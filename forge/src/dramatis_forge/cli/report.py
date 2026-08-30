@@ -8,10 +8,13 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
+from ..report import attribution as attribution_mod
 from ..report import coverage as coverage_mod
 from ..report import inspect as inspect_mod
 from ..store.archive import Archive
-from .common import HomeOpt, PackOpt, console, die, need, resolve
+from ..store.folio import Folio
+from ..wiki import Wiki
+from .common import HomeOpt, PackOpt, console, die, need, resolve, ticker
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -73,5 +76,61 @@ def inspect_cmd(
     if not written:
         die(f"{title!r} is not in the archive",
             "check `dramatis-forge report coverage` for what is in scope")
+    for path in written:
+        console.print(f"[green]{path}[/green]  {path.stat().st_size:,} bytes")
+
+
+@app.command("attribution")
+def attribution_cmd(
+    pack: PackOpt = "arknights",
+    home: HomeOpt = None,
+    templates: Annotated[
+        Path | None, typer.Option("--templates", help="Directory holding the templates.")
+    ] = None,
+    editors: Annotated[
+        bool, typer.Option("--editors", help="Look up each page's last editor (network).")
+    ] = False,
+    issue_url: Annotated[str, typer.Option("--issue-url")] = "",
+    contact: Annotated[str, typer.Option("--contact")] = "",
+) -> None:
+    """Generate the attribution and notice files that must accompany a published corpus.
+
+    Refuses to write if any unit lacks a source revision: a notice claiming every record
+    is traceable, produced from a corpus where they are not, would be a false statement in
+    the one document that must not contain one.
+    """
+    pk, paths = resolve(pack, home)
+    need(paths.archive, "archive", "run `dramatis-forge harvest sync` first")
+    need(paths.folio, "folio", "run `dramatis-forge corpus build` first")
+
+    template_dir = templates or Path("../../dramatis-design/templates")
+    found = sorted(template_dir.glob("*.md")) if template_dir.is_dir() else []
+    if not found:
+        die(f"no templates in {template_dir}", "pass --templates <dir>")
+
+    with Archive(paths.archive, readonly=True) as archive, Folio(paths.folio, readonly=True) as folio:
+        data = attribution_mod.collect(archive, folio)
+        if editors:
+            with Wiki(pk.wiki.api, pk.wiki.contact, rate=pk.wiki.rate) as wiki:
+                attribution_mod.resolve_editors(wiki, data, progress=ticker("attribution"))
+
+        console.print(
+            f"pages [bold]{data.page_count:,}[/bold] · units [bold]{data.unit_count:,}[/bold] · "
+            f"revid max {data.revid_max:,}")
+        if data.complete:
+            console.print(
+                "[green]every unit traces to a source revision[/green] — "
+                "[dim]the precondition for publishing at all[/dim]")
+        else:
+            die(f"{data.units_without_revid:,} unit(s) have no source revision",
+                "attribution would claim a traceability that does not exist")
+        if data.editors_resolved:
+            console.print(f"resolved {data.editors_resolved:,} page editors")
+
+        written = attribution_mod.render(
+            data, found, paths.pack_dir,
+            url_pattern=str(folio.get_meta("source_url_pattern") or ""),
+            issue_url=issue_url, contact_email=contact,
+        )
     for path in written:
         console.print(f"[green]{path}[/green]  {path.stat().st_size:,} bytes")

@@ -9,16 +9,22 @@ a *pack*; the engine never names a game, a character, or a site.
 
 ```
 dramatis/
-  forge/        Python 3.13 — the offline half, working
+  forge/        Python 3.13 — the offline half
     src/dramatis_forge/     mechanism: harvest · normalize · corpus · evals · probes
     packs/arknights/        rules: the only place a game may be named
-    tests/                  unit · packs · pipeline
+    tests/                  118 tests: unit · packs · pipeline
+  engine/       Rust 2024 — the runtime
+    crates/folio/           read a .folio: manifest, units, f16 vectors, roster, aliases
+    crates/index/           lexical BM25 ∥ exact dense scan → RRF → confidence
+    bins/dramatis-cli/      inspect · search · bench
   docs/         contributor documentation
 ```
 
-The Rust engine is **not written yet**; `docs/engine-plan.md` records its intended shape
-and the constraints the forge's measurements already place on it. There are no empty crate
-directories, because a tree of empty crates looks like progress and is not.
+The engine is a **skeleton, deliberately**: retrieval and measurement only. It exists
+before the daemon because two freeze conditions — first-token latency and resident memory —
+cannot be settled on paper, so the thing that answers them has to run first. The agent
+loop, world state and RPC layer are not written; there are no empty crate directories
+standing in for them, because a tree of empty crates looks like progress and is not.
 
 ## Why one repository for two languages
 
@@ -45,6 +51,16 @@ Then, to build everything from scratch:
 ./forge corpus build
 ./forge evals build
 ./forge probe run
+```
+
+And to query what that produced:
+
+```sh
+cd ../engine
+cargo build --release
+./target/release/dramatis-cli inspect
+./target/release/dramatis-cli search "源石技艺"
+./target/release/dramatis-cli bench     # latency distribution and resident memory
 ```
 
 Products land in `../artifacts/` — outside every repository, because the archive is 80 MB

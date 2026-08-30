@@ -1,0 +1,17 @@
+[package]
+name = "index"
+description = "Hybrid retrieval: lexical BM25 and exact dense scan, fused and reranked"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+folio = { path = "../folio" }
+rusqlite.workspace = true
+thiserror.workspace = true
+jieba-rs.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

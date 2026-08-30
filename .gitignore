@@ -44,3 +44,7 @@ out/
 
 # ---- OS ----
 .DS_Store
+
+# ---- Rust ----
+target/
+Cargo.lock.bak

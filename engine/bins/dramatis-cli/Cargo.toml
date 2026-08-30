@@ -1,0 +1,18 @@
+[package]
+name = "dramatis-cli"
+description = "Maintainer surface: inspect a corpus, query it, measure it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "dramatis-cli"
+path = "src/main.rs"
+
+[dependencies]
+folio = { path = "../../crates/folio" }
+index = { path = "../../crates/index" }
+anyhow.workspace = true
+clap.workspace = true
