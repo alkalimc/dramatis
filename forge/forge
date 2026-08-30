@@ -1,0 +1,11 @@
+#!/bin/sh
+# Wrapper for the forge CLI.
+#
+# It exists because of one environment quirk: on this machine every `.pth` file written
+# into site-packages ends up flagged hidden, and CPython's `site` module skips hidden
+# path files. An editable install therefore succeeds and is then invisible to imports.
+# PYTHONPATH is not subject to that, so we set it explicitly and stop depending on the
+# install layout at all.
+here=$(cd "$(dirname "$0")" && pwd)
+PYTHONPATH="$here/src:$here${PYTHONPATH:+:$PYTHONPATH}" \
+  exec "$here/.venv/bin/python" -m dramatis_forge "$@"

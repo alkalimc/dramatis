@@ -1,0 +1,44 @@
+[project]
+name = "dramatis-forge"
+version = "0.2.0"
+description = "Offline forge: turn a collaborative wiki into a retrieval-grounded character corpus"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+dependencies = [
+    "httpx>=0.28",
+    "mwparserfromhell>=0.6.6",
+    "typer>=0.15",
+    "rich>=13.9",
+    "tenacity>=9.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Chinese segmentation for the lexical path. Optional because `corpus build`
+# falls back to a character-bigram tokenizer that produces a usable (if weaker)
+# FTS5 index; the fallback is recorded in the folio manifest so the engine can
+# tell which one it is looking at.
+zh = ["jieba>=0.42"]
+# Encoder/reranker training and vector encoding. Heavy; never needed to build
+# the record archive or the benchmark suites.
+train = ["sentence-transformers>=5", "ranx>=0.3", "torch>=2.4"]
+
+[project.scripts]
+dramatis-forge = "dramatis_forge.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.pytest.ini_options]
+# Explicit src layout: do not depend on the editable-install .pth. macOS marks
+# uv's .pth hidden, `site` skips it, imports fail. This decouples tests from
+# that environment quirk.
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dramatis_forge", "packs"]
