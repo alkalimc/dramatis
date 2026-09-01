@@ -217,6 +217,9 @@ def update(
         table.add_row("changed, in scope", f"{len(plan.changed):,}")
         table.add_row("changed, out of scope", f"[dim]{plan.ignored:,}[/dim]")
         table.add_row("newly in scope", f"{len(plan.added):,}")
+        table.add_row(
+            "in scope, no body held",
+            f"[yellow]{len(plan.missing):,}[/yellow]" if plan.missing else "0")
         table.add_row("left scope", f"{len(plan.gone):,}")
         console.print(table)
 
@@ -224,7 +227,8 @@ def update(
         ledger.extend(plan.findings)
         render_guards(ledger)
 
-        for label, items in (("changed", plan.changed), ("added", plan.added), ("gone", plan.gone)):
+        for label, items in (("changed", plan.changed), ("added", plan.added),
+                             ("missing", plan.missing), ("gone", plan.gone)):
             for title in items[:10]:
                 console.print(f"  [{label}] {title}")
             if len(items) > 10:

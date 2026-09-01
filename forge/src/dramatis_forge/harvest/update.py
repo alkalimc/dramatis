@@ -40,13 +40,18 @@ class Plan:
     ignored: int = 0
     added: list[str] = field(default_factory=list)
     gone: list[str] = field(default_factory=list)
+    #: In scope but no body held. A previous fetch failed, or a followup registered a
+    #: title without retrieving it. Repaired here because nothing else will: once the
+    #: title is a seed, the followup loop filters it out as already-known, and the change
+    #: feed never mentions a page that did not change.
+    missing: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     #: Re-enumeration result, carried so `apply` need not repeat it.
     scope: Scope | None = None
 
     @property
     def nothing_to_do(self) -> bool:
-        return not (self.changed or self.added or self.gone)
+        return not (self.changed or self.added or self.gone or self.missing)
 
 
 def plan(
@@ -91,6 +96,14 @@ def plan(
 
     say(f"changed titles: {len(touched)}")
     in_scope = set(archive.titles_in(pack.fetch_seeds))
+
+    # Gaps first: an archive that claims a page is in scope while holding nothing for it
+    # is the state G3 reports as high severity, and it blocks a corpus build. It has to be
+    # repairable without a full re-sync.
+    held = archive.have_pages()
+    p.missing = sorted(t for t in in_scope if t not in held)
+    if p.missing:
+        say(f"in scope but no body held: {len(p.missing)} — will re-fetch")
     p.changed = sorted(t for t in touched if t in in_scope)
     p.ignored = len(touched) - len(p.changed)
 
@@ -126,7 +139,7 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
     if p.scope is not None:
         scope_stage.write(archive, p.scope, pack)
 
-    titles = sorted(set(p.changed) | set(p.added))
+    titles = sorted(set(p.changed) | set(p.added) | set(p.missing))
     res = FetchResult()
     if titles:
         _into(wiki, archive, titles, res, progress)
