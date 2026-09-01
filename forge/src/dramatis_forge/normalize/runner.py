@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from .. import identity as identity_mod
 from ..pack import Pack, PageContext
 from ..store.archive import Archive
+from . import guards
 from .guards import Ledger, Reconciliation
 from .records import ORDER, PARSER_VERSION, Alias, Record
 from .wikitext import Cleaner
@@ -126,8 +127,30 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
     archive.set_meta("parser_version", PARSER_VERSION)
     archive.set_meta("pack_version", pack.version)
     archive.set_meta("alias_page_kinds", dict(pack.alias_pages))
-    archive.set_meta("guard_tally", {g: list(v) for g, v in rep.ledger.tally().items()})
-    archive.write_findings(rep.ledger.rows())
+    # Order matters. Seed counts are republished from the table first, then findings are
+    # written under a run id, then the tally is *derived* from those rows, and only then
+    # does G6 reconcile the two. Publishing a tally computed from the ledger — a second
+    # writer for the same fact — is what let the manifest and the table disagree.
+    seed_counts = archive.refresh_seed_counts()
+
+    run_id = archive.next_run_id()
+    archive.write_findings(rep.ledger.rows(), stage="normalize", run_id=run_id)
+    table_tally = archive.tally_from_table()
+
+    self_findings = guards.check_self_consistency(
+        table_tally=table_tally,
+        manifest_tally={g: list(v) for g, v in table_tally.items()},
+        table_seed_counts=archive.seed_counts_from_table(),
+        manifest_seed_counts=seed_counts,
+    )
+    if self_findings:
+        rep.ledger.extend(self_findings)
+        archive.write_findings(
+            [f.row() for f in self_findings], stage="self", run_id=run_id)
+        table_tally = archive.tally_from_table()
+
+    archive.set_meta("guard_run_id", run_id)
+    archive.set_meta("guard_tally", {g: list(v) for g, v in table_tally.items()})
     archive.commit()
     return rep
 
@@ -142,7 +165,7 @@ def _site_aliases(
     **The target must be in the archive.** An alias resolving to a page we
     deliberately did not archive normalises a user's query onto something
     unretrievable, which is worse than not recognising the alias at all. Measured
-    on the Arknights pack: most redirects point at levels and items, all of them
+    in practice: most redirects point at out-of-scope pages, all of them
     out of scope by decision.
 
     **The target is resolved through identity.** A redirect aimed at an alternate

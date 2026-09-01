@@ -7,6 +7,7 @@ whether a run went wrong.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -20,7 +21,12 @@ from ..pack import Pack, load_pack
 
 console = Console()
 
-PackOpt = Annotated[str, typer.Option("--pack", "-p", help="Domain pack to use.")]
+#: No default. This repository ships no pack, so a default here would name someone
+#: else's rules and fail confusingly when they are absent.
+PackOpt = Annotated[
+    str,
+    typer.Option("--pack", "-p", help="Domain pack to use (or set DRAMATIS_PACK)."),
+]
 HomeOpt = Annotated[
     Path | None,
     typer.Option("--home", help="Artifact root (default: <workspace>/artifacts)."),
@@ -28,7 +34,24 @@ HomeOpt = Annotated[
 
 
 def resolve(pack_name: str, home: Path | None) -> tuple[Pack, Paths]:
-    pack = load_pack(pack_name)
+    """Load the selected pack, or explain what is missing.
+
+    The framework has no rules of its own, so every stage needs a pack named. Failing
+    with a traceback here would be the least useful moment for one: the likely cause is
+    an unset search path, not a bug.
+    """
+    name = pack_name or os.environ.get("DRAMATIS_PACK", "")
+    if not name:
+        die("no pack selected",
+            "pass --pack <name>, or set DRAMATIS_PACK; "
+            "the directory holding packs/<name>/ must be on DRAMATIS_PACKS")
+    try:
+        pack = load_pack(name)
+    except ModuleNotFoundError as exc:
+        die(f"no pack named {name!r}",
+            f"{exc}. Point DRAMATIS_PACKS at the directory containing packs/{name}/")
+    except TypeError as exc:
+        die(f"pack {name!r} is malformed", str(exc))
     return pack, Paths.for_pack(pack.name, home).ensure()
 
 

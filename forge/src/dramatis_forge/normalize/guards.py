@@ -14,6 +14,15 @@ an unexplained low-severity count is a high-severity finding in waiting.
     G3  empty         a page in scope that yielded nothing
     G4  identity      page-to-person resolution invariants
     G5  corpus        chunking invariants (coverage, size, redundancy)
+    G6  self          the artifact agrees with its own bookkeeping
+
+G6 is the odd one out: G1–G5 check the corpus, G6 checks *us*. It exists because a
+probe found three places where this artifact disagreed with itself — a findings table
+holding one high-severity row while the manifest tally published zero, a seed count
+published from a snapshot taken before the seeds were discovered, and a drift of one
+page that no guard recorded at all. None of them lost content. All three made the
+artifact impossible to audit, and two freeze conditions are stated in terms of numbers
+the artifact reports about itself.
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ GUARDS: dict[str, str] = {
     "G3": "empty: an in-scope page produced no records",
     "G4": "identity: page-to-person resolution invariants",
     "G5": "corpus: chunking coverage, size and redundancy invariants",
+    "G6": "self: the artifact agrees with its own bookkeeping",
 }
 
 
@@ -95,32 +105,96 @@ def check_drift(
     counts: Mapping[str, int],
     baselines: Mapping[str, int],
     *,
-    tolerance: float = 0.02,
     labels: Mapping[str, str] | None = None,
 ) -> list[Finding]:
-    """Compare seed-set sizes against measured baselines.
+    """Compare seed-set sizes against measured baselines. Three outcomes, not two.
 
-    Growth and shrinkage are both reported but they are not the same event.
-    Growth is expected — new story ships. Shrinkage means either the site removed
-    something or our enumerator broke, and the second is far more likely, so it
-    is high severity while growth is low.
+    There used to be a tolerance band that suppressed small deviations entirely, and it
+    hid a real one: a seed set sat one page above its baseline with *no finding of any
+    kind*, so the artifact recorded neither "aligned" nor "drifted". A condition phrased
+    as "every seed set aligns with its baseline" cannot be checked against silence.
+
+    So every deviation is now recorded, and the three cases are kept apart because they
+    mean different things:
+
+    * **fell** — the site removed something, or our enumerator broke. The second is far
+      more likely, so it is high severity.
+    * **grew** — new material ships; expected. Low severity, but *recorded*, because the
+      baseline now needs updating and an unrecorded difference is indistinguishable from
+      one nobody looked at.
+    * **equal** — nothing to say.
     """
     out: list[Finding] = []
     for key, base in baselines.items():
         if not base:
             continue
         n = counts.get(key, 0)
-        if abs(n - base) / base <= tolerance:
+        if n == base:
             continue
-        grew = n > base
         where = f"（{labels[key]}）" if labels and key in labels else ""
-        out.append(Finding(
-            "G1", LOW if grew else HIGH,
-            f"{key} count {'grew' if grew else 'FELL'}: {base} → {n}{where}",
-        ))
+        if n < base:
+            out.append(Finding(
+                "G1", HIGH,
+                f"{key} count FELL: {base} → {n}{where} — either the source shrank or "
+                "enumeration broke",
+            ))
+        else:
+            out.append(Finding(
+                "G1", LOW,
+                f"{key} count grew: {base} → {n} (+{n - base}){where} — monotonic growth, "
+                "baseline needs updating",
+            ))
     for key in counts:
         if key not in baselines:
             out.append(Finding("G1", LOW, f"{key} has no baseline yet: {counts[key]}"))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# G6
+# --------------------------------------------------------------------------- #
+
+
+def check_self_consistency(
+    *,
+    table_tally: Mapping[str, tuple[int, int]],
+    manifest_tally: Mapping[str, Sequence[int]],
+    table_seed_counts: Mapping[str, int],
+    manifest_seed_counts: Mapping[str, int],
+) -> list[Finding]:
+    """Reconcile what the tables hold against what the manifest publishes.
+
+    Every other guard reads the corpus. This one reads the artifact's own account of
+    itself, because that account is what the freeze conditions are stated in terms of:
+    "high-severity guard findings are zero" is a claim the artifact makes *about itself*,
+    and nothing verified it. A file asserting its own cleanliness is not evidence.
+
+    Any disagreement is high severity regardless of direction. The question is not which
+    number is right — it is whether the artifact can be audited at all, and one that
+    contradicts itself cannot be.
+    """
+    out: list[Finding] = []
+
+    for guard in sorted(set(table_tally) | set(manifest_tally)):
+        in_table = tuple(table_tally.get(guard, (0, 0)))
+        published = tuple(manifest_tally.get(guard, (0, 0)))[:2]
+        if in_table != published:
+            out.append(Finding(
+                "G6", HIGH,
+                f"{guard}: findings table holds {in_table} (high, low) but the manifest "
+                f"publishes {published} — the artifact disagrees with itself",
+            ))
+
+    for seed in sorted(set(table_seed_counts) | set(manifest_seed_counts)):
+        held = table_seed_counts.get(seed, 0)
+        published = manifest_seed_counts.get(seed, 0)
+        if held != published:
+            out.append(Finding(
+                "G6", HIGH,
+                f"{seed}: seeds table holds {held} rows but the manifest publishes "
+                f"{published} — most likely a snapshot taken before a later stage "
+                "added to the set",
+            ))
     return out
 
 

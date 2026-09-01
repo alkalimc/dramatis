@@ -122,6 +122,5 @@ def write(archive, sc: Scope, pack: Pack) -> None:
     archive.write_seeds(sc.seeds, preserve=pack.discovered_seeds)
     archive.write_source_rows(sc.tables)
     archive.write_aliases_source(sc.redirects, sc.disambigs)
-    archive.clear_findings("G1")
-    archive.write_findings([f.row() for f in sc.findings])
+    archive.write_findings([f.row() for f in sc.findings], stage="scope")
     archive.commit()

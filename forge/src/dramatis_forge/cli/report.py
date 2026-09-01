@@ -10,7 +10,9 @@ from rich.table import Table
 
 from ..report import attribution as attribution_mod
 from ..report import coverage as coverage_mod
+from ..report import figures as figures_mod
 from ..report import inspect as inspect_mod
+from ..pack import pack_dir
 from ..store.archive import Archive
 from ..store.folio import Folio
 from ..wiki import Wiki
@@ -23,7 +25,7 @@ _STYLE = {"archived": "green", "partial": "yellow", "excluded": "dim"}
 
 @app.command("coverage")
 def coverage_cmd(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     out: Annotated[Path | None, typer.Option("--out", help="Where to write the report.")] = None,
 ) -> None:
@@ -54,10 +56,82 @@ def coverage_cmd(
     console.print(f"full report, with a reason for every exclusion: [cyan]{destination}[/cyan]")
 
 
+@app.command("figures")
+def figures_cmd(
+    pack: PackOpt = "",
+    home: HomeOpt = None,
+    check: Annotated[
+        Path | None,
+        typer.Option("--check", help="Document tree to scan against these figures."),
+    ] = None,
+    show: Annotated[bool, typer.Option("--show", help="Print the figure table.")] = False,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Where to write the figure report.")
+    ] = None,
+) -> None:
+    """Print the figures an artifact actually supports, and optionally audit documents.
+
+    Guards check the corpus; G6 checks that an artifact agrees with itself. Neither
+    catches a document quoting a number the artifact never produced, which is its own
+    failure mode: the number has a citation, the citation resolves, and the value is
+    stale. Reading 22 documents cannot catch it either, because it requires remembering
+    every figure that has ever been revised.
+    """
+    pk, paths = resolve(pack, home)
+    need(paths.folio, "folio", "run `dramatis-forge corpus build` first")
+    specs = figures_mod.figures_for(pk)
+    if not specs:
+        die(f"pack {pack!r} declares no figures", "add FIGURES to the pack")
+    figs = figures_mod.resolve(specs, paths.archive, paths.folio)
+
+    if show or not check:
+        table = Table(title="figures")
+        table.add_column("key")
+        table.add_column("value", justify="right")
+        table.add_column("note", overflow="fold")
+        for fig in figs:
+            table.add_row(fig.key, fig.shown, f"[dim]{fig.note}[/dim]")
+        console.print(table)
+
+    destination = out or paths.figures
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fingerprint = next((f.shown for f in figs if f.key == "fingerprint"), "")
+    destination.write_text(
+        figures_mod.render(figs, fingerprint=fingerprint), encoding="utf-8")
+    console.print(f"[green]{destination}[/green]  {destination.stat().st_size:,} bytes")
+
+    if not check:
+        return
+
+    if not check.is_dir():
+        die(f"no document tree at {check}", "pass --check <dir>")
+    report = figures_mod.scan(check, figs)
+    console.print(
+        f"scanned [bold]{report.scanned}[/bold] documents under [cyan]{check}[/cyan]")
+
+    for label, hits, colour in (
+        ("stale figure", report.stale, "red"),
+        ("dangling reference", report.dangling, "yellow"),
+    ):
+        if not hits:
+            continue
+        console.print(f"\n[{colour}]{len(hits)} {label}(s)[/{colour}]")
+        for hit in hits:
+            console.print(f"  [{colour}]{hit.where}[/{colour}]  {hit.what} — {hit.detail}")
+            console.print(f"    [dim]{hit.line[:150]}[/dim]")
+
+    if report.clean:
+        console.print(
+            "[green]every quoted figure matches the artifact, every reference "
+            "resolves[/green]")
+    else:
+        raise typer.Exit(1)
+
+
 @app.command("inspect")
 def inspect_cmd(
     title: Annotated[str, typer.Argument(help="Page title.")],
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     out: Annotated[Path | None, typer.Option("--out", help="Sample directory.")] = None,
 ) -> None:
@@ -82,7 +156,7 @@ def inspect_cmd(
 
 @app.command("attribution")
 def attribution_cmd(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     templates: Annotated[
         Path | None, typer.Option("--templates", help="Directory holding the templates.")
@@ -103,7 +177,7 @@ def attribution_cmd(
     need(paths.archive, "archive", "run `dramatis-forge harvest sync` first")
     need(paths.folio, "folio", "run `dramatis-forge corpus build` first")
 
-    template_dir = templates or Path("../../dramatis-design/templates")
+    template_dir = templates or pack_dir(pack) / "templates"
     found = sorted(template_dir.glob("*.md")) if template_dir.is_dir() else []
     if not found:
         die(f"no templates in {template_dir}", "pass --templates <dir>")
@@ -130,6 +204,7 @@ def attribution_cmd(
         written = attribution_mod.render(
             data, found, paths.pack_dir,
             url_pattern=str(folio.get_meta("source_url_pattern") or ""),
+            history_pattern=str(folio.get_meta("history_url_pattern") or ""),
             issue_url=issue_url, contact_email=contact,
         )
     for path in written:

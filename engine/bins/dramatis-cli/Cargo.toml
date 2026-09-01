@@ -14,5 +14,7 @@ path = "src/main.rs"
 [dependencies]
 folio = { path = "../../crates/folio" }
 index = { path = "../../crates/index" }
+eval = { path = "../../crates/eval" }
 anyhow.workspace = true
 clap.workspace = true
+serde_json.workspace = true

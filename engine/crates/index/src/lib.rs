@@ -1,13 +1,19 @@
 //! Hybrid retrieval over a `.folio`.
 //!
 //! ```text
-//! query ─┬─ lexical: FTS5 + BM25 over pre-segmented tokens ──┐
-//!        └─ dense:   exact SIMD-shaped scan over f16 vectors ┘
-//!                          → RRF fusion → (rerank) → top-k
-//!                                             └→ neighbour expansion, hits only
+//! query ─ alias expansion ─┬─ lexical: FTS5 + BM25 over pre-segmented tokens ──┐
+//!                          └─ dense:   exact SIMD-shaped scan over f16 vectors ┘
+//!                                   → RRF fusion → (rerank) → top-k
+//!                                                      └→ neighbour expansion, hits only
 //! ```
 //!
-//! Two properties of this pipeline are consequences of measurement rather than taste.
+//! Three properties of this pipeline are consequences of measurement rather than taste.
+//!
+//! **Alias expansion is not optional.** Measured: a query naming an entity by a foreign-
+//! language redirect (`バブル`, `Whislash`) matches *zero* units, because the alias occurs
+//! nowhere in the corpus text — the wiki records it as a redirect page, not as prose. The
+//! table lookup is the only path to those entities, so the retriever without it scores 0.03
+//! nDCG on 1,108 such queries.
 //!
 //! **The dense path is exact.** 58,853 units at 1024 dimensions is 120 MB, which fits the
 //! resident budget, so there is no approximate index — one fewer dependency, no build
@@ -25,6 +31,57 @@ use std::collections::HashMap;
 use folio::{Folio, Unit};
 
 pub use segment::Segmenter;
+
+/// What to do with a query that names something the site records under another name.
+///
+/// Redirects, real-name tables and alternate-form entries are synonymy the wiki's editors
+/// wrote by hand. Using it is a table lookup, so it costs nothing worth measuring; *not*
+/// using it means an entity whose only English name is a redirect page is unreachable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Normalise {
+    /// Take the query as typed.
+    Off,
+    /// Add the canonical name's tokens to the query.
+    Expand,
+    /// Add the tokens, and when the alias names exactly one person, restrict to them.
+    #[default]
+    ExpandAndFilter,
+}
+
+/// What the alias stage found. Carried on the response so a caller can say what it
+/// understood the query to mean, rather than silently answering a different question.
+#[derive(Debug, Clone)]
+pub struct Resolved {
+    pub alias: String,
+    pub target: String,
+    /// The roster id, when the target is a person. Aliases also point at operations,
+    /// locations and items, which have no person to filter by.
+    pub person: Option<String>,
+    /// How the single target was arrived at.
+    pub how: How,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum How {
+    /// The alias names exactly one thing.
+    Unique,
+    /// The alias names several, and the rest of the query named one of them.
+    Qualified,
+}
+
+/// The alias names several things, and nothing in the query said which.
+///
+/// This is a *reportable state*, not a failure. The site maintains a disambiguation page
+/// listing eight different things called 小车; a retriever that silently picked one would be
+/// answering a question the user did not ask, and one that returned nothing would be hiding
+/// information the corpus has. The right behaviour is to answer broadly and let the caller
+/// ask which — which it can only do if the candidates reach it.
+#[derive(Debug, Clone)]
+pub struct Ambiguity {
+    pub alias: String,
+    /// Every target the site declares for this name, in a stable order.
+    pub candidates: Vec<String>,
+}
 
 /// Which paths to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -50,6 +107,8 @@ pub struct Request {
     pub persons: Vec<String>,
     /// How many candidates each path contributes before fusion.
     pub candidates: usize,
+    /// Whether to consult the alias dictionary. See [`Normalise`].
+    pub normalise: Normalise,
     /// Widen each returned hit by this many neighbouring units on each side.
     pub expand: i64,
 }
@@ -63,6 +122,7 @@ impl Default for Request {
             templates: Vec::new(),
             persons: Vec::new(),
             candidates: 50,
+            normalise: Normalise::default(),
             expand: 0,
         }
     }
@@ -108,6 +168,11 @@ pub struct Hit {
 pub struct Response {
     pub hits: Vec<Hit>,
     pub signals: Signals,
+    /// Set when the query named an entity by an alias.
+    pub resolved: Option<Resolved>,
+    /// Set when the query named something the site records as ambiguous and the query did
+    /// not say which. The hits are still the unrestricted best effort.
+    pub ambiguous: Option<Ambiguity>,
     pub trace: Trace,
 }
 
@@ -115,6 +180,7 @@ pub struct Response {
 /// rather than behind a flag: a number nobody collects is a number nobody can defend.
 #[derive(Debug, Clone, Default)]
 pub struct Trace {
+    pub normalise_us: u128,
     pub lexical_us: u128,
     pub dense_us: u128,
     pub fuse_us: u128,
@@ -127,7 +193,12 @@ pub struct Trace {
 
 impl Trace {
     pub fn total_us(&self) -> u128 {
-        self.lexical_us + self.dense_us + self.fuse_us + self.fetch_us + self.expand_us
+        self.normalise_us
+            + self.lexical_us
+            + self.dense_us
+            + self.fuse_us
+            + self.fetch_us
+            + self.expand_us
     }
 }
 
@@ -173,6 +244,11 @@ impl<'a> Index<'a> {
     /// Search. `embedding` is required for any mode that uses the dense path.
     pub fn search(&self, request: &Request, embedding: Option<&[f32]>) -> Result<Response> {
         let mut trace = Trace::default();
+
+        let started = std::time::Instant::now();
+        let (resolved, ambiguous, effective) = self.normalise(request)?;
+        trace.normalise_us = started.elapsed().as_micros();
+        let request = &effective;
 
         let lexical = match request.mode {
             Mode::Dense => Vec::new(),
@@ -255,25 +331,157 @@ impl<'a> Index<'a> {
             trace.expand_us = started.elapsed().as_micros();
         }
 
-        Ok(Response { hits, signals, trace })
+        Ok(Response { hits, signals, resolved, ambiguous, trace })
+    }
+
+    /// The alias stage: turn a query that names an entity by another name into one that
+    /// names it by the name the corpus actually uses.
+    ///
+    /// Two rules, both lookups against relations the site declares. Neither infers anything:
+    /// no name similarity, no edit distance. A wrong inference about who someone is would be
+    /// undiscoverable in the output, which is why the contract forbids it outright
+    /// (`identity.md`).
+    ///
+    /// **Whole query is an alias.** Deliberately narrow. `锋刃` is both a redirect to an
+    /// operator and an ordinary noun, so substituting it mid-sentence would rewrite queries
+    /// that were already right. The narrow form fires on bare-name lookups — the case that is
+    /// otherwise unanswerable, since a foreign-language redirect appears nowhere in the text.
+    ///
+    /// **Alias plus a qualifier naming one of its own candidates.** The site's
+    /// disambiguation page lists eight things called 小车; a query saying `小车 Castle-3`
+    /// has named one of them. Reading that is not guessing, because the candidate list came
+    /// from the site.
+    ///
+    /// Expansion *adds* to the query rather than replacing it. An alias that is also real
+    /// text — a nickname a character is called in dialogue — should still match where it
+    /// literally occurs.
+    fn normalise(
+        &self,
+        request: &Request,
+    ) -> Result<(Option<Resolved>, Option<Ambiguity>, Request)> {
+        if request.normalise == Normalise::Off {
+            return Ok((None, None, request.clone()));
+        }
+        let query = request.query.trim();
+        if query.is_empty() {
+            return Ok((None, None, request.clone()));
+        }
+
+        let (alias, target, how) = match &self.folio.resolve_alias(query)?[..] {
+            [only] => (query.to_string(), only.clone(), How::Unique),
+            [] => match self.qualified(query)? {
+                Some((alias, target)) => (alias, target, How::Qualified),
+                None => return Ok((None, None, request.clone())),
+            },
+            several => {
+                // The whole query is a name the site itself records as ambiguous. Report the
+                // candidates and leave the query alone: picking one would answer a different
+                // question, and the disambig family measures exactly this.
+                return Ok((
+                    None,
+                    Some(Ambiguity {
+                        alias: query.to_string(),
+                        candidates: several.to_vec(),
+                    }),
+                    request.clone(),
+                ));
+            }
+        };
+
+        let person = match how {
+            // A qualified hit names one target out of several, so the person is that target
+            // when it is on the roster — not the alias's whole candidate set.
+            How::Qualified => self.folio.person(&target)?.map(|p| p.person_id),
+            How::Unique => match &self.folio.persons_for_alias(&alias)?[..] {
+                [only] => Some(only.clone()),
+                _ => None,
+            },
+        };
+
+        let mut effective = request.clone();
+        effective.query = format!("{query} {target}");
+        if request.normalise == Normalise::ExpandAndFilter
+            && request.persons.is_empty()
+            && let Some(person) = &person
+        {
+            effective.persons = vec![person.clone()];
+        }
+        Ok((Some(Resolved { alias, target, person, how }), None, effective))
+    }
+
+    /// An ambiguous alias whose query also names one of its declared candidates.
+    ///
+    /// The candidate must appear in the query as written. Matching on anything looser would
+    /// be inference, and the whole point of using the site's disambiguation pages is that the
+    /// answer is already enumerated.
+    fn qualified(&self, query: &str) -> Result<Option<(String, String)>> {
+        for token in self.segmenter.segment_for_query(query) {
+            let candidates = self.folio.resolve_alias(&token)?;
+            if candidates.len() < 2 {
+                continue;
+            }
+            let rest = query.replacen(token.as_str(), " ", 1);
+            // Longest candidate first, so a name wins over another that is its prefix.
+            let mut sorted = candidates;
+            sorted.sort_by_key(|c| std::cmp::Reverse(c.chars().count()));
+            if let Some(candidate) = sorted.into_iter().find(|c| rest.contains(c.as_str())) {
+                return Ok(Some((token, candidate)));
+            }
+        }
+        Ok(None)
     }
 
     /// BM25 over the pre-segmented column.
     ///
     /// FTS5 returns `bm25()` as a negative number where more negative is better; it is
     /// negated here so every score in this crate improves upward.
+    ///
+    /// **Filters are applied here, not after fusion.** Measured: a query naming 梅尔 puts her
+    /// first unit at candidate rank 52, so a top-50 candidate list filtered afterwards is
+    /// empty — the retriever returns nothing about a person it holds 56 units on. This is
+    /// the same failure P11 found between fusion and truncation, one stage earlier, and it
+    /// has the same fix: the filter belongs where the candidates are chosen.
+    ///
+    /// There are two statement shapes, not one, and both are cached. The unfiltered shape
+    /// is the common case and measurably cheaper: joining `chunks` costs 0.3 ms even when
+    /// the filter predicate short-circuits on NULL, because SQLite still probes the index
+    /// per posting-list row. Two fixed shapes keep preparation cached while letting the
+    /// common path stay at the 1.6 ms P11 measured.
     fn lexical(&self, request: &Request) -> Result<Vec<(i64, f64)>> {
         let Some(expression) = self.segmenter.match_expression(&request.query) else {
             return Ok(Vec::new());
         };
+        let limit = request.candidates as i64;
+        let read = |row: &rusqlite::Row<'_>| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?));
+
+        if request.templates.is_empty() && request.persons.is_empty() {
+            let mut stmt = self.folio.conn().prepare_cached(
+                "SELECT rowid, -bm25(chunks_fts) AS score \
+                 FROM chunks_fts WHERE chunks_fts MATCH ?1 \
+                 ORDER BY score DESC LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![expression, limit], read)?;
+            return rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into);
+        }
+
+        // One filtered shape covers all three remaining combinations: an empty list is bound
+        // as SQL NULL and the predicate short-circuits, so this prepares once rather than
+        // once per combination.
+        let templates_json = (!request.templates.is_empty())
+            .then(|| serde_json::to_string(&request.templates).expect("strings serialise"));
+        let persons_json = (!request.persons.is_empty())
+            .then(|| serde_json::to_string(&request.persons).expect("strings serialise"));
         let mut stmt = self.folio.conn().prepare_cached(
-            "SELECT rowid, -bm25(chunks_fts) AS score \
-             FROM chunks_fts WHERE chunks_fts MATCH ?1 \
+            "SELECT f.rowid, -bm25(chunks_fts) AS score \
+             FROM chunks_fts f JOIN chunks c ON c.ord = f.rowid \
+             WHERE chunks_fts MATCH ?1 \
+               AND (?3 IS NULL OR c.template IN (SELECT value FROM json_each(?3))) \
+               AND (?4 IS NULL OR c.person IN (SELECT value FROM json_each(?4))) \
              ORDER BY score DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
-            rusqlite::params![expression, request.candidates as i64],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
+            rusqlite::params![expression, limit, templates_json, persons_json],
+            read,
         )?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
     }

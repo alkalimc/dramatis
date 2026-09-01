@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -181,7 +182,7 @@ class Followup:
 
     Enumeration is closed over what the site *declares*, and this is the one real
     hole in that: a page can transclude its content from a subpage that belongs to
-    no seed set. Measured on the Arknights pack: two story pages, whose entire text
+    no seed set. Seen in practice: story pages whose entire text
     is elsewhere. Without this hook they parse to zero records and land in guard G3
     as an unexplained failure — the guard catches it, but nothing fixes it.
 
@@ -240,7 +241,7 @@ class ContentSpec:
     """A template that *carries body text* rather than decorating it.
 
     Falling back to "keep the last positional parameter" — the right default for
-    decoration templates — silently destroys these. Measured on the Arknights
+    decoration templates — silently destroys these. Seen in practice on a
     pack: 992 story synopses and 59 encyclopaedia entries, all of them among the
     highest-value material in the corpus.
 
@@ -381,11 +382,43 @@ class CoverageRow:
 
 
 @dataclass(frozen=True)
+class FigureSpec:
+    """One quantity a design document is allowed to quote, and its retired renderings.
+
+    Packs own this because both halves are domain knowledge. *Which* quantities are
+    load-bearing depends on what the corpus is, and the list of values a document once
+    claimed is design history — "94,458 was the overlapping-window build" belongs in a
+    decision record, not in a regex table in an open repository.
+
+    The framework only knows how to read a key out of a manifest, run a named derived
+    query, compare, and report. It is told nothing about what the numbers mean.
+    """
+
+    key: str
+    #: Where the value comes from: `manifest:<field>`, `folio:<field>`,
+    #: `derived:<name>`, or `computed:<name>` for the few that are arithmetic.
+    source: str
+    #: Renderings that are no longer true. Plain integers are turned into
+    #: comma-tolerant patterns; anything else is used as a regex verbatim.
+    retired: tuple[str | int, ...] = ()
+    note: str = ""
+    #: Optional sub-key for mapping-valued manifest fields, e.g. a template name.
+    member: str | None = None
+
+
+@dataclass(frozen=True)
 class WikiConfig:
     api: str
     #: Sent in User-Agent. A contactable maintainer is the minimum courtesy owed
     #: to a volunteer-run site we are about to make thousands of requests to.
     contact: str
+    #: Human-readable page URL, `{page}` substituted. Stored in the folio so a reader
+    #: can offer "see the original" without the framework knowing any site.
+    source_url: str = ""
+    #: Page-history URL, `{page}` substituted. Attribution for collectively edited pages
+    #: points here rather than at a single revision, because a page history is what
+    #: actually credits every contributor.
+    history_url: str = ""
     rate: float = 8.0
     #: Namespaces whose changes can matter for incremental update.
     watch_namespaces: tuple[int, ...] = (0,)
@@ -418,6 +451,9 @@ class Pack:
     #: rather than corpus records. Without this a working parser reports "produced
     #: nothing", because aliases carry no source page of their own.
     alias_pages: Mapping[str, str] = field(default_factory=dict)
+    #: Quantities the design documents may quote, and the renderings each has retired.
+    #: Both halves are domain knowledge; see `FigureSpec`.
+    figures: tuple[FigureSpec, ...] = ()
 
     def seed(self, key: str) -> SeedSet:
         for s in self.seeds:
@@ -470,6 +506,29 @@ class Pack:
 # --------------------------------------------------------------------------- #
 
 _SEARCH: Sequence[str] = ("packs.{name}", "dramatis_packs.{name}", "{name}")
+
+
+def pack_dir(name: str) -> Path:
+    """Directory holding `packs.<name>`, for assets that sit next to the rules.
+
+    Kept off `Pack` deliberately. `Pack` is declarative rules; giving it a filesystem
+    path would make it describe where it was loaded from as well as what it says, and
+    the rules are meant to be readable without reference to a checkout layout.
+
+    What lives here is anything the code *reads* but a person *writes*: the attribution
+    and notice templates, parser fixtures. That is the dividing line — a template is
+    prose, but prose a generator consumes is an input to code, so it ships with the code
+    rather than with the design documents.
+    """
+    for pattern in _SEARCH:
+        try:
+            mod = importlib.import_module(pattern.format(name=name))
+        except ModuleNotFoundError:
+            continue
+        spec = getattr(mod, "__file__", None)
+        if spec:
+            return Path(spec).parent
+    raise ModuleNotFoundError(f"no pack named {name!r}")
 
 
 def load_pack(name: str) -> Pack:

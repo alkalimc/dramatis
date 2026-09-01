@@ -50,16 +50,26 @@ class Plan:
 
 
 def plan(
-    wiki: Wiki, archive: Archive, pack: Pack, *, limit: int = 5000, rescope: bool = True
+    wiki: Wiki, archive: Archive, pack: Pack, *, limit: int = 5000, rescope: bool = True,
+    progress=None,
 ) -> Plan:
     """Work out what to do without touching the archive.
 
     Separate from `apply` so a human can look first. An update that silently
     removes 400 pages because an enumerator broke is exactly the event this
     separation exists to catch.
+
+    `progress` is not decoration. Re-enumerating the seed sets costs about a minute of
+    paged index queries, while walking the change feed for a short increment costs under
+    a second — so without a callback the only slow stage is also the only silent one, and
+    it reads as a hang.
     """
+    def say(msg: str) -> None:
+        if progress is not None:
+            progress(msg)
     p = Plan(watermark=int(archive.get_meta("watermark", 0) or 0))
 
+    say(f"change feed from rcid={p.watermark:,}")
     touched: dict[str, int] = {}
     reached = False
     for rc in wiki.recentchanges(pack.wiki.watch_namespaces):
@@ -79,16 +89,27 @@ def plan(
         ))
     p.new_watermark = max(p.new_watermark, p.watermark)
 
+    say(f"changed titles: {len(touched)}")
     in_scope = set(archive.titles_in(pack.fetch_seeds))
     p.changed = sorted(t for t in touched if t in in_scope)
     p.ignored = len(touched) - len(p.changed)
 
     if rescope:
-        fresh = scope_stage.build(wiki, pack)
+        say("re-enumerating seed sets (paged index queries; the slow part)")
+        fresh = scope_stage.build(wiki, pack, progress=progress)
         p.scope = fresh
         fresh_titles = set(fresh.fetch_titles(pack))
         p.added = sorted(fresh_titles - in_scope)
-        p.gone = sorted(in_scope - fresh_titles)
+        # `gone` is computed only over seeds that re-enumeration actually covers.
+        # Discovered sets are populated by `fetch` reading a parent page, so `scope` never
+        # yields them (`SeedSet.discovered`) — and subtracting a set that was never
+        # enumerated makes every discovered title look like it left scope. That deleted
+        # them on every incremental run: fetched by the followup, then dropped a few lines
+        # later, which is the same silent loss the discovered-seed machinery exists to
+        # prevent.
+        discovered = set(pack.discovered_seeds)
+        enumerated = tuple(k for k in pack.fetch_seeds if k not in discovered)
+        p.gone = sorted(set(archive.titles_in(enumerated)) - fresh_titles)
         p.findings += fresh.findings
         if p.gone:
             p.findings.append(Finding(
@@ -109,6 +130,25 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
     res = FetchResult()
     if titles:
         _into(wiki, archive, titles, res, progress)
+
+    # Followups have to run here too, not only in `fetch`. A page whose body is
+    # transcluded from a subpage is discovered *by reading its parent*, so re-fetching a
+    # changed parent can reveal a subpage that no enumeration knows about. Skipping this
+    # left those titles registered as seeds with no body held — which `G3` then reports as
+    # a high-severity finding, correctly: the archive claimed a page was in scope and had
+    # nothing for it.
+    for hook in pack.followups:
+        discovered: set[str] = set()
+        for row in archive.pages(archive.seed(hook.of_seed)):
+            discovered.update(hook.discover(row["title"], row["wikitext"]))
+        pending = sorted(t for t in discovered if t not in archive.have_pages())
+        if not pending:
+            continue
+        if progress is not None:
+            progress(f"followup {hook.label or hook.seed}: {len(pending)} pages")
+        _into(wiki, archive, pending, res, progress)
+        archive.add_seeds(hook.seed, pending)
+
     for t in p.gone:
         archive.drop_page(t)
 

@@ -179,8 +179,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "eval",
  "folio",
  "index",
+ "serde_json",
 ]
 
 [[package]]
@@ -188,6 +190,18 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "folio",
+ "index",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "fallible-iterator"
@@ -323,6 +337,7 @@ dependencies = [
  "folio",
  "jieba-rs",
  "rusqlite",
+ "serde_json",
  "thiserror",
 ]
 

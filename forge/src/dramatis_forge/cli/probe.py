@@ -22,7 +22,7 @@ _STATUS_STYLE = {
 
 @app.command("run")
 def run_cmd(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     only: Annotated[
         str | None, typer.Option("--only", help="Comma-separated probe ids, e.g. P1,P5.")

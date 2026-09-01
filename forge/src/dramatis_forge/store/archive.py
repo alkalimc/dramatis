@@ -33,6 +33,17 @@ from typing import Any
 
 from ..normalize.records import KINDS, PARSER_VERSION, Record
 
+#: Columns added after a schema shipped. `CREATE TABLE IF NOT EXISTS` is a no-op when the
+#: table exists with a *different* shape, so a new column reaches new databases only and
+#: every existing archive fails at write time — after the network work is already done.
+#: Reconciled on open instead, which is idempotent and cheap.
+LATE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
+    "guard_findings": (
+        ("run_id", "INTEGER NOT NULL DEFAULT 0"),
+        ("stage", "TEXT NOT NULL DEFAULT ''"),
+    ),
+}
+
 SCHEMA = """
 PRAGMA journal_mode = WAL;
 
@@ -168,13 +179,19 @@ CREATE INDEX IF NOT EXISTS idx_forms_person ON forms(person_id);
 
 -- ---- guards ----
 
+-- `run_id` exists because findings used to accumulate across runs with no way to tell
+-- which run produced which row. A probe found one high-severity row from an earlier run
+-- sitting beside a current-run tally of zero, and the same duplicate finding recorded six
+-- times. Severity is only meaningful relative to a run.
 CREATE TABLE IF NOT EXISTS guard_findings (
+    run_id   INTEGER NOT NULL DEFAULT 0,
+    stage    TEXT NOT NULL DEFAULT '',
     guard    TEXT NOT NULL,
     severity TEXT NOT NULL,
     page     TEXT,
     detail   TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_findings ON guard_findings(guard, severity);
+CREATE INDEX IF NOT EXISTS idx_findings ON guard_findings(stage, guard, severity);
 
 CREATE INDEX IF NOT EXISTS idx_lines_speaker ON lines(speaker);
 CREATE INDEX IF NOT EXISTS idx_lore_page     ON lore(page);
@@ -217,6 +234,7 @@ class Archive:
         self.db.row_factory = sqlite3.Row
         if not readonly:
             self.db.executescript(SCHEMA)
+            self._add_late_columns()
         # The raw cache is attached, not embedded. Pass it as a bound parameter: a
         # URI filename is only honoured when the connection enabled URI handling, so
         # interpolating `file:…` into the statement of a non-URI connection attaches a
@@ -234,6 +252,16 @@ class Archive:
                 RAW_SCHEMA.replace("CREATE TABLE IF NOT EXISTS ", "CREATE TABLE IF NOT EXISTS raw.")
             )
             self.set_meta("parser_version", PARSER_VERSION)
+
+    def _add_late_columns(self) -> None:
+        """Bring an older database up to the declared shape, one column at a time."""
+        for table, columns in LATE_COLUMNS.items():
+            present = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if not present:
+                continue  # table not created yet; the schema script owns it
+            for name, decl in columns:
+                if name not in present:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     # ---- lifecycle ----
 
@@ -295,6 +323,9 @@ class Archive:
         self.db.executemany(
             "INSERT OR IGNORE INTO seeds(seed,title) VALUES(?,?)", [(seed, t) for t in titles]
         )
+        # Republish immediately: this is the fetch-stage path, and leaving the scope-stage
+        # count in place is what made the manifest disagree with the table.
+        self.refresh_seed_counts()
 
     def write_source_rows(self, tables: dict[str, list[dict]]) -> None:
         self.db.execute("DELETE FROM source_rows")
@@ -403,6 +434,9 @@ class Archive:
             self.db.execute(f"DELETE FROM {tbl}")
         self.db.execute("DELETE FROM persons")
         self.db.execute("DELETE FROM forms")
+        # G1 was excluded here, so seed-drift findings accumulated run over run forever.
+        # Runs are now identified, so clearing by guard is unnecessary — a reader asks for
+        # the latest run and gets exactly that run's findings.
         self.db.execute("DELETE FROM guard_findings WHERE guard IN ('G2','G3','G4','G5')")
 
     def insert_records(self, records: Sequence[Record]) -> tuple[int, int]:
@@ -454,10 +488,66 @@ class Archive:
 
     # ---- guards ----
 
-    def write_findings(self, rows: Sequence[tuple[str, str, str | None, str]]) -> None:
+    def next_run_id(self) -> int:
+        """One more than the highest run recorded. Runs are numbered, not timestamped:
+        the question asked of them is always "is this the latest", never "when"."""
+        return int(self.scalar("SELECT COALESCE(MAX(run_id),0)+1 FROM guard_findings") or 1)
+
+    def write_findings(
+        self,
+        rows: Sequence[tuple[str, str, str | None, str]],
+        *,
+        stage: str,
+        run_id: int | None = None,
+    ) -> None:
+        """Replace this stage's findings. Other stages' rows are left alone.
+
+        Clearing is **per stage**, not per run. Findings legitimately arrive from more
+        than one stage — `scope` reports seed drift, `normalize` reports produced-vs-stored
+        — so a tally scoped to "the latest run" would silently omit whichever stage ran
+        first. That is the same shape as the defect this bookkeeping exists to fix, so the
+        unit of replacement is the stage that owns the finding.
+        """
+        run = self.next_run_id() if run_id is None else run_id
+        self.db.execute("DELETE FROM guard_findings WHERE stage=?", (stage,))
         if rows:
             self.db.executemany(
-                "INSERT INTO guard_findings(guard,severity,page,detail) VALUES(?,?,?,?)", rows)
+                "INSERT INTO guard_findings(run_id,stage,guard,severity,page,detail) "
+                "VALUES(?,?,?,?,?,?)",
+                [(run, stage, *r) for r in rows])
+
+    def latest_run(self) -> int:
+        return int(self.scalar("SELECT COALESCE(MAX(run_id),0) FROM guard_findings") or 0)
+
+    def tally_from_table(self) -> dict[str, tuple[int, int]]:
+        """The guard tally, derived from the rows rather than written beside them.
+
+        Counts **every** row, across all stages. Two writers for one fact is how the
+        manifest came to publish a tally the table contradicted; there is now one writer,
+        and it reads exactly what a person auditing the artifact would read.
+        """
+        out: dict[str, tuple[int, int]] = {}
+        for guard, severity, count in self.db.execute(
+            "SELECT guard,severity,COUNT(*) FROM guard_findings GROUP BY guard,severity"
+        ):
+            high, low = out.get(guard, (0, 0))
+            out[guard] = (high + count, low) if severity == "高" else (high, low + count)
+        return out
+
+    def seed_counts_from_table(self) -> dict[str, int]:
+        """Seed sizes read from the seeds table.
+
+        The manifest used to publish a count written during `scope`, before `fetch`
+        discovered the sets whose membership only fetching can learn — so it published a
+        pre-discovery snapshot that looked like a final count.
+        """
+        return {r[0]: r[1] for r in self.db.execute(
+            "SELECT seed,COUNT(*) FROM seeds GROUP BY seed")}
+
+    def refresh_seed_counts(self) -> dict[str, int]:
+        counts = self.seed_counts_from_table()
+        self.set_meta("seed_counts", counts)
+        return counts
 
     def clear_findings(self, *guards: str) -> None:
         for g in guards:

@@ -16,7 +16,7 @@ app = typer.Typer(no_args_is_help=True)
 
 @app.command("build")
 def build_cmd(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     max_per_family: Annotated[
         int, typer.Option("--cap", help="Cap queries per family (0 = no cap).")

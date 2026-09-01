@@ -1,6 +1,6 @@
 [package]
-name = "index"
-description = "Hybrid retrieval: lexical BM25 and exact dense scan, fused and reranked"
+name = "eval"
+description = "Score a retriever against the structural benchmark, per family and per stratum"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,10 +9,10 @@ repository.workspace = true
 
 [dependencies]
 folio = { path = "../folio" }
-rusqlite.workspace = true
-thiserror.workspace = true
+index = { path = "../index" }
+serde.workspace = true
 serde_json.workspace = true
-jieba-rs.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

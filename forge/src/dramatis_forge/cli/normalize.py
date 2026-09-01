@@ -13,7 +13,7 @@ app = typer.Typer(no_args_is_help=True)
 
 
 @app.command("run")
-def run_cmd(pack: PackOpt = "arknights", home: HomeOpt = None) -> None:
+def run_cmd(pack: PackOpt = "", home: HomeOpt = None) -> None:
     """Wikitext to records, with the guards. No network access.
 
     This is the stage to re-run after changing a parse rule: it costs minutes and no

@@ -10,15 +10,32 @@ a *pack*; the engine never names a game, a character, or a site.
 ```
 dramatis/
   forge/        Python 3.13 — the offline half
-    src/dramatis_forge/     mechanism: harvest · normalize · corpus · evals · probes
-    packs/arknights/        rules: the only place a game may be named
-    tests/                  118 tests: unit · packs · pipeline
+    src/dramatis_forge/     mechanism: harvest · normalize · corpus · evals · probes · report
+    tests/                  framework tests; none of them load a pack
   engine/       Rust 2024 — the runtime
     crates/folio/           read a .folio: manifest, units, f16 vectors, roster, aliases
     crates/index/           lexical BM25 ∥ exact dense scan → RRF → confidence
+    crates/eval/            suite runner and retrieval metrics
     bins/dramatis-cli/      inspect · search · bench
   docs/         contributor documentation
 ```
+
+## This is half of a working system
+
+**No pack ships here.** The framework is mechanism: it knows how to harvest a MediaWiki
+site, normalise it into records, resolve pages to people, cut retrieval units, pack a
+single-file corpus, build benchmark suites and measure itself. It knows nothing about *any
+particular* site — which pages to take, how to parse their markup, which templates declare
+that two pages are one person, how a character should be addressed.
+
+Those rules are a pack, and supplying one is the work. Point `DRAMATIS_PACKS` at a
+directory containing a `packs/<name>/` tree and every stage above becomes available to it;
+without one, the CLI has nothing to run.
+
+The contract is `forge/src/dramatis_forge/pack.py` in its entirety. It is deliberately
+thin — declarative rule objects plus a handful of parser callables behind one module-level
+`PACK` — and there is no plugin base-class hierarchy, because with the seam this narrow
+that would be fiction dressed as architecture.
 
 The engine is a **skeleton, deliberately**: retrieval and measurement only. It exists
 before the daemon because two freeze conditions — first-token latency and resident memory —
@@ -40,7 +57,8 @@ incompatible with this one.
 ```sh
 cd forge
 make install          # venv + editable install + a macOS path-file workaround
-make test             # 118 tests, ~1s
+make test             # framework tests, ~1s
+export DRAMATIS_PACKS=/path/to/your/rules   # the directory holding packs/<name>/
 ./forge --help
 ```
 
@@ -63,16 +81,21 @@ cargo build --release
 ./target/release/dramatis-cli bench     # latency distribution and resident memory
 ```
 
-Products land in `../artifacts/` — outside every repository, because the archive is 80 MB
-and a working tree is the wrong place for it.
+Products land in `../artifacts/` — outside every repository, because they run to hundreds
+of megabytes and a working tree is the wrong place for them.
 
 ## The engine/pack seam
 
 One rule decides where code goes: **the engine owns mechanism, the pack owns rules.** If a
 line contains a wiki template name, a character name, a game term, or a site URL, it
-belongs to a pack. `forge/src/dramatis_forge/pack.py` is the whole contract; a pack that
-satisfies it gets rate-limited harvesting, the record vocabulary, five guards, identity
-resolution, chunking, folio packing, benchmark construction and the probe runner for free.
+belongs to a pack — and therefore not to this repository. A pack that satisfies the
+contract gets rate-limited harvesting, the record vocabulary, the guards, identity
+resolution, chunking, folio packing, benchmark construction, the probe runner and the
+figure reporter for free.
+
+The seam is also where measurement lives. Design documents that describe a corpus should
+cite `dramatis-forge report figures` rather than quote numbers: a figure copied into prose
+outlives the build it came from, and nothing downstream can tell that it has.
 
 ## Guards, not rule tables
 

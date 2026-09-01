@@ -252,8 +252,24 @@ impl Folio {
     /// why this matters for identity: a query naming one incarnation must reach the one
     /// person, or the alias dictionary silently disagrees with the roster.
     pub fn resolve_alias(&self, name: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT target FROM aliases WHERE alias = ?1 ORDER BY kind, target",
+        )?;
+        let rows = stmt.query_map([name], |row| row.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    }
+
+    /// The people an alias names, as roster ids.
+    ///
+    /// Separate from `resolve_alias` because the two answer different questions. An alias
+    /// may point at a page that is not a person — an operation, a location, an item — and a
+    /// caller restricting retrieval to a person needs the join, not the raw target. 1,343 of
+    /// the pack's 1,376 aliases resolve to somebody; the remaining 33 are pages about
+    /// things, and returning those as "persons" would be a filter that matches nothing.
+    pub fn persons_for_alias(&self, name: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT p.person_id FROM aliases a JOIN persons p ON p.person_id = a.target \
+             WHERE a.alias = ?1 ORDER BY p.person_id",
         )?;
         let rows = stmt.query_map([name], |row| row.get::<_, String>(0))?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)

@@ -16,7 +16,7 @@ app = typer.Typer(no_args_is_help=True)
 
 @app.command("build")
 def build_cmd(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     segmenter: Annotated[
         str, typer.Option("--segmenter", help="jieba | none | auto")

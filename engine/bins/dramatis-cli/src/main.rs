@@ -1,10 +1,11 @@
 //! Maintainer surface for a corpus.
 //!
-//! Three commands, and the third is the reason this binary exists before the daemon does:
+//! Four commands, and the last two are the reason this binary exists before the daemon does:
 //!
 //!   inspect   what does this corpus contain, and what does it require of a reader
 //!   search    run the pipeline and show what came back
 //!   bench     measure latency and resident memory on this machine
+//!   evaluate  score retrieval against the structural benchmark, per family and per stratum
 //!
 //! `bench` is a probe wearing a CLI. Two freeze conditions — first-token latency and
 //! resident memory — cannot be settled on paper, so the skeleton that answers them has to
@@ -19,7 +20,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use folio::Folio;
-use index::{Index, Mode, Request};
+use index::{Index, Mode, Normalise, Request};
 
 #[derive(Parser)]
 #[command(name = "dramatis-cli", about = "Inspect, query and measure a .folio corpus")]
@@ -49,6 +50,33 @@ enum Command {
         #[arg(long)]
         template: Vec<String>,
     },
+    /// Score retrieval against the structural benchmark.
+    ///
+    /// Two configurations are run over identical queries and compared with a paired
+    /// bootstrap, because the question worth asking is not "how good is retrieval" — a
+    /// number with no comparison is not interpretable — but "does alias resolution earn
+    /// its place".
+    Evaluate {
+        /// The suite, as JSONL.
+        #[arg(long, default_value = "../artifacts/arknights/evals/structural.queries.jsonl")]
+        suite: PathBuf,
+        #[arg(long, default_value_t = 10)]
+        k: usize,
+        #[arg(long, default_value_t = 50)]
+        candidates: usize,
+        /// Score a random subsample. 0 means the whole suite.
+        #[arg(long, default_value_t = 0)]
+        sample: usize,
+        /// Run all three alias settings and compare them pairwise.
+        #[arg(long)]
+        compare_alias: bool,
+        /// Write the machine-readable report here.
+        #[arg(long)]
+        json: Option<PathBuf>,
+        /// Write the markdown report here.
+        #[arg(long)]
+        markdown: Option<PathBuf>,
+    },
     /// Measure the pipeline: per-stage latency distribution and resident memory.
     Bench {
         /// Queries to run. Defaults to a spread across the templates.
@@ -72,6 +100,24 @@ fn main() -> Result<()> {
             expand,
             template,
         } => search(&cli.folio, &query, top_k, &mode, expand, template),
+        Command::Evaluate {
+            suite,
+            k,
+            candidates,
+            sample,
+            compare_alias,
+            json,
+            markdown,
+        } => evaluate(
+            &cli.folio,
+            &suite,
+            k,
+            candidates,
+            sample,
+            compare_alias,
+            json.as_deref(),
+            markdown.as_deref(),
+        ),
         Command::Bench {
             query,
             iterations,
@@ -167,6 +213,26 @@ fn search(
         ..Default::default()
     };
     let response = idx.search(&request, None)?;
+
+    if let Some(resolved) = &response.resolved {
+        let how = match resolved.how {
+            index::How::Unique => "别名",
+            index::How::Qualified => "消歧限定",
+        };
+        let person = resolved.person.as_deref().unwrap_or("（非人物）");
+        println!("{how}       {} → {}  person={person}\n", resolved.alias, resolved.target);
+    }
+    if let Some(ambiguity) = &response.ambiguous {
+        // Reported rather than resolved. The site says this name means several things, so
+        // the honest response is to answer broadly and say what the alternatives were.
+        println!(
+            "歧义       {} 可指 {} 个对象：{}",
+            ambiguity.alias,
+            ambiguity.candidates.len(),
+            ambiguity.candidates.join(" · ")
+        );
+        println!("           查询未指明，下列结果未加限定\n");
+    }
 
     for (rank, hit) in response.hits.iter().enumerate() {
         let ranks = match (hit.lexical_rank, hit.dense_rank) {
@@ -318,4 +384,154 @@ fn report(label: &str, samples: &mut [u128]) {
         at(0.99),
         samples[samples.len() - 1]
     );
+}
+
+/// A deterministic subsample, stratified by family.
+///
+/// Uniform sampling would be wrong here: `disambig` holds ten queries out of 19,801, so a
+/// 5% uniform sample would usually contain none of them and the report would silently drop
+/// a family. Taking every n-th query within each family keeps all six present.
+fn subsample(suite: eval::Suite, target: usize) -> eval::Suite {
+    if target == 0 || target >= suite.queries.len() {
+        return suite;
+    }
+    let mut by_family: std::collections::BTreeMap<String, Vec<eval::Query>> = Default::default();
+    for query in suite.queries {
+        by_family.entry(query.family.clone()).or_default().push(query);
+    }
+    let total: usize = by_family.values().map(Vec::len).sum();
+    let mut kept = Vec::with_capacity(target);
+    for queries in by_family.into_values() {
+        // At least one per family, and never more than the family holds.
+        let want = ((queries.len() as f64 / total as f64) * target as f64).round() as usize;
+        let want = want.clamp(1, queries.len());
+        let step = (queries.len() as f64 / want as f64).max(1.0);
+        for i in 0..want {
+            kept.push(queries[((i as f64 * step) as usize).min(queries.len() - 1)].clone());
+        }
+    }
+    eval::Suite { queries: kept }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate(
+    path: &PathBuf,
+    suite_path: &PathBuf,
+    k: usize,
+    candidates: usize,
+    sample: usize,
+    compare_alias: bool,
+    json_out: Option<&std::path::Path>,
+    markdown_out: Option<&std::path::Path>,
+) -> Result<()> {
+    let folio = Folio::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let suite = eval::Suite::load(suite_path)
+        .with_context(|| format!("loading {}", suite_path.display()))?;
+    let full = suite.queries.len();
+    let suite = subsample(suite, sample);
+
+    println!("corpus     {} units", folio.manifest().unit_count);
+    println!("suite      {} queries", suite.queries.len());
+    if suite.queries.len() != full {
+        println!("           (stratified subsample of {full}; every family kept)");
+    }
+    println!("families   {}\n", suite.families().join(" "));
+
+    // The dense path needs an encoder that does not exist yet, so this measures the lexical
+    // path. Saying so in the output matters more than it looks: a reader who finds these
+    // numbers later must not mistake them for the full system's.
+    let note = "词法路单独测量。稠密路需要编码器权重，尚不存在——本表不是完整系统的分数。"
+        .to_string();
+
+    let config = |normalise| eval::Config {
+        k,
+        candidates,
+        mode: Mode::Lexical,
+        normalise,
+        ..eval::Config::default()
+    };
+    let configs: Vec<eval::Config> = if compare_alias {
+        vec![
+            config(Normalise::Off),
+            config(Normalise::Expand),
+            config(Normalise::ExpandAndFilter),
+        ]
+    } else {
+        vec![config(Normalise::ExpandAndFilter)]
+    };
+
+    let progress = |done: usize, total: usize| {
+        if done > 0 && done % 2500 == 0 {
+            println!("  {done}/{total}");
+        }
+    };
+
+    let mut runs: Vec<(eval::Config, eval::Outcome)> = Vec::new();
+    for config in configs {
+        println!("running {}", config.label());
+        let outcome = eval::runner::run(&folio, &suite, &config, progress)?;
+        runs.push((config, outcome));
+    }
+
+    let mut markdown = String::new();
+    let mut reports = Vec::new();
+    for (i, (config, outcome)) in runs.iter().enumerate() {
+        let mut notes = vec![note.clone()];
+        let mut paired = serde_json::Value::Null;
+        if i > 0 {
+            // Compare against the previous setting, not against the first: the question is
+            // what each stage adds on top of the one before it, and comparing everything to
+            // the baseline would credit filtering with expansion's gains.
+            let (previous_config, previous) = &runs[i - 1];
+            let (left, right) = eval::runner::align(&previous.scored, &outcome.scored);
+            let p = eval::metrics::paired_bootstrap(&left, &right, 10_000);
+            let delta = if left.is_empty() {
+                0.0
+            } else {
+                right.iter().zip(&left).map(|(r, l)| r - l).sum::<f64>() / left.len() as f64
+            };
+            notes.push(match p {
+                Some(p) => format!(
+                    "相对 `{}`：nDCG@{k} 平均差 {delta:+.4}，配对 bootstrap p={p:.4}\
+                     （10,000 次重采样，种子固定）",
+                    previous_config.label()
+                ),
+                None => "配对比较不可用：两次运行没有共同查询。".to_string(),
+            });
+            paired = serde_json::json!({
+                "against": previous_config.label(),
+                "paired_queries": left.len(),
+                "mean_ndcg_delta": delta,
+                "p_value": p,
+                "iterations": 10_000,
+                "test": "paired bootstrap over per-query nDCG, fixed seed",
+            });
+        }
+        let section = eval::report::markdown(config, outcome, &notes);
+        print!("\n{section}");
+        markdown.push_str(&section);
+        markdown.push('\n');
+        let mut payload = eval::report::json(config, outcome);
+        if !paired.is_null() {
+            payload["paired_vs_previous"] = paired;
+        }
+        reports.push(payload);
+    }
+
+    if let Some(out) = json_out {
+        let payload = serde_json::json!({
+            "suite": suite_path.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
+            "folio_fingerprint": folio.manifest().build_fingerprint,
+            "queries_scored": suite.queries.len(),
+            "queries_in_suite": full,
+            "runs": reports,
+        });
+        std::fs::write(out, serde_json::to_string_pretty(&payload)? + "\n")?;
+        println!("\nwrote {}", out.display());
+    }
+    if let Some(out) = markdown_out {
+        std::fs::write(out, &markdown)?;
+        println!("wrote {}", out.display());
+    }
+    Ok(())
 }

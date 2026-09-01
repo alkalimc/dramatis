@@ -87,7 +87,7 @@ def run(
     archive.set_meta("pages_missing", sorted(res.missing)[:200])
     archive.set_meta("wiki_requests", wiki.requests)
     if res.findings:
-        archive.write_findings([f.row() for f in res.findings])
+        archive.write_findings([f.row() for f in res.findings], stage="fetch")
     archive.commit()
     return res
 

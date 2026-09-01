@@ -20,8 +20,23 @@ def test_shrinkage_is_high_growth_is_low():
     assert [f.severity for f in fell] == [HIGH]
 
 
-def test_within_tolerance_is_silent():
-    assert check_drift({"S1": 2090}, {"S1": 2086}) == []
+def test_only_an_exact_match_is_silent():
+    """There is no tolerance band, and that is the point.
+
+    A band used to suppress small deviations, and it hid a real one: a seed set sat one
+    page above its baseline with no finding of any kind, so the artifact recorded neither
+    "aligned" nor "drifted". A freeze condition phrased as "every seed set aligns with its
+    baseline" cannot be checked against silence, so a small growth must still be *recorded*
+    — quietly, but recorded.
+    """
+    assert check_drift({"S1": 2086}, {"S1": 2086}) == []
+
+    tiny_growth = check_drift({"S1": 2087}, {"S1": 2086})
+    assert [f.severity for f in tiny_growth] == [LOW]
+    assert "+1" in tiny_growth[0].detail
+
+    tiny_fall = check_drift({"S1": 2085}, {"S1": 2086})
+    assert [f.severity for f in tiny_fall] == [HIGH]
 
 
 def test_a_set_with_no_baseline_is_reported_not_ignored():

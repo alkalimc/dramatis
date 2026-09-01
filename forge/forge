@@ -1,11 +1,16 @@
 #!/bin/sh
 # Wrapper for the forge CLI.
 #
-# It exists because of one environment quirk: on this machine every `.pth` file written
-# into site-packages ends up flagged hidden, and CPython's `site` module skips hidden
-# path files. An editable install therefore succeeds and is then invisible to imports.
-# PYTHONPATH is not subject to that, so we set it explicitly and stop depending on the
-# install layout at all.
+# Two things it settles:
+#
+# 1. On this machine every `.pth` written into site-packages ends up flagged hidden, and
+#    CPython's `site` module skips hidden path files. An editable install therefore
+#    succeeds and is then invisible to imports. PYTHONPATH is not subject to that.
+#
+# 2. This repository ships no pack. The framework is mechanism; the rules that drive it
+#    are supplied from outside and are not public. Point DRAMATIS_PACKS at the directory
+#    *containing* a `packs/` tree, or set PYTHONPATH yourself.
 here=$(cd "$(dirname "$0")" && pwd)
-PYTHONPATH="$here/src:$here${PYTHONPATH:+:$PYTHONPATH}" \
+packs=${DRAMATIS_PACKS:-}
+PYTHONPATH="$here/src${packs:+:$packs}${PYTHONPATH:+:$PYTHONPATH}" \
   exec "$here/.venv/bin/python" -m dramatis_forge "$@"

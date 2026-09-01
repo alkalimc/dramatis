@@ -93,6 +93,11 @@ class Paths:
     def coverage(self) -> Path:
         return self.pack_dir / "COVERAGE.md"
 
+    @property
+    def figures(self) -> Path:
+        """Measured values the design documents link to instead of quoting."""
+        return self.pack_dir / "FIGURES.md"
+
     def ensure(self) -> Paths:
         self.pack_dir.mkdir(parents=True, exist_ok=True)
         return self

@@ -112,14 +112,15 @@ def resolve_editors(wiki: Wiki, attribution: Attribution, *, progress=None) -> i
     return attribution.editors_resolved
 
 
-def _page_rows(attribution: Attribution, url_pattern: str) -> str:
+def _page_rows(attribution: Attribution, url_pattern: str,
+               history_pattern: str) -> str:
     lines: list[str] = []
     for entry in attribution.pages:
         page = entry["page"]
         revid = entry["revid"]
         # The history link, not the current-version link: it is what actually satisfies
         # the attribution requirement for a collectively edited page.
-        history = f"https://prts.wiki/index.php?title={page.replace(' ', '_')}&action=history"
+        history = history_pattern.format(page=page.replace(" ", "_"))
         lines.append(
             f"| {page} | {revid or '—'} | {entry['units']:,} | "
             f"{entry['editor'] or '（见页面历史）'} | [历史]({history}) |"
@@ -132,7 +133,8 @@ def render(
     templates: Iterable[Path],
     outdir: Path,
     *,
-    url_pattern: str = "https://prts.wiki/w/{page}",
+    url_pattern: str,
+    history_pattern: str,
     issue_url: str = "",
     contact_email: str = "",
 ) -> list[Path]:
@@ -159,7 +161,7 @@ def render(
         "PACK_VERSION": str(attribution.pack_version),
         "ISSUE_URL": issue_url or "（待填）",
         "CONTACT_EMAIL": contact_email or "（待填）",
-        "PAGE_ROWS": _page_rows(attribution, url_pattern),
+        "PAGE_ROWS": _page_rows(attribution, url_pattern, history_pattern),
         "GENERATED_AT": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
     }
 

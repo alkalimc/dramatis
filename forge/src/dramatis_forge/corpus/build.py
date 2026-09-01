@@ -33,7 +33,6 @@ from .chunk import Chunk, build as build_chunks
 
 #: What a citation card links to. The folio stores the page title and revision, and
 #: the client composes the URL, so a wiki move does not invalidate stored data.
-DEFAULT_SOURCE_URL = "https://prts.wiki/w/{page}"
 
 
 @dataclass
@@ -181,7 +180,8 @@ def run(
         folio.set_meta("redundancy", rep.redundancy)
         folio.set_meta("requires", rep.requirements)
         folio.set_meta("size_stats", rep.size_stats)
-        folio.set_meta("source_url_pattern", DEFAULT_SOURCE_URL)
+        folio.set_meta("source_url_pattern", pack.wiki.source_url)
+        folio.set_meta("history_url_pattern", pack.wiki.history_url)
         folio.set_meta("source_revid_max", archive.scalar(
             "SELECT MAX(revid) FROM (SELECT revid FROM scenes UNION ALL "
             "SELECT revid FROM dossiers UNION ALL SELECT revid FROM lore)") or 0)

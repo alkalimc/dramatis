@@ -59,7 +59,7 @@ def _scope_table(pack, counts: dict[str, int]) -> Table:
 
 @app.command()
 def scope(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     rate: RateOpt = None,
 ) -> None:
@@ -81,7 +81,7 @@ def scope(
 
 @app.command()
 def fetch(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     rate: RateOpt = None,
     limit: Annotated[int, typer.Option("--limit", help="Only fetch N pages (0 = all).")] = 0,
@@ -113,7 +113,7 @@ def fetch(
 
 @app.command()
 def sync(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     rate: RateOpt = None,
     skip_scope: Annotated[bool, typer.Option("--skip-scope", help="Reuse the stored scope.")] = False,
@@ -174,12 +174,26 @@ def sync(
 
 @app.command()
 def update(
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     rate: RateOpt = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Plan only; touch nothing.")] = False,
+    rescope: Annotated[
+        bool,
+        typer.Option(
+            "--rescope/--no-rescope",
+            help="Re-enumerate the seed sets. On by default; the slow part.",
+        ),
+    ] = True,
 ) -> None:
-    """Incremental update from the site's change feed."""
+    """Incremental update from the site's change feed.
+
+    Two questions get answered, and they are not the same question. The change feed says
+    which held pages were edited; re-enumeration says whether the seed sets gained or lost
+    members. Only the second can notice that a page left scope, which is why it defaults
+    on — but it costs about a minute against a change feed that costs under a second, so
+    `--no-rescope` is there for a routine increment.
+    """
     pk, paths = resolve(pack, home)
     need(paths.archive, "archive", "run `dramatis-forge harvest sync` first")
 
@@ -190,7 +204,12 @@ def update(
             console.print("the archive is now level with the site; the next `update` is incremental")
             return
 
-        plan = update_stage.plan(wiki, archive, pk)
+        plan = update_stage.plan(
+            wiki, archive, pk, rescope=rescope, progress=ticker("plan"))
+        if not rescope:
+            console.print(
+                "[yellow]--no-rescope: seed sets not re-enumerated[/yellow] "
+                "[dim]pages that left scope will not be noticed this run[/dim]")
         table = Table(title="update plan")
         table.add_column("item")
         table.add_column("value", justify="right")

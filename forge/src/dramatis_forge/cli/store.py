@@ -16,7 +16,7 @@ app = typer.Typer(no_args_is_help=True)
 @app.command("migrate")
 def migrate_cmd(
     legacy: Annotated[Path, typer.Argument(help="Path to the previous-generation archive.")],
-    pack: PackOpt = "arknights",
+    pack: PackOpt = "",
     home: HomeOpt = None,
     cache: Annotated[Path | None, typer.Option("--cache", help="Its page cache.")] = None,
 ) -> None:
