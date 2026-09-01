@@ -43,6 +43,13 @@ cannot be settled on paper, so the thing that answers them has to run first. The
 loop, world state and RPC layer are not written; there are no empty crate directories
 standing in for them, because a tree of empty crates looks like progress and is not.
 
+Three defects it found on its first run were invisible to reading the code: a stopword that
+made BM25 score nearly the whole corpus, SQL rebuilt per candidate count so it never
+cached, and a filter applied after truncation that returned nothing. A fourth was worse —
+the memory measurement itself was wrong, returning success and a resident size of zero.
+**A system call that succeeds is not the same as a correct measurement**, and two freeze
+conditions rest on that number.
+
 ## Why one repository for two languages
 
 `.folio` is a contract written by Python and read by Rust. Keeping both here means a
@@ -93,9 +100,14 @@ contract gets rate-limited harvesting, the record vocabulary, the guards, identi
 resolution, chunking, folio packing, benchmark construction, the probe runner and the
 figure reporter for free.
 
-The seam is also where measurement lives. Design documents that describe a corpus should
-cite `dramatis-forge report figures` rather than quote numbers: a figure copied into prose
-outlives the build it came from, and nothing downstream can tell that it has.
+The seam is also where measurement lives. Documents describing a corpus cite report keys
+rather than values: a figure copied into prose outlives the build it came from, and nothing
+downstream can tell that it has. `report figures --check` audits a document tree against
+the artifact it claims to describe, and reports both retired renderings and references that
+resolve nowhere.
+
+Which figures a pack exposes, and which renderings each has retired, are supplied by the
+pack — both are domain knowledge, and a retired-value list is design history.
 
 ## Guards, not rule tables
 
@@ -105,19 +117,31 @@ is an assertion with a measured baseline and a place to complain:
 
 | Guard | Checks |
 | --- | --- |
-| G1 | seed-set drift, and produced-versus-stored reconciliation |
+| G1 | seed-set drift (graded three ways), and produced-versus-stored reconciliation |
 | G2 | markup the rules did not predict |
 | G3 | an in-scope page that produced nothing |
 | G4 | page-to-person identity invariants |
 | G5 | chunking coverage, size and redundancy |
+| G6 | **the artifact agrees with itself**: tables ↔ manifest ↔ report |
 
 Severity means one thing: **could content have been lost?** A high-severity finding blocks
 the design freeze. A low-severity one must be *attributed* — an unexplained low-severity
 count is a high-severity finding in waiting.
 
+G6 is the only one that does not check the corpus, and it exists because the other five
+cannot catch the failure that actually happened: a build whose own records disagreed about
+how many findings it had. A file that asserts "I have no high-severity problems" needs
+something to verify that assertion, and for a while nothing did. G1's drift check is graded
+rather than binary for the same reason — "shrank" and "grew by one" are different facts, and
+collapsing them produced a false alarm shaped exactly like a real data-loss bug.
+
 ## Licence
 
-Apache-2.0. Vendored third-party code is declared in `NOTICE`.
+Apache-2.0. **No third-party code is vendored here** — `NOTICE` declares ordinary
+dependencies only. An earlier design vendored two crates for a command-execution
+subsystem; that subsystem became an optional, off-by-default extension, and carrying
+thousands of lines of vendored code for a subsystem that is absent by default was a cost
+with nothing on the other side.
 
 The corpus this builds is **not** covered by that licence: it derives from a
 volunteer-maintained wiki whose editorial contributions are CC BY-NC-SA, over fiction
