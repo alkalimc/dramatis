@@ -1,0 +1,18 @@
+[package]
+name = "eval"
+description = "Score a retriever against the structural benchmark, per family and per stratum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+folio = { path = "../folio" }
+index = { path = "../index" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
