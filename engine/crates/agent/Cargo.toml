@@ -1,0 +1,10 @@
+[package]
+name = "agent"
+description = "Append-only sessions, endpoint client, tool dispatch and metering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
