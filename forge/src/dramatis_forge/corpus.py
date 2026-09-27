@@ -21,14 +21,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import RunInfo
-from ..normalize.guards import Ledger
-from ..normalize.records import PARSER_VERSION
-from ..pack import Pack
-from ..store.archive import Archive
-from ..store.folio import FOLIO_FORMAT_VERSION, Folio
-from . import tokenize
-from .chunk import Chunk, build as build_chunks
+from . import segment
+from .archive import Archive
+from .chunk import build as build_chunks
+from .config import RunInfo
+from .folio import FOLIO_FORMAT_VERSION, Folio
+from .guards import Ledger
+from .pack import Pack
+from .records import PARSER_VERSION
 
 
 @dataclass
@@ -40,21 +40,12 @@ class CorpusReport:
     segmenter: str = ""
     redundancy: dict[str, float] = field(default_factory=dict)
     ledger: Ledger = field(default_factory=Ledger)
-    vector_bytes: dict[int, int] = field(default_factory=dict)
     size_stats: dict[str, dict[str, int]] = field(default_factory=dict)
     #: Obligations this corpus places on whatever reads it. Recorded in the folio so the
     #: engine can refuse a corpus whose requirements it does not implement, rather than
     #: quietly serving degraded results.
     requirements: list[str] = field(default_factory=list)
     repeated_header_segments: int = 0
-
-    @property
-    def total_chars(self) -> int:
-        return sum(self.chars_by_template.values())
-
-    @property
-    def clean(self) -> bool:
-        return self.ledger.clean
 
 
 def _repeats_a_segment(header: str) -> bool:
@@ -80,9 +71,9 @@ def run(
     progress=None,
 ) -> CorpusReport:
     rep = CorpusReport()
-    seg = tokenize.load(segmenter)
+    seg = segment.load(segmenter)
     rep.segmenter = f"{seg.name}/{seg.version}"
-    run_info = RunInfo.create("corpus", pack.name, pack.version)
+    run_info = RunInfo.create("build", pack.name, pack.version)
 
     sizes: dict[str, list[int]] = {}
     bodies: dict[str, list[int]] = {}
@@ -153,9 +144,6 @@ def run(
         folio.write_template_stats(stats_rows)
 
         rep.redundancy = _redundancy(spans, rep.by_template)
-        rep.vector_bytes = {
-            dim: rep.chunks * dim * 2 for dim in (1024, 512, 256, 128)
-        }
         # Units are stored once, so a reader that wants surrounding context must fetch
         # it — the corpus does not carry lookbehind. Declaring the capability makes the
         # obligation explicit instead of leaving readers to discover truncated context.
@@ -195,11 +183,13 @@ def run(
         folio.set_meta("built_at", dt.datetime.now(dt.UTC).isoformat(timespec="seconds"))
         folio.set_meta("build", run_info.as_dict())
         folio.set_meta("wording", dict(pack.wording))
-        folio.set_meta("guard_tally", {g: list(v) for g, v in rep.ledger.tally().items()})
-        folio.set_meta("guard_findings", [f.detail for f in rep.ledger.findings])
         # Written last: the fingerprint has to cover everything above it.
         folio.set_meta("build_fingerprint", _fingerprint(folio))
         folio.optimize()
+    # G5 findings join the others in the archive's findings table, the one place a tally
+    # is read from.
+    archive.write_findings(rep.ledger.rows(), stage="corpus")
+    archive.commit()
     return rep
 
 
@@ -354,12 +344,17 @@ def _check(
         )
 
 
+#: Manifest keys that describe when and where a build ran rather than what it contains.
+_UNHASHED = frozenset({"build_fingerprint", "built_at", "build"})
+
+
 def _fingerprint(folio: Folio) -> str:
     """Hash of the chunk identifiers in order, plus the manifest that describes them.
 
     Content-derived rather than time-derived, so two builds of the same inputs
     fingerprint identically — which is what makes it usable for the client's
-    lineage check and for reproducibility claims.
+    lineage check and for reproducibility claims. The build time and host stamp are
+    therefore left out.
     """
     import hashlib
 
@@ -367,7 +362,7 @@ def _fingerprint(folio: Folio) -> str:
     for (cid,) in folio.db.execute("SELECT id FROM chunks ORDER BY ord"):
         h.update(cid.encode())
     for key, value in sorted(folio.manifest().items()):
-        if key == "build_fingerprint":
+        if key in _UNHASHED:
             continue
         h.update(f"{key}={json.dumps(value, sort_keys=True, ensure_ascii=False)}".encode())
     return f"sha256:{h.hexdigest()}"

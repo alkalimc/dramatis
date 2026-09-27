@@ -26,9 +26,9 @@ import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from ..normalize.records import sig
-from ..pack import ChunkTemplate, Pack
-from ..store.archive import Archive
+from .records import sig
+from .pack import ChunkTemplate, Pack
+from .archive import Archive
 
 
 @dataclass(frozen=True, slots=True)

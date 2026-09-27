@@ -19,7 +19,7 @@ from collections.abc import Iterator
 
 import mwparserfromhell as mw
 
-from ..pack import ContentSpec, InlineRules
+from .pack import ContentSpec, InlineRules
 
 RE_COMMENT = re.compile(r"<!--.*?-->", re.S)
 RE_OPEN_COMMENT = re.compile(r"<!--.*$", re.S)

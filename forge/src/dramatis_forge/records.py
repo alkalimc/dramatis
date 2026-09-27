@@ -322,5 +322,4 @@ class Alias(Record):
 KINDS: tuple[type[Record], ...] = (
     Scene, Line, Choice, Dossier, Voice, Lore, Letter, Term, CharRef, Alias,
 )
-BY_KIND: dict[str, type[Record]] = {k.KIND: k for k in KINDS}
 ORDER: tuple[str, ...] = tuple(k.KIND for k in KINDS)

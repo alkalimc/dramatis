@@ -26,10 +26,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ..archive import Archive
+from ..folio import Folio
 from ..pack import Pack
-from ..store.archive import Archive
-from ..store.folio import Folio
-from ..wiki import TITLES_LIMIT, Wiki
 
 
 @dataclass
@@ -62,6 +61,8 @@ def collect(archive: Archive, folio: Folio) -> Attribution:
 
     Reads the folio rather than the archive for unit counts, because the folio is what
     ships: attributing what was built is the point, not attributing what was parsed.
+    Editors are cached per revision by `forge sync` (`harvest.refresh_editors`), so this
+    never needs the network.
     """
     out = Attribution(
         synced_at=str(archive.get_meta("synced_at") or ""),
@@ -77,59 +78,18 @@ def collect(archive: Archive, folio: Folio) -> Attribution:
     out.units_without_revid = int(row["missing"] or 0)
     out.revid_max = int(row["top"] or 0)
 
-    cached = archive.editors()
+    by_revid = archive.editors()
     for r in folio.db.execute(
         "SELECT page, MAX(revid) AS revid, COUNT(*) AS units FROM chunks "
         "GROUP BY page ORDER BY page"
     ):
-        known = cached.get(r["page"])
         out.pages.append({
             "page": r["page"],
             "revid": r["revid"],
             "units": r["units"],
-            "editor": known[1] if known and known[0] == r["revid"] else "",
+            "editor": by_revid.get(r["revid"], ""),
         })
     return out
-
-
-def stale_editors(attribution: Attribution) -> list[dict]:
-    """Pages whose cached editor is missing or belongs to a different revision."""
-    return [p for p in attribution.pages if not p["editor"] and p["revid"]]
-
-
-def resolve_editors(
-    wiki: Wiki, archive: Archive, attribution: Attribution, *, progress=None
-) -> int:
-    """Ask the site who made each revision the cache cannot answer for.
-
-    Asks by revision id, not by title: the author of the revision the corpus holds is
-    the one to credit, whatever the page's current revision is. Only uncached (page,
-    revid) pairs are requested, batched at the API's limit, and every answer is cached
-    in the archive. Returns how many revisions were looked up.
-    """
-    # Several pages can carry one revision (a unit built from one page and filed under
-    # another), so each revision maps to every entry waiting on it.
-    todo: dict[int, list[dict]] = {}
-    for entry in stale_editors(attribution):
-        todo.setdefault(entry["revid"], []).append(entry)
-    revids = sorted(todo)
-    found: list[tuple[str, int, str]] = []
-    for i in range(0, len(revids), TITLES_LIMIT):
-        batch = revids[i: i + TITLES_LIMIT]
-        data = wiki.get(action="query", prop="revisions", rvprop="user|ids",
-                        revids="|".join(str(r) for r in batch))
-        for page in data.get("query", {}).get("pages", []):
-            for rev in page.get("revisions") or []:
-                if not rev.get("user"):
-                    continue  # hidden or deleted author: the page history still credits them
-                for entry in todo.get(rev.get("revid"), []):
-                    entry["editor"] = rev["user"]
-                    found.append((entry["page"], entry["revid"], rev["user"]))
-        if progress is not None:
-            progress(f"editors {min(i + TITLES_LIMIT, len(revids)):,}/{len(revids):,}")
-    archive.put_editors(found)
-    archive.commit()
-    return len(revids)
 
 
 def _page_rows(attribution: Attribution, pack: Pack) -> str:

@@ -14,17 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Word segmentation for CJK text on the lexical path. Optional because `corpus build`
-# falls back to a character-bigram tokenizer that produces a usable (if weaker)
-# FTS5 index; the fallback is recorded in the folio manifest so the engine can
-# tell which one it is looking at.
+# Word segmentation for CJK text on the lexical path. Optional because the build falls
+# back to a character-bigram segmenter that produces a usable (if weaker) FTS5 index; the
+# choice is recorded in the folio manifest so the engine can tell which one it reads.
 zh = ["jieba>=0.42"]
 # Reference tokenizers for the `tokens.*` figures (context-budget sizing). Either backend
 # works; the pack names which tokenizer to use.
 tokens = ["tiktoken==0.12.0", "tokenizers==0.22.1"]
-# Encoder/reranker training and vector encoding. Heavy; never needed to build
-# the record archive or the benchmark suites.
-train = ["sentence-transformers>=5", "ranx>=0.3", "torch>=2.4"]
 
 [project.scripts]
 dramatis-forge = "dramatis_forge.cli:app"

@@ -19,8 +19,8 @@ import json
 import re
 from pathlib import Path
 
+from ..archive import Archive
 from ..pack import Pack
-from ..store.archive import Archive
 from ..text import table_head
 
 SAFE = re.compile(r"[^\w.-]")
@@ -34,21 +34,33 @@ def safe_name(title: str) -> str:
 
 
 def dump(archive: Archive, pack: Pack, title: str, outdir: Path) -> list[Path]:
+    """Write the three files for a page the archive holds. Empty if it holds none."""
     row = archive.page(title)
     if row is None or not row["wikitext"]:
         return []
+    return _write(pack, title, row["wikitext"], row["revid"], collect(archive, title, pack),
+                  outdir)
+
+
+def dump_snapshot(pack: Pack, snapshot, outdir: Path) -> list[Path]:
+    """The same three files for a page that is gone, from its `raw.removed` snapshot."""
+    return _write(pack, snapshot["title"], snapshot["wikitext"] or "", snapshot["revid"],
+                  json.loads(snapshot["records"]), outdir)
+
+
+def _write(pack: Pack, title: str, wikitext: str, revid, records: dict,
+           outdir: Path) -> list[Path]:
     outdir.mkdir(parents=True, exist_ok=True)
     stem = safe_name(title)
     source, records_path, archived = (outdir / f"{stem}{s}" for s in SUFFIXES)
-
-    source.write_text(row["wikitext"], encoding="utf-8")
-    records = collect(archive, title)
+    source.write_text(wikitext, encoding="utf-8")
     records_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    archived.write_text(render(pack, title, row, records), encoding="utf-8")
+    archived.write_text(render(pack, title, {"wikitext": wikitext, "revid": revid}, records),
+                        encoding="utf-8")
     return [source, records_path, archived]
 
 
-def collect(archive: Archive, title: str) -> dict:
+def collect(archive: Archive, title: str, pack: Pack) -> dict:
     """Every record that came from this page, whatever kind it is.
 
     Alias-producing pages are included deliberately: a page whose entire output is alias
@@ -112,7 +124,7 @@ def collect(archive: Archive, title: str) -> dict:
 
     # Aliases have no page column — they are a dictionary, not corpus. Attribute them by
     # kind so a page whose only output is aliases still reports its output.
-    kind = (archive.get_meta("alias_page_kinds") or {}).get(title)
+    kind = pack.alias_pages.get(title)
     if kind:
         rows = [dict(r) for r in db.execute(
             "SELECT alias,target FROM aliases WHERE kind=? ORDER BY target LIMIT ?",

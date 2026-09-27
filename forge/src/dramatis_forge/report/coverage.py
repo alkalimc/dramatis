@@ -7,10 +7,9 @@ evaluate a measure and lay out a page.
 
 from __future__ import annotations
 
-from ..normalize.guards import GUARDS
-from ..normalize.records import ORDER
+from ..archive import Archive
 from ..pack import Pack
-from ..store.archive import Archive
+from ..records import ORDER
 from ..text import table_head
 
 DISPOSITION_ORDER = {"archived": 0, "partial": 1, "excluded": 2}
@@ -31,7 +30,7 @@ def _measure(archive: Archive, spec: str | None) -> str:
     return "—"
 
 
-def build(archive: Archive, pack: Pack) -> tuple[str, list[tuple[str, str, str, str]]]:
+def build(archive: Archive, pack: Pack) -> str:
     say = pack.say
     rows = [
         (row.section, row.disposition, _measure(archive, row.measure), row.reason)
@@ -40,7 +39,7 @@ def build(archive: Archive, pack: Pack) -> tuple[str, list[tuple[str, str, str, 
 
     counts = archive.get_meta("record_counts") or {}
     chars = archive.get_meta("record_chars") or {}
-    tally = archive.get_meta("guard_tally") or {}
+    tally = archive.tally()
     recon = archive.get_meta("reconciliation") or {}
     tally_of = {d: sum(1 for r in pack.coverage if r.disposition == d) for d in DISPOSITION_ORDER}
 
@@ -52,7 +51,7 @@ def build(archive: Archive, pack: Pack) -> tuple[str, list[tuple[str, str, str, 
         say("coverage.synced", at=archive.get_meta("synced_at", "—")),
         say("coverage.versions", parser=archive.get_meta("parser_version", "—"),
             pack=archive.get_meta("pack_version", "—")),
-        say("coverage.pages", n=int(archive.get_meta("pages_held", 0) or 0)),
+        say("coverage.pages", n=archive.pages_held()),
         say("coverage.dispositions", archived=tally_of["archived"],
             partial=tally_of["partial"], excluded=tally_of["excluded"]),
         "",
@@ -98,8 +97,7 @@ def build(archive: Archive, pack: Pack) -> tuple[str, list[tuple[str, str, str, 
         md.append(f"| {r['t'] or '—'} | {r['n']:,} |")
 
     md += ["", say("coverage.guards"), "", *table_head(say("coverage.guards_head"))]
-    for guard in GUARDS:
-        hi, lo = tally.get(guard, (0, 0))
+    for guard, (hi, lo) in tally.items():
         md.append(f"| {guard} {say('guard.' + guard)} | {hi:,} | {lo:,} |")
     md += ["", say("coverage.guards_note"), ""]
 
@@ -115,4 +113,4 @@ def build(archive: Archive, pack: Pack) -> tuple[str, list[tuple[str, str, str, 
                 f"{recon.get('ignored', {}).get(kind, 0):,} |")
         md.append("")
 
-    return "\n".join(md), rows
+    return "\n".join(md)

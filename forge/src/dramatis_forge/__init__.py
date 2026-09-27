@@ -1,10 +1,11 @@
 """dramatis-forge — the offline half of dramatis.
 
-The forge turns a collaborative wiki into two artifacts the runtime consumes:
+The forge turns a collaborative wiki into the artifacts the runtime consumes:
 
-    wiki --harvest--> *.archive --corpus--> *.folio
-             *.rawcache (local)      |--> persona prompts (into the folio)
-                                     '--> eval suites (published separately)
+    wiki --sync--> *.archive + *.rawcache --build--> *.folio, evals/, samples/, reports/
+
+`sync` (harvest.py) is the only part that makes requests; `build` (normalize.py,
+corpus.py, evals.py, report/) is offline and deterministic.
 
 Everything domain-specific lives in a *pack* (`packs/<domain>/`). The code under
 `dramatis_forge/` never names a game, a character, or a wiki template: it owns

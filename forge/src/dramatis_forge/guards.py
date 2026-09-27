@@ -14,14 +14,9 @@ unexplained low-severity count is a high-severity finding in waiting.
     G3  empty         a page in scope that yielded nothing
     G4  identity      page-to-person resolution invariants
     G5  corpus        chunking invariants (coverage, size, redundancy)
-    G6  self          the artifact agrees with its own bookkeeping
 
-G6 is the odd one out: G1–G5 check the corpus, G6 checks *us*. An artifact can
-disagree with itself — a findings table holding a high-severity row while the manifest
-tally publishes zero, a seed count published from a snapshot taken before later stages
-added to the set. Neither loses content; both make the artifact impossible to audit,
-and a release gate stated in terms of numbers the artifact reports about itself is
-only as good as that self-report.
+The artifact cannot disagree with itself about any of this, because every count a report
+shows is read from the table that holds it rather than from a copy written beside it.
 
 Expected sizes (G1 seed counts, G4 identity counts) are never declared in code. They are
 measured, accepted into a baseline file with `forge baseline accept`, and compared here.
@@ -29,20 +24,17 @@ measured, accepted into a baseline file with `forge baseline accept`, and compar
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
-from ..text import TEXT
+from .text import TEXT
 
 HIGH = "high"
 LOW = "low"
 
-#: Severity values written by earlier versions, mapped to the current ones.
-LEGACY_SEVERITY: Mapping[str, str] = {"\u9ad8": HIGH, "\u4f4e": LOW}
-
 #: Every guard, in order. Descriptions are text (`guard.<id>` in `text.TEXT`), so a pack
 #: can word them; these are the framework defaults.
-GUARDS: dict[str, str] = {g: TEXT[f"guard.{g}"] for g in ("G1", "G2", "G3", "G4", "G5", "G6")}
+GUARDS: dict[str, str] = {g: TEXT[f"guard.{g}"] for g in ("G1", "G2", "G3", "G4", "G5")}
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,9 +53,8 @@ class Finding:
 
 
 class Ledger:
-    """Accumulates findings and answers the only two questions that matter:
-    is anything high-severity outstanding, and is every low-severity count
-    attributed to a known cause?"""
+    """Accumulates one stage's findings until they are written to the archive, where the
+    tally is read from (`Archive.tally`)."""
 
     def __init__(self) -> None:
         self.findings: list[Finding] = []
@@ -73,26 +64,6 @@ class Ledger:
 
     def extend(self, findings: Iterable[Finding]) -> None:
         self.findings.extend(findings)
-
-    def high(self, guard: str | None = None) -> list[Finding]:
-        return [f for f in self.findings
-                if f.severity == HIGH and (guard is None or f.guard == guard)]
-
-    def low(self, guard: str | None = None) -> list[Finding]:
-        return [f for f in self.findings
-                if f.severity == LOW and (guard is None or f.guard == guard)]
-
-    def tally(self) -> dict[str, tuple[int, int]]:
-        return {
-            g: (len(self.high(g)), len(self.low(g)))
-            for g in GUARDS
-            if self.high(g) or self.low(g)
-        }
-
-    @property
-    def clean(self) -> bool:
-        """The release-gate predicate: no high-severity finding anywhere."""
-        return not self.high()
 
     def rows(self) -> list[tuple[str, str, str | None, str]]:
         return [f.row() for f in self.findings]
@@ -157,54 +128,6 @@ def check_drift(
     for key in counts:
         if key not in baselines:
             out.append(Finding(guard, LOW, f"{key} has no accepted baseline: {counts[key]}"))
-    return out
-
-
-# --------------------------------------------------------------------------- #
-# G6
-# --------------------------------------------------------------------------- #
-
-
-def check_self_consistency(
-    *,
-    table_tally: Mapping[str, tuple[int, int]],
-    manifest_tally: Mapping[str, Sequence[int]],
-    table_seed_counts: Mapping[str, int],
-    manifest_seed_counts: Mapping[str, int],
-) -> list[Finding]:
-    """Reconcile what the tables hold against what the manifest publishes.
-
-    Every other guard reads the corpus. This one reads the artifact's own account of
-    itself, because that account is what a release gate is stated in terms of:
-    "high-severity guard findings are zero" is a claim the artifact makes *about itself*.
-    A file asserting its own cleanliness is not evidence.
-
-    Any disagreement is high severity regardless of direction. The question is not which
-    number is right — it is whether the artifact can be audited at all, and one that
-    contradicts itself cannot be.
-    """
-    out: list[Finding] = []
-
-    for guard in sorted(set(table_tally) | set(manifest_tally)):
-        in_table = tuple(table_tally.get(guard, (0, 0)))
-        published = tuple(manifest_tally.get(guard, (0, 0)))[:2]
-        if in_table != published:
-            out.append(Finding(
-                "G6", HIGH,
-                f"{guard}: findings table holds {in_table} (high, low) but the manifest "
-                f"publishes {published} — the artifact disagrees with itself",
-            ))
-
-    for seed in sorted(set(table_seed_counts) | set(manifest_seed_counts)):
-        held = table_seed_counts.get(seed, 0)
-        published = manifest_seed_counts.get(seed, 0)
-        if held != published:
-            out.append(Finding(
-                "G6", HIGH,
-                f"{seed}: seeds table holds {held} rows but the manifest publishes "
-                f"{published} — most likely a snapshot taken before a later stage "
-                "added to the set",
-            ))
     return out
 
 

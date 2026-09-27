@@ -31,12 +31,11 @@ from __future__ import annotations
 
 import json
 import unicodedata
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..normalize.records import sig
-from ..store.folio import Folio
+from .records import sig
+from .folio import Folio
 
 #: Relation families with a fixed meaning. Each is a different claim about what
 #: retrieval should do, so metrics are reported per family; a single mean over all of
@@ -381,10 +380,3 @@ def write(suite: Suite, outdir: Path, *, folio: Folio) -> dict:
     (outdir / "structural.manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
-
-
-def iter_jsonl(path: Path) -> Iterator[dict]:
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            if line.strip():
-                yield json.loads(line)

@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .. import baseline as baseline_mod
-from .. import identity as identity_mod
-from ..pack import Pack, PageContext
-from ..store.archive import Archive
+from . import baseline as baseline_mod
 from . import guards
+from . import identity as identity_mod
+from .archive import Archive
 from .guards import HIGH, Ledger, Reconciliation
+from .pack import Pack, PageContext
 from .records import ORDER, PARSER_VERSION, Alias, Record
 from .wikitext import Cleaner
 
@@ -40,10 +40,6 @@ class Report:
     @property
     def total_chars(self) -> int:
         return sum(self.chars.values())
-
-    @property
-    def clean(self) -> bool:
-        return self.ledger.clean
 
 
 def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
@@ -125,41 +121,14 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
         rep.reconciliation.note(kind, produced=len(records), stored=stored, ignored=ignored)
     rep.ledger.extend(rep.reconciliation.check())
 
-    # The previous run's counts are kept beside the new ones so a reader of the sample can
-    # see what a sync changed without diffing two archives.
-    previous = archive.get_meta("record_counts")
-    if previous is not None:
-        archive.set_meta("record_counts_previous", previous)
+    # `record_counts_previous` is set by `harvest.apply`, so the sample's delta is what the
+    # last sync changed, however many offline builds ran since.
     archive.set_meta("record_counts", rep.counts)
     archive.set_meta("record_chars", rep.chars)
     archive.set_meta("reconciliation", rep.reconciliation.as_dict())
     archive.set_meta("parser_version", PARSER_VERSION)
     archive.set_meta("pack_version", pack.version)
-    archive.set_meta("alias_page_kinds", dict(pack.alias_pages))
-    # Order matters. Seed counts are republished from the table first, then findings are
-    # written under a run id, then the tally is *derived* from those rows, and only then
-    # does G6 reconcile the two. Publishing a tally computed from the ledger — a second
-    # writer for the same fact — is what let the manifest and the table disagree.
-    seed_counts = archive.refresh_seed_counts()
-
-    run_id = archive.next_run_id()
-    archive.write_findings(rep.ledger.rows(), stage="normalize", run_id=run_id)
-    table_tally = archive.tally_from_table()
-
-    self_findings = guards.check_self_consistency(
-        table_tally=table_tally,
-        manifest_tally={g: list(v) for g, v in table_tally.items()},
-        table_seed_counts=archive.seed_counts_from_table(),
-        manifest_seed_counts=seed_counts,
-    )
-    if self_findings:
-        rep.ledger.extend(self_findings)
-        archive.write_findings(
-            [f.row() for f in self_findings], stage="self", run_id=run_id)
-        table_tally = archive.tally_from_table()
-
-    archive.set_meta("guard_run_id", run_id)
-    archive.set_meta("guard_tally", {g: list(v) for g, v in table_tally.items()})
+    archive.write_findings(rep.ledger.rows(), stage="normalize")
     archive.commit()
     return rep
 

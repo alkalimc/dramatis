@@ -24,11 +24,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from .guards import HIGH, LOW
 from .text import TEXT
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .normalize.records import Record
-    from .normalize.wikitext import Cleaner
+    from .records import Record
+    from .wikitext import Cleaner
     from .wiki import Wiki
 
 
@@ -56,7 +57,6 @@ class HarvestContext:
     """
 
     tables: dict[str, list[dict]] = field(default_factory=dict)
-    notes: list[str] = field(default_factory=list)
 
     def rows(self, table: str) -> list[dict]:
         return self.tables.get(table, [])
@@ -156,8 +156,6 @@ class PageContext:
         about how odd the construct looks. Low-severity warnings are counted and
         summarised; high-severity ones are printed and fail the release gate.
         """
-        from .normalize.guards import HIGH, LOW  # deferred: the normalize package imports this module
-
         self._warnings.append((HIGH if high else LOW, detail))
 
     def rows(self, table: str, title: str | None = None) -> list[dict]:
@@ -352,8 +350,6 @@ class ChunkTemplate:
     name: str
     #: Which record kinds feed this template.
     sources: tuple[str, ...]
-    #: Instruction prefix for the encoder's task-conditioned embedding.
-    task: str = ""
     #: Soft character budget. Chunks over it are split at a natural boundary.
     max_chars: int = 900
     #: Sequence templates only: target unit length in records, and the hard cap
@@ -419,12 +415,6 @@ class ChunkPolicy:
         """Names of the templates built by one builder."""
         return tuple(t.name for t in self.templates if t.builder == shape)
 
-    def by_name(self, name: str) -> ChunkTemplate:
-        for t in self.templates:
-            if t.name == name:
-                return t
-        raise KeyError(name)
-
 
 #: Fallbacks for `ChunkPolicy.labels`. The key set is the contract; the values are
 #: placeholders a pack is expected to replace.
@@ -484,24 +474,17 @@ class CoverageRow:
 
 @dataclass(frozen=True)
 class FigureSpec:
-    """One quantity a document is allowed to cite, and its retired renderings.
+    """One quantity a document is allowed to cite.
 
-    Packs own this because both halves are domain knowledge: *which* quantities are
-    load-bearing depends on what the corpus is, and which values a document once
-    claimed is the history of a particular project.
-
-    The framework only knows how to read a key out of a manifest, run a named derived
+    Packs own this because *which* quantities are load-bearing depends on what the corpus
+    is. The framework only knows how to read a key out of a manifest, run a named derived
     query, compare against a target, and report. It is told nothing about what the
     numbers mean.
     """
 
     key: str
-    #: Where the value comes from: `manifest:<field>`, `folio:<field>`,
-    #: `derived:<name>`, or `computed:<name>` for the few that are arithmetic.
+    #: Where the value comes from: `manifest:<field>`, `folio:<field>` or `derived:<name>`.
     source: str
-    #: Renderings that are no longer true. Plain integers are turned into
-    #: comma-tolerant patterns; anything else is used as a regex verbatim.
-    retired: tuple[str | int, ...] = ()
     note: str = ""
     #: Optional sub-key: a member of a mapping-valued manifest field (e.g. a template
     #: name), or the parameter of a derived figure (e.g. a threshold, a form kind).
@@ -515,14 +498,14 @@ class FigureSpec:
 class DocAudit:
     """How `report figures --check` reads a document tree. All of it is house style.
 
-    `history_markers` are phrases marking a number as a recorded past value rather
-    than a live claim, so a decision log may keep superseded figures. `id_prefixes` are
-    the letters of cross-reference ids (`X12`) a document set uses; every one referenced
-    must be defined somewhere in the tree.
+    `id_prefixes` are the letters of cross-reference ids (`X12`) a document set uses; every
+    one referenced must be defined somewhere in the tree. `planned_keys` are figure keys a
+    document may cite before anything computes them (`*` matches one segment); any other
+    backticked key under the root of a computed figure is reported as unknown.
     """
 
-    history_markers: tuple[str, ...] = ("~~",)
     id_prefixes: tuple[str, ...] = ()
+    planned_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -566,13 +549,7 @@ class Pack:
     chunking: ChunkPolicy
     #: Structured tables (the Cargo extension) to pull once during `scope`: table -> field spec.
     tables: Mapping[str, str] = field(default_factory=dict)
-    #: Tables where one page legitimately has several rows. Getting this wrong is
-    #: a silent data-loss bug: keying by page drops the extra rows without a word.
-    multi_row_tables: frozenset[str] = frozenset()
-    #: Machine field name -> the wiki's own wording. Downstream consumers (prompt
-    #: synthesis, retrieval) should see the site's vocabulary, not a schema's.
-    field_names: Mapping[str, str] = field(default_factory=dict)
-    #: In-world phrasing for runtime surfaces the client renders.
+    #: In-world phrasing for runtime surfaces the client renders (folio manifest `wording`).
     wording: Mapping[str, str] = field(default_factory=dict)
     #: The source's own table of contents, annotated with what we took and why not.
     coverage: tuple[CoverageRow, ...] = ()
@@ -580,7 +557,7 @@ class Pack:
     #: rather than corpus records. Without this a working parser reports "produced
     #: nothing", because aliases carry no source page of their own.
     alias_pages: Mapping[str, str] = field(default_factory=dict)
-    #: Quantities documents may cite, and the renderings each has retired. See `FigureSpec`.
+    #: Quantities documents may cite. See `FigureSpec`.
     figures: tuple[FigureSpec, ...] = ()
     audit: DocAudit = field(default_factory=DocAudit)
     publication: Publication = field(default_factory=Publication)
@@ -601,12 +578,6 @@ class Pack:
             template = TEXT[key]
         return template.format(**fields) if fields else template
 
-    def seed(self, key: str) -> SeedSet:
-        for s in self.seeds:
-            if s.key == key:
-                return s
-        raise KeyError(key)
-
     @property
     def fetch_seeds(self) -> tuple[str, ...]:
         return tuple(s.key for s in self.seeds if s.fetch)
@@ -614,11 +585,6 @@ class Pack:
     @property
     def discovered_seeds(self) -> tuple[str, ...]:
         return tuple(s.key for s in self.seeds if s.discovered)
-
-    @property
-    def fixed_seeds(self) -> dict[str, tuple[str, ...]]:
-        """Seed sets whose membership is a constant, so it needs no network."""
-        return {s.key: s.fixed for s in self.seeds if s.fixed is not None}
 
     @property
     def corpus_seeds(self) -> tuple[str, ...]:

@@ -1,8 +1,7 @@
 """Measure an artifact, report the figures, and check a document tree against them.
 
-Guards check the corpus. `G6` checks that an artifact agrees with itself. Neither checks
-the third thing that can be wrong: **a document quoting a number the artifact never
-produced.** That is the gap this closes.
+Documents cite measured values by key (`units`, `tokens.line`) rather than quoting them,
+so a number cannot go stale in prose. This module is what makes that workable.
 
 Three parts:
 
@@ -14,10 +13,12 @@ each derived one is computed is the framework's, because it is schema knowledge.
 here and shown as pass or fail. A condition a document states in prose cannot be checked;
 one declared beside the figure is checked on every build.
 
-*Scanning* — a document that quotes a superseded measurement is making a checkable claim
-that is false, and a cross-reference to something undefined is a consistency claim nobody
-checked. Neither pass understands prose; both report file, line and text and leave the
-judgement to a reader.
+*Scanning* — a relative link to a file that does not exist, a cross-reference id nothing
+defines, and a backticked key under the root of a computed figure that nothing computes
+(and the pack does not declare planned) are all claims nobody checked. Placeholders are
+understood: `a.{x,y}` names two keys, and `a.{name}` (one word, any script) stands for
+any registered member. The scan understands no prose; it reports file, line and what it
+found, and leaves the judgement to a reader.
 """
 
 from __future__ import annotations
@@ -30,9 +31,11 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import tokens as tokens_mod
-from ..pack import DocAudit, FigureSpec, Pack
+from ..config import Paths
+from ..guards import GUARDS, HIGH
+from ..pack import Pack, pack_dir
 from ..text import table_head
+from . import tokens as tokens_mod
 
 #: Share of held-out lines used by `heldout_lines`.
 HOLDOUT_FRACTION = 0.2
@@ -49,7 +52,6 @@ class Figure:
     key: str
     value: object
     shown: str
-    retired: tuple[str, ...] = ()
     note: str = ""
     target: str = ""
     #: None when there is no target; otherwise whether the value meets it.
@@ -67,47 +69,6 @@ class Hit:
     @property
     def where(self) -> str:
         return f"{self.path}:{self.line_no}"
-
-
-def num_pattern(n: object) -> str:
-    """Regex for an integer as prose writes it, with or without thousands commas.
-
-    The boundary must reject digits *and* commas on both sides: `\\b553\\b` matches
-    inside `552,553`, which would report one figure as a stale rendering of another.
-    """
-    raw = f"{int(n):,}"
-    plain = raw.replace(",", "")
-    return rf"(?<![\d,])(?:{re.escape(raw)}|{re.escape(plain)})(?![\d,])"
-
-
-def _current_token(shown: str) -> str:
-    """The numeric part of a rendered value, as prose would write it.
-
-    Decimals have to survive intact: stripping non-digits turns `12.5 MB` into `125`,
-    which then fails to match a line that says `12.5`.
-    """
-    match = re.search(r"\d[\d,]*(?:\.\d+)?", shown)
-    return match.group(0) if match else ""
-
-
-def _is_recorded(
-    line: str, previous: str, heading: str, current: str, markers: Iterable[str]
-) -> bool:
-    """Whether a retired value here is being recorded rather than asserted.
-
-    Two signals. A history marker nearby, or — the stronger one — the line also shows the
-    current value, which makes it a correction table. Flagging correction tables would
-    punish exactly the discipline that keeps documents honest.
-    """
-    if any(marker in f"{previous} {line} {heading}" for marker in markers):
-        return True
-    if not current:
-        return False
-    plain = current.replace(",", "")
-    return any(
-        re.search(rf"(?<![\d.]){re.escape(form)}(?![\d,])", line)
-        for form in {current, plain}
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -143,17 +104,14 @@ class _Sources:
     folio: sqlite3.Connection | None
     folio_path: Path
     meta: dict[str, dict[str, object]]
+    pack: Pack
+    suite: Path
     has_raw: bool = False
-    pack: Pack | None = None
-    suite: Path | None = None
     _cache: dict[str, object] = field(default_factory=dict)
 
     def counter(self) -> Callable[[str], int] | None:
         """The pack's reference tokenizer, loaded once. None when unavailable."""
         def compute():
-            if self.pack is None:
-                return None
-            from ..pack import pack_dir
             return tokens_mod.load_counter(self.pack.tokenizer, pack_dir(self.pack.name))
         return self.once("counter", compute)  # type: ignore[return-value]
 
@@ -345,6 +303,34 @@ def _d_people_with_material(src: _Sources, member: str | None):
         "group by person having count(*) >= ?)", (n,)).fetchone()[0])
 
 
+def _d_pages(src: _Sources, _m: str | None):
+    """Pages whose body the raw cache holds."""
+    assert src.archive is not None
+    if not src.has_raw:
+        return None
+    return _count(src.archive.execute(
+        "select count(*) from raw.pages where wikitext is not null").fetchone()[0])
+
+
+def _d_persons(src: _Sources, _m: str | None):
+    assert src.archive is not None
+    return _count(src.archive.execute("select count(*) from persons").fetchone()[0])
+
+
+def _d_units_with_revid(src: _Sources, _m: str | None):
+    """Units that name the source revision they came from."""
+    assert src.folio is not None
+    return _count(src.folio.execute(
+        "select count(*) from chunks where revid is not null").fetchone()[0])
+
+
+def _d_pack_lines(src: _Sources, _m: str | None):
+    """Non-blank lines of Python in the pack: how much rule code a wiki needs."""
+    root = pack_dir(src.pack.name)
+    return _count(sum(1 for path in root.rglob("*.py")
+                      for line in path.read_text(encoding="utf-8").splitlines() if line.strip()))
+
+
 def _d_roster_pages(src: _Sources, _m: str | None):
     assert src.archive is not None
     return _count(src.archive.execute("select count(*) from forms").fetchone()[0])
@@ -399,8 +385,6 @@ def _d_aliases(src: _Sources, member: str | None):
 
 def _guard_sum(src: _Sources, member: str | None, column: int):
     assert src.archive is not None
-    from ..normalize.guards import GUARDS, HIGH
-
     counts = {g: [0, 0] for g in GUARDS}
     for guard, severity, n in src.archive.execute(
         "select guard, severity, count(*) from guard_findings group by guard, severity"
@@ -440,9 +424,9 @@ def _d_tokens_line(src: _Sources, _m: str | None):
 def _d_tokens_retrieval(src: _Sources, member: str | None):
     """Median tokens of a lexical top-k block; `member` is k."""
     count = src.counter()
-    if count is None or src.pack is None or src.suite is None:
+    if count is None:
         return None
-    from ..corpus.tokenize import load as load_segmenter
+    from ..segment import load as load_segmenter
     name = str(src.meta["folio"].get("segmenter") or "")
     try:
         seg = load_segmenter("jieba" if name.startswith("jieba") else "none")
@@ -456,6 +440,10 @@ def _d_tokens_retrieval(src: _Sources, member: str | None):
 
 #: name -> (artifacts it reads, how). A figure whose inputs are missing is skipped.
 DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], object]]] = {
+    "pages": (("archive",), _d_pages),
+    "persons": (("archive",), _d_persons),
+    "pack_lines": ((), _d_pack_lines),
+    "units_with_revid": (("folio",), _d_units_with_revid),
     "units_attributed": (("folio",), _d_units_attributed),
     "units_per_person": (("folio",), _d_units_per_person),
     "folio_mb": (("folio",), _d_folio_mb),
@@ -501,21 +489,19 @@ def meets(value: object, target: str) -> bool | None:
     return _OPS[m.group(1)](float(value), float(m.group(2)))
 
 
-def resolve(specs: Iterable[FigureSpec], archive: Path, folio: Path, *,
-            pack: Pack | None = None, suite: Path | None = None) -> list[Figure]:
-    """Turn pack specs into measured figures. Values come only from artifacts."""
-    a, f = _connect(archive), _connect(folio)
-    rawcache = archive.with_suffix(".rawcache")
-    has_raw = a is not None and rawcache.exists()
+def resolve(pack: Pack, paths: Paths) -> list[Figure]:
+    """Turn the pack's specs into measured figures. Values come only from artifacts."""
+    a, f = _connect(paths.archive), _connect(paths.folio)
+    has_raw = a is not None and paths.rawcache.exists()
     if has_raw:
-        a.execute("ATTACH DATABASE ? AS raw", (f"file:{rawcache}?immutable=1",))
+        a.execute("ATTACH DATABASE ? AS raw", (f"file:{paths.rawcache}?immutable=1",))
     try:
-        src = _Sources(archive=a, folio=f, folio_path=folio,
+        src = _Sources(archive=a, folio=f, folio_path=paths.folio,
                        meta={"manifest": _meta(a), "folio": _meta(f)}, has_raw=has_raw,
-                       pack=pack, suite=suite)
+                       pack=pack, suite=paths.evals / "structural.queries.jsonl")
         have = {"archive": a is not None, "folio": f is not None}
         out: list[Figure] = []
-        for spec in specs:
+        for spec in pack.figures:
             kind, _, name = spec.source.partition(":")
             measured: object = None
             if kind in src.meta:
@@ -535,9 +521,8 @@ def resolve(specs: Iterable[FigureSpec], archive: Path, folio: Path, *,
             if measured is None:
                 continue
             value, shown = measured  # type: ignore[misc]
-            retired = tuple(num_pattern(r) if isinstance(r, int) else r for r in spec.retired)
             passed = meets(value, spec.target) if spec.target else None
-            out.append(Figure(spec.key, value, shown, retired, spec.note, spec.target, passed))
+            out.append(Figure(spec.key, value, shown, spec.note, spec.target, passed))
         return out
     finally:
         for con in (a, f):
@@ -549,27 +534,73 @@ def resolve(specs: Iterable[FigureSpec], archive: Path, folio: Path, *,
 # Scanning
 # --------------------------------------------------------------------------- #
 
-_REF = re.compile(r"[`(]((?:\.\./)?[\w./-]+\.md)(?:#[\w-]*)?[`)]")
+_LINK = re.compile(r"[`(]((?:\.\./)*[\w./-]+\.md)(?:#[^`)]*)?[`)]")
+_SPAN = re.compile(r"`([^`\n]+)`")
+#: A dotted key, optionally with one `{…}` group: `a.b`, `a.{x,y}`, `a.{template}.c`.
+_KEY = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z0-9_]*(?:\{[^{}]+\}[a-z0-9_]*)?)+")
+_GROUP = re.compile(r"\{([^{}]+)\}")
+#: Alternatives inside a group: plain key segments, or `…` meaning "and so on".
+_MEMBER = re.compile(r"[a-z0-9_]+")
+#: A backticked dotted name ending in one of these is a file, not a figure key.
+_FILE_SUFFIXES = frozenset({
+    "md", "py", "rs", "js", "json", "jsonl", "toml", "yaml", "yml", "txt", "gguf", "sql",
+    "archive", "rawcache", "folio", "html", "css", "ts", "sh",
+})
+
+
+@dataclass
+class Hit:
+    path: Path
+    line_no: int
+    what: str
+    detail: str
+
+    @property
+    def where(self) -> str:
+        return f"{self.path}:{self.line_no}"
 
 
 @dataclass
 class Report:
-    figures: list[Figure] = field(default_factory=list)
-    stale: list[Hit] = field(default_factory=list)
-    dangling: list[Hit] = field(default_factory=list)
+    hits: list[Hit] = field(default_factory=list)
     scanned: int = 0
 
-    @property
-    def clean(self) -> bool:
-        return not self.stale and not self.dangling
+
+def _keys_in(span: str) -> list[str]:
+    """The figure keys a backticked span names, as patterns.
+
+    `a.b` is one key. `a.{x,y}` expands to `a.x` and `a.y`; an alternative written as
+    `…` or `...` is dropped. A group holding a single word (`a.{name}`, in any script)
+    is a placeholder, returned as `*`: it matches any registered member there.
+    """
+    if not _KEY.fullmatch(span):
+        return []
+    m = _GROUP.search(span)
+    if m is None:
+        return [span]
+    head, tail = span[:m.start()], span[m.end():]
+    parts = [p.strip() for p in re.split("[,\uff0c]", m.group(1))]
+    members = [p for p in parts if _MEMBER.fullmatch(p)]
+    if len(parts) == 1 or not members:
+        # A placeholder stands for a whole segment, so it can only sit between dots.
+        return [f"{head}*{tail}"] if head.endswith(".") and tail[:1] in ("", ".") else []
+    return [f"{head}{member}{tail}" for member in members]
+
+
+def _known(key: str, known: set[str]) -> bool:
+    """Whether `key` names a known key. `*` on either side matches one segment."""
+    if key in known:
+        return True
+    parts = key.split(".")
+    return any(
+        len(k.split(".")) == len(parts)
+        and all(a == b or "*" in (a, b) for a, b in zip(parts, k.split(".")))
+        for k in known)
 
 
 def _defined_ids(docs: Mapping[Path, list[str]], prefixes: Iterable[str]) -> dict[str, set[str]]:
-    """Ids each document actually defines, by table-row or heading position.
-
-    Deliberately loose: the aim is to catch an id nothing anywhere defines, not to
-    police where definitions live.
-    """
+    """Ids the tree defines, by table-row or heading position. Deliberately loose: the aim
+    is to catch an id nothing anywhere defines, not to police where definitions live."""
     defined: dict[str, set[str]] = {k: set() for k in prefixes}
     for lines in docs.values():
         for line in lines:
@@ -583,50 +614,38 @@ def _defined_ids(docs: Mapping[Path, list[str]], prefixes: Iterable[str]) -> dic
     return defined
 
 
-def scan(root: Path, figures: Iterable[Figure], audit: DocAudit | None = None) -> Report:
-    """Read every markdown file under `root` and report both kinds of rot."""
-    audit = audit or DocAudit()
-    figures = list(figures)
+def scan(root: Path, pack: Pack) -> Report:
+    """Read every markdown file under `root` and report what does not resolve."""
+    audit = pack.audit
     paths = sorted(p for p in root.rglob("*.md") if ".git" not in p.parts)
     docs = {p: p.read_text(encoding="utf-8").splitlines() for p in paths}
-    rep = Report(figures=figures, scanned=len(paths))
+    rep = Report(scanned=len(paths))
     ids = {k: re.compile(rf"\b{re.escape(k)}(\d{{1,3}})\b") for k in audit.id_prefixes}
     defined = _defined_ids(docs, audit.id_prefixes)
-    known = {p.resolve() for p in paths}
-    current = {f.key: _current_token(f.shown) for f in figures}
-    seen: set[tuple[Path, int, str]] = set()
+    known_keys = {f.key for f in pack.figures} | set(audit.planned_keys)
+    # Only roots of computed figures are checked: other dotted names in a document are
+    # parameters or paths, not report keys, even when they share a planned key's root.
+    roots = {f.key.split(".", 1)[0] for f in pack.figures}
 
     for path, lines in docs.items():
-        heading = ""
         for i, line in enumerate(lines, 1):
-            if line.lstrip().startswith("#"):
-                heading = line
-            previous = lines[i - 2] if i >= 2 else ""
-
-            for fig in figures:
-                token = (path, i, fig.key)
-                if token in seen:
-                    continue
-                matched = any(re.search(pattern, line) for pattern in fig.retired)
-                if matched and not _is_recorded(
-                    line, previous, heading, current[fig.key], audit.history_markers
-                ):
-                    rep.stale.append(Hit(
-                        path, i, line.strip(), fig.key,
-                        f"retired rendering; current value is {fig.shown}"))
-                    seen.add(token)
-
-            for m in _REF.finditer(line):
-                target = (path.parent / m.group(1)).resolve()
-                if target not in known and not target.exists():
-                    rep.dangling.append(Hit(path, i, line.strip(), "path", m.group(1)))
+            for m in _LINK.finditer(line):
+                if not (path.parent / m.group(1)).resolve().exists():
+                    rep.hits.append(Hit(path, i, "dangling link", m.group(1)))
             for kind, pattern in ids.items():
                 for m in pattern.finditer(line):
-                    n = m.group(1)
-                    if len(n) >= 2 and n not in defined[kind]:
-                        rep.dangling.append(Hit(
-                            path, i, line.strip(), f"{kind}-id",
-                            f"{kind}{n} is referenced but never defined"))
+                    if len(m.group(1)) >= 2 and m.group(1) not in defined[kind]:
+                        rep.hits.append(Hit(path, i, "undefined id",
+                                            f"{kind}{m.group(1)} is referenced but never defined"))
+            for m in _SPAN.finditer(line):
+                for key in _keys_in(m.group(1).strip()):
+                    if key.rsplit(".", 1)[-1] in _FILE_SUFFIXES:
+                        continue
+                    # Only roots that have a registered key are report keys; any other
+                    # dotted name (a calibration parameter, a module path) is not ours.
+                    if key.split(".", 1)[0] in roots and not _known(key, known_keys):
+                        rep.hits.append(Hit(path, i, "unknown key",
+                                            f"`{key}` is neither computed nor planned"))
     return rep
 
 
@@ -641,8 +660,10 @@ def verdict(fig: Figure) -> str:
     return f"{'✅' if fig.passed else '❌'} {fig.target}"
 
 
-def render(figures: Iterable[Figure], pack: Pack, *, fingerprint: str = "") -> str:
+def render(figures: Iterable[Figure], pack: Pack) -> str:
     """The generated figure report a document links to instead of quoting."""
+    figures = list(figures)
+    fingerprint = next((f.shown for f in figures if f.key == "fingerprint"), "")
     lines = [pack.say("figures.title"), "", pack.say("figures.intro"), ""]
     if fingerprint:
         lines += [pack.say("figures.fingerprint", fingerprint=fingerprint), ""]
@@ -650,8 +671,3 @@ def render(figures: Iterable[Figure], pack: Pack, *, fingerprint: str = "") -> s
     for fig in figures:
         lines.append(f"| `{fig.key}` | {fig.shown} | {verdict(fig)} | {fig.note} |")
     return "\n".join(lines) + "\n"
-
-
-def figures_for(pack: Pack) -> tuple[FigureSpec, ...]:
-    """A pack's figure registry, or empty if it declares none."""
-    return tuple(pack.figures)

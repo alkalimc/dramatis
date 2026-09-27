@@ -186,13 +186,6 @@ class Folio:
         self.db.executemany(
             "INSERT INTO chunks_fts(rowid, tokens) VALUES(?,?)", rows)
 
-    def write_vectors(self, dim: int, count: int, dtype: str, data: bytes) -> None:
-        self.db.execute("DELETE FROM vectors")
-        self.db.execute(
-            "INSERT INTO vectors(id,dim,count,dtype,data) VALUES(0,?,?,?,?)",
-            (dim, count, dtype, data),
-        )
-
     def write_persons(self, rows: Sequence[tuple]) -> None:
         self.db.executemany(
             "INSERT OR REPLACE INTO persons"
@@ -204,10 +197,6 @@ class Folio:
     def write_aliases(self, rows: Sequence[tuple[str, str, str]]) -> None:
         self.db.executemany(
             "INSERT OR IGNORE INTO aliases(alias,target,kind) VALUES(?,?,?)", rows)
-
-    def write_prompts(self, rows: Sequence[tuple[str, str, str, str]]) -> None:
-        self.db.executemany(
-            "INSERT OR REPLACE INTO prompts(subject,slot,body,generator) VALUES(?,?,?,?)", rows)
 
     def write_template_stats(self, rows: Sequence[tuple]) -> None:
         self.db.executemany(
@@ -238,12 +227,3 @@ class Folio:
         self.db.execute("VACUUM")
         self.db.execute("ANALYZE")
         self.db.commit()
-
-    # ---- reading ----
-
-    def count(self, table: str = "chunks") -> int:
-        return int(self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-
-    def templates(self) -> dict[str, int]:
-        return {r["template"]: r["n"] for r in self.db.execute(
-            "SELECT template, COUNT(*) AS n FROM chunks GROUP BY template ORDER BY n DESC")}

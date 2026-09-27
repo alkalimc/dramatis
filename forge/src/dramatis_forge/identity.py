@@ -28,8 +28,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .normalize.guards import HIGH, Finding
-from .normalize.records import Alias
+from .guards import HIGH, Finding
+from .records import Alias
 from .pack import IdentityRules
 
 CANONICAL = "canonical"
@@ -49,14 +49,6 @@ class Person:
     person_id: str
     forms: list[Form] = field(default_factory=list)
 
-    @property
-    def primary_page(self) -> str:
-        return self.person_id
-
-    @property
-    def pages(self) -> list[str]:
-        return [f.page for f in self.forms]
-
 
 @dataclass(slots=True)
 class Roster:
@@ -69,10 +61,6 @@ class Roster:
 
     def __len__(self) -> int:
         return len(self.people)
-
-    @property
-    def multi_form(self) -> list[Person]:
-        return [p for p in self.people.values() if len(p.forms) > 1]
 
     def aliases(self) -> list[Alias]:
         """Non-canonical form names are site-curated synonyms for the person.

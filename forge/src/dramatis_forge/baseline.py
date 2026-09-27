@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import BASELINES_FILE
-from .store.archive import Archive
+from .archive import Archive
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ def measure(archive: Archive) -> Baseline:
     ):
         identity[f"form:{kind}"] = n
     return Baseline(
-        seeds=dict(sorted(archive.seed_counts_from_table().items())),
+        seeds=dict(sorted(archive.seed_counts().items())),
         identity=identity,
         accepted_at=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         watermark=int(archive.get_meta("watermark", 0) or 0),

@@ -1,4 +1,4 @@
-"""Where things live, and the run manifest.
+"""Where things live, and the build stamp.
 
 Artifacts are kept **outside the source tree** by default. They are large, and a
 working tree that contains them makes every `git status` a lie and every clone a
@@ -92,20 +92,28 @@ class Paths:
         return self.pack_dir / BASELINES_FILE
 
     @property
+    def reports(self) -> Path:
+        """Generated Markdown: FIGURES, COVERAGE, ATTRIBUTION, NOTICE (and the engine's
+        RESULTS, when `dramatis-cli evaluate --markdown` is pointed here)."""
+        return self.pack_dir / "reports"
+
+    @property
     def coverage(self) -> Path:
-        return self.pack_dir / "COVERAGE.md"
+        return self.reports / "COVERAGE.md"
 
     @property
     def figures(self) -> Path:
         """Measured values documents cite by key instead of quoting."""
-        return self.pack_dir / "FIGURES.md"
+        return self.reports / "FIGURES.md"
 
     def ensure(self) -> Paths:
-        self.pack_dir.mkdir(parents=True, exist_ok=True)
+        self.reports.mkdir(parents=True, exist_ok=True)
         return self
 
 
-def _git_describe(root: Path) -> str:
+def _git_describe(root: Path | None) -> str:
+    if root is None:
+        return "unknown"
     try:
         out = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
@@ -123,13 +131,23 @@ def _git_describe(root: Path) -> str:
     return "unknown"
 
 
+def _source_repo() -> Path | None:
+    """The git checkout this package was imported from, if any.
+
+    Not the workspace root: that directory holds several repositories and is not one.
+    """
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
 @dataclass
 class RunInfo:
-    """Provenance stamped into every artifact the forge writes.
+    """Provenance stamped into the folio (`build`): which code produced this file.
 
-    This is the minimum needed to answer "which code produced this file" months
-    later, and it is the reproducibility floor: a result whose artifact cannot be
-    traced to a build is not a result.
+    The reproducibility floor: a result whose artifact cannot be traced to a build is
+    not a result.
     """
 
     stage: str
@@ -147,7 +165,7 @@ class RunInfo:
             stage=stage,
             pack=pack,
             pack_version=pack_version,
-            code_revision=_git_describe(workspace_root()),
+            code_revision=_git_describe(_source_repo()),
         )
 
     def as_dict(self) -> dict[str, object]:
