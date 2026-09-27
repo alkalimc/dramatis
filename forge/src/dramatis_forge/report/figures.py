@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import tokens as tokens_mod
 from ..pack import DocAudit, FigureSpec, Pack
 from ..text import table_head
 
@@ -143,7 +144,18 @@ class _Sources:
     folio_path: Path
     meta: dict[str, dict[str, object]]
     has_raw: bool = False
+    pack: Pack | None = None
+    suite: Path | None = None
     _cache: dict[str, object] = field(default_factory=dict)
+
+    def counter(self) -> Callable[[str], int] | None:
+        """The pack's reference tokenizer, loaded once. None when unavailable."""
+        def compute():
+            if self.pack is None:
+                return None
+            from ..pack import pack_dir
+            return tokens_mod.load_counter(self.pack.tokenizer, pack_dir(self.pack.name))
+        return self.once("counter", compute)  # type: ignore[return-value]
 
     def once(self, key: str, compute: Callable[[], object]) -> object:
         if key not in self._cache:
@@ -408,6 +420,40 @@ def _d_guards_low(src: _Sources, member: str | None):
     return _guard_sum(src, member, 1)
 
 
+def _d_tokens_unit(src: _Sources, member: str | None):
+    """Median tokens of one injected unit; `member` is a builder shape."""
+    count = src.counter()
+    if count is None or not member:
+        return None
+    n = tokens_mod.unit_tokens(src.folio, src.shaped(member), count)
+    return None if n is None else _count(n)
+
+
+def _d_tokens_line(src: _Sources, _m: str | None):
+    count = src.counter()
+    if count is None:
+        return None
+    n = tokens_mod.line_tokens(src.archive, count)
+    return None if n is None else _count(n)
+
+
+def _d_tokens_retrieval(src: _Sources, member: str | None):
+    """Median tokens of a lexical top-k block; `member` is k."""
+    count = src.counter()
+    if count is None or src.pack is None or src.suite is None:
+        return None
+    from ..corpus.tokenize import load as load_segmenter
+    name = str(src.meta["folio"].get("segmenter") or "")
+    try:
+        seg = load_segmenter("jieba" if name.startswith("jieba") else "none")
+    except ImportError:
+        return None
+    stop = set(src.meta["folio"].get("stopwords") or ())
+    n = tokens_mod.retrieval_tokens(src.folio, src.suite, int(member or 6),
+                                    segment=seg, stopwords=stop, count=count)
+    return None if n is None else _count(n)
+
+
 #: name -> (artifacts it reads, how). A figure whose inputs are missing is skipped.
 DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], object]]] = {
     "units_attributed": (("folio",), _d_units_attributed),
@@ -431,6 +477,9 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "aliases": (("archive",), _d_aliases),
     "guards_high": (("archive",), _d_guards_high),
     "guards_low": (("archive",), _d_guards_low),
+    "tokens_unit": (("folio",), _d_tokens_unit),
+    "tokens_line": (("archive",), _d_tokens_line),
+    "tokens_retrieval": (("folio",), _d_tokens_retrieval),
 }
 
 _OPS: dict[str, Callable[[float, float], bool]] = {
@@ -452,7 +501,8 @@ def meets(value: object, target: str) -> bool | None:
     return _OPS[m.group(1)](float(value), float(m.group(2)))
 
 
-def resolve(specs: Iterable[FigureSpec], archive: Path, folio: Path) -> list[Figure]:
+def resolve(specs: Iterable[FigureSpec], archive: Path, folio: Path, *,
+            pack: Pack | None = None, suite: Path | None = None) -> list[Figure]:
     """Turn pack specs into measured figures. Values come only from artifacts."""
     a, f = _connect(archive), _connect(folio)
     rawcache = archive.with_suffix(".rawcache")
@@ -461,7 +511,8 @@ def resolve(specs: Iterable[FigureSpec], archive: Path, folio: Path) -> list[Fig
         a.execute("ATTACH DATABASE ? AS raw", (f"file:{rawcache}?immutable=1",))
     try:
         src = _Sources(archive=a, folio=f, folio_path=folio,
-                       meta={"manifest": _meta(a), "folio": _meta(f)}, has_raw=has_raw)
+                       meta={"manifest": _meta(a), "folio": _meta(f)}, has_raw=has_raw,
+                       pack=pack, suite=suite)
         have = {"archive": a is not None, "folio": f is not None}
         out: list[Figure] = []
         for spec in specs:

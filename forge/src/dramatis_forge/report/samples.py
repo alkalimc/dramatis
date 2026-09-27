@@ -24,6 +24,7 @@ lists every page, why it was chosen and where its three files are.
 from __future__ import annotations
 
 import random
+import re
 import shutil
 from collections import Counter
 from dataclasses import dataclass, field
@@ -43,6 +44,29 @@ SMALL_ROUTE = 8
 PER_KIND = 2
 CHANGED = 8
 MULTI_FORM = 2
+
+#: Example pages quoted per residue pattern in the formatting-quality section.
+RESIDUE_EXAMPLES = 3
+
+#: Markup that should never survive normalisation into record text. Generic MediaWiki and
+#: HTML only; a pack's own script syntax is checked through `InlineRules.macro_shape`.
+_RESIDUE: dict[str, str] = {
+    "template": r"\{\{|\}\}",
+    "link": r"\[\[|\]\]",
+    "bold": r"'''",
+    "tag": r"</?[A-Za-z][\w-]*(?:\s[^<>]*)?/?>",
+    "entity": r"&(?:nbsp|amp|lt|gt|quot|#\d+);",
+    "table": r"(?:^|\n)\s*(?:\{\||\|[-}])",
+    "magic": r"__[A-Z]+__",
+}
+
+#: Which text column of each record table is prose a reader sees, and its page column.
+_TEXT_OF: dict[str, tuple[str, str, str]] = {
+    "line": ("lines", "text", "scene"), "choice": ("choices", "options", "scene"),
+    "voice": ("voices", "text", "page"), "lore": ("lore", "text", "page"),
+    "letter": ("letters", "body", "page"), "term": ("terms", "term", "page"),
+    "char_ref": ("char_refs", "description", "page"), "dossier": ("dossiers", "sections", "page"),
+}
 
 #: Which table (and column) says a record came from a page.
 _PAGE_OF: dict[str, tuple[str, str]] = {
@@ -173,6 +197,90 @@ def select(archive: Archive, pack: Pack) -> Selection:
     return sel
 
 
+@dataclass
+class Residue:
+    kind: str
+    pattern: str
+    hits: int
+    total: int
+    examples: list[tuple[str, str]] = field(default_factory=list)
+
+
+def residue(archive: Archive, pack: Pack) -> list[Residue]:
+    """Markup left in record text after normalisation: one row per (record kind, pattern).
+
+    Guards report constructs the rules did not predict *while parsing*; this reads the
+    output afterwards, so it also catches markup a rule let through on purpose and got
+    wrong. A clean corpus yields an empty list.
+    """
+    patterns = dict(_RESIDUE)
+    if pack.inline.macro_shape:
+        patterns["macro"] = pack.inline.macro_shape
+    compiled = {name: re.compile(p) for name, p in patterns.items()}
+    out: list[Residue] = []
+    for kind, (table, column, page) in _TEXT_OF.items():
+        rows = archive.db.execute(f"SELECT {page}, {column} FROM {table}").fetchall()
+        for name, rx in compiled.items():
+            hits = [(p, t) for p, t in rows if t and rx.search(t)]
+            if not hits:
+                continue
+            found = Residue(kind, name, len(hits), len(rows))
+            for p, t in hits[:RESIDUE_EXAMPLES]:
+                m = rx.search(t)
+                found.examples.append((p, t[max(0, m.start() - 30): m.end() + 30]))
+            out.append(found)
+    return out
+
+
+def _status(archive: Archive, pack: Pack) -> list[str]:
+    """What this sync did and what state it left the archive in."""
+    say = pack.say
+    last = archive.get_meta("last_update")
+    lines = [say("samples.status"), ""]
+    lines.append(say(
+        "samples.sync",
+        at=archive.get_meta("synced_at", "—"), watermark=archive.get_meta("watermark", 0) or 0,
+        kind=say("samples.sync.update") if last is not None else say("samples.sync.full"),
+        pages=archive.get_meta("pages_held", 0) or 0))
+    if last is not None:
+        lines.append(say("samples.delta", changed=len(last.get("changed", [])),
+                         added=len(last.get("added", [])), gone=len(last.get("gone", []))))
+        for title in last.get("gone", []):
+            lines.append(f"  - {say('samples.gone', title=title)}")
+    lines.append("")
+
+    now = archive.get_meta("record_counts") or {}
+    before = archive.get_meta("record_counts_previous") or {}
+    lines += table_head(say("samples.records_head"))
+    for kind in sorted(set(now) | set(before)):
+        n, b = now.get(kind, 0), before.get(kind)
+        delta = "—" if b is None else f"{n - b:+,}"
+        lines.append(f"| `{kind}` | {pack.say(f'record.{kind}')} | {n:,} | {delta} |")
+    lines.append("")
+
+    tally = archive.tally_from_table()
+    lines += table_head(say("samples.guards_head"))
+    for guard, (high, low) in tally.items():
+        lines.append(f"| {guard} | {say(f'guard.{guard}')} | {high:,} | {low:,} |")
+    lines.append("")
+    return lines
+
+
+def _quality(archive: Archive, pack: Pack) -> list[str]:
+    say = pack.say
+    found = residue(archive, pack)
+    lines = [say("samples.quality"), ""]
+    if not found:
+        return lines + [say("samples.quality_clean"), ""]
+    lines += table_head(say("samples.quality_head"))
+    for r in found:
+        examples = " · ".join(
+            f"{p}: `{e.replace('`', '′').replace(chr(10), ' ').replace('|', '/')}`"
+            for p, e in r.examples)
+        lines.append(f"| `{r.kind}` | {r.pattern} | {r.hits:,} / {r.total:,} | {examples} |")
+    return lines + [""]
+
+
 def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, Selection]:
     """Clear `outdir`, dump every selected page, and write `INDEX.md`."""
     if outdir.exists():
@@ -184,6 +292,8 @@ def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, Selection]:
     lines = [say("samples.title"), "", say("samples.intro"), "",
              say("samples.meta", watermark=archive.get_meta("watermark", 0) or 0,
                  pages=len(sel.samples), routes=len(sel.routes())), ""]
+    lines += _status(archive, pack)
+    lines += _quality(archive, pack)
     for route in sel.routes():
         folder = inspect_mod.safe_name(route.replace(" · ", "-"))
         lines += [say("samples.route", route=route), "", *table_head(say("samples.head"))]

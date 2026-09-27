@@ -134,6 +134,17 @@ TEXT: Mapping[str, str] = {
     "samples.why.alias": "alias-producing page",
     "samples.why.multi_form": "person with several forms",
     "samples.why.kind": "yields `{kind}` records",
+    "samples.status": "## Sync status",
+    "samples.sync": "- {kind} at {at} · watermark {watermark} · pages held {pages:,}",
+    "samples.sync.full": "Full sync",
+    "samples.sync.update": "Incremental update",
+    "samples.delta": "- This update: {changed:,} changed · {added:,} added · {gone:,} removed",
+    "samples.gone": "removed: {title}",
+    "samples.records_head": "Kind|What|Records|Change",
+    "samples.guards_head": "Guard|Checks|High|Low",
+    "samples.quality": "## Formatting quality",
+    "samples.quality_clean": "No markup residue found in any record text.",
+    "samples.quality_head": "Kind|Residue|Records|Examples",
 }
 
 

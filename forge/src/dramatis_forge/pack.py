@@ -590,6 +590,9 @@ class Pack:
     #: Query-side stopwords, written into the folio manifest for the engine. Which words
     #: carry no retrieval signal is a property of the corpus language.
     stopwords: tuple[str, ...] = ()
+    #: Reference tokenizer for the `tokens.*` figures: `hf:<repo id>`, a `tokenizer.json`
+    #: path relative to the pack directory, or a `tiktoken` encoding name. Empty disables them.
+    tokenizer: str = ""
 
     def say(self, key: str, **fields: object) -> str:
         """Pack wording for `key`, else the framework default, formatted with `fields`."""

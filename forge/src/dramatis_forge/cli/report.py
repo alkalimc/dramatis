@@ -84,7 +84,8 @@ def figures_cmd(
     specs = figures_mod.figures_for(pk)
     if not specs:
         die(f"pack {pack!r} declares no figures", "add FIGURES to the pack")
-    figs = figures_mod.resolve(specs, paths.archive, paths.folio)
+    figs = figures_mod.resolve(specs, paths.archive, paths.folio, pack=pk,
+                               suite=paths.evals / "structural.queries.jsonl")
 
     if show or not check:
         table = Table(title="figures")

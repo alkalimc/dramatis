@@ -189,6 +189,14 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
     }
 
 
+def record_noop(archive: Archive, p: Plan) -> None:
+    """An update that found nothing to do still brought the archive level with the site."""
+    archive.set_meta("watermark", p.new_watermark)
+    archive.mark_synced()
+    archive.set_meta("last_update", {"changed": [], "added": [], "gone": []})
+    archive.commit()
+
+
 def init_watermark(wiki: Wiki, archive: Archive, pack: Pack) -> int:
     """Pin the watermark to the site's newest change.
 

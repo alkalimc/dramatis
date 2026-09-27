@@ -19,22 +19,15 @@ dependencies = [
 # FTS5 index; the fallback is recorded in the folio manifest so the engine can
 # tell which one it is looking at.
 zh = ["jieba>=0.42"]
+# Reference tokenizers for the `tokens.*` figures (context-budget sizing). Either backend
+# works; the pack names which tokenizer to use.
+tokens = ["tiktoken==0.12.0", "tokenizers==0.22.1"]
 # Encoder/reranker training and vector encoding. Heavy; never needed to build
 # the record archive or the benchmark suites.
 train = ["sentence-transformers>=5", "ranx>=0.3", "torch>=2.4"]
 
 [project.scripts]
 dramatis-forge = "dramatis_forge.cli:app"
-
-[dependency-groups]
-dev = ["pytest>=8.3"]
-
-[tool.pytest.ini_options]
-# Explicit src layout: do not depend on the editable-install .pth. macOS marks
-# uv's .pth hidden, `site` skips it, imports fail. This decouples tests from
-# that environment quirk.
-pythonpath = ["src", "."]
-testpaths = ["tests"]
 
 [build-system]
 requires = ["hatchling"]

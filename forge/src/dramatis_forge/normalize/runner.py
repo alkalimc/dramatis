@@ -125,6 +125,11 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
         rep.reconciliation.note(kind, produced=len(records), stored=stored, ignored=ignored)
     rep.ledger.extend(rep.reconciliation.check())
 
+    # The previous run's counts are kept beside the new ones so a reader of the sample can
+    # see what a sync changed without diffing two archives.
+    previous = archive.get_meta("record_counts")
+    if previous is not None:
+        archive.set_meta("record_counts_previous", previous)
     archive.set_meta("record_counts", rep.counts)
     archive.set_meta("record_chars", rep.chars)
     archive.set_meta("reconciliation", rep.reconciliation.as_dict())

@@ -261,20 +261,24 @@ def update(
             if len(items) > 10:
                 console.print(f"  [dim]… {len(items) - 10:,} more {label}[/dim]")
 
-        if plan.nothing_to_do:
-            console.print("[green]nothing to update[/green]")
-            return
         if dry_run:
             console.print("[dim]--dry-run: archive untouched[/dim]")
             return
+        if plan.nothing_to_do:
+            # Still a sync: the archive was checked against the site and found level, so
+            # the watermark, the sync time and the sample all say so.
+            update_stage.record_noop(archive, plan)
+            console.print("[green]nothing to update[/green] — archive is level with the site")
+            result = None
+        else:
+            result = update_stage.apply(wiki, archive, pk, plan, progress=ticker("update"))
 
-        result = update_stage.apply(wiki, archive, pk, plan, progress=ticker("update"))
-
-    console.print(
-        f"re-fetched [bold]{result['refetched']:,}[/bold], removed {result['removed']:,}, "
-        f"watermark {result['watermark']:,}")
-    _records_table(pk, result["report"])
-    render_guards(result["report"].ledger, pack=pk)
+    if result is not None:
+        console.print(
+            f"re-fetched [bold]{result['refetched']:,}[/bold], removed {result['removed']:,}, "
+            f"watermark {result['watermark']:,}")
+        _records_table(pk, result["report"])
+        render_guards(result["report"].ledger, pack=pk)
     if samples:
         _samples(pk, paths)
 

@@ -13,6 +13,7 @@ templates, and typos in hand-written markup are permanent.
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Iterator
 
@@ -288,8 +289,13 @@ class Cleaner:
         if "{{" in s:
             s = re.sub(r"\{\{[^{}]*$", "", s, flags=re.S)
             s = re.sub(r"\{\{\s*[^|}\n]*\|?", "", s)
-            s = s.replace("}}", "")
+        # A closer with no opener: the section split cut a template in half, so the opener
+        # went with the previous section and only its `}}` landed here.
+        s = s.replace("}}", "")
         s = re.sub(r"^\s*\|\s*\w+\s*=\s*", "", s, flags=re.M)
+        # Character references are markup too; after the tag pass so a decoded `&lt;` can
+        # never be mistaken for a tag. A non-breaking space is just a space in prose.
+        s = html.unescape(s).replace("\xa0", " ")
         s = re.sub(r"[ \t]+", " ", s)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
