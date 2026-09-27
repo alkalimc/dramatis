@@ -66,8 +66,10 @@ pub struct Suite {
 impl Suite {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let text = std::fs::read_to_string(path)
-            .map_err(|source| Error::Io { path: path.into(), source })?;
+        let text = std::fs::read_to_string(path).map_err(|source| Error::Io {
+            path: path.into(),
+            source,
+        })?;
         let mut queries = Vec::new();
         for (line_no, line) in text.lines().enumerate() {
             if line.trim().is_empty() {
@@ -82,8 +84,7 @@ impl Suite {
     }
 
     pub fn families(&self) -> Vec<String> {
-        let mut names: Vec<String> =
-            self.queries.iter().map(|q| q.family.clone()).collect();
+        let mut names: Vec<String> = self.queries.iter().map(|q| q.family.clone()).collect();
         names.sort();
         names.dedup();
         names

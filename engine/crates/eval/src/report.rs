@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use crate::metrics::{by_family, by_family_and_stratum, macro_average, Aggregate, Scored};
+use crate::metrics::{Aggregate, Scored, by_family, by_family_and_stratum, macro_average};
 use crate::runner::{Config, Outcome};
 
 fn row(name: &str, a: &Aggregate) -> String {
@@ -45,7 +45,10 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
         outcome.latency_percentile(0.99) as f64 / 1000.0,
     );
 
-    let _ = writeln!(out, "### By family (each family weighted equally)\n\n{HEADER}");
+    let _ = writeln!(
+        out,
+        "### By family (each family weighted equally)\n\n{HEADER}"
+    );
     for (family, aggregate) in &per_family {
         let _ = writeln!(out, "{}", row(family, aggregate));
     }

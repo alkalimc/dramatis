@@ -20,6 +20,7 @@ make install                               # venv + editable install (jieba, tok
 export DRAMATIS_PACKS=/path/to/rules       # directory that contains packs/<name>/
 export DRAMATIS_PACK=<name>                # or pass --pack <name> to every command
 ./forge --help
+make test lint                             # pytest + ruff on a synthetic toy pack
 ```
 
 Artifacts are written outside the repository, to `<workspace>/artifacts/<pack>/` (override

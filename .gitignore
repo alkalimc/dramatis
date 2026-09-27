@@ -57,3 +57,6 @@ BASELINES.json
 *.orig
 tmp/
 scratch/
+
+# Toy folio written by `make contract`
+forge/.contract/

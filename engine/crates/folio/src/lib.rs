@@ -226,7 +226,8 @@ impl Folio {
             rusqlite::params![span_of, from - before, to + after, unit.id],
             Self::row_to_unit,
         )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn template_stats(&self) -> Result<Vec<TemplateStats>> {
@@ -243,7 +244,8 @@ impl Folio {
                 embed_max: row.get(4)?,
             })
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     /// Resolve a name through the alias dictionary.
@@ -257,7 +259,8 @@ impl Folio {
             "SELECT DISTINCT target FROM aliases WHERE alias = ?1 ORDER BY kind, target",
         )?;
         let rows = stmt.query_map([name], |row| row.get::<_, String>(0))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     /// The people an alias names, as roster ids.
@@ -273,7 +276,8 @@ impl Folio {
              WHERE a.alias = ?1 ORDER BY p.person_id",
         )?;
         let rows = stmt.query_map([name], |row| row.get::<_, String>(0))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn person(&self, person_id: &str) -> Result<Option<Person>> {

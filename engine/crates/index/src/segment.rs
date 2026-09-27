@@ -61,7 +61,10 @@ pub struct Segmenter {
 
 impl Segmenter {
     pub fn new(kind: Kind, stopwords: impl IntoIterator<Item = String>) -> Self {
-        Self { kind, stopwords: stopwords.into_iter().collect() }
+        Self {
+            kind,
+            stopwords: stopwords.into_iter().collect(),
+        }
     }
 
     /// Pick the segmenter a corpus was built with, and its stopword list.
@@ -116,7 +119,11 @@ impl Segmenter {
             .filter(|token| !self.is_stopword(token))
             .cloned()
             .collect();
-        if filtered.is_empty() { tokens } else { filtered }
+        if filtered.is_empty() {
+            tokens
+        } else {
+            filtered
+        }
     }
 
     /// An FTS5 MATCH expression: every token quoted, OR-joined.
@@ -228,7 +235,11 @@ mod tests {
         // property that matters: every token in the output is a single closed literal, so
         // no input can restructure the query.
         let expr = bigram().match_expression("a\"b").unwrap();
-        assert_eq!(expr.matches('"').count() % 2, 0, "unbalanced quoting in {expr}");
+        assert_eq!(
+            expr.matches('"').count() % 2,
+            0,
+            "unbalanced quoting in {expr}"
+        );
         for token in expr.split(" OR ") {
             assert!(
                 token.starts_with('"') && token.ends_with('"') && token.len() >= 2,

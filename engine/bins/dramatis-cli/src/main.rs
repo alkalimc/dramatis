@@ -31,13 +31,16 @@ use index::{Index, Mode, Normalise, Request};
 /// So the fallback is an environment variable, and its absence is an error with the fix
 /// in it rather than a file-not-found on a path the user never chose.
 fn default_folio() -> Result<PathBuf> {
-    std::env::var_os("DRAMATIS_FOLIO").map(PathBuf::from).context(
-        "no corpus given: pass --folio <path>, or set DRAMATIS_FOLIO",
-    )
+    std::env::var_os("DRAMATIS_FOLIO")
+        .map(PathBuf::from)
+        .context("no corpus given: pass --folio <path>, or set DRAMATIS_FOLIO")
 }
 
 #[derive(Parser)]
-#[command(name = "dramatis-cli", about = "Inspect, query and measure a .folio corpus")]
+#[command(
+    name = "dramatis-cli",
+    about = "Inspect, query and measure a .folio corpus"
+)]
 struct Cli {
     /// Path to the corpus. Defaults to $DRAMATIS_FOLIO.
     #[arg(long, short, global = true)]
@@ -129,9 +132,9 @@ fn main() -> Result<()> {
         } => {
             let suite = match suite {
                 Some(path) => path,
-                None => std::env::var_os("DRAMATIS_SUITE").map(PathBuf::from).context(
-                    "no suite given: pass --suite <path>, or set DRAMATIS_SUITE",
-                )?,
+                None => std::env::var_os("DRAMATIS_SUITE")
+                    .map(PathBuf::from)
+                    .context("no suite given: pass --suite <path>, or set DRAMATIS_SUITE")?,
             };
             evaluate(
                 &folio,
@@ -219,7 +222,10 @@ fn search(
     }
 
     let idx = Index::new(&folio);
-    println!("segmenter  {} (from the corpus manifest)", idx.segmenter().name());
+    println!(
+        "segmenter  {} (from the corpus manifest)",
+        idx.segmenter().name()
+    );
     let all = idx.segmenter().segment(query);
     let queried = idx.segmenter().segment_for_query(query);
     println!("tokens     {all:?}");
@@ -246,7 +252,10 @@ fn search(
             index::How::Qualified => "qualified ",
         };
         let person = resolved.person.as_deref().unwrap_or("(not a person)");
-        println!("{how} {} → {}  person={person}\n", resolved.alias, resolved.target);
+        println!(
+            "{how} {} → {}  person={person}\n",
+            resolved.alias, resolved.target
+        );
     }
     if let Some(ambiguity) = &response.ambiguous {
         // Reported rather than resolved. The source says this name means several things, so
@@ -304,7 +313,11 @@ fn search(
     let trace = &response.trace;
     println!(
         "latency    lexical {}us  dense {}us  fuse {}us  fetch {}us  expand {}us  total {}us",
-        trace.lexical_us, trace.dense_us, trace.fuse_us, trace.fetch_us, trace.expand_us,
+        trace.lexical_us,
+        trace.dense_us,
+        trace.fuse_us,
+        trace.fetch_us,
+        trace.expand_us,
         trace.total_us()
     );
     Ok(())
@@ -326,8 +339,7 @@ const SAMPLED_QUERIES: usize = 8;
 /// `ord` ordering makes two runs on one corpus comparable, which is the whole point of a
 /// bench.
 fn sampled_queries(folio: &Folio, want: usize) -> Result<Vec<String>> {
-    const USABLE: &str =
-        "title IS NOT NULL AND length(title) BETWEEN 4 AND 24";
+    const USABLE: &str = "title IS NOT NULL AND length(title) BETWEEN 4 AND 24";
     let mut out: Vec<String> = Vec::new();
 
     for sql in [
@@ -374,7 +386,14 @@ fn bench(path: &PathBuf, queries: Vec<String>, iterations: usize, top_k: usize) 
     }
 
     println!("corpus     {} units", folio.manifest().unit_count);
-    println!("vectors    {}", if has_vectors { "loaded" } else { "absent — lexical only" });
+    println!(
+        "vectors    {}",
+        if has_vectors {
+            "loaded"
+        } else {
+            "absent — lexical only"
+        }
+    );
     println!("queries    {}  iterations {}\n", queries.len(), iterations);
 
     // One warm pass before measuring. A cold first query pays for page cache and prepared
@@ -382,7 +401,12 @@ fn bench(path: &PathBuf, queries: Vec<String>, iterations: usize, top_k: usize) 
     // experiences twice.
     for query in &queries {
         let _ = idx.search(
-            &Request { query: query.clone(), mode: Mode::Lexical, top_k, ..Default::default() },
+            &Request {
+                query: query.clone(),
+                mode: Mode::Lexical,
+                top_k,
+                ..Default::default()
+            },
             None,
         )?;
     }
@@ -394,7 +418,12 @@ fn bench(path: &PathBuf, queries: Vec<String>, iterations: usize, top_k: usize) 
     for _ in 0..iterations {
         for query in &queries {
             let response = idx.search(
-                &Request { query: query.clone(), mode: Mode::Lexical, top_k, ..Default::default() },
+                &Request {
+                    query: query.clone(),
+                    mode: Mode::Lexical,
+                    top_k,
+                    ..Default::default()
+                },
                 None,
             )?;
             totals.push(response.trace.total_us());
@@ -454,7 +483,10 @@ fn subsample(suite: eval::Suite, target: usize) -> eval::Suite {
     }
     let mut by_family: std::collections::BTreeMap<String, Vec<eval::Query>> = Default::default();
     for query in suite.queries {
-        by_family.entry(query.family.clone()).or_default().push(query);
+        by_family
+            .entry(query.family.clone())
+            .or_default()
+            .push(query);
     }
     let total: usize = by_family.values().map(Vec::len).sum();
     let mut kept = Vec::with_capacity(target);
@@ -554,8 +586,7 @@ fn evaluate(
                      p={p:.4} (10,000 resamples, fixed seed)",
                     previous_config.label()
                 ),
-                None => "Paired comparison unavailable: the two runs share no queries."
-                    .to_string(),
+                None => "Paired comparison unavailable: the two runs share no queries.".to_string(),
             });
             paired = serde_json::json!({
                 "against": previous_config.label(),

@@ -28,7 +28,7 @@ from . import normalize as normalize_mod
 from .archive import Archive
 from .config import Paths
 from .folio import Folio
-from .guards import GUARDS, HIGH
+from .guards import HIGH
 from .pack import Pack, load_pack, pack_dir
 from .report import attribution as attribution_mod
 from .report import coverage as coverage_mod

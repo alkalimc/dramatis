@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::suite::{discount, gain, Query};
+use crate::suite::{Query, discount, gain};
 
 /// One query's outcome.
 #[derive(Debug, Clone)]
@@ -128,9 +128,7 @@ pub fn score(query: &Query, ranked: &[String], k: usize) -> Scored {
 /// Both levels are mandatory in any report. A family that is mostly verbatim is solvable by
 /// exact match, so its score is a sanity floor rather than evidence — and that is only
 /// visible when the strata are kept apart.
-pub fn by_family_and_stratum(
-    scored: &[Scored],
-) -> BTreeMap<String, BTreeMap<String, Aggregate>> {
+pub fn by_family_and_stratum(scored: &[Scored]) -> BTreeMap<String, BTreeMap<String, Aggregate>> {
     let mut buckets: BTreeMap<String, BTreeMap<String, Vec<Scored>>> = BTreeMap::new();
     for s in scored {
         buckets
@@ -197,11 +195,7 @@ pub fn paired_bootstrap(baseline: &[f64], candidate: &[f64], iterations: usize) 
     if baseline.len() != candidate.len() || baseline.is_empty() {
         return None;
     }
-    let deltas: Vec<f64> = candidate
-        .iter()
-        .zip(baseline)
-        .map(|(c, b)| c - b)
-        .collect();
+    let deltas: Vec<f64> = candidate.iter().zip(baseline).map(|(c, b)| c - b).collect();
     let observed: f64 = deltas.iter().sum::<f64>() / deltas.len() as f64;
 
     // xorshift64*, inline: a fixed, documented generator beats a dependency whose default
@@ -301,9 +295,16 @@ mod tests {
         };
         let ranked: Vec<String> = (0..10).map(|i| format!("u{i}")).collect();
         let s = score(&q, &ranked, 10);
-        assert!((s.precision - 1.0).abs() < 1e-9, "precision {}", s.precision);
+        assert!(
+            (s.precision - 1.0).abs() < 1e-9,
+            "precision {}",
+            s.precision
+        );
         assert!((s.recall - 0.5).abs() < 1e-9, "recall {}", s.recall);
-        assert_eq!(s.gold_size, 20, "the cap must travel with the number it explains");
+        assert_eq!(
+            s.gold_size, 20,
+            "the cap must travel with the number it explains"
+        );
     }
 
     #[test]
@@ -313,21 +314,36 @@ mod tests {
         let mut per_family = BTreeMap::new();
         per_family.insert(
             "big".to_string(),
-            Aggregate { queries: 1000, ndcg: 0.1, ..Default::default() },
+            Aggregate {
+                queries: 1000,
+                ndcg: 0.1,
+                ..Default::default()
+            },
         );
         per_family.insert(
             "small".to_string(),
-            Aggregate { queries: 10, ndcg: 0.9, ..Default::default() },
+            Aggregate {
+                queries: 10,
+                ndcg: 0.9,
+                ..Default::default()
+            },
         );
         let macro_avg = macro_average(&per_family);
-        assert!((macro_avg.ndcg - 0.5).abs() < 1e-9, "got {}", macro_avg.ndcg);
+        assert!(
+            (macro_avg.ndcg - 0.5).abs() < 1e-9,
+            "got {}",
+            macro_avg.ndcg
+        );
     }
 
     #[test]
     fn bootstrap_finds_no_difference_between_identical_systems() {
         let scores = vec![0.5, 0.6, 0.7, 0.4, 0.9];
         let p = paired_bootstrap(&scores, &scores, 500).unwrap();
-        assert!(p > 0.5, "identical systems should not look different, p={p}");
+        assert!(
+            p > 0.5,
+            "identical systems should not look different, p={p}"
+        );
     }
 
     #[test]

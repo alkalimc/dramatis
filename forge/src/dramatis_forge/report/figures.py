@@ -58,19 +58,6 @@ class Figure:
     passed: bool | None = None
 
 
-@dataclass
-class Hit:
-    path: Path
-    line_no: int
-    line: str
-    what: str
-    detail: str
-
-    @property
-    def where(self) -> str:
-        return f"{self.path}:{self.line_no}"
-
-
 # --------------------------------------------------------------------------- #
 # Measuring
 # --------------------------------------------------------------------------- #
@@ -594,7 +581,7 @@ def _known(key: str, known: set[str]) -> bool:
     parts = key.split(".")
     return any(
         len(k.split(".")) == len(parts)
-        and all(a == b or "*" in (a, b) for a, b in zip(parts, k.split(".")))
+        and all(a == b or "*" in (a, b) for a, b in zip(parts, k.split("."), strict=True))
         for k in known)
 
 

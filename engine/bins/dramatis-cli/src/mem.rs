@@ -109,7 +109,13 @@ mod macos {
         unsafe {
             let mut info: MachTaskBasicInfo = std::mem::zeroed();
             let mut count = COUNT;
-            if task_info(mach_task_self(), MACH_TASK_BASIC_INFO, &mut info, &mut count) != 0 {
+            if task_info(
+                mach_task_self(),
+                MACH_TASK_BASIC_INFO,
+                &mut info,
+                &mut count,
+            ) != 0
+            {
                 return None;
             }
             Some(info)

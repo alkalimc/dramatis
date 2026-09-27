@@ -47,11 +47,9 @@ pub struct Manifest {
 
 fn get<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<Option<T>> {
     let raw: Option<String> = conn
-        .query_row(
-            "SELECT value FROM manifest WHERE key = ?1",
-            [key],
-            |row| row.get(0),
-        )
+        .query_row("SELECT value FROM manifest WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
         .ok();
     match raw {
         None => Ok(None),
@@ -111,9 +109,6 @@ impl Manifest {
 
     /// The segmenter name without its version, for dispatch.
     pub fn segmenter_name(&self) -> &str {
-        self.segmenter
-            .split('/')
-            .next()
-            .unwrap_or(&self.segmenter)
+        self.segmenter.split('/').next().unwrap_or(&self.segmenter)
     }
 }

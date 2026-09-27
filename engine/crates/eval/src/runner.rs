@@ -10,7 +10,7 @@ use folio::Folio;
 use index::{Index, Mode, Normalise, Request};
 
 use crate::error::Result;
-use crate::metrics::{score, Scored};
+use crate::metrics::{Scored, score};
 use crate::suite::Suite;
 
 /// One system under test.
@@ -140,7 +140,10 @@ pub fn run(
             let negatives: std::collections::HashSet<&str> =
                 query.hard_negatives.iter().map(String::as_str).collect();
             let position = |wanted: &dyn Fn(&str) -> bool| {
-                ranked.iter().take(config.k).position(|id| wanted(id.as_str()))
+                ranked
+                    .iter()
+                    .take(config.k)
+                    .position(|id| wanted(id.as_str()))
             };
             let negative_rank = position(&|id| negatives.contains(id)).unwrap_or(0);
             failures.push(Failure {
@@ -161,7 +164,12 @@ pub fn run(
     }
     progress(suite.queries.len(), suite.queries.len());
 
-    Ok(Outcome { scored, failures, latencies_us, unscoreable })
+    Ok(Outcome {
+        scored,
+        failures,
+        latencies_us,
+        unscoreable,
+    })
 }
 
 /// Per-query nDCG aligned across two runs, for the paired test.

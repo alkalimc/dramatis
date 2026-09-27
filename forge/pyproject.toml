@@ -31,3 +31,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dramatis_forge"]
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "ruff==0.13.2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "SIM", "UP"]

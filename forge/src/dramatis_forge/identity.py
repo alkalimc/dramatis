@@ -110,7 +110,7 @@ def resolve(
     declared = dict(rules.resolve(pages, roster_titles))
 
     # 1. every declaration must land inside the roster
-    for page, (canonical, kind) in sorted(declared.items()):
+    for page, (canonical, _kind) in sorted(declared.items()):
         if canonical not in roster_titles:
             out.findings.append(Finding(
                 "G4", HIGH, f"{page} declares {canonical!r} but it is not in the roster", page))

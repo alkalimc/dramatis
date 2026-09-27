@@ -334,7 +334,13 @@ impl<'a> Index<'a> {
             trace.expand_us = started.elapsed().as_micros();
         }
 
-        Ok(Response { hits, signals, resolved, ambiguous, trace })
+        Ok(Response {
+            hits,
+            signals,
+            resolved,
+            ambiguous,
+            trace,
+        })
     }
 
     /// The alias stage: turn a query that names an entity by another name into one that
@@ -411,7 +417,16 @@ impl<'a> Index<'a> {
         {
             effective.persons = vec![person.clone()];
         }
-        Ok((Some(Resolved { alias, target, person, how }), None, effective))
+        Ok((
+            Some(Resolved {
+                alias,
+                target,
+                person,
+                how,
+            }),
+            None,
+            effective,
+        ))
     }
 
     /// An ambiguous alias whose query also names one of its declared candidates.
@@ -467,7 +482,9 @@ impl<'a> Index<'a> {
                  ORDER BY score DESC LIMIT ?2",
             )?;
             let rows = stmt.query_map(rusqlite::params![expression, limit], read)?;
-            return rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into);
+            return rows
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(Into::into);
         }
 
         // One filtered shape covers all three remaining combinations: an empty list is bound
@@ -489,7 +506,8 @@ impl<'a> Index<'a> {
             rusqlite::params![expression, limit, templates_json, persons_json],
             read,
         )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 }
 
