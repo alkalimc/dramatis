@@ -59,7 +59,7 @@ class Chunk:
 
     def row(self, ord_: int) -> tuple:
         return (
-            self.id, ord_, self.template, self.person, self.page, self.revid,
+            self.id, ord_, self.template, self.page, self.revid,
             self.title, self.header, self.text, self.chars,
             self.span_of, self.span_from, self.span_to,
         )

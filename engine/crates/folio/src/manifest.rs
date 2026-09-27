@@ -7,9 +7,10 @@ use crate::error::{Error, Result};
 
 /// The format version this build understands.
 ///
-/// Bumped only when a column changes meaning. Adding a column does not require it, which
-/// is why the check is equality-or-lower rather than exact.
-pub const SUPPORTED_FORMAT_VERSION: i64 = 1;
+/// Bumped when a column changes meaning or moves. Version 2 replaced the single
+/// `chunks.person` with the many-valued `unit_persons`, so version 1 reads through the
+/// wrong columns and is refused like any other unknown version.
+pub const SUPPORTED_FORMAT_VERSION: i64 = 2;
 
 /// Capabilities this build implements, checked against `manifest.requires`.
 ///
@@ -43,6 +44,8 @@ pub struct Manifest {
     pub requires: Vec<String>,
     pub units_by_template: BTreeMap<String, i64>,
     pub wording: BTreeMap<String, String>,
+    /// `[open, close]` around a reply line that describes action rather than speech.
+    pub scene_marker: (String, String),
 }
 
 fn get<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<Option<T>> {
@@ -66,7 +69,7 @@ fn require<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<
 impl Manifest {
     pub fn load(conn: &Connection) -> Result<Self> {
         let format_version: i64 = require(conn, "format_version")?;
-        if format_version > SUPPORTED_FORMAT_VERSION {
+        if format_version != SUPPORTED_FORMAT_VERSION {
             return Err(Error::UnknownFormat {
                 found: format_version,
                 supported: SUPPORTED_FORMAT_VERSION,
@@ -94,6 +97,8 @@ impl Manifest {
             requires,
             units_by_template: get(conn, "chunks_by_template")?.unwrap_or_default(),
             wording: get(conn, "wording")?.unwrap_or_default(),
+            scene_marker: get(conn, "scene_marker")?
+                .unwrap_or_else(|| ("*".to_string(), "*".to_string())),
         })
     }
 
@@ -110,5 +115,55 @@ impl Manifest {
     /// The segmenter name without its version, for dispatch.
     pub fn segmenter_name(&self) -> &str {
         self.segmenter.split('/').next().unwrap_or(&self.segmenter)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest_with(pairs: &[(&str, &str)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .unwrap();
+        for (key, value) in pairs {
+            conn.execute("INSERT INTO manifest VALUES (?1, ?2)", [key, value])
+                .unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn loads_the_supported_format() {
+        let conn = manifest_with(&[
+            ("format_version", "2"),
+            ("requires", r#"["neighbor_expand"]"#),
+        ]);
+        let manifest = Manifest::load(&conn).unwrap();
+        assert_eq!(manifest.requires, IMPLEMENTED);
+        assert_eq!(manifest.scene_marker, ("*".into(), "*".into()));
+    }
+
+    #[test]
+    fn refuses_older_and_newer_formats() {
+        for version in ["1", "3"] {
+            let conn = manifest_with(&[("format_version", version)]);
+            assert!(matches!(
+                Manifest::load(&conn),
+                Err(Error::UnknownFormat { supported: 2, .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn refuses_an_unimplemented_requirement() {
+        let conn = manifest_with(&[
+            ("format_version", "2"),
+            ("requires", r#"["neighbor_expand","span_merge"]"#),
+        ]);
+        assert!(matches!(
+            Manifest::load(&conn),
+            Err(Error::UnmetRequirement { requirement }) if requirement == "span_merge"
+        ));
     }
 }

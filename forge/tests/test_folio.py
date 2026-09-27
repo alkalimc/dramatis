@@ -8,6 +8,8 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from conftest import KNOWN_TERM, build
 
 from dramatis_forge import segment
@@ -58,6 +60,27 @@ def test_manifest_shape(built, pack):
     assert m["stopwords"] == list(pack.stopwords)
     assert m["template_shapes"] == {"lore": "lore", "dialogue": "dialogue"}
     assert m["chunk_count"] == 13 and m["build_fingerprint"].startswith("sha256:")
+    assert m["requires"] == ["neighbor_expand"]
+    assert m["wording"] == {} and m["scene_marker"] == ["*", "*"]
+
+
+def test_v2_tables_exist_and_enforce_their_checks(built):
+    with Folio(built.folio, readonly=True) as f:
+        tables = {r[0] for r in f.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"unit_persons", "cooccur", "knowledge_scope", "topic_terms"} <= tables
+        cols = {r[1] for r in f.db.execute("PRAGMA table_info(persons)")}
+        assert {"birthday", "persona_confidence"} <= cols and "confidence" not in cols
+        assert "person" not in {r[1] for r in f.db.execute("PRAGMA table_info(chunks)")}
+    with sqlite3.connect(built.folio) as con:
+        for bad in (
+            "INSERT INTO cooccur VALUES ('b', 'a', 1)",
+            "INSERT INTO knowledge_scope VALUES ('a', 'c', 'heard')",
+            "INSERT INTO prompts(subject, slot, body) VALUES ('a', 'schedule', '')",
+            "UPDATE persons SET birthday = '2024-01-01'",
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                con.execute(bad)
+    con.close()
 
 
 def test_fingerprint_deterministic_and_rebuild_replaces(built, pack, tmp_path):

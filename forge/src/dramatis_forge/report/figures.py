@@ -181,13 +181,13 @@ def _mb(n_bytes: float) -> tuple[object, str]:
 def _d_units_attributed(src: _Sources, _m: str | None):
     assert src.folio is not None
     return _count(src.folio.execute(
-        "select count(*) from chunks where person is not null").fetchone()[0])
+        "select count(distinct chunk_id) from unit_persons").fetchone()[0])
 
 
 def _d_units_per_person(src: _Sources, _m: str | None):
     assert src.folio is not None
     per = sorted(r[0] for r in src.folio.execute(
-        "select count(*) from chunks where person is not null group by person"))
+        "select count(*) from unit_persons group by person_id"))
     if not per:
         return None
     mean, median = sum(per) / len(per), per[len(per) // 2]
@@ -286,8 +286,8 @@ def _d_people_with_material(src: _Sources, member: str | None):
     assert src.folio is not None
     n = int(member) if member else 5
     return _count(src.folio.execute(
-        "select count(*) from (select person from chunks where person is not null "
-        "group by person having count(*) >= ?)", (n,)).fetchone()[0])
+        "select count(*) from (select person_id from unit_persons "
+        "group by person_id having count(*) >= ?)", (n,)).fetchone()[0])
 
 
 def _d_pages(src: _Sources, _m: str | None):
