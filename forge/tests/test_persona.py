@@ -247,6 +247,29 @@ def test_material_is_the_union_over_forms_tagged_by_form(paths):
     assert text.index("## Identity card") < text.index("## Voice lines")
 
 
+def test_story_lines_carry_what_they_answer(paths):
+    db = open_db(paths)
+    mat = for_person(db, "Alice", GEN, Persona(), estimate_tokens, ": ")
+    before = {s.text: s.before for s in mat.story}
+    assert before["Good morning, Dr.<reader>."] == "The harbour is quiet."
+    assert before["Then we wait."] == "Bob: The boats are late again."
+    assert before["Snow on the lens again."] == ""  # first line of its unit
+    text = mat.render(GEN, ": ")
+    assert "  Bob: The boats are late again.\n[Alice] Then we wait." in text
+    line = next(s for s in mat.story if s.text == "Then we wait.")
+    assert line.tokens == estimate_tokens(line.before + line.text)  # context is billed
+
+
+def test_line_drops_remove_matching_lines_only(paths):
+    db = open_db(paths)
+    gen = replace(GEN, line_drops=(r"home: .*",))
+    card = next(i for i in for_person(db, "Alice", gen, Persona(), estimate_tokens, ": ").items
+                if i.kind == "card")
+    assert card.text == "role: Keeper of the northern light"
+    assert gen.version(model="m", reasoning=None, params=Persona()) != GEN.version(
+        model="m", reasoning=None, params=Persona())
+
+
 def test_material_budget_drops_and_counts(paths):
     db = open_db(paths)
     tight = Persona(material_tokens=30, story_tokens=8)

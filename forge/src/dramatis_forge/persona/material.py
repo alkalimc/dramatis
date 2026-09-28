@@ -61,7 +61,12 @@ class Line:
     form_page: str
     scene: str
     text: str
+    #: Tokens of `text` and `before` together: both are sent.
     tokens: int
+    #: The line just before it in the unit, when it is not their own: what the line
+    #: answers (another speaker, narration, a caption, a branch option). A bare line of
+    #: dialogue says little about how someone speaks until you see what it replies to.
+    before: str = ""
 
 
 @dataclass
@@ -111,6 +116,8 @@ class Material:
                 if s.scene != scene:
                     scene = s.scene
                     body.append(f"### {scene}")
+                if s.before:
+                    body.append(f"  {s.before}")
                 body.append(f"[{s.form_page}] {s.text}")
             blocks.append(f"## {gen.label_for('story')}\n" + "\n".join(body))
         return "\n\n".join(blocks)
@@ -133,10 +140,11 @@ def _kind(shape: str, span_of: str | None) -> str | None:
 
 
 class _Rules:
-    """The generator's reclassification rules, compiled once per run."""
+    """The generator's reclassification and line-drop rules, compiled once per run."""
 
     def __init__(self, gen: Generator) -> None:
         self.kinds = [(src, re.compile(rx), dst) for src, rx, dst in gen.title_kinds]
+        self.drops = [re.compile(rx) for rx in gen.line_drops]
 
     def kind(self, kind: str | None, title: str) -> str | None:
         if kind is None:
@@ -152,13 +160,31 @@ class _Rules:
         # runtime assembles a session.
         return text.strip()
 
+    def body(self, text: str) -> str:
+        """A unit body without the lines the generator drops (a stat row on an identity
+        card, a provenance note), otherwise verbatim."""
+        if not self.drops:
+            return self.clean(text)
+        kept = [ln for ln in text.splitlines()
+                if not any(rx.fullmatch(ln.strip()) for rx in self.drops)]
+        return self.clean("\n".join(kept))
 
-def _speaker_lines(text: str, names: set[str], sep: str) -> Iterable[tuple[str, str]]:
-    """(speaker, words) for each line of a dialogue unit spoken by one of `names`."""
+
+def _speaker_lines(text: str, names: set[str],
+                   sep: str) -> Iterable[tuple[str, str, str]]:
+    """(speaker, words, before) for each line of a dialogue unit spoken by one of `names`;
+    `before` is the preceding line unless that one is theirs too."""
+    before = ""
     for raw in text.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
         speaker, found, words = raw.partition(sep)
         if found and speaker in names and words.strip():
-            yield speaker, words.strip()
+            yield speaker, words.strip(), before
+            before = ""
+        else:
+            before = raw
 
 
 def _sample(lines: list[Line], budget: int) -> list[Line]:
@@ -221,18 +247,18 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
     for template, page, title, text, span_of in units:
         shape = shapes.get(template, template)
         if shape == "dialogue":
-            for speaker, words in _speaker_lines(text, names, sep):
+            for speaker, words, before in _speaker_lines(text, names, sep):
                 words = rules.clean(words)
                 if not words or words in seen:
                     continue
                 seen.add(words)
                 form = speaker if speaker in rank else primary
-                story.append(Line(form, title or page, words, count(words)))
+                story.append(Line(form, title or page, words, count(before + words), before))
             continue
         kind = rules.kind(_kind(shape, span_of), title)
         if kind is None:
             continue
-        body = rules.clean(text)
+        body = rules.body(text)
         if not body:
             continue
         form = span_of.partition("#")[0] if kind in ("voice", "char_ref") and span_of else page
@@ -262,11 +288,12 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
             f"SELECT title, page, text FROM chunks WHERE template IN ({marks}) "
             f"AND ({likes}) ORDER BY ord", [*dialogue, *(f"{n}{sep}" for n in names)],
         ):
-            for _speaker, words in _speaker_lines(text, names, sep):
+            for _speaker, words, before in _speaker_lines(text, names, sep):
                 words = rules.clean(words)
                 if words and words not in seen:
                     seen.add(words)
-                    story.append(Line(page, title or page, words, count(words)))
+                    story.append(Line(page, title or page, words, count(before + words),
+                                      before))
     items: list[Item] = []
     for template, page, title, text, span_of in db.execute(
         "SELECT template, page, title, text, span_of FROM chunks ORDER BY ord"
@@ -276,7 +303,7 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
         kind = rules.kind(_kind(shapes.get(template, template), span_of), title)
         if kind is None:
             continue
-        body = rules.clean(text)
+        body = rules.body(text)
         if body:
             items.append(Item(kind, page, title, body, count(title + body)))
     display = src.names[0] if src.names else HOST

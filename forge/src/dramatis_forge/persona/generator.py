@@ -75,6 +75,10 @@ class Generator:
     #: folio tells a dossier section from an archive quote only by title, and some units
     #: (an item description, a menu caption) are about something other than the person.
     title_kinds: tuple[tuple[str, str, str], ...] = ()
+    #: Regular expressions matched in full against each line of a non-dialogue unit;
+    #: matching lines are left out of the material (a stat row on an identity card, a
+    #: provenance note). What the model never sees it cannot repeat.
+    line_drops: tuple[str, ...] = ()
     #: The prompt line about addressing the user, filled into `{user_rule}` when the corpus
     #: declares a user-name placeholder (`{user_placeholder}` is replaced by it). Material
     #: and output keep the placeholder verbatim; only runtime assembly substitutes it.
@@ -109,7 +113,8 @@ class Generator:
         for part in (CODE_VERSION, self.system, self.user, self.host_system, self.host_user,
                      json.dumps(self.schema(True), sort_keys=True),
                      json.dumps(dict(self.labels), sort_keys=True, ensure_ascii=False),
-                     repr(self.title_kinds), self.user_rule, placeholder, repr(self.host),
+                     repr(self.title_kinds), repr(self.line_drops), self.user_rule,
+                     placeholder, repr(self.host),
                      model, reasoning or "", repr(params.prompt_values()),
                      str(params.material_tokens), str(params.story_tokens)):
             h.update(part.encode())
@@ -163,7 +168,9 @@ About the material: every item is tagged with the page of the form it comes from
 square brackets. Several forms are one person at different times or in different roles;
 say how their speech differs between them if it does. Voice lines are text only: take
 wording, address and habits from them, never anything about a voice or its trigger.
-Story lines are things they said; other speakers' lines are context.
+Story lines are things they said; an indented line just before one is what it answers
+(another speaker, narration, or options the user could have picked, which were not
+necessarily said), context only.
 {user_rule}
 
 Fields:
