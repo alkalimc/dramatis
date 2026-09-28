@@ -4,8 +4,10 @@
     build      offline: normalize, samples, folio, evals, reports
     baseline   accept or show the counts the guards compare against
     report     regenerate one report, or inspect a page
+    persona    network: generate, gate and write personas (maintainer only)
 
-`sync` is the only command that makes requests. The first run (no watermark) and
+`sync` is the only command that talks to the wiki; `persona` is the only one that calls a
+model endpoint. The first run (no watermark) and
 `--full` enumerate and fetch everything; later runs read the change feed from the
 watermark. Both are resumable: pages already held are never fetched twice.
 """
@@ -32,6 +34,7 @@ from .folio import Folio
 from .guards import HIGH
 from .params import Params
 from .pack import Pack, load_pack, pack_dir
+from .persona import cli as persona_cli
 from .report import attribution as attribution_mod
 from .report import coverage as coverage_mod
 from .report import figures as figures_mod
@@ -471,6 +474,9 @@ def report_attribution(
             looked = harvest.refresh_editors(wiki, archive, progress=_tick("editors"))
         console.print(f"editors looked up: {looked:,} revision(s)")
     _attribution(pk, paths)
+
+
+persona_cli.register(app, resolve=_resolve, die=_die, console=console)
 
 
 def main() -> None:  # pragma: no cover - entry point
