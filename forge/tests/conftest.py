@@ -34,6 +34,7 @@ STORIES = {
         "[caption] Later that day\n"
         "[choice] Wait with them | Walk away\n"
         "Bob: You chose well.\n"
+        "Carol: Nobody asked me.\n"
     ),
     "Chapter 2": (
         "{{Scene|category=Main|group=Chapter Two}}\n"
@@ -47,6 +48,7 @@ STORIES = {
 
 PEOPLE = {
     "Alice": (
+        "{{Info|born=03-14|home=North Cape|role=Keeper of the northern light}}\n"
         "Alice keeps the lighthouse on the northern cape and writes letters.\n"
         "== Early life ==\n"
         "She grew up in the harbour town, the youngest of five siblings.\n"
@@ -57,7 +59,8 @@ PEOPLE = {
         "{{AltForm|Alice}}\n"
         "In winter Alice wears a heavy coat and speaks less than usual.\n"
     ),
-    "Bob": "Bob is a fisherman who owns two boats and a very old dog named Pepper.\n",
+    "Bob": "{{Info|born=unknown|home=Harbour|role=Fisherman with two boats}}\n"
+           "Bob is a fisherman who owns two boats and a very old dog named Pepper.\n",
 }
 
 

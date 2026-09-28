@@ -262,23 +262,65 @@ def _d_name_leak(src: _Sources, member: str | None):
 
 
 def _d_cooccur_pairs(src: _Sources, _m: str | None):
-    """Distinct pairs of speakers who share at least one scene."""
-    assert src.archive is not None
-    return _count(src.archive.execute(
-        "select count(*) from (select distinct l1.speaker, l2.speaker from lines l1 "
-        "join lines l2 on l1.scene = l2.scene and l1.speaker < l2.speaker)").fetchone()[0])
+    """Pairs of persons who speak in at least one scene together, read from `cooccur`."""
+    assert src.folio is not None
+    return _count(src.folio.execute("select count(*) from cooccur").fetchone()[0])
 
 
 def _d_cooccur_scenes_per_person(src: _Sources, _m: str | None):
-    """Mean number of scenes a roster person speaks in."""
-    assert src.archive is not None
-    per = [r[0] for r in src.archive.execute(
-        "select count(distinct l.scene) from lines l join forms f on f.page = l.speaker "
-        "group by f.person_id")]
+    """Mean number of scenes a person speaks in, over persons who speak in any."""
+    assert src.folio is not None
+    names = src.shaped("dialogue")
+    if not names:
+        return None
+    marks = ",".join("?" * len(names))
+    per = [r[0] for r in src.folio.execute(
+        "select count(distinct c.span_of) from unit_persons u join chunks c on c.id = u.chunk_id "
+        f"where c.template in ({marks}) group by u.person_id", names)]
     if not per:
         return None
     mean = sum(per) / len(per)
     return round(mean, 1), f"{mean:.1f}"
+
+
+def _d_birthdays(src: _Sources, _m: str | None):
+    """Persons whose birthday the builder could read as `MM-DD`."""
+    assert src.folio is not None
+    return _count(src.folio.execute(
+        "select count(*) from persons where birthday is not null").fetchone()[0])
+
+
+def _d_stopword_top_df(src: _Sources, member: str | None):
+    """Share of units containing the most widespread query-side stopword (or `member`).
+
+    Read from the lexical index itself, so it measures the tokens retrieval sees.
+    """
+    assert src.folio is not None
+    words = [member] if member else list(src.meta["folio"].get("stopwords") or ())
+    units = src.folio.execute("select count(*) from chunks").fetchone()[0]
+    if not words or not units:
+        return None
+    df = {w: src.folio.execute(
+        "select count(*) from chunks_fts where chunks_fts match ?",
+        ('"' + w.replace('"', '""') + '"',)).fetchone()[0] for w in words}
+    word = max(df, key=lambda w: (df[w], w))
+    value, shown = _ratio(df[word], units)
+    return value, f"{shown} ({word})"
+
+
+def _d_pipeline_hours(src: _Sources, _m: str | None):
+    """Wall-clock hours of the pipeline: the last full sync plus the last build.
+
+    Stage times are stamped into the archive manifest (`timings`) by the CLI. Until a
+    full sync has been timed, the value is the build alone and says so.
+    """
+    timings = src.meta["manifest"].get("timings") or {}
+    if not isinstance(timings, Mapping) or "build" not in timings:
+        return None
+    sync = timings.get("sync_full")
+    hours = (float(timings["build"]) + float(sync or 0)) / 3600
+    shown = f"{hours:.2f} h" + ("" if sync is not None else " (build only; no timed full sync)")
+    return round(hours, 2), shown
 
 
 def _d_people_with_material(src: _Sources, member: str | None):
@@ -370,13 +412,24 @@ def _d_aliases(src: _Sources, member: str | None):
     return _count(src.archive.execute("select count(*) from aliases").fetchone()[0])
 
 
-def _guard_sum(src: _Sources, member: str | None, column: int):
+def _findings(src: _Sources) -> list[tuple[str, str, str]]:
+    """(guard, severity, detail) for every finding of the latest run of each stage."""
     assert src.archive is not None
+    return src.once("findings", lambda: [tuple(r) for r in src.archive.execute(
+        "select guard, severity, detail from guard_findings")])  # type: ignore[return-value]
+
+
+def _by_guard(src: _Sources) -> dict[str, list[int]]:
+    """[high, low] per guard, every guard listed, including those with nothing to report:
+    a guard absent from the counts is otherwise indistinguishable from one that never ran."""
     counts = {g: [0, 0] for g in GUARDS}
-    for guard, severity, n in src.archive.execute(
-        "select guard, severity, count(*) from guard_findings group by guard, severity"
-    ):
-        counts.setdefault(guard, [0, 0])[0 if severity == HIGH else 1] += n
+    for guard, severity, _detail in _findings(src):
+        counts.setdefault(guard, [0, 0])[0 if severity == HIGH else 1] += 1
+    return counts
+
+
+def _guard_sum(src: _Sources, member: str | None, column: int):
+    counts = _by_guard(src)
     if member:
         return _count(counts.get(member, [0, 0])[column])
     return _count(sum(v[column] for v in counts.values()))
@@ -389,6 +442,23 @@ def _d_guards_high(src: _Sources, member: str | None):
 
 def _d_guards_low(src: _Sources, member: str | None):
     return _guard_sum(src, member, 1)
+
+
+def _d_guards_by_guard(src: _Sources, member: str | None):
+    """Findings per guard as `high/low`; `member` picks one guard's total."""
+    counts = _by_guard(src)
+    if member:
+        return _count(sum(counts.get(member, [0, 0])))
+    shown = " · ".join(f"{g} {h}/{lo}" for g, (h, lo) in counts.items())
+    return {g: {"high": h, "low": lo} for g, (h, lo) in counts.items()}, shown
+
+
+def _d_guards_unattributed(src: _Sources, _m: str | None):
+    """Low-severity findings no reviewed note in the pack explains (`Pack.finding_notes`)."""
+    notes = src.pack.finding_notes
+    return _count(sum(
+        1 for guard, severity, detail in _findings(src)
+        if severity != HIGH and not any(n.explains(guard, detail) for n in notes)))
 
 
 def _d_tokens_unit(src: _Sources, member: str | None):
@@ -442,8 +512,11 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "scorable_at": (("archive",), _d_scorable_at),
     "heldout_lines": (("archive",), _d_heldout_lines),
     "name_leak": (("archive",), _d_name_leak),
-    "cooccur_pairs": (("archive",), _d_cooccur_pairs),
-    "cooccur_scenes_per_person": (("archive",), _d_cooccur_scenes_per_person),
+    "cooccur_pairs": (("folio",), _d_cooccur_pairs),
+    "cooccur_scenes_per_person": (("folio",), _d_cooccur_scenes_per_person),
+    "birthdays": (("folio",), _d_birthdays),
+    "stopword_top_df": (("folio",), _d_stopword_top_df),
+    "pipeline_hours": (("archive",), _d_pipeline_hours),
     "people_with_material": (("folio",), _d_people_with_material),
     "roster_pages": (("archive",), _d_roster_pages),
     "forms_by_kind": (("archive",), _d_forms),
@@ -452,6 +525,8 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "aliases": (("archive",), _d_aliases),
     "guards_high": (("archive",), _d_guards_high),
     "guards_low": (("archive",), _d_guards_low),
+    "guards_by_guard": (("archive",), _d_guards_by_guard),
+    "guards_unattributed": (("archive",), _d_guards_unattributed),
     "tokens_unit": (("folio",), _d_tokens_unit),
     "tokens_line": (("archive",), _d_tokens_line),
     "tokens_retrieval": (("folio",), _d_tokens_retrieval),

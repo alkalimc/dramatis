@@ -19,6 +19,7 @@ packing, the benchmark builders, generated reports and sampling.
 from __future__ import annotations
 
 import importlib
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -328,6 +329,80 @@ class IdentityRules:
     display_facet: str = ""
 
 
+@dataclass(frozen=True)
+class PersonSource:
+    """What a person's own dossier pages say, merged over their forms, canonical first.
+
+    The single input every roster hook receives. Merged rather than per page because the
+    hooks answer questions about the person (when is her birthday, where is she from), and
+    a second form's page usually repeats or fills in the first.
+    """
+
+    person_id: str
+    facets: Mapping[str, str] = field(default_factory=dict)
+    sections: tuple[Mapping[str, str], ...] = ()
+    items: Mapping[str, Any] = field(default_factory=dict)
+
+
+def _no_birthday(_person: PersonSource) -> str | None:
+    return None
+
+
+def _no_terms(_person: PersonSource) -> Iterable[str]:
+    return ()
+
+
+def _no_faction(_person: PersonSource) -> str:
+    return ""
+
+
+def _first_line(person: PersonSource) -> str:
+    for section in person.sections:
+        text = str(section.get("text", "")).strip()
+        if text:
+            return text.splitlines()[0].strip()
+    return ""
+
+
+@dataclass(frozen=True)
+class RosterRules:
+    """Per-person static fields the builder derives from dossier material.
+
+    Each is a question only the pack can answer, because the answer is written in the
+    site's vocabulary: which field holds a birthday and how it is spelled, which facets
+    name a person's domain, what counts as their affiliation. The defaults answer
+    "nothing known", which is always a correct answer, just an uninformative one.
+    """
+
+    #: `MM-DD`, or None when the source gives none or withholds it.
+    birthday: Callable[[PersonSource], str | None] = _no_birthday
+    #: Terms that place an encyclopaedia hit inside this person's domain (the topical
+    #: part of knowledge scope).
+    topic_terms: Callable[[PersonSource], Iterable[str]] = _no_terms
+    #: Affiliation used to spread the first-run recommendations; empty means unknown.
+    faction: Callable[[PersonSource], str] = _no_faction
+    #: One line from the person's material that says who they are, shown beside a
+    #: first-run recommendation. Must be quoted from the material, never composed.
+    reason: Callable[[PersonSource], str] = _first_line
+
+
+@dataclass(frozen=True)
+class FindingNote:
+    """Why a low-severity guard finding is expected, stated once, by a person.
+
+    A low finding nobody has explained is a high finding nobody has noticed yet, so the
+    report counts the ones no note explains (`guards.unattributed`). `pattern` is a regular
+    expression searched in the finding's detail; `reason` is what a reviewer concluded.
+    """
+
+    guard: str
+    pattern: str
+    reason: str
+
+    def explains(self, guard: str, detail: str) -> bool:
+        return guard == self.guard and re.search(self.pattern, detail) is not None
+
+
 # --------------------------------------------------------------------------- #
 # Chunking
 # --------------------------------------------------------------------------- #
@@ -549,11 +624,20 @@ class Pack:
     chunking: ChunkPolicy
     #: Structured tables (the Cargo extension) to pull once during `scope`: table -> field spec.
     tables: Mapping[str, str] = field(default_factory=dict)
-    #: In-world phrasing for runtime surfaces the client renders (folio manifest `wording`).
+    #: Every user-facing string and in-world name the client renders, keyed like the
+    #: client's i18n keys (folio manifest `wording`). Missing keys fall back to the
+    #: client's neutral defaults.
     wording: Mapping[str, str] = field(default_factory=dict)
     #: (open, close) wrapping a reply line that describes action rather than speech
     #: (folio manifest `scene_marker`). The engine renders such lines apart from speech.
     scene_marker: tuple[str, str] = ("*", "*")
+    #: In-world year = local year minus this (folio manifest `clock.year_offset`). Month
+    #: and day are the local ones; the fiction's calendar is the pack's to state.
+    year_offset: int = 0
+    #: Per-person static fields derived from dossier material. See `RosterRules`.
+    roster: RosterRules = field(default_factory=RosterRules)
+    #: Reviewed explanations for expected low-severity findings. See `FindingNote`.
+    finding_notes: tuple[FindingNote, ...] = ()
     #: The source's own table of contents, annotated with what we took and why not.
     coverage: tuple[CoverageRow, ...] = ()
     #: page title -> alias kind, for pages whose entire output is dictionary entries

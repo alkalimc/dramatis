@@ -21,13 +21,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import segment
+from . import __version__, segment
 from .archive import Archive
 from .chunk import build as build_chunks
 from .config import RunInfo
 from .folio import FOLIO_FORMAT_VERSION, Folio
 from .guards import Ledger
-from .pack import Pack
+from .pack import Pack, PersonSource
+from .params import Params
 from .records import PARSER_VERSION
 
 
@@ -68,8 +69,10 @@ def run(
     folio_path: Path,
     *,
     segmenter: str = "auto",
+    params: Params | None = None,
     progress=None,
 ) -> CorpusReport:
+    params = params or Params()
     rep = CorpusReport()
     seg = segment.load(segmenter)
     rep.segmenter = f"{seg.name}/{seg.version}"
@@ -82,6 +85,9 @@ def run(
     batch: list[tuple] = []
     fts: list[tuple[int, str]] = []
     owners: list[tuple[str, str]] = []
+    # Attribution keeps roster members only: `person_id` is the key every reader joins on,
+    # and a name with no roster row has nothing to join to.
+    roster = set(archive.persons())
     ord_ = 0
 
     with Folio.create(folio_path) as folio:
@@ -94,8 +100,7 @@ def run(
             seen.add(chunk.id)
             batch.append(chunk.row(ord_))
             fts.append((ord_, seg(chunk.embed_text)))
-            if chunk.person:
-                owners.append((chunk.id, chunk.person))
+            owners.extend((chunk.id, p) for p in chunk.persons if p in roster)
             rep.by_template[chunk.template] = rep.by_template.get(chunk.template, 0) + 1
             rep.chars_by_template[chunk.template] = (
                 rep.chars_by_template.get(chunk.template, 0) + chunk.chars)
@@ -124,7 +129,8 @@ def run(
             folio.add_unit_persons(owners)
         rep.chunks = ord_
 
-        _write_roster(archive, folio, pack)
+        _write_roster(archive, folio, pack, params)
+        _write_relations(archive, folio, pack)
         folio.write_aliases([
             (r["alias"], r["target"], r["kind"])
             for r in archive.db.execute("SELECT alias,target,kind FROM aliases")
@@ -189,6 +195,7 @@ def run(
         folio.set_meta("build", run_info.as_dict())
         folio.set_meta("wording", dict(pack.wording))
         folio.set_meta("scene_marker", list(pack.scene_marker))
+        folio.set_meta("clock.year_offset", pack.year_offset)
         # Written last: the fingerprint has to cover everything above it.
         folio.set_meta("build_fingerprint", _fingerprint(folio))
         folio.optimize()
@@ -199,52 +206,176 @@ def run(
     return rep
 
 
-def _write_roster(archive: Archive, folio: Folio, pack: Pack) -> None:
-    """One row per person, with material volume and `persona_confidence`.
-
-    `persona_confidence` is the amount of source material, normalised — not a quality
-    judgement: sqrt(material / max material), in [0, 1]. It is used downstream to *change behaviour rather than to apologise*: a person the
-    archive barely covers should be written as terse and unwilling to speculate, which
-    is a characterisation, whereas a generator told to produce a full personality from
-    thin material will invent one.
-    """
-    person_pages = archive.persons()
-    facet_source = {
-        r["page"]: json.loads(r["fields"])
-        for r in archive.db.execute("SELECT page,fields FROM dossiers")
-    }
-    material: dict[str, int] = {}
-    for person_id, forms in person_pages.items():
-        total = 0
+def _person_sources(archive: Archive) -> dict[str, PersonSource]:
+    """Each person's dossier pages merged over their forms, canonical first."""
+    out: dict[str, PersonSource] = {}
+    for person_id, forms in archive.persons().items():
+        facets: dict[str, str] = {}
+        sections: list[dict[str, str]] = []
+        items: dict[str, object] = {}
         for f in forms:
-            total += int(archive.scalar(
-                "SELECT COALESCE(SUM(LENGTH(text)),0) FROM voices WHERE page=? OR subject=?",
-                (f["page"], f["page"])) or 0)
             row = archive.db.execute(
-                "SELECT sections,items FROM dossiers WHERE page=?", (f["page"],)).fetchone()
-            if row is not None:
-                total += len(row["sections"]) + len(row["items"])
-        total += int(archive.scalar(
-            "SELECT COALESCE(SUM(LENGTH(text)),0) FROM lines WHERE speaker=?",
-            (person_id,)) or 0)
-        material[person_id] = total
+                "SELECT fields,sections,items FROM dossiers WHERE page=?", (f["page"],)
+            ).fetchone()
+            if row is None:
+                continue
+            for k, v in json.loads(row["fields"]).items():
+                facets.setdefault(k, v)
+            sections.extend(json.loads(row["sections"]))
+            for k, v in json.loads(row["items"]).items():
+                items.setdefault(k, v)
+        out[person_id] = PersonSource(person_id, facets, tuple(sections), items)
+    return out
 
-    ceiling = max(material.values()) or 1
+
+def _material(archive: Archive, folio: Folio, dialogue: tuple[str, ...]) -> dict[str, int]:
+    """Characters of source material that are a person's own, over every template.
+
+    Non-dialogue units attributed to a person are wholly theirs (their voice lines, their
+    dossier sections, letters they wrote). A dialogue unit is shared by everyone speaking
+    in it, so it contributes only the person's own lines, resolved through identity.
+    """
+    material: dict[str, int] = {}
+    marks = ",".join("?" * len(dialogue))
+    for person_id, chars in folio.db.execute(
+        "SELECT u.person_id, SUM(c.chars) FROM unit_persons u JOIN chunks c ON c.id = u.chunk_id "
+        f"WHERE c.template NOT IN ({marks}) GROUP BY u.person_id", dialogue,
+    ):
+        material[person_id] = int(chars or 0)
+    person_of = archive.person_of()
+    for speaker, chars in archive.db.execute(
+        "SELECT speaker, SUM(LENGTH(text)) FROM lines WHERE speaker IS NOT NULL GROUP BY speaker"
+    ):
+        person_id = person_of.get(speaker)
+        if person_id is not None:
+            material[person_id] = material.get(person_id, 0) + int(chars or 0)
+    return material
+
+
+def _write_roster(archive: Archive, folio: Folio, pack: Pack, params: Params) -> None:
+    """One row per person, their topical terms, and the host's first-run recommendations.
+
+    `persona_confidence` is defined beside its column in `folio.SCHEMA`; `_material`
+    measures the input.
+    """
+    sources = _person_sources(archive)
+    forms = archive.persons()
+    material = _material(archive, folio, pack.chunking.shaped("dialogue"))
+    present = sorted(m for p in sources if (m := material.get(p, 0)) > 0)
+    median = present[len(present) // 2] if present else 0
     display_key = pack.identity.display_facet
-    rows = []
-    for person_id, forms in sorted(person_pages.items()):
-        facets = facet_source.get(person_id, {})
-        display = facets.get(display_key) if display_key else None
+    rules = pack.roster
+
+    rows, terms, confidence = [], [], {}
+    for person_id, src in sorted(sources.items()):
+        m = material.get(person_id, 0)
+        confidence[person_id] = round(m / (m + median), 4) if m else 0.0
+        birthday = rules.birthday(src)
+        if birthday is not None and not _is_birthday(birthday):
+            raise ValueError(
+                f"pack birthday hook returned {birthday!r} for {person_id!r}; expected MM-DD")
+        display = src.facets.get(display_key) if display_key else None
         rows.append((
             person_id, person_id, display or person_id,
-            json.dumps([{"page": f["page"], "kind": f["kind"]} for f in forms],
+            json.dumps([{"page": f["page"], "kind": f["kind"]} for f in forms[person_id]],
                        ensure_ascii=False),
-            json.dumps(facets, ensure_ascii=False),
-            material[person_id],
-            round(min(material[person_id] / ceiling, 1.0) ** 0.5, 4),
-            None,  # birthday: not extracted yet
+            json.dumps(dict(src.facets), ensure_ascii=False),
+            m, confidence[person_id], birthday,
         ))
+        terms.extend((person_id, t) for t in dict.fromkeys(rules.topic_terms(src)) if t)
     folio.write_persons(rows)
+    folio.write_topic_terms(terms)
+
+    picks = coldstart(sources, confidence, pack, params.coldstart.picks)
+    folio.write_prompt(HOST, COLDSTART, json.dumps(picks, ensure_ascii=False),
+                       f"forge/{__version__}")
+
+
+#: The host's subject id and the builder-computed slot in the `prompts` table.
+HOST = "host"
+COLDSTART = "coldstart"
+
+
+def _is_birthday(value: str) -> bool:
+    if len(value) != 5 or value[2] != "-" or not (value[:2] + value[3:]).isdigit():
+        return False
+    try:
+        dt.date(2000, int(value[:2]), int(value[3:]))  # a leap year admits 02-29
+    except ValueError:
+        return False
+    return True
+
+
+def coldstart(
+    sources: dict[str, PersonSource], confidence: dict[str, float], pack: Pack, picks: int
+) -> list[dict[str, str]]:
+    """First-run recommendations: the thickest material, spread across affiliations.
+
+    Greedy by `persona_confidence`, skipping a person whose affiliation is already on the
+    card; if the roster has fewer affiliations than picks, the rest fill by confidence
+    alone. A person with no quotable reason is passed over: the card says why, from the
+    material, or it does not recommend.
+    """
+    ranked = sorted((p for p in sources if confidence.get(p, 0) > 0),
+                    key=lambda p: (-confidence[p], p))
+    reasons = {p: pack.roster.reason(sources[p]).strip() for p in ranked}
+    ranked = [p for p in ranked if reasons[p]]
+    chosen: list[str] = []
+    seen: set[str] = set()
+    for person_id in ranked:
+        if len(chosen) == picks:
+            break
+        faction = pack.roster.faction(sources[person_id])
+        if faction and faction in seen:
+            continue
+        chosen.append(person_id)
+        if faction:
+            seen.add(faction)
+    for person_id in ranked:
+        if len(chosen) >= picks:
+            break
+        if person_id not in chosen:
+            chosen.append(person_id)
+    return [{"person_id": p, "reason": reasons[p]} for p in chosen]
+
+
+def _write_relations(archive: Archive, folio: Folio, pack: Pack) -> None:
+    """Co-appearance and first-hand knowledge, both from who speaks in which scene.
+
+    A scene is a dialogue unit's `span_of`. `cooccur` counts, per unordered pair, the
+    scenes both speak in. `knowledge_scope` is `self` (every unit attributed to the
+    person) plus `lived` (the other dialogue units of every scene they speak in).
+    """
+    dialogue = pack.chunking.shaped("dialogue")
+    marks = ",".join("?" * len(dialogue))
+    units_of: dict[str, list[str]] = {}
+    for scene, chunk_id in folio.db.execute(
+        f"SELECT span_of, id FROM chunks WHERE template IN ({marks}) ORDER BY ord", dialogue
+    ):
+        units_of.setdefault(scene, []).append(chunk_id)
+    in_scene: dict[str, set[str]] = {}
+    for scene, person_id in folio.db.execute(
+        "SELECT DISTINCT c.span_of, u.person_id FROM unit_persons u "
+        f"JOIN chunks c ON c.id = u.chunk_id WHERE c.template IN ({marks})", dialogue,
+    ):
+        in_scene.setdefault(scene, set()).add(person_id)
+
+    pairs: dict[tuple[str, str], int] = {}
+    for people in in_scene.values():
+        ordered = sorted(people)
+        for i, a in enumerate(ordered):
+            for b in ordered[i + 1:]:
+                pairs[(a, b)] = pairs.get((a, b), 0) + 1
+    folio.write_cooccur((a, b, n) for (a, b), n in sorted(pairs.items()))
+
+    folio.db.execute(
+        "INSERT INTO knowledge_scope(person_id,chunk_id,kind) "
+        "SELECT person_id, chunk_id, 'self' FROM unit_persons")
+    # `self` wins where a unit is both: it is the stronger claim.
+    folio.db.executemany(
+        "INSERT OR IGNORE INTO knowledge_scope(person_id,chunk_id,kind) VALUES(?,?,'lived')",
+        ((person_id, cid) for scene, people in in_scene.items()
+         for person_id in people for cid in units_of.get(scene, ())))
 
 
 def _redundancy(

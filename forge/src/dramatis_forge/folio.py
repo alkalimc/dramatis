@@ -86,9 +86,13 @@ CREATE TABLE IF NOT EXISTS persons (
     display      TEXT NOT NULL,
     forms        TEXT NOT NULL,        -- JSON [{page, kind}]
     facets       TEXT NOT NULL,        -- JSON: roster attributes, site wording
-    material     INTEGER NOT NULL,     -- chars of source material, for persona_confidence
-    -- Material thickness in [0, 1]. The exact definition belongs to the builder
-    -- (`corpus._write_roster`) and is documented there; readers only compare values.
+    material     INTEGER NOT NULL,     -- chars of the person's own material, all templates
+    -- Material thickness in [0, 1): m / (m + median), m = `material`, median over the
+    -- roster persons with m > 0. `material` counts the person's own text only: whole
+    -- non-dialogue units attributed to them (voice, dossier, letters) plus their own
+    -- spoken lines, not the other speakers of a shared dialogue unit. Saturating, 0.5 at
+    -- the median person, 0 with no material; the corpus's own median sets the scale, so
+    -- there is no tuned constant. A volume, not a quality verdict; readers only compare.
     persona_confidence REAL NOT NULL DEFAULT 0.0,
     birthday     TEXT                  -- MM-DD, NULL when the source gives none
         CHECK (birthday IS NULL OR birthday GLOB '[0-1][0-9]-[0-3][0-9]')
@@ -178,7 +182,8 @@ CREATE TABLE IF NOT EXISTS template_stats (
 -- key -> JSON value. Keys readers act on: format_version, requires (JSON list of
 -- capabilities the reader must implement, or refuse to load), segmenter, stopwords,
 -- wording (JSON object: every user-facing string and in-world name, the client's only
--- source of UI text), scene_marker (JSON [open, close] wrapping a scene line).
+-- source of UI text), scene_marker (JSON [open, close] wrapping a scene line),
+-- clock.year_offset (integer: in-world year = local year minus this).
 CREATE TABLE IF NOT EXISTS manifest (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -257,6 +262,20 @@ class Folio:
             " birthday) VALUES(?,?,?,?,?,?,?,?)",
             rows,
         )
+
+    def write_topic_terms(self, rows: Iterable[tuple[str, str]]) -> None:
+        """(person_id, term) pairs."""
+        self.db.executemany(
+            "INSERT OR IGNORE INTO topic_terms(person_id,term) VALUES(?,?)", rows)
+
+    def write_cooccur(self, rows: Iterable[tuple[str, str, int]]) -> None:
+        """(a, b, scenes) with a < b."""
+        self.db.executemany("INSERT INTO cooccur(a,b,scenes) VALUES(?,?,?)", rows)
+
+    def write_prompt(self, subject: str, slot: str, body: str, generator_version: str) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO prompts(subject,slot,body,generator_version) VALUES(?,?,?,?)",
+            (subject, slot, body, generator_version))
 
     def write_aliases(self, rows: Sequence[tuple[str, str, str]]) -> None:
         self.db.executemany(
