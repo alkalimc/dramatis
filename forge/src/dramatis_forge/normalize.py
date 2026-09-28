@@ -12,7 +12,7 @@ they end up inside whichever parser happened to need them first.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import baseline as baseline_mod
 from . import guards
@@ -20,7 +20,7 @@ from . import identity as identity_mod
 from .archive import Archive
 from .guards import HIGH, Ledger, Reconciliation
 from .pack import Pack, PageContext
-from .records import ORDER, PARSER_VERSION, Alias, Record
+from .records import ORDER, PARSER_VERSION, SEQUENCED, Alias, Record
 from .wikitext import Cleaner
 
 
@@ -82,7 +82,15 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
                         "G3", f"produced no records and gave no reason "
                               f"(route {route.label or route.seed})",
                         page=title, high=True)
+            else:
+                _check_yield(ctx, route, produced, cleaner, rep)
+            # Source order, recorded rather than implied: storage and readers order by
+            # `seq`, so nothing downstream can re-sort a page's records by accident.
+            position: dict[str, int] = {}
             for rec in produced:
+                if rec.KIND in SEQUENCED:
+                    rec = replace(rec, seq=position.get(rec.KIND, 0))
+                    position[rec.KIND] = rec.seq + 1
                 buckets.setdefault(rec.KIND, []).append(rec)
             if progress is not None and i and i % 500 == 0:
                 progress(f"  {seed_key} {i:,}/{len(titles):,}")
@@ -131,6 +139,32 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
     archive.write_findings(rep.ledger.rows(), stage="normalize")
     archive.commit()
     return rep
+
+
+#: Pages with fewer visible letters than this are too small for a yield ratio to mean
+#: anything.
+MIN_VISIBLE = 200
+
+
+def _check_yield(ctx: PageContext, route, produced: list[Record], cleaner: Cleaner,
+                 rep: Report) -> None:
+    """G3, the quiet half: a page that produced *something*, but far less than it shows.
+
+    The loud half — a page that produced nothing — is caught above. This one is how a
+    rule that reads the first of several layouts, or a length floor set too high, loses
+    most of a page while every count still looks healthy.
+    """
+    if route.min_yield <= 0:
+        return
+    shown = cleaner.visible(ctx.wikitext)
+    if shown < MIN_VISIBLE:
+        return
+    kept = cleaner.letters("".join(r.prose for r in produced))
+    if kept < shown * route.min_yield:
+        rep.ledger.add(
+            "G3", f"yield {kept / shown:.0%} of visible text ({kept:,} of {shown:,} "
+                  f"letters) is under the route's floor of {route.min_yield:.0%}",
+            page=ctx.title)
 
 
 def _site_aliases(

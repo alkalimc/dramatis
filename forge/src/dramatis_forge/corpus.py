@@ -38,6 +38,9 @@ class CorpusReport:
     by_template: dict[str, int] = field(default_factory=dict)
     chars_by_template: dict[str, int] = field(default_factory=dict)
     duplicates: int = 0
+    #: Units whose text repeats, verbatim, a unit of the same person and template read
+    #: from another of that person's form pages: stored once (see `run`).
+    form_copies: int = 0
     segmenter: str = ""
     redundancy: dict[str, float] = field(default_factory=dict)
     ledger: Ledger = field(default_factory=Ledger)
@@ -88,6 +91,14 @@ def run(
     # Attribution keeps roster members only: `person_id` is the key every reader joins on,
     # and a name with no roster row has nothing to join to.
     roster = set(archive.persons())
+    # Material reachable through two form pages of one person — an alter's page that
+    # repeats the base dossier, a line recorded again under the alter — is one piece of
+    # material. The first form's unit is kept and names the other pages it also appears
+    # on (manifest `form_copies`); form *differences* are kept as they are. Scenes are
+    # left alone: two scenes that share lines are two tellings, not two copies.
+    shared = set(pack.chunking.shaped("profile") + pack.chunking.shaped("voice"))
+    first_copy: dict[tuple, tuple[str, str]] = {}
+    copies: dict[str, list[str]] = {}
     ord_ = 0
 
     with Folio.create(folio_path) as folio:
@@ -98,6 +109,14 @@ def run(
                 rep.duplicates += 1
                 continue
             seen.add(chunk.id)
+            if chunk.template in shared and chunk.persons:
+                key = (chunk.template, chunk.persons, chunk.text)
+                kept = first_copy.get(key)
+                if kept is not None and kept[1] != chunk.page:
+                    copies.setdefault(kept[0], []).append(chunk.page)
+                    rep.form_copies += 1
+                    continue
+                first_copy.setdefault(key, (chunk.id, chunk.page))
             batch.append(chunk.row(ord_))
             fts.append((ord_, seg(chunk.embed_text)))
             owners.extend((chunk.id, p) for p in chunk.persons if p in roster)
@@ -196,6 +215,10 @@ def run(
         folio.set_meta("wording", dict(pack.wording))
         folio.set_meta("scene_marker", list(pack.scene_marker))
         folio.set_meta("clock.year_offset", pack.year_offset)
+        folio.set_meta("user_placeholder", pack.user_placeholder)
+        # chunk id -> the other form pages its text also appears on, in form order.
+        folio.set_meta("form_copies", {cid: list(dict.fromkeys(pages))
+                                       for cid, pages in sorted(copies.items())})
         # Written last: the fingerprint has to cover everything above it.
         folio.set_meta("build_fingerprint", _fingerprint(folio))
         folio.optimize()
@@ -468,6 +491,9 @@ def _check(
         )
     if rep.duplicates:
         rep.ledger.add("G5", f"{rep.duplicates} identical units collapsed")
+    if rep.form_copies:
+        rep.ledger.add("G5", f"{rep.form_copies} unit(s) repeating another form page of the "
+                             "same person verbatim, stored once (manifest form_copies)")
 
     # A header that repeats a path segment wastes the reader's attention and the
     # encoder's budget on the same words twice. Found by sampling, not by a count: the

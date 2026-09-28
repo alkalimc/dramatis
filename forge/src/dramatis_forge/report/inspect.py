@@ -70,15 +70,20 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
     db = archive.db
     out: dict = {"title": title, "revid": archive.page(title)["revid"]}
 
-    scene = db.execute("SELECT * FROM scenes WHERE id=?", (title,)).fetchone()
+    # A scene is stored once, under its own id; the page its body was read from (a
+    # transcluded subpage) shows the same scene, so each page's archived view sits next
+    # to the source it came from.
+    scene = db.execute("SELECT * FROM scenes WHERE id=? OR source_page=? ORDER BY id<>?",
+                       (title, title, title)).fetchone()
     if scene:
+        sid = scene["id"]
         out["scene"] = dict(scene)
         out["lines"] = [dict(r) for r in db.execute(
-            "SELECT seq,speaker,text,kind FROM lines WHERE scene=? ORDER BY seq", (title,))]
+            "SELECT seq,speaker,text,kind FROM lines WHERE scene=? ORDER BY seq", (sid,))]
         out["choices"] = [
             {"seq": r["seq"], "options": json.loads(r["options"])}
             for r in db.execute(
-                "SELECT seq,options FROM choices WHERE scene=? ORDER BY seq", (title,))
+                "SELECT seq,options FROM choices WHERE scene=? ORDER BY seq", (sid,))
         ]
 
     dossier = db.execute("SELECT * FROM dossiers WHERE page=?", (title,)).fetchone()
@@ -90,19 +95,20 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
         }
 
     voices = [dict(r) for r in db.execute(
-        "SELECT idx,title,trigger,text,condition FROM voices WHERE page=? ORDER BY idx", (title,))]
+        "SELECT idx,variant,title,trigger,text,condition FROM voices WHERE page=? ORDER BY seq",
+        (title,))]
     if voices:
         out["voices"] = voices
 
     lore = [
         {"path": json.loads(r["path"]), "text": r["text"]}
-        for r in db.execute("SELECT path,text FROM lore WHERE page=? ORDER BY path,sig", (title,))
+        for r in db.execute("SELECT path,text FROM lore WHERE page=? ORDER BY seq", (title,))
     ]
     if lore:
         out["lore"] = lore
 
     letters = [dict(r) for r in db.execute(
-        "SELECT sender,date,title,body FROM letters WHERE page=? ORDER BY sig", (title,))]
+        "SELECT sender,date,title,body FROM letters WHERE page=? ORDER BY seq", (title,))]
     if letters:
         out["letters"] = letters
 
@@ -110,13 +116,13 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
         {"term": r["term"], "translations": json.loads(r["translations"]),
          "category": r["category"]}
         for r in db.execute(
-            "SELECT term,translations,category FROM terms WHERE page=? ORDER BY term", (title,))
+            "SELECT term,translations,category FROM terms WHERE page=? ORDER BY seq", (title,))
     ]
     if terms:
         out["terms"] = terms
 
     refs = [dict(r) for r in db.execute(
-        "SELECT name,grp,description FROM char_refs WHERE page=? ORDER BY name LIMIT ?",
+        "SELECT name,grp,description FROM char_refs WHERE page=? ORDER BY seq LIMIT ?",
         (title, SHOW_REFS))]
     if refs:
         out["char_refs"] = refs
@@ -146,6 +152,24 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
     return out
 
 
+def _merge_orders(orders: list[list[str]]) -> list[str]:
+    """One column order agreeing with every record's own key order.
+
+    Each term lists only the renderings it has, in the source's column order; taking
+    labels by first appearance puts a column after one it precedes in the source,
+    whenever the first term to use it skipped the column before it.
+    """
+    out: list[str] = []
+    for keys in orders:
+        for i, key in enumerate(keys):
+            if key in out:
+                continue
+            # Before the next key of this record that is already placed; with none, last.
+            after = next((out.index(k) for k in keys[i + 1:] if k in out), len(out))
+            out.insert(after, key)
+    return out
+
+
 def render(pack: Pack, title: str, row, rec: dict) -> str:
     say, policy = pack.say, pack.chunking
     lsep, list_sep = policy.sep("label"), policy.sep("list")
@@ -168,6 +192,10 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
             say("inspect.scene_meta", category=s["category"], group=s["grp"],
                 source_ref=s["source_ref"]),
             "",
+        ]
+        if s.get("source_page") and s["source_page"] != s["id"]:
+            L += [say("inspect.scene_source", scene=s["id"], source=s["source_page"]), ""]
+        L += [
             say("inspect.scene_counts", lines=len(rec["lines"]), choices=len(rec["choices"])),
             "", say("inspect.body"), "",
         ]
@@ -208,7 +236,8 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
         L += [say("inspect.voices", n=len(rec["voices"])), ""]
         for v in rec["voices"]:
             cond = say("inspect.voice_condition", condition=v["condition"]) if v["condition"] else ""
-            L += [say("inspect.voice_line", title=v["title"], trigger=v["trigger"], condition=cond),
+            title = " · ".join(x for x in (v["title"], v["variant"]) if x)
+            L += [say("inspect.voice_line", title=title, trigger=v["trigger"], condition=cond),
                   "", v["text"], ""]
 
     if "lore" in rec:
@@ -224,7 +253,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
                   m["body"], ""]
 
     if "terms" in rec:
-        labels = sorted({k for t in rec["terms"] for k in t["translations"]})
+        labels = _merge_orders([list(t["translations"]) for t in rec["terms"]])
         L += [say("inspect.terms", n=len(rec["terms"])), "",
               *table_head("|".join([say("inspect.term"), *labels, say("inspect.category")]))]
         for t in rec["terms"]:

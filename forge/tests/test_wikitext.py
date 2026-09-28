@@ -6,7 +6,14 @@ from __future__ import annotations
 import pytest
 
 from dramatis_forge.pack import InlineRules
-from dramatis_forge.wikitext import Cleaner, find_header, strip_comments, table_rows
+from dramatis_forge.wikitext import (
+    Cleaner,
+    find_header,
+    header_rows,
+    strip_comments,
+    table_grid,
+    table_rows,
+)
 
 
 @pytest.fixture
@@ -64,7 +71,7 @@ def test_pack_can_add_localised_namespace():
 
 def test_macros_substituted_and_unknown_shape_warned(clean):
     assert flat(clean, "Hi ${player} and ${ghost}") == (
-        "Hi the reader and ${ghost}", ["unknown engine macro: ${ghost}"])
+        "Hi {user} and ${ghost}", ["unknown engine macro: ${ghost}"])
 
 
 def test_bold_and_generic_tags_stripped(clean):
@@ -93,3 +100,49 @@ def test_table_rows_and_header_after_title_row():
     header, index = find_header(table, "Name", "Role")
     assert header == ["Name", "Role"] and index == 2
     assert table_rows(table)[-2:] == [["Ann", "Pilot"], ["Ben", "Cook"]]
+
+
+def test_table_grid_expands_spans_so_columns_line_up():
+    # Two stacked header rows (a group spanning three columns, then the columns), a
+    # category spanning two data rows. Without expansion the second data row's cells
+    # shift left by one and read under the wrong header.
+    table = ("{|\n! colspan=\"2\" | Group A !! Group B\n|-\n! Name !! Code !! Other\n"
+             "|-\n| rowspan=2 | cat || x1 || y1\n|-\n| x2 || y2\n|}")
+    grid = table_grid(table)
+    assert header_rows(grid) == 2
+    assert [c.text for c in grid[0]] == ["Group A", "Group A", "Group B"]
+    assert [[c.text for c in row] for row in grid[2:]] == [["cat", "x1", "y1"],
+                                                          ["cat", "x2", "y2"]]
+    assert grid[2][0] is grid[3][0] and not grid[2][1].header
+
+
+def test_inner_templates_render_before_their_parent(clean):
+    # The outer template keeps a parameter holding a dropped template and a kept one;
+    # the kept name must survive, the dropped note must not.
+    assert flat(clean, "{{color|red|{{Quote|Captain|aye}}{{cite|x}}}}") == ("Captain: aye", [])
+
+
+def test_a_literal_may_depend_on_named_parameters():
+    rules = InlineRules(literal={"you": lambda p: p.get("prefix", "") + "<you>"})
+    assert Cleaner(rules).text("Hi {{you|prefix=Mr.}}, {{you}}") == "Hi Mr.<you>, <you>"
+
+
+def test_visible_counts_what_a_reader_sees_in_the_corpus_letters():
+    cleaner = Cleaner(InlineRules(letters=r"[a-z]"))
+    source = "<!-- hidden -->{{Box|title=abc|body=de}} [[Page|fg]] <b>h</b> XYZ 123"
+    # Parameter names and template names are markup; values, link labels and tag
+    # contents are text; `letters` keeps lower-case only, so XYZ is another language.
+    assert cleaner.visible(source) == len("abcdefgh")
+
+
+def test_table_grid_reads_an_empty_attribute_prefix_as_attributes():
+    grid = table_grid("{|\n! A !! B !! C\n|-\n|x||y|||-\n|}")
+    assert [c.text for c in grid[1]] == ["x", "y", "-"]
+
+
+def test_sections_carry_their_offset_and_headings_resolve_at_any_point(clean):
+    body = "== A ==\nText under A, long enough to be kept.\n=== B ===\nText under B, also kept.\n"
+    sections = clean.split_sections(body, min_chars=5)
+    assert [s["at"] for s in sections] == [0, body.index("=== B")]
+    assert clean.headings_at(body, body.index("Text under B")) == ("A", "B")
+    assert clean.headings_at(body, 0) == ()

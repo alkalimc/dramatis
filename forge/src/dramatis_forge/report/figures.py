@@ -283,6 +283,29 @@ def _d_cooccur_scenes_per_person(src: _Sources, _m: str | None):
     return round(mean, 1), f"{mean:.1f}"
 
 
+def _d_form_copies(src: _Sources, _m: str | None):
+    """Units stored once because another form page of the same person repeats them."""
+    table = src.meta["folio"].get("form_copies")
+    if not isinstance(table, Mapping):
+        return None
+    return _count(sum(len(v) for v in table.values()))
+
+
+def _d_same_person_copies(src: _Sources, _m: str | None):
+    """Profile and voice units whose exact text is stored twice for one person on two
+    pages. Should be 0 once form copies are collapsed."""
+    assert src.folio is not None
+    names = src.shaped("profile") + src.shaped("voice")
+    if not names:
+        return None
+    marks = ",".join("?" * len(names))
+    return _count(src.folio.execute(
+        "select coalesce(sum(n - 1), 0) from (select count(*) n from chunks c "
+        "join unit_persons u on u.chunk_id = c.id "
+        f"where c.template in ({marks}) group by c.template, u.person_id, c.text "
+        "having count(distinct c.page) > 1)", names).fetchone()[0])
+
+
 def _d_birthdays(src: _Sources, _m: str | None):
     """Persons whose birthday the builder could read as `MM-DD`."""
     assert src.folio is not None
@@ -412,18 +435,18 @@ def _d_aliases(src: _Sources, member: str | None):
     return _count(src.archive.execute("select count(*) from aliases").fetchone()[0])
 
 
-def _findings(src: _Sources) -> list[tuple[str, str, str]]:
-    """(guard, severity, detail) for every finding of the latest run of each stage."""
+def _findings(src: _Sources) -> list[tuple[str, str, str, str | None]]:
+    """(guard, severity, detail, page) for every finding of the latest run of each stage."""
     assert src.archive is not None
     return src.once("findings", lambda: [tuple(r) for r in src.archive.execute(
-        "select guard, severity, detail from guard_findings")])  # type: ignore[return-value]
+        "select guard, severity, detail, page from guard_findings")])  # type: ignore[return-value]
 
 
 def _by_guard(src: _Sources) -> dict[str, list[int]]:
     """[high, low] per guard, every guard listed, including those with nothing to report:
     a guard absent from the counts is otherwise indistinguishable from one that never ran."""
     counts = {g: [0, 0] for g in GUARDS}
-    for guard, severity, _detail in _findings(src):
+    for guard, severity, _detail, _page in _findings(src):
         counts.setdefault(guard, [0, 0])[0 if severity == HIGH else 1] += 1
     return counts
 
@@ -457,8 +480,8 @@ def _d_guards_unattributed(src: _Sources, _m: str | None):
     """Low-severity findings no reviewed note in the pack explains (`Pack.finding_notes`)."""
     notes = src.pack.finding_notes
     return _count(sum(
-        1 for guard, severity, detail in _findings(src)
-        if severity != HIGH and not any(n.explains(guard, detail) for n in notes)))
+        1 for guard, severity, detail, page in _findings(src)
+        if severity != HIGH and not any(n.explains(guard, detail, page) for n in notes)))
 
 
 def _d_tokens_unit(src: _Sources, member: str | None):
@@ -515,6 +538,8 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "cooccur_pairs": (("folio",), _d_cooccur_pairs),
     "cooccur_scenes_per_person": (("folio",), _d_cooccur_scenes_per_person),
     "birthdays": (("folio",), _d_birthdays),
+    "form_copies": (("folio",), _d_form_copies),
+    "same_person_copies": (("folio",), _d_same_person_copies),
     "stopword_top_df": (("folio",), _d_stopword_top_df),
     "pipeline_hours": (("archive",), _d_pipeline_hours),
     "people_with_material": (("folio",), _d_people_with_material),

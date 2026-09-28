@@ -87,6 +87,7 @@ TEXT: Mapping[str, str] = {
     "inspect.forms": "**Forms of one person**: {forms}",
     "inspect.form_item": "{page} ({kind})",
     "inspect.scene_meta": "**Category** {category} · **Group** {group} · **Source** `{source_ref}`",
+    "inspect.scene_source": "Stored once as scene `{scene}`; the body was read from `{source}`.",
     "inspect.scene_counts": "{lines:,} lines, {choices:,} branch points.",
     "inspect.body": "## Body",
     "inspect.choice": "{mark}{options}",
@@ -149,6 +150,9 @@ TEXT: Mapping[str, str] = {
     "samples.why.kind": "first yielding `{kind}` records",
     "samples.why.alias": "alias-producing page",
     "samples.why.multi_form": "first person with several forms",
+    "samples.why.watch": "on the pack's watch list: {note}",
+    "samples.why.placeholder": "first page with the user placeholder `{placeholder}`",
+    "samples.why.low_yield": "lowest yield on this route (guard G3)",
 }
 
 
