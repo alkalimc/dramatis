@@ -30,6 +30,7 @@ from pathlib import Path
 
 from ..archive import Archive
 from ..guards import HIGH
+from ..normalize import YIELD_DETAIL
 from ..pack import Pack
 from ..text import table_head
 from . import inspect as inspect_mod
@@ -132,11 +133,13 @@ def select(archive: Archive, pack: Pack) -> Selection:
         flagged = next((t for t in titles if t in findings), None)
         if flagged is not None:
             sel.add(label, flagged, "findings")
-        # G3 records exactly the pages that produced nothing, with the stated reason.
-        # Counting records per page cannot tell: a record may be filed under another
-        # page's id (a transcluded body's lines belong to its parent's scene).
+        # G3 records the pages that produced nothing, with the stated reason. Counting
+        # records per page cannot tell: a record may be filed under another page's id
+        # (a transcluded body's lines belong to its parent's scene). A yield shortfall is
+        # G3 too, but that page produced records; it counts as a finding, not as empty.
         for t in titles:
-            reason = next((d for g, d in findings.get(t, []) if g == "G3"), None)
+            reason = next((d for g, d in findings.get(t, [])
+                           if g == "G3" and not d.startswith(YIELD_DETAIL)), None)
             if reason is not None:
                 sel.add(label, t, "empty", reason=reason)
                 break

@@ -141,6 +141,10 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
     return rep
 
 
+#: How a G3 yield finding's detail starts. The page produced records, so readers that want
+#: only the pages that produced nothing (the sample's "empty" boundary) skip these.
+YIELD_DETAIL = "yield "
+
 #: Pages with fewer visible letters than this are too small for a yield ratio to mean
 #: anything.
 MIN_VISIBLE = 200
@@ -162,7 +166,7 @@ def _check_yield(ctx: PageContext, route, produced: list[Record], cleaner: Clean
     kept = cleaner.letters("".join(r.prose for r in produced))
     if kept < shown * route.min_yield:
         rep.ledger.add(
-            "G3", f"yield {kept / shown:.0%} of visible text ({kept:,} of {shown:,} "
+            "G3", f"{YIELD_DETAIL}{kept / shown:.0%} of visible text ({kept:,} of {shown:,} "
                   f"letters) is under the route's floor of {route.min_yield:.0%}",
             page=ctx.title)
 

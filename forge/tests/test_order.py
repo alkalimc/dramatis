@@ -11,7 +11,7 @@ from dramatis_forge.archive import Archive
 from dramatis_forge.folio import Folio
 from dramatis_forge.pack import Route
 from dramatis_forge.records import Lore, Scene, Voice
-from dramatis_forge.report import inspect
+from dramatis_forge.report import inspect, samples
 
 #: Headings that sort differently from how the page lists them.
 ZEBRA = (
@@ -48,6 +48,11 @@ def test_a_short_page_with_little_yield_is_reported_not_failed(pack, paths):
         [(severity, detail)] = a.db.execute(
             "SELECT severity, detail FROM guard_findings WHERE page='Alice' AND guard='G3'")
     assert severity == "low" and detail.startswith("yield ") and "floor of 50%" in detail
+    # The sample shows it as the route's first finding; it did produce records, so it is
+    # not the route's first page that produced nothing.
+    with Archive(paths.archive, readonly=True) as a:
+        why = [k for k, _f in samples.select(a, pack).routes["people · prose"]["Alice"]]
+    assert "findings" in why and "empty" not in why
 
 
 def test_the_yield_check_is_off_unless_a_route_sets_a_floor():
