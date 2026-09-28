@@ -13,6 +13,7 @@ watermark. Both are resumable: pages already held are never fetched twice.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -29,6 +30,7 @@ from .archive import Archive
 from .config import Paths
 from .folio import Folio
 from .guards import HIGH
+from .params import Params
 from .pack import Pack, load_pack, pack_dir
 from .report import attribution as attribution_mod
 from .report import coverage as coverage_mod
@@ -147,6 +149,7 @@ def sync(
     `--no-rescope` is there for a quick routine increment.
     """
     pk, paths = _resolve(pack, home)
+    started = time.monotonic()
     with Archive(paths.archive) as archive, _wiki(pk, rate) as wiki:
         p = harvest.plan(wiki, archive, pk, full=full, rescope=rescope, progress=_tick("plan"))
         table = Table(title="first sync" if p.first else ("full sync" if p.full else "sync plan"))
@@ -190,6 +193,8 @@ def sync(
         looked = harvest.refresh_editors(wiki, archive, progress=_tick("editors"))
         console.print(f"editors looked up: {looked:,} revision(s) · requests this run: "
                       f"{wiki.requests:,}")
+        if p.full:
+            _stamp(archive, "sync_full", time.monotonic() - started)
     _build(pk, paths, samples=samples)
 
 
@@ -214,7 +219,21 @@ def build(
     _build(pk, paths, samples=samples)
 
 
+def _stamp(archive: Archive, stage: str, seconds: float) -> None:
+    """Record how long a stage took, for `pipeline.hours`."""
+    timings = dict(archive.get_meta("timings") or {})
+    timings[stage] = round(seconds, 1)
+    archive.set_meta("timings", timings)
+    archive.commit()
+
+
+def _params(paths: Paths) -> Params:
+    """Calibration overrides from `<home>/params.toml`, else the register's defaults."""
+    return Params.load(paths.home / "params.toml")
+
+
 def _build(pk: Pack, paths: Paths, *, samples: bool) -> None:
+    started = time.monotonic()
     console.rule("[bold]normalize")
     with Archive(paths.archive) as archive:
         rep = normalize_mod.run(archive, pk, progress=_tick("normalize"))
@@ -231,7 +250,8 @@ def _build(pk: Pack, paths: Paths, *, samples: bool) -> None:
 
     console.rule("[bold]folio")
     with Archive(paths.archive) as archive:
-        crep = corpus_mod.run(archive, pk, paths.folio, progress=_tick("folio"))
+        crep = corpus_mod.run(archive, pk, paths.folio, params=_params(paths),
+                              progress=_tick("folio"))
     console.print(f"units [bold]{crep.chunks:,}[/bold] · "
                   + " · ".join(f"{t} {n:,}" for t, n in sorted(crep.by_template.items()))
                   + f" · segmenter {crep.segmenter}")
@@ -248,7 +268,9 @@ def _build(pk: Pack, paths: Paths, *, samples: bool) -> None:
         _samples(pk, paths)
 
     console.rule("[bold]reports")
-    with Archive(paths.archive, readonly=True) as archive:
+    with Archive(paths.archive) as archive:
+        # Reports are regenerated on their own in seconds; the build proper ends here.
+        _stamp(archive, "build", time.monotonic() - started)
         ok = _guards(archive, pk)
     _coverage(pk, paths)
     failed = _figures(pk, paths, show=False)

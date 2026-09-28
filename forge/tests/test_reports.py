@@ -33,7 +33,7 @@ def test_boundary_selection_is_deterministic(built, pack):
     assert "empty" in story["Interlude"]             # first G3 by title, with its reason
     people = reasons(first, "people · prose")
     assert people["Alice"][:2] == ["first", "largest"] and "multi_form" in people["Alice"]
-    assert "smallest" in people["Bob"]
+    assert "smallest" in people["Alice (Winter)"]
 
 
 def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):
@@ -78,12 +78,33 @@ def test_residue_scan_finds_leftover_markup(built, pack):
 
 def test_figures_derive_values_and_judge_targets(built, pack):
     figs = {f.key: f for f in figures.resolve(pack, built)}
-    assert figs["units"].value == 13 and figs["units"].passed is True
+    assert figs["units"].value == 15 and figs["units"].passed is True
     assert figs["persons"].value == 2 and figs["forms.alt"].value == 1
     # The toy corpus deliberately has one unexplained empty page, so this target fails.
     assert figs["guards.high"].value == 1 and figs["guards.high"].passed is False
     md = figures.render(figs.values(), pack)
-    assert "| `units` | 13 | ✅ > 0 |" in md and "❌ == 0" in md
+    assert "| `units` | 15 | ✅ > 0 |" in md and "❌ == 0" in md
+
+
+def test_v2_figures(built, pack):
+    figs = {f.key: f for f in figures.resolve(pack, built)}
+    # Every guard is listed, the silent ones too.
+    assert set(figs["guards.by_guard"].value) == {"G1", "G2", "G3", "G4", "G5"}
+    assert figs["guards.by_guard"].value["G5"] == {"high": 0, "low": 0}
+    assert "G2 0/0" in figs["guards.by_guard"].shown
+    # Low findings: no-baseline notes (G1, G4) and the scriptless interlude (G3), which
+    # the pack's note explains.
+    assert sum(v["low"] for v in figs["guards.by_guard"].value.values()) == 3
+    assert figs["guards.unattributed"].value == 2
+    assert figs["cooccur.pairs"].passed and figs["birthdays"].passed
+    assert figs["units.attributed"].value == 10
+    assert figs["cooccur.scenes_per_person"].value == 2.0
+    assert 0 < figs["stopword.top_df"].value <= 1 and "(the)" in figs["stopword.top_df"].shown
+    assert "pipeline.hours" not in figs  # no timings stamped by this build helper
+    with Archive(built.archive) as a:
+        a.set_meta("timings", {"build": 1800, "sync_full": 5400})
+    figs = {f.key: f for f in figures.resolve(pack, built)}
+    assert figs["pipeline.hours"].value == 2.0
 
 
 def test_meets_rejects_unreadable_target():
@@ -123,7 +144,7 @@ def test_attribution_refuses_when_a_unit_lacks_revid(built, pack, tmp_path):
         data = attribution.collect(a, f)
     assert data.complete
     [out] = attribution.render(data, pack, [template], tmp_path / "out")
-    assert out.read_text(encoding="utf-8").startswith("https://toy.invalid 5 13")
+    assert out.read_text(encoding="utf-8").startswith("https://toy.invalid 5 15")
 
     with Folio(built.folio) as f:
         f.db.execute("UPDATE chunks SET revid=NULL WHERE ord=0")

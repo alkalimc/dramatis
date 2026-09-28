@@ -38,7 +38,10 @@ class Chunk:
     text: str
     header: str = ""
     title: str = ""
-    person: str | None = None
+    #: Everyone the unit belongs to — all speakers of a dialogue unit, the owner of a
+    #: voice line or dossier section — resolved through identity where it knows the name.
+    #: The folio builder keeps the roster members among them.
+    persons: tuple[str, ...] = ()
     revid: int | None = None
     span_of: str | None = None
     span_from: int | None = None
@@ -162,6 +165,7 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
     """
     policy = pack.chunking
     label, sep = policy.label, policy.sep
+    person_of = archive.person_of()
     subtitle_kind = policy.kind("subtitle")
     target = t.target or 12
     cap = t.max_span or (target + 6)
@@ -195,6 +199,9 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
             for _seq, speaker, _ in group:
                 if speaker and speaker not in uniq:
                     uniq.append(speaker)
+            # Every speaker, not only the four the header names: attribution is what
+            # person-filtered retrieval reads, so dropping names here drops material.
+            owners = tuple(dict.fromkeys(person_of.get(s, s) for s in uniq))
             head = header.format(
                 group=scene["grp"] or scene["category"] or label("story"),
                 scene=scene["id"],
@@ -207,7 +214,7 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
             for part in _split(body, t.max_chars, pack.chunking.breaks):
                 yield Chunk(
                     template=t.name, page=scene["id"], text=part, header=head,
-                    title=scene["id"], revid=scene["revid"],
+                    title=scene["id"], persons=owners, revid=scene["revid"],
                     span_of=scene["id"], span_from=group[0][0], span_to=group[-1][0],
                 )
 
@@ -230,7 +237,7 @@ def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Itera
         )
         yield Chunk(
             template=t.name, page=r["page"], text=r["text"], header=head,
-            title=r["title"] or r["trigger"] or label("voice"), person=person,
+            title=r["title"] or r["trigger"] or label("voice"), persons=(person,),
             revid=revids.get(r["page"]),
             span_of=f"{r['subject']}#voice", span_from=r["idx"], span_to=r["idx"],
         )
@@ -284,7 +291,7 @@ def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Ite
             head = header.format(person=person_id, section=f" · {label('card')}")
             yield Chunk(
                 template=t.name, page=person_id, text=body, header=head,
-                title=f"{person_id} {label('card')}", person=person_id, revid=revid,
+                title=f"{person_id} {label('card')}", persons=(person_id,), revid=revid,
                 span_of=f"{person_id}#card", span_from=0, span_to=0,
             )
 
@@ -293,7 +300,7 @@ def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Ite
             for part in _split(text, t.max_chars, pack.chunking.breaks):
                 yield Chunk(
                     template=t.name, page=page, text=part, header=head,
-                    title=title or person_id, person=person_id, revid=revid,
+                    title=title or person_id, persons=(person_id,), revid=revid,
                     span_of=f"{person_id}#dossier", span_from=i, span_to=i,
                 )
 
@@ -312,7 +319,8 @@ def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Ite
             body += f"\n{label('source')}{sep('label')}{r['source']}"
         yield Chunk(
             template=t.name, page=r["page"], text=body, header=head,
-            title=r["name"], person=person, revid=ref_revids.get(r["page"]),
+            title=r["name"], persons=(person,) if person else (),
+            revid=ref_revids.get(r["page"]),
             span_of=f"{r['name']}#ref", span_from=0, span_to=0,
         )
 
@@ -335,7 +343,8 @@ def _letter(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iter
         for part in _split(body, t.max_chars, pack.chunking.breaks):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
-                title=r["title"] or label("letter"), person=person_of.get(r["sender"] or ""),
+                title=r["title"] or label("letter"),
+                persons=(person_of[r["sender"]],) if r["sender"] in person_of else (),
                 revid=revids.get(r["page"]),
                 span_of=f"{r['page']}#letter{i}", span_from=i, span_to=i,
             )

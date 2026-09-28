@@ -3,6 +3,7 @@ fingerprint. Also the forge side of the forge → engine contract (see `make con
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -12,8 +13,11 @@ import pytest
 
 from conftest import KNOWN_TERM, build
 
-from dramatis_forge import segment
+from dramatis_forge import corpus, segment
+from dramatis_forge.archive import Archive
 from dramatis_forge.folio import FOLIO_FORMAT_VERSION, Folio
+from dramatis_forge.pack import PersonSource
+from dramatis_forge.params import Params
 
 
 def manifest(path: Path) -> dict:
@@ -24,7 +28,7 @@ def manifest(path: Path) -> dict:
 def test_units_by_template_with_spans(built):
     with Folio(built.folio, readonly=True) as f:
         by = dict(f.db.execute("SELECT template, COUNT(*) FROM chunks GROUP BY 1"))
-        assert by == {"lore": 5, "dialogue": 8}
+        assert by == {"lore": 5, "dialogue": 8, "profile": 2}
         spans = [tuple(r) for r in f.db.execute(
             "SELECT span_from, span_to FROM chunks WHERE span_of='Chapter 1' ORDER BY span_from")]
         # Non-overlapping and contiguous: neighbour expansion depends on it.
@@ -58,10 +62,11 @@ def test_manifest_shape(built, pack):
     assert "neighbor_expand" in m["requires"]
     assert m["segmenter"] == "char-bigram/1"
     assert m["stopwords"] == list(pack.stopwords)
-    assert m["template_shapes"] == {"lore": "lore", "dialogue": "dialogue"}
-    assert m["chunk_count"] == 13 and m["build_fingerprint"].startswith("sha256:")
+    assert m["template_shapes"] == {"lore": "lore", "dialogue": "dialogue", "profile": "profile"}
+    assert m["chunk_count"] == 15 and m["build_fingerprint"].startswith("sha256:")
     assert m["requires"] == ["neighbor_expand"]
-    assert m["wording"] == {} and m["scene_marker"] == ["*", "*"]
+    assert m["wording"] == dict(pack.wording) and m["scene_marker"] == ["*", "*"]
+    assert m["clock.year_offset"] == 100
 
 
 def test_v2_tables_exist_and_enforce_their_checks(built):
@@ -81,6 +86,80 @@ def test_v2_tables_exist_and_enforce_their_checks(built):
             with pytest.raises(sqlite3.IntegrityError):
                 con.execute(bad)
     con.close()
+
+
+def rows(path: Path, sql: str) -> list[tuple]:
+    with Folio(path, readonly=True) as f:
+        return [tuple(r) for r in f.db.execute(sql)]
+
+
+def test_unit_persons_holds_every_roster_speaker(built):
+    """A dialogue unit belongs to all of its roster speakers; names off the roster
+    (Carol) and units nobody speaks in carry no row."""
+    per_unit = rows(built.folio,
+                    "SELECT c.text, group_concat(u.person_id) FROM chunks c "
+                    "LEFT JOIN unit_persons u ON u.chunk_id = c.id "
+                    "WHERE c.template = 'dialogue' GROUP BY c.id ORDER BY c.ord")
+    shared = [t for t, who in per_unit if who and set(who.split(",")) == {"Alice", "Bob"}]
+    assert shared and all("Alice:" in t and "Bob:" in t for t in shared)
+    assert all("Carol" not in (who or "") for _t, who in per_unit)
+    assert rows(built.folio, "SELECT DISTINCT person_id FROM unit_persons ORDER BY 1") == [
+        ("Alice",), ("Bob",)]
+
+
+def test_cooccur_and_knowledge_scope(built):
+    assert rows(built.folio, "SELECT * FROM cooccur") == [("Alice", "Bob", 2)]
+    kinds = dict(rows(built.folio, "SELECT kind, COUNT(*) FROM knowledge_scope GROUP BY 1"))
+    attributed = rows(built.folio, "SELECT COUNT(*) FROM unit_persons")[0][0]
+    assert kinds["self"] == attributed and kinds["lived"] > 0
+    # Lived = other dialogue units of a scene the person speaks in, never outside it.
+    outside = rows(built.folio,
+                   "SELECT COUNT(*) FROM knowledge_scope k JOIN chunks c ON c.id = k.chunk_id "
+                   "WHERE k.kind = 'lived' AND (c.template <> 'dialogue' OR c.span_of NOT IN ("
+                   "  SELECT c2.span_of FROM unit_persons u JOIN chunks c2 ON c2.id = u.chunk_id"
+                   "  WHERE u.person_id = k.person_id))")
+    assert outside == [(0,)]
+
+
+def test_roster_fields_and_coldstart(built):
+    people = {r[0]: r[1:] for r in rows(
+        built.folio, "SELECT person_id, material, persona_confidence, birthday FROM persons")}
+    (alice_m, alice_c, alice_b), (bob_m, bob_c, bob_b) = people["Alice"], people["Bob"]
+    # m / (m + median): the median person (of two, the upper) sits at exactly 0.5.
+    assert alice_m > bob_m > 0 and alice_c == 0.5 and 0 < bob_c < alice_c
+    assert (alice_b, bob_b) == ("03-14", None)
+    assert rows(built.folio, "SELECT * FROM topic_terms WHERE person_id = 'Bob' ORDER BY 2") == [
+        ("Bob", "Fisherman with two boats"), ("Bob", "Harbour")]
+    [(body, version)] = rows(built.folio, "SELECT body, generator_version FROM prompts "
+                                          "WHERE subject = 'host' AND slot = 'coldstart'")
+    assert json.loads(body) == [
+        {"person_id": "Alice", "reason": "Keeper of the northern light"},
+        {"person_id": "Bob", "reason": "Fisherman with two boats"}]
+    assert version.startswith("forge/")
+
+
+def test_coldstart_spreads_factions_then_fills(pack):
+    src = {p: PersonSource(p, {"home": h, "role": f"{p} role"})
+           for p, h in (("a", "x"), ("b", "x"), ("c", "y"), ("d", "x"))}
+    conf = {"a": 0.9, "b": 0.8, "c": 0.1, "d": 0.7}
+    picked = [p["person_id"] for p in corpus.coldstart(src, conf, pack, 3)]
+    assert picked == ["a", "c", "b"]
+    assert [p["person_id"] for p in corpus.coldstart(src, conf, pack, 1)] == ["a"]
+
+
+def test_picks_come_from_params(built, pack, paths, tmp_path):
+    (tmp_path / "params.toml").write_text("[coldstart]\npicks = 1\nunknown = 2\n")
+    params = Params.load(tmp_path / "params.toml")
+    assert params.coldstart.picks == 1 and Params.load(None) == Params()
+    with Archive(paths.archive) as archive:
+        corpus.run(archive, pack, tmp_path / "one.folio", segmenter="bigram", params=params)
+    [(body,)] = rows(tmp_path / "one.folio", "SELECT body FROM prompts WHERE slot='coldstart'")
+    assert len(json.loads(body)) == 1
+
+
+def test_a_malformed_birthday_from_the_pack_is_refused():
+    assert corpus._is_birthday("02-29") and not corpus._is_birthday("13-01")
+    assert not corpus._is_birthday("3-14") and not corpus._is_birthday("ab-cd")
 
 
 def test_fingerprint_deterministic_and_rebuild_replaces(built, pack, tmp_path):

@@ -9,7 +9,9 @@
     [choice] First option | Second option
 
 `people` pages are prose, parsed into sections; they form the roster. A page carrying
-`{{AltForm|<name>}}` is another form of that person. Everything here is invented.
+`{{AltForm|<name>}}` is another form of that person. An `{{Info|key=value|…}}` line is the
+person's dossier: `born` (MM-DD, or anything else when unknown), `home`, `role`.
+Everything here is invented.
 """
 
 from __future__ import annotations
@@ -23,20 +25,25 @@ from dramatis_forge.pack import (
     ContentSpec,
     DocAudit,
     FigureSpec,
+    FindingNote,
     IdentityRules,
     InlineRules,
     Pack,
     PageContext,
+    PersonSource,
     Route,
+    RosterRules,
     SeedSet,
     WikiConfig,
 )
-from dramatis_forge.records import Choice, Line, Lore, Record, Scene
+from dramatis_forge.records import Choice, Dossier, Line, Lore, Record, Scene
 
 STORY_CATEGORY = "Category:Stories"
 RE_SCENE = re.compile(r"\{\{Scene\|category=([^|}]*)\|group=([^|}]*)\}\}")
 RE_SPEECH = re.compile(r"^([A-Z][A-Za-z]*):\s*(.+)$")
 RE_ALT = re.compile(r"\{\{AltForm\|([^}]+)\}\}")
+RE_INFO = re.compile(r"\{\{Info\|([^}]*)\}\}")
+RE_BORN = re.compile(r"^\d\d-\d\d$")
 
 
 def parse_story(ctx: PageContext) -> Iterator[Record]:
@@ -75,11 +82,28 @@ def parse_story(ctx: PageContext) -> Iterator[Record]:
 
 def parse_prose(ctx: PageContext) -> Iterator[Record]:
     warnings: list[str] = []
-    for section in ctx.clean.split_sections(ctx.wikitext, warnings):
+    info = RE_INFO.search(ctx.wikitext)
+    if info:
+        fields = dict(part.split("=", 1) for part in info.group(1).split("|") if "=" in part)
+        yield Dossier(page=ctx.title, fields=fields, revid=ctx.revid)
+    for section in ctx.clean.split_sections(RE_INFO.sub("", ctx.wikitext), warnings):
         yield Lore(page=ctx.title, path=section["path"], text=section["text"],
                    revid=ctx.revid)
     for detail in warnings:
         ctx.warn(detail)
+
+
+def birthday(person: PersonSource) -> str | None:
+    born = person.facets.get("born", "")
+    return born if RE_BORN.match(born) else None
+
+
+ROSTER = RosterRules(
+    birthday=birthday,
+    topic_terms=lambda p: [p.facets[k] for k in ("home", "role") if p.facets.get(k)],
+    faction=lambda p: p.facets.get("home", ""),
+    reason=lambda p: p.facets.get("role", ""),
+)
 
 
 def resolve_identity(pages, roster):
@@ -126,16 +150,32 @@ PACK = Pack(
             ChunkTemplate("lore", sources=("lore",), max_chars=600),
             ChunkTemplate("dialogue", sources=("line", "choice"), max_chars=600,
                           target=3, max_span=4),
+            ChunkTemplate("profile", sources=("dossier",), max_chars=600),
         ),
         headers={"lore": "[lore] {page}{path}",
-                 "dialogue": "[scene] {group} · {scene}{speakers}"},
+                 "dialogue": "[scene] {group} · {scene}{speakers}",
+                 "profile": "[file] {person}{section}"},
     ),
     figures=(
         FigureSpec("units", "folio:chunk_count", target="> 0"),
         FigureSpec("persons", "derived:persons", target=">= 2"),
         FigureSpec("forms.alt", "derived:forms_by_kind", member="alt", target="== 1"),
         FigureSpec("guards.high", "derived:guards_high", target="== 0"),
+        FigureSpec("guards.by_guard", "derived:guards_by_guard"),
+        FigureSpec("guards.unattributed", "derived:guards_unattributed"),
+        FigureSpec("units.attributed", "derived:units_attributed"),
+        FigureSpec("cooccur.pairs", "derived:cooccur_pairs", target="== 1"),
+        FigureSpec("cooccur.scenes_per_person", "derived:cooccur_scenes_per_person"),
+        FigureSpec("stopword.top_df", "derived:stopword_top_df"),
+        FigureSpec("pipeline.hours", "derived:pipeline_hours"),
+        FigureSpec("birthdays", "derived:birthdays", target="== 1"),
     ),
+    finding_notes=(
+        FindingNote("G3", "marked as having no script", "interludes carry no script"),
+    ),
+    roster=ROSTER,
+    wording={"host.name": "Keeper", "user.title": "Captain {name}"},
+    year_offset=100,
     audit=DocAudit(id_prefixes=("D",), planned_keys=("units.later",)),
     text={"samples.title": "# Toy samples", "record.lore": "prose sections"},
     stopwords=("the", "a"),
