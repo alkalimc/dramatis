@@ -889,15 +889,18 @@ fn calibrate(path: &Path, suite_path: &Path, fit: &Fit, samples_out: Option<&Pat
     );
     let show = |label: &str, a: &eval::calibrate::Assessment| {
         println!(
-            "{label} ({} queries, families weighted equally): high {:.1}% right {:.1}% · \
-             medium {:.1}% right {:.1}% · low {:.1}% right {:.1}%",
+            "{label} ({} queries, families weighted equally): high {:.1}% right {:.1}% \
+             (recall {:.1}% of right) · medium {:.1}% right {:.1}% · low {:.1}% right {:.1}% \
+             (recall {:.1}% of wrong)",
             a.samples,
             a.high_share * 100.0,
             a.high_answered * 100.0,
+            a.high_recall * 100.0,
             a.medium_share * 100.0,
             a.medium_answered * 100.0,
             a.low_share * 100.0,
-            a.low_answered * 100.0
+            a.low_answered * 100.0,
+            a.low_recall * 100.0
         );
     };
     show("fit    ", &fit.fit);

@@ -43,10 +43,8 @@ impl Default for Retrieve {
 /// `low_entropy`; `High` when the best score reaches `high_top1` and the window is at least
 /// as peaked as `high_entropy`; `Medium` otherwise.
 ///
-/// `top1` is a raw BM25 score, so its scale belongs to the corpus. **The defaults are
-/// uncalibrated placeholders** (the entropy half of `Low` is off): the register's values
-/// come from `dramatis-cli calibrate` on the corpus's structural suite and reach the engine
-/// through `params.toml`.
+/// `top1` is a raw BM25 score, so its scale belongs to the corpus the bands were fitted
+/// on; a rebuilt or different corpus needs a new `dramatis-cli calibrate` run.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ConfidenceBands {
@@ -62,12 +60,18 @@ pub struct ConfidenceBands {
 }
 
 impl Default for ConfidenceBands {
+    /// Fitted on the structural suite by
+    /// `dramatis-cli calibrate --per-family 1000 --holdout 1000 --family voice --family section`
+    /// (`--high-precision 0.95`): up to 1000 queries per family fitted, a disjoint 1000 per
+    /// family held out, families weighted equally. Only those two families are used because
+    /// the alias families are answered by construction once the alias stage filters to the
+    /// person, so they say nothing about the scores.
     fn default() -> Self {
         Self {
-            low_top1: 5.0,
-            low_entropy: 1.0,
-            high_top1: 10.0,
-            high_entropy: 0.5,
+            low_top1: 9.84,
+            low_entropy: 0.283,
+            high_top1: 9.84,
+            high_entropy: 0.196,
         }
     }
 }

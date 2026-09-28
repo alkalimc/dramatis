@@ -46,16 +46,20 @@ pub struct Calibration {
 }
 
 /// Family-weighted share of queries at each level, and the share of those whose top hit
-/// was relevant.
+/// was relevant (each band's precision, read as "right" for `High` and "wrong" for `Low`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Assessment {
     pub samples: usize,
     pub high_share: f64,
     pub high_answered: f64,
+    /// Of the queries whose top hit was relevant, the share called `High`.
+    pub high_recall: f64,
     pub medium_share: f64,
     pub medium_answered: f64,
     pub low_share: f64,
     pub low_answered: f64,
+    /// Of the queries whose top hit was not relevant, the share called `Low`.
+    pub low_recall: f64,
 }
 
 /// Run the suite through `index` as `config` describes and collect one sample per query.
@@ -223,21 +227,19 @@ pub fn assess(samples: &[Sample], bands: &ConfidenceBands) -> Assessment {
             right[at] += w;
         }
     }
-    let rate = |i: usize| {
-        if share[i] > 0.0 {
-            right[i] / share[i]
-        } else {
-            0.0
-        }
-    };
+    let ratio = |a: f64, b: f64| if b > 0.0 { a / b } else { 0.0 };
+    let answered: f64 = right.iter().sum();
+    let missed: f64 = share.iter().sum::<f64>() - answered;
     Assessment {
         samples: samples.len(),
         high_share: share[0],
-        high_answered: rate(0),
+        high_answered: ratio(right[0], share[0]),
+        high_recall: ratio(right[0], answered),
         medium_share: share[1],
-        medium_answered: rate(1),
+        medium_answered: ratio(right[1], share[1]),
         low_share: share[2],
-        low_answered: rate(2),
+        low_answered: ratio(right[2], share[2]),
+        low_recall: ratio(share[2] - right[2], missed),
     }
 }
 
@@ -336,6 +338,9 @@ mod tests {
             (0.25, 0.5, 0.25)
         );
         assert_eq!((a.high_answered, a.low_answered), (1.0, 0.0));
+        // Answered weight: 0.25 (high) + 0.5 (medium); missed weight: 0.25, all of it low.
+        assert!((a.high_recall - 1.0 / 3.0).abs() < 1e-9);
+        assert_eq!(a.low_recall, 1.0);
     }
 
     #[test]
