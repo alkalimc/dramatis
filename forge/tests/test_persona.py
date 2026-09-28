@@ -36,9 +36,17 @@ from dramatis_forge.persona.endpoints import (
 )
 from dramatis_forge.persona.gates import META, PRESCRIPTIVE, STRUCTURE, Lexicons, check
 from dramatis_forge.persona.generator import DEFAULT, Generator, HostSource
-from dramatis_forge.persona.material import estimate_tokens, for_host, for_person
+from dramatis_forge.persona.material import estimate_tokens, for_host, for_person, speech_units
 from dramatis_forge.persona.params import Persona
-from dramatis_forge.persona.run import FAILED, RESTORED, RESUMED, WRITTEN, probe_set
+from dramatis_forge.persona.run import (
+    FAILED,
+    RESTORED,
+    RESUMED,
+    SKIPPED,
+    WRITTEN,
+    ineligible,
+    probe_set,
+)
 
 GEN = replace(
     DEFAULT,
@@ -294,8 +302,26 @@ def test_estimate_counts_wide_characters_one_each():
     assert estimate_tokens("") == 0
 
 
-def test_probe_set_is_thickest_three_then_thinnest_two_with_material(paths):
-    assert probe_set(open_db(paths)) == ["Alice", "Bob", "Carol", "Erin", "Frank"]
+def test_probe_set_is_thickest_three_then_thinnest_two_eligible(paths):
+    # Erin has the lowest confidence but only a card: the thin end skips her.
+    assert probe_set(open_db(paths), Persona()) == ["Alice", "Bob", "Carol", "Frank", "Gil"]
+    # With the rule off she is back, and Dan (no material at all) still is not.
+    assert probe_set(open_db(paths), Persona(min_own_units=0)) == [
+        "Alice", "Bob", "Carol", "Erin", "Frank"]
+
+
+def test_eligibility_counts_voice_and_dialogue_units_by_shape(paths):
+    db = open_db(paths)
+    assert speech_units(db) == {"Alice": 4, "Bob": 3, "Carol": 1, "Frank": 1, "Gil": 1}
+    skip = ineligible(db, Persona())
+    assert sorted(skip) == ["Dan", "Erin"]
+    assert "0 voice or dialogue unit(s)" in skip["Erin"] and "min_own_units 1" in skip["Erin"]
+    # A stricter floor, and templates found by declared shape, not by name.
+    assert sorted(ineligible(db, Persona(min_own_units=2))) == [
+        "Carol", "Dan", "Erin", "Frank", "Gil"]
+    db.execute("UPDATE manifest SET value=? WHERE key='template_shapes'",
+               (json.dumps({"profile": "profile", "voice": "lore", "dialogue": "dialogue"}),))
+    assert speech_units(db) == {"Alice": 2, "Bob": 2, "Carol": 1}
 
 
 # --------------------------------------------------------------------------- #
@@ -388,8 +414,8 @@ def test_placeholder_itself_passes():
 
 def test_run_writes_passing_people_and_reports_the_rest(toy, paths, endpoints_file):
     replies = {"Alice": "responses_ok.json", "Bob": "responses_prescriptive.json",
-               "Carol": "responses_meta_leak.json", "Erin": "responses_ok.json",
-               "Frank": "responses_ok.json"}
+               "Carol": "responses_meta_leak.json", "Frank": "responses_ok.json",
+               "Gil": "responses_ok.json"}
 
     def reply(body: dict) -> dict:
         user = body["input"][1]["content"]
@@ -400,11 +426,12 @@ def test_run_writes_passing_people_and_reports_the_rest(toy, paths, endpoints_fi
     result = run(toy, paths, endpoints_file, ep)
     rep = result.report
     status = {o.subject: o.status for o in rep.outcomes}
-    assert status == {"Alice": WRITTEN, "Bob": FAILED, "Carol": FAILED, "Dan": "no material",
-                      "Erin": WRITTEN, "Frank": WRITTEN, "host": WRITTEN}
-    assert len(ep.requests) == 6  # one call per subject with material; none for Dan
+    assert status == {"Alice": WRITTEN, "Bob": FAILED, "Carol": FAILED, "Dan": SKIPPED,
+                      "Erin": SKIPPED, "Frank": WRITTEN, "Gil": WRITTEN, "host": WRITTEN}
+    assert len(ep.requests) == 6  # one call per eligible subject; none for Dan or Erin
     assert rep.meta_leak == 1 and rep.prescriptive_rate == round(1 / 6, 4)
-    assert rep.missing == ["Bob", "Carol", "Dan"]
+    assert rep.missing == ["Bob", "Carol", "Dan", "Erin"]
+    assert [o.subject for o in rep.skipped] == ["Dan", "Erin"]
 
     r = rows(paths)
     assert r[("Alice", "system")][0].startswith("You are Alice")
@@ -423,6 +450,10 @@ def test_run_writes_passing_people_and_reports_the_rest(toy, paths, endpoints_fi
     assert report["figures"] == {"persona.meta_leak": 1, "prescriptive.rate": round(1 / 6, 4)}
     assert any("prescriptive" in r for s in report["subjects"] if s["subject"] == "Bob"
                for r in s["reasons"])
+    erin = next(s for s in report["subjects"] if s["subject"] == "Erin")
+    assert erin["status"] == SKIPPED and "min_own_units" in erin["reasons"][0]
+    md = (paths.pack_dir / "persona" / "REPORT.md").read_text()
+    assert "| Erin | skipped |" in md and "skipped, no words of their own: 2" in md
     assert KEY not in json.dumps(report)
 
 
@@ -472,8 +503,8 @@ def test_call_errors_leave_rows_alone_and_exit_nonzero(toy, paths, endpoints_fil
 def test_probe_writes_readable_files(toy, paths, endpoints_file):
     ep = FakeEndpoint(recorded("chat_ok.json"))
     result = run(toy, paths, endpoints_file, ep, wire="chat", probe=True)
-    assert [o.subject for o in result.report.outcomes] == ["Alice", "Bob", "Carol", "Erin",
-                                                            "Frank"]
+    assert [o.subject for o in result.report.outcomes] == ["Alice", "Bob", "Carol", "Frank",
+                                                            "Gil"]
     probe = paths.pack_dir / "persona" / "probe"
     md = sorted(probe.glob("*.md"))
     assert len(md) == 5 and len(list(probe.glob("*.json"))) == 5
@@ -495,6 +526,26 @@ def test_only_rejects_unknown_names(toy, paths, endpoints_file):
         run(toy, paths, endpoints_file, FakeEndpoint(), only=["host"], gen=DEFAULT)
 
 
+def test_only_refuses_a_person_without_words_of_their_own(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    with pytest.raises(UsageError, match="Erin gets no persona: 0 voice or dialogue") as exc:
+        run(toy, paths, endpoints_file, ep, only=["Alice", "Erin"])
+    assert "min_own_units" in exc.value.hint and not ep.requests
+
+
+def test_a_skipped_person_loses_rows_an_older_rule_wrote(toy, paths, endpoints_file, tmp_path):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    off = tmp_path / "params.toml"
+    off.write_text("[persona]\nmin_own_units = 0\n")
+    execute(toy, paths, endpoints_path=endpoints_file("responses"), transport=ep.transport,
+            counter=estimate_tokens, generator=GEN, params_path=off, lookup=key_lookup(),
+            only=["Erin"])
+    assert ("Erin", "system") in rows(paths)
+    rep = run(toy, paths, endpoints_file, ep, gen=DEFAULT).report
+    assert {o.subject: o.status for o in rep.outcomes}["Erin"] == SKIPPED
+    assert not any(s == "Erin" for s, _sl in rows(paths)) and len(ep.requests) == 6  # Erin once, then 5 eligible
+
+
 def test_the_default_generator_without_host_skips_it(toy, paths, endpoints_file):
     ep = FakeEndpoint(recorded("responses_ok.json"))
     rep = run(toy, paths, endpoints_file, ep, gen=DEFAULT).report
@@ -506,6 +557,7 @@ def test_params_override_from_toml(tmp_path):
     path.write_text("[persona]\nprompt_tokens = 500\ntone_rules = [2, 6]\nunknown = 1\n")
     p = Persona.load(path)
     assert p.prompt_tokens == 500 and p.tone_rules == (2, 6) and p.capability_chars == 40
+    assert p.min_own_units == 1
     assert Persona.load(tmp_path / "missing.toml") == Persona()
 
 

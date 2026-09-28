@@ -24,7 +24,7 @@ from .client import Client, request
 from .endpoints import Endpoints, EndpointsError, KeyLookup, persona_target
 from .material import HOST, estimate_tokens
 from .params import Persona
-from .run import Context, Report, probe_set, resolve_subject, roster, run
+from .run import Context, Report, ineligible, probe_set, resolve_subject, roster, run
 from .store import RawCache
 
 
@@ -98,7 +98,7 @@ def execute(
     root = paths.pack_dir / "persona"
     db = sqlite3.connect(paths.folio)
     try:
-        subjects = _subjects(db, gen, probe=probe, only=only)
+        subjects = _subjects(db, gen, params, probe=probe, only=only)
         ctx = Context(db=db, gen=gen, params=params, version=version, count=count,
                       sep=pack.chunking.sep("label"), cache=RawCache(root / "raw"),
                       connect=connect, placeholder=placeholder, force=force,
@@ -128,9 +128,10 @@ def user_placeholder(folio: Path) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _subjects(db: sqlite3.Connection, gen: generator_mod.Generator, *, probe: bool,
-              only: list[str] | None) -> list[str]:
+def _subjects(db: sqlite3.Connection, gen: generator_mod.Generator, params: Persona, *,
+              probe: bool, only: list[str] | None) -> list[str]:
     if only:
+        skip = ineligible(db, params)
         picked = []
         for name in only:
             subject = resolve_subject(db, name)
@@ -139,9 +140,13 @@ def _subjects(db: sqlite3.Connection, gen: generator_mod.Generator, *, probe: bo
                                  "use a person id, a display name, an alias, or `host`")
             if subject == HOST and not gen.host_system:
                 raise UsageError("the pack's generator does not generate the host")
+            if subject in skip:
+                raise UsageError(f"{subject} gets no persona: {skip[subject]}",
+                                 "a persona is written only from a person's own words; "
+                                 "set persona.min_own_units in params.toml to change the rule")
             if subject not in picked:
                 picked.append(subject)
         return picked
     if probe:
-        return probe_set(db)
+        return probe_set(db, params)
     return roster(db) + ([HOST] if gen.host_system and gen.host is not None else [])

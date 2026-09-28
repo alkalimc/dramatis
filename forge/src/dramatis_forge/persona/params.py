@@ -28,6 +28,10 @@ class Persona:
     story_tokens: int = 4000
     #: Attempts per endpoint call before the person is reported as failed.
     retries: int = 3
+    #: Least number of voice and dialogue units attributed to a person for them to get a
+    #: persona at all. Below it they have no words of their own, only a card or a note
+    #: about them, and a generator can only invent a voice. 0 turns the rule off.
+    min_own_units: int = 1
 
     def prompt_values(self) -> dict[str, int]:
         """The budgets a generator prompt may state, by placeholder name. `prompt_chars`
