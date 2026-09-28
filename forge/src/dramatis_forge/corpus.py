@@ -1,10 +1,8 @@
 """Assemble a folio: chunks, lexical index, roster, aliases, stats, manifest.
 
-Vectors are deliberately *not* written here. Encoding needs a model endpoint, so
-folding it into this stage would make the whole corpus build depend on one being
-reachable — and the chunk set is the thing worth iterating on, dozens of times, with
-no model in sight. `encode` fills the vector table afterwards and is the only stage
-that needs weights.
+Vectors are deliberately *not* written here. Encoding needs a model, so folding it
+into this stage would make the whole corpus build depend on one — and the chunk set is
+the thing worth iterating on, dozens of times, with no model in sight.
 
 Guard G5 runs here. Its job is to catch the failures that produce a *plausible* corpus
 — one that builds, counts up, and is quietly worse than it looks: a template that

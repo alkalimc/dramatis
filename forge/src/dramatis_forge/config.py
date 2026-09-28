@@ -75,7 +75,7 @@ class Paths:
 
     @property
     def folio(self) -> Path:
-        """The distributable: chunks, vectors, roster, aliases, prompts, manifest."""
+        """The distributable: chunks, lexical index, roster, aliases, prompts, manifest."""
         return self.pack_dir / f"{self.pack}.folio"
 
     @property

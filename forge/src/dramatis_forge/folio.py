@@ -1,28 +1,25 @@
 """`*.folio` — the knowledge base is one file.
 
-A single SQLite database holding everything the runtime needs and nothing it does
-not: retrieval units, their lexical index, their vectors, the person roster, the
-alias dictionary, the synthesised prompts, and a manifest that says exactly which
-build produced all of it.
+A single SQLite database holding everything the runtime reads from the corpus:
+retrieval units and their lexical index, the person roster with per-person tables
+(attribution, co-appearance, knowledge scope), the alias dictionary, the synthesised
+prompts, and a manifest that says exactly which build produced all of it.
 
 Design notes worth the space:
 
-**Vectors live here too, in one contiguous blob ordered by `chunks.ord`.** An
-earlier design shipped them as a separate file to support "one corpus, many
-encoders". That flexibility had no user, and it cost an extra distributable plus a
-version-compatibility rule between two files. Maintainers who want to compare two
-encoders build both locally; the distribution does not have to model it.
+**No vectors are written.** The lexical path is the only retrieval path for now. The
+`vectors` table is part of the format but stays empty; dense retrieval will read its
+vectors from a sidecar file named after the encoder, so changing encoders never
+rebuilds the corpus.
 
-**Prompts live here too.** They are derived from this corpus by a generator whose
+**Prompts live here.** They are derived from this corpus by a generator whose
 output is only valid for it, so co-locating them makes lineage automatic instead of
 making it a constraint someone has to enforce.
 
 **Chunks carry their span.** `span_of` / `span_from` / `span_to` identify the source
-range a unit covers. Dialogue windows overlap by construction — that is good for
-recall and bad for result diversity, since a top-6 could otherwise be six
-half-identical windows of one conversation. Recording the span lets the engine merge
-or cap overlapping hits at query time, which is where the decision belongs: the
-corpus should keep the recall, the ranker should spend it.
+range a unit covers. Units never overlap, so a hit carries no context of its own; the
+span is what lets the engine fetch the adjacent units of a hit at query time
+(`neighbor_expand`, a declared reader requirement).
 
 **One integer format version plus a build fingerprint**, not a five-component
 semver range. This is a single-user local application; a dependency solver would be
@@ -55,7 +52,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     header     TEXT,                  -- context line prepended when embedding
     text       TEXT NOT NULL,         -- body as retrieved and shown
     chars      INTEGER NOT NULL,
-    span_of    TEXT,                  -- container id for overlapping units
+    span_of    TEXT,                  -- container (scene, page) the unit's span is in
     span_from  INTEGER,
     span_to    INTEGER
 );

@@ -28,8 +28,8 @@ htmlcov/
 *.gguf
 *.safetensors
 *.bundle
-out/
-samples/
+/out/
+/samples/
 FIGURES.md
 COVERAGE.md
 ATTRIBUTION.md
