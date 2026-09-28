@@ -84,6 +84,17 @@ pub struct Person {
     /// rather than to apologise: a thinly covered person should be written as terse and
     /// unwilling to speculate, which is a characterisation.
     pub persona_confidence: f64,
+    /// `MM-DD`, when the source gives one.
+    pub birthday: Option<String>,
+}
+
+/// Why a unit is part of a person's first-hand knowledge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The unit is attributed to them.
+    Own,
+    /// Another unit of a scene they speak in.
+    Lived,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

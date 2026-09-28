@@ -13,5 +13,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+[features]
+# Synthetic corpora for tests, here and in dependent crates.
+fixture = []
+
 [dev-dependencies]
+folio = { path = ".", features = ["fixture"] }
 anyhow.workspace = true
