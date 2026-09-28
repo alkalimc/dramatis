@@ -265,7 +265,7 @@ def test_host_material_is_found_by_name(paths):
 
 def test_estimate_counts_wide_characters_one_each():
     assert estimate_tokens("abcdefgh") == 2
-    assert estimate_tokens("一二三") == 3
+    assert estimate_tokens("\u4e00\u4e8c\u4e09") == 3  # three wide characters
     assert estimate_tokens("") == 0
 
 
