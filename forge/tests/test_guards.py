@@ -69,3 +69,9 @@ def test_baseline_accept_show_round_trip(built, pack, wiki):
     assert not any("no accepted baseline" in d for _s, _p, d in g1)
     assert any(s == HIGH and "story count FELL: 4 → 3" in d for s, _p, d in g1)
     assert not any("no accepted baseline" in d for _s, _p, d in findings(built, "G4"))
+
+    # Accepting the reviewed counts clears the shrink on the next offline build.
+    with Archive(built.archive) as a:
+        baseline.accept(a)
+    build(pack, built)
+    assert not any("FELL" in d for _s, _p, d in findings(built, "G1"))
