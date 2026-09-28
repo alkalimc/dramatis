@@ -210,7 +210,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
                 L.append(f"> {ln['text']}")
             L.append("")
             if ln["seq"] + 1 in by_seq:
-                L += [say("inspect.choice", mark=policy.mark(policy.label("protagonist")),
+                L += [say("inspect.choice", mark=policy.mark(policy.label("options")),
                           options=" / ".join(by_seq[ln["seq"] + 1]["options"])), ""]
 
     if "dossier" in rec:

@@ -31,6 +31,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..chunk import engine_meta_test
 from ..config import Paths
 from ..guards import GUARDS, HIGH
 from ..pack import Pack, pack_dir
@@ -306,6 +307,16 @@ def _d_same_person_copies(src: _Sources, _m: str | None):
         "having count(distinct c.page) > 1)", names).fetchone()[0])
 
 
+def _d_engine_meta_headers(src: _Sources, _m: str | None):
+    """Unit headers still showing a voice trigger key or a scene's page-part suffix."""
+    assert src.archive is not None and src.folio is not None
+    triggers = [r[0] for r in src.archive.execute(
+        "select distinct trigger from voices where trigger <> ''")]
+    test = engine_meta_test(src.pack.chunking, triggers)
+    return _count(sum(1 for row in src.folio.execute("select template, page, header from chunks")
+                      if test(*row)))
+
+
 def _d_birthdays(src: _Sources, _m: str | None):
     """Persons whose birthday the builder could read as `MM-DD`."""
     assert src.folio is not None
@@ -538,6 +549,7 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "cooccur_pairs": (("folio",), _d_cooccur_pairs),
     "cooccur_scenes_per_person": (("folio",), _d_cooccur_scenes_per_person),
     "birthdays": (("folio",), _d_birthdays),
+    "engine_meta_headers": (("archive", "folio"), _d_engine_meta_headers),
     "form_copies": (("folio",), _d_form_copies),
     "same_person_copies": (("folio",), _d_same_person_copies),
     "stopword_top_df": (("folio",), _d_stopword_top_df),

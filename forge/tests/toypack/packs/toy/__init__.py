@@ -171,6 +171,7 @@ PACK = Pack(
         FigureSpec("stopword.top_df", "derived:stopword_top_df"),
         FigureSpec("pipeline.hours", "derived:pipeline_hours"),
         FigureSpec("birthdays", "derived:birthdays", target="== 1"),
+        FigureSpec("units.engine_meta", "derived:engine_meta_headers", target="== 0"),
     ),
     finding_notes=(
         FindingNote("G3", "marked as having no script", "interludes carry no script"),
