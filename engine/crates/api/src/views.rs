@@ -73,6 +73,27 @@ impl Default for SceneMarker {
     }
 }
 
+// ---- clock ----
+
+/// The header's clock. Derived from the local wall clock on every call, never stored.
+///
+/// The in-world year is the local year minus an offset that belongs to the corpus, not to
+/// this code: it is read from the folio manifest key `clock.year_offset`, written by the
+/// pack. Month and day are the local ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Clock {
+    pub in_world: InWorldDate,
+    /// Local time, `HH:MM`.
+    pub local_time: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct InWorldDate {
+    pub year: i32,
+    pub month: u8,
+    pub day: u8,
+}
+
 // ---- presence ----
 
 /// The waiting panel: pure data, no model call.
@@ -506,13 +527,25 @@ pub struct QuietHours {
     pub to: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Settings {
     pub user_name: Option<String>,
     pub birthday: Option<MonthDay>,
-    /// `None`: no quiet hours.
+    /// `None`: no quiet hours. The engine fills the register default on first run.
     pub quiet_hours: Option<QuietHours>,
     pub notifications: bool,
+}
+
+impl Default for Settings {
+    /// Notifications are on until the user turns them off.
+    fn default() -> Self {
+        Self {
+            user_name: None,
+            birthday: None,
+            quiet_hours: None,
+            notifications: true,
+        }
+    }
 }
 
 // ---- endpoints ----

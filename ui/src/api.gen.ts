@@ -12,10 +12,23 @@ export const commands = {
 	/**  The corpus's runtime phrasing. */
 	wording: () => typedError<Wording, ApiError>(__TAURI_INVOKE("wording")),
 	/**
-	 *  The user opened the app or came back from idle. Returns the waiting panel; the
-	 *  host's line and any opening arrive as events.
+	 *  The user opened the app or came back from idle. Returns the waiting panel at once
+	 *  (no model call). What the engine then says arrives as `MessageAdded` (streamed
+	 *  through `MessageDelta` first) in the host's channel: on the very first open with a
+	 *  chat endpoint that is the host's introduction, shown with the [`coldstart`] card;
+	 *  afterwards at most one line about a non-empty digest. Then at most one person's
+	 *  opening, in their own channel. Nothing is said while quota is quiet or exhausted.
+	 * 
+	 *  [`coldstart`]: Api::coldstart
 	 */
 	presence: () => typedError<Digest, ApiError>(__TAURI_INVOKE("presence")),
+	/**
+	 *  The first-open recommendation card: people picked when the corpus was built,
+	 *  each with a reason from their material. Everyone on it is still frozen.
+	 */
+	coldstart: () => typedError<Candidate[], ApiError>(__TAURI_INVOKE("coldstart")),
+	/**  The in-world date and the local time, for the header. */
+	clock: () => typedError<Clock, ApiError>(__TAURI_INVOKE("clock")),
 	/**  The waiting panel. Pure data. */
 	digest: () => typedError<Digest, ApiError>(__TAURI_INVOKE("digest")),
 	roster: () => typedError<Roster, ApiError>(__TAURI_INVOKE("roster")),
@@ -214,6 +227,19 @@ export type CitationView = {
 	revision_url: string | null,
 };
 
+/**
+ *  The header's clock. Derived from the local wall clock on every call, never stored.
+ * 
+ *  The in-world year is the local year minus an offset that belongs to the corpus, not to
+ *  this code: it is read from the folio manifest key `clock.year_offset`, written by the
+ *  pack. Month and day are the local ones.
+ */
+export type Clock = {
+	in_world: InWorldDate,
+	/**  Local time, `HH:MM`. */
+	local_time: string,
+};
+
 /**  How much the corpus supports an answer, as retrieval measured it. */
 export type Confidence = "high" | "medium" | "low";
 
@@ -275,6 +301,12 @@ export type ImagePart = {
 	/**  `image/png`, `image/jpeg`, ... */
 	mime: string,
 	data_base64: string,
+};
+
+export type InWorldDate = {
+	year: number,
+	month: number,
+	day: number,
 };
 
 /**  A file on this machine the UI may display or play (avatar, note, audio, attachment). */
@@ -524,7 +556,7 @@ export type SearchResults = {
 export type Settings = {
 	user_name: string | null,
 	birthday: MonthDay | null,
-	/**  `None`: no quiet hours. */
+	/**  `None`: no quiet hours. The engine fills the register default on first run. */
 	quiet_hours: QuietHours | null,
 	notifications: boolean,
 };

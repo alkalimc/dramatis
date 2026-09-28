@@ -89,9 +89,20 @@ commands! {
     });
     /// The corpus's runtime phrasing.
     fn wording() -> Wording = Ok(Wording::default());
-    /// The user opened the app or came back from idle. Returns the waiting panel; the
-    /// host's line and any opening arrive as events.
+    /// The user opened the app or came back from idle. Returns the waiting panel at once
+    /// (no model call). What the engine then says arrives as `MessageAdded` (streamed
+    /// through `MessageDelta` first) in the host's channel: on the very first open with a
+    /// chat endpoint that is the host's introduction, shown with the [`coldstart`] card;
+    /// afterwards at most one line about a non-empty digest. Then at most one person's
+    /// opening, in their own channel. Nothing is said while quota is quiet or exhausted.
+    ///
+    /// [`coldstart`]: Api::coldstart
     fn presence() -> Digest = Ok(Digest::default());
+    /// The first-open recommendation card: people picked when the corpus was built,
+    /// each with a reason from their material. Everyone on it is still frozen.
+    fn coldstart() -> Vec<Candidate> = Ok(Vec::new());
+    /// The in-world date and the local time, for the header.
+    fn clock() -> Clock;
 
     // ---- presence and people ----
 
@@ -214,6 +225,9 @@ mod tests {
     fn stub_boots_in_library_form() {
         assert_eq!(now(Stub.app_status()).unwrap().form, AppForm::Library);
         assert!(!now(Stub.endpoints()).unwrap().presets.is_empty());
+        assert!(now(Stub.settings()).unwrap().notifications);
+        assert!(now(Stub.coldstart()).unwrap().is_empty());
+        assert_eq!(now(Stub.clock()), Err(ApiError::NotImplemented));
         assert_eq!(
             now(Stub.set_key("p".into(), "k".into())),
             Err(ApiError::NotImplemented)
