@@ -6,7 +6,9 @@ members = [
     "crates/eval",
     "crates/world",
     "crates/agent",
+    "crates/api",
     "bins/dramatis-cli",
+    "bins/dramatis",
 ]
 
 [workspace.package]
@@ -27,6 +29,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 jieba-rs = "0.8"
+# The UI seam. `specta` + `tauri-specta` are release candidates: the 2.x line is the one
+# that supports Tauri 2, and rc.25 is the pair `specta-typescript` 0.0.12 is built against.
+schemars = "=1.2.2"
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "=0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+tauri = "=2.12.0"
+tauri-build = "=2.7.0"
+async-trait = "=0.1.92"
+toml = "=1.1.6"
 
 [profile.release]
 # The dense path is an exact full scan over every vector. LTO and a single codegen unit

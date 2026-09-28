@@ -1,0 +1,23 @@
+[package]
+name = "dramatis"
+description = "The desktop app: one process holding the window, the tray and the engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "dramatis"
+path = "src/main.rs"
+
+[features]
+# Embed `ui/dist` instead of loading the dev server. `tauri build` turns this on.
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+api = { path = "../../crates/api", features = ["tauri"] }
+tauri.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true

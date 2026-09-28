@@ -1,0 +1,25 @@
+[package]
+name = "api"
+description = "The seam between the engine and the UI: commands, events, tool schemas, endpoints"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Tauri glue: command handlers, typed events and the TypeScript exporter. Off by default
+# so the rest of the workspace builds on hosts without a webview toolkit.
+tauri = ["dep:tauri", "dep:tauri-specta", "dep:specta-typescript"]
+
+[dependencies]
+async-trait.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tauri = { workspace = true, optional = true }
+tauri-specta = { workspace = true, optional = true }
+specta-typescript = { workspace = true, optional = true }
