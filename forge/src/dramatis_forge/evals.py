@@ -147,14 +147,17 @@ class _Index:
         self.title: dict[str, str] = {}
         self.template: dict[str, str] = {}
         for r in folio.db.execute(
-            "SELECT id,page,person,template,title,header,text FROM chunks ORDER BY ord"
+            "SELECT id,page,template,title,header,text FROM chunks ORDER BY ord"
         ):
             self.by_page.setdefault(r["page"], []).append(r["id"])
-            if r["person"]:
-                self.by_person.setdefault(r["person"], []).append(r["id"])
             self.text[r["id"]] = f"{r['header']}\n{r['text']}"
             self.title[r["id"]] = r["title"] or ""
             self.template[r["id"]] = r["template"]
+        for r in folio.db.execute(
+            "SELECT u.person_id, u.chunk_id FROM unit_persons u "
+            "JOIN chunks c ON c.id = u.chunk_id ORDER BY c.ord, u.person_id"
+        ):
+            self.by_person.setdefault(r["person_id"], []).append(r["chunk_id"])
 
     def templates_of(self, shape: str) -> list[str]:
         return sorted(t for t, s in self.shapes.items() if s == shape)
@@ -284,14 +287,16 @@ def build(folio: Folio, *, max_per_family: int = 0) -> Suite:
     voice = _in(index.templates_of("voice"))
     voice_by_person: dict[str, list[str]] = {}
     for r in folio.db.execute(
-        f"SELECT id,person FROM chunks WHERE template IN ({voice[0]}) "
-        "AND person IS NOT NULL ORDER BY ord", voice[1],
+        f"SELECT c.id, u.person_id AS person FROM chunks c "
+        f"JOIN unit_persons u ON u.chunk_id = c.id WHERE c.template IN ({voice[0]}) "
+        "ORDER BY c.ord, u.person_id", voice[1],
     ):
         voice_by_person.setdefault(r["person"], []).append(r["id"])
 
     for r in folio.db.execute(
-        f"SELECT id,person,title FROM chunks WHERE template IN ({voice[0]}) "
-        "AND person IS NOT NULL AND title <> '' ORDER BY ord", voice[1],
+        f"SELECT c.id, u.person_id AS person, c.title FROM chunks c "
+        f"JOIN unit_persons u ON u.chunk_id = c.id WHERE c.template IN ({voice[0]}) "
+        "AND c.title <> '' ORDER BY c.ord, u.person_id", voice[1],
     ):
         text = f"{r['person']} {r['title']}"
         siblings = [c for c in voice_by_person.get(r["person"], []) if c != r["id"]]

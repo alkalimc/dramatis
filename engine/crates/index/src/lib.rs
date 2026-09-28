@@ -499,7 +499,9 @@ impl<'a> Index<'a> {
              FROM chunks_fts f JOIN chunks c ON c.ord = f.rowid \
              WHERE chunks_fts MATCH ?1 \
                AND (?3 IS NULL OR c.template IN (SELECT value FROM json_each(?3))) \
-               AND (?4 IS NULL OR c.person IN (SELECT value FROM json_each(?4))) \
+               AND (?4 IS NULL OR EXISTS (SELECT 1 FROM unit_persons u \
+                    WHERE u.chunk_id = c.id \
+                      AND u.person_id IN (SELECT value FROM json_each(?4)))) \
              ORDER BY score DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(

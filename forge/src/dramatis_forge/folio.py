@@ -40,7 +40,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-FOLIO_FORMAT_VERSION = 1
+FOLIO_FORMAT_VERSION = 2
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -49,7 +49,6 @@ CREATE TABLE IF NOT EXISTS chunks (
     id         TEXT PRIMARY KEY,      -- stable, content-derived
     ord        INTEGER NOT NULL,      -- dense 0..N-1; indexes the vector blob
     template   TEXT NOT NULL,         -- retrieval-unit type
-    person     TEXT,                  -- person_id when the unit belongs to someone
     page       TEXT NOT NULL,         -- source page title
     revid      INTEGER,               -- source revision: attribution and staleness
     title      TEXT,                  -- human label for citation cards
@@ -62,7 +61,6 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_ord     ON chunks(ord);
 CREATE INDEX IF NOT EXISTS        idx_chunks_tmpl    ON chunks(template);
-CREATE INDEX IF NOT EXISTS        idx_chunks_person  ON chunks(person);
 CREATE INDEX IF NOT EXISTS        idx_chunks_span    ON chunks(span_of, span_from);
 
 -- Lexical path. `tokens` is pre-segmented text written into a plain unicode61
@@ -88,9 +86,56 @@ CREATE TABLE IF NOT EXISTS persons (
     display      TEXT NOT NULL,
     forms        TEXT NOT NULL,        -- JSON [{page, kind}]
     facets       TEXT NOT NULL,        -- JSON: roster attributes, site wording
-    material     INTEGER NOT NULL,     -- chars of source material, for confidence
-    confidence   REAL NOT NULL DEFAULT 0.0
+    material     INTEGER NOT NULL,     -- chars of source material, for persona_confidence
+    -- Material thickness in [0, 1]. The exact definition belongs to the builder
+    -- (`corpus._write_roster`) and is documented there; readers only compare values.
+    persona_confidence REAL NOT NULL DEFAULT 0.0,
+    birthday     TEXT                  -- MM-DD, NULL when the source gives none
+        CHECK (birthday IS NULL OR birthday GLOB '[0-1][0-9]-[0-3][0-9]')
 );
+
+-- The tables below join on `chunks.id` and `persons.person_id` without declaring
+-- foreign keys, like the rest of this schema: the file is written once by one builder
+-- and opened read-only, so there is no writer for a constraint to protect against.
+
+-- Speaker attribution, many-valued: every person a unit belongs to (all speakers of a
+-- dialogue unit, forms expanded to their person). A unit that belongs to nobody has
+-- no rows.
+CREATE TABLE IF NOT EXISTS unit_persons (
+    chunk_id  TEXT NOT NULL,
+    person_id TEXT NOT NULL,
+    PRIMARY KEY (chunk_id, person_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_unit_persons_person ON unit_persons(person_id, chunk_id);
+
+-- Co-appearance history from the corpus: how many scenes two persons share. One row
+-- per unordered pair, stored with a < b so a pair has exactly one address.
+CREATE TABLE IF NOT EXISTS cooccur (
+    a      TEXT NOT NULL,
+    b      TEXT NOT NULL,
+    scenes INTEGER NOT NULL CHECK (scenes > 0),
+    PRIMARY KEY (a, b),
+    CHECK (a < b)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_cooccur_b ON cooccur(b, a);
+
+-- What a person knows first-hand, materialised at build time: `self` = units they
+-- are attributed to, `lived` = the other dialogue units of scenes they speak in.
+-- Retrieval weights by it; it never filters.
+CREATE TABLE IF NOT EXISTS knowledge_scope (
+    person_id TEXT NOT NULL,
+    chunk_id  TEXT NOT NULL,
+    kind      TEXT NOT NULL CHECK (kind IN ('self', 'lived')),
+    PRIMARY KEY (person_id, chunk_id)
+) WITHOUT ROWID;
+
+-- The topical part of knowledge scope: terms that put a lore hit inside a person's
+-- domain. One row per term.
+CREATE TABLE IF NOT EXISTS topic_terms (
+    person_id TEXT NOT NULL,
+    term      TEXT NOT NULL,
+    PRIMARY KEY (person_id, term)
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS aliases (
     alias  TEXT NOT NULL,
@@ -100,11 +145,21 @@ CREATE TABLE IF NOT EXISTS aliases (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_aliases_alias ON aliases(alias);
 
+-- Assembled, never generated, at runtime. Slots are a closed set:
+--   subject = person_id      system | tone | fallback | capability
+--   subject = 'host'         in_world | meta (the host's two layers; meta never enters
+--                            another person's session), coldstart (the builder's
+--                            first-run recommendation order), and any person slot
+-- `generator_version` names the generator that wrote the row, so a gated persona run
+-- can resume by skipping rows the current version already produced. Builder-computed
+-- rows (coldstart) carry the builder's own version string.
 CREATE TABLE IF NOT EXISTS prompts (
-    subject   TEXT NOT NULL,           -- person_id, or a system role
-    slot      TEXT NOT NULL,           -- system | tone | capability | fallback | schedule | …
-    body      TEXT NOT NULL,
-    generator TEXT NOT NULL DEFAULT "",
+    subject           TEXT NOT NULL,
+    slot              TEXT NOT NULL CHECK (slot IN (
+                          'system', 'tone', 'fallback', 'capability',
+                          'in_world', 'meta', 'coldstart')),
+    body              TEXT NOT NULL,
+    generator_version TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (subject, slot)
 ) WITHOUT ROWID;
 
@@ -117,9 +172,13 @@ CREATE TABLE IF NOT EXISTS template_stats (
     chars_p50 INTEGER NOT NULL,
     chars_p95 INTEGER NOT NULL,
     chars_max INTEGER NOT NULL,
-    stats    TEXT NOT NULL DEFAULT "{}"
+    stats    TEXT NOT NULL DEFAULT '{}'
 );
 
+-- key -> JSON value. Keys readers act on: format_version, requires (JSON list of
+-- capabilities the reader must implement, or refuse to load), segmenter, stopwords,
+-- wording (JSON object: every user-facing string and in-world name, the client's only
+-- source of UI text), scene_marker (JSON [open, close] wrapping a scene line).
 CREATE TABLE IF NOT EXISTS manifest (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -172,12 +231,17 @@ class Folio:
     def add_chunks(self, rows: Sequence[tuple]) -> int:
         self.db.executemany(
             "INSERT OR IGNORE INTO chunks"
-            "(id,ord,template,person,page,revid,title,header,text,chars,"
+            "(id,ord,template,page,revid,title,header,text,chars,"
             " span_of,span_from,span_to) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         return len(rows)
+
+    def add_unit_persons(self, rows: Iterable[tuple[str, str]]) -> None:
+        """(chunk_id, person_id) pairs."""
+        self.db.executemany(
+            "INSERT OR IGNORE INTO unit_persons(chunk_id,person_id) VALUES(?,?)", rows)
 
     def add_fts(self, rows: Iterable[tuple[int, str]]) -> None:
         """`content=''` makes the FTS table contentless: it stores only the index,
@@ -189,8 +253,8 @@ class Folio:
     def write_persons(self, rows: Sequence[tuple]) -> None:
         self.db.executemany(
             "INSERT OR REPLACE INTO persons"
-            "(person_id,primary_page,display,forms,facets,material,confidence) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "(person_id,primary_page,display,forms,facets,material,persona_confidence,"
+            " birthday) VALUES(?,?,?,?,?,?,?,?)",
             rows,
         )
 

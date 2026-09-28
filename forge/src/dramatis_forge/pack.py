@@ -551,6 +551,9 @@ class Pack:
     tables: Mapping[str, str] = field(default_factory=dict)
     #: In-world phrasing for runtime surfaces the client renders (folio manifest `wording`).
     wording: Mapping[str, str] = field(default_factory=dict)
+    #: (open, close) wrapping a reply line that describes action rather than speech
+    #: (folio manifest `scene_marker`). The engine renders such lines apart from speech.
+    scene_marker: tuple[str, str] = ("*", "*")
     #: The source's own table of contents, annotated with what we took and why not.
     coverage: tuple[CoverageRow, ...] = ()
     #: page title -> alias kind, for pages whose entire output is dictionary entries

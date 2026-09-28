@@ -9,10 +9,73 @@
 use std::path::PathBuf;
 
 use folio::Folio;
-use folio::manifest::IMPLEMENTED;
+use folio::manifest::{IMPLEMENTED, SUPPORTED_FORMAT_VERSION};
 
 /// A word that occurs in exactly one toy dialogue line.
 const KNOWN_TERM: &str = "zephyrine";
+
+/// The format-2 tables and the columns this engine generation may read from them. Extra
+/// columns are allowed; a missing one is a contract break.
+const V2_SCHEMA: &[(&str, &[&str])] = &[
+    (
+        "chunks",
+        &[
+            "id",
+            "ord",
+            "template",
+            "page",
+            "revid",
+            "title",
+            "header",
+            "text",
+            "chars",
+            "span_of",
+            "span_from",
+            "span_to",
+        ],
+    ),
+    ("chunks_fts", &["tokens"]),
+    ("vectors", &["id", "dim", "count", "dtype", "data"]),
+    (
+        "persons",
+        &[
+            "person_id",
+            "primary_page",
+            "display",
+            "forms",
+            "facets",
+            "material",
+            "persona_confidence",
+            "birthday",
+        ],
+    ),
+    ("unit_persons", &["chunk_id", "person_id"]),
+    ("cooccur", &["a", "b", "scenes"]),
+    ("knowledge_scope", &["person_id", "chunk_id", "kind"]),
+    ("topic_terms", &["person_id", "term"]),
+    ("aliases", &["alias", "target", "kind"]),
+    ("prompts", &["subject", "slot", "body", "generator_version"]),
+    (
+        "template_stats",
+        &[
+            "template",
+            "count",
+            "chars_p50",
+            "chars_p95",
+            "chars_max",
+            "stats",
+        ],
+    ),
+    ("manifest", &["key", "value"]),
+];
+
+fn columns(folio: &Folio, table: &str) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = folio
+        .conn()
+        .prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let rows = stmt.query_map([table], |row| row.get(0))?;
+    rows.collect()
+}
 
 fn contract_folio() -> Option<PathBuf> {
     match std::env::var_os("DRAMATIS_CONTRACT_FOLIO") {
@@ -43,7 +106,27 @@ fn toy_folio_honours_the_contract() -> anyhow::Result<()> {
         "requires {:?} not all implemented",
         manifest.requires
     );
-    assert!(manifest.requires.iter().any(|r| r == "neighbor_expand"));
+    assert_eq!(
+        manifest.requires, IMPLEMENTED,
+        "requires is what this engine implements"
+    );
+    assert_eq!(manifest.format_version, SUPPORTED_FORMAT_VERSION);
+    assert_eq!(manifest.scene_marker, ("*".to_string(), "*".to_string()));
+
+    for (table, expected) in V2_SCHEMA {
+        let found = columns(&folio, table)?;
+        assert!(!found.is_empty(), "table {table} is missing");
+        for column in *expected {
+            assert!(
+                found.iter().any(|c| c == column),
+                "{table}.{column} is missing (have {found:?})"
+            );
+        }
+    }
+    assert!(
+        !columns(&folio, "chunks")?.iter().any(|c| c == "person"),
+        "single-valued chunks.person is gone in format 2"
+    );
     assert_eq!(manifest.pack, "toy");
     assert_eq!(manifest.segmenter_name(), "char-bigram");
 
@@ -83,5 +166,6 @@ fn toy_folio_honours_the_contract() -> anyhow::Result<()> {
     );
     let person = folio.person("Alice")?.expect("toy person on the roster");
     assert!(person.forms.iter().any(|f| f.page == "Alice (Winter)"));
+    assert!((0.0..=1.0).contains(&person.persona_confidence));
     Ok(())
 }

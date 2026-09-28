@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/folio", "crates/index", "crates/eval", "bins/dramatis-cli"]
+members = [
+    "crates/folio",
+    "crates/index",
+    "crates/eval",
+    "crates/world",
+    "crates/agent",
+    "bins/dramatis-cli",
+]
 
 [workspace.package]
 version = "0.1.0"

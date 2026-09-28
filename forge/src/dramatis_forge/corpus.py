@@ -81,6 +81,7 @@ def run(
     seen: set[str] = set()
     batch: list[tuple] = []
     fts: list[tuple[int, str]] = []
+    owners: list[tuple[str, str]] = []
     ord_ = 0
 
     with Folio.create(folio_path) as folio:
@@ -93,6 +94,8 @@ def run(
             seen.add(chunk.id)
             batch.append(chunk.row(ord_))
             fts.append((ord_, seg(chunk.embed_text)))
+            if chunk.person:
+                owners.append((chunk.id, chunk.person))
             rep.by_template[chunk.template] = rep.by_template.get(chunk.template, 0) + 1
             rep.chars_by_template[chunk.template] = (
                 rep.chars_by_template.get(chunk.template, 0) + chunk.chars)
@@ -111,12 +114,14 @@ def run(
             if len(batch) >= 5000:
                 folio.add_chunks(batch)
                 folio.add_fts(fts)
-                batch, fts = [], []
+                folio.add_unit_persons(owners)
+                batch, fts, owners = [], [], []
                 if progress is not None:
                     progress(f"chunks {ord_:,}")
         if batch:
             folio.add_chunks(batch)
             folio.add_fts(fts)
+            folio.add_unit_persons(owners)
         rep.chunks = ord_
 
         _write_roster(archive, folio, pack)
@@ -183,6 +188,7 @@ def run(
         folio.set_meta("built_at", dt.datetime.now(dt.UTC).isoformat(timespec="seconds"))
         folio.set_meta("build", run_info.as_dict())
         folio.set_meta("wording", dict(pack.wording))
+        folio.set_meta("scene_marker", list(pack.scene_marker))
         # Written last: the fingerprint has to cover everything above it.
         folio.set_meta("build_fingerprint", _fingerprint(folio))
         folio.optimize()
@@ -194,10 +200,10 @@ def run(
 
 
 def _write_roster(archive: Archive, folio: Folio, pack: Pack) -> None:
-    """One row per person, with material volume and a confidence score.
+    """One row per person, with material volume and `persona_confidence`.
 
-    Confidence is the amount of source material, normalised — not a quality judgement.
-    It is used downstream to *change behaviour rather than to apologise*: a person the
+    `persona_confidence` is the amount of source material, normalised — not a quality
+    judgement: sqrt(material / max material), in [0, 1]. It is used downstream to *change behaviour rather than to apologise*: a person the
     archive barely covers should be written as terse and unwilling to speculate, which
     is a characterisation, whereas a generator told to produce a full personality from
     thin material will invent one.
@@ -236,6 +242,7 @@ def _write_roster(archive: Archive, folio: Folio, pack: Pack) -> None:
             json.dumps(facets, ensure_ascii=False),
             material[person_id],
             round(min(material[person_id] / ceiling, 1.0) ** 0.5, 4),
+            None,  # birthday: not extracted yet
         ))
     folio.write_persons(rows)
 

@@ -24,12 +24,12 @@ pub enum Error {
     #[error("manifest is missing required key {0}")]
     MissingKey(&'static str),
 
-    /// The corpus was written by a newer forge. Refusing is correct: a format bump means
-    /// a column changed meaning, and guessing at the new meaning is how a reader starts
+    /// The corpus was written by a different forge generation. Refusing is correct: a
+    /// format bump means a column changed meaning, and guessing at the new meaning is how a reader starts
     /// answering questions wrongly without anyone noticing.
     #[error(
         "corpus format version {found} is not supported (this build reads {supported}); \
-         upgrade the engine rather than this corpus"
+         use an engine and a corpus built for the same format"
     )]
     UnknownFormat { found: i64, supported: i64 },
 

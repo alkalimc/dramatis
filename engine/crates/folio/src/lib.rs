@@ -30,6 +30,20 @@ pub use manifest::Manifest;
 pub use unit::{Person, PersonForm, TemplateStats, Unit};
 pub use vectors::Vectors;
 
+/// The column list every unit query selects, in `row_to_unit` order, over `chunks c`.
+///
+/// Attribution is many-valued and lives in `unit_persons`; it comes back as one JSON
+/// array per unit so each statement stays a single row-per-unit query.
+macro_rules! unit_columns {
+    () => {
+        "c.id, c.ord, c.template, c.page, c.revid, c.title, c.header, c.text, c.chars, \
+         c.span_of, c.span_from, c.span_to, \
+         (SELECT json_group_array(person_id) FROM \
+            (SELECT person_id FROM unit_persons WHERE chunk_id = c.id ORDER BY person_id))"
+    };
+}
+const UNIT_COLUMNS: &str = unit_columns!();
+
 /// An opened corpus.
 pub struct Folio {
     conn: Connection,
@@ -118,11 +132,7 @@ impl Folio {
             return Ok(Vec::new());
         }
         let placeholders = vec!["?"; ords.len()].join(",");
-        let sql = format!(
-            "SELECT id, ord, template, person, page, revid, title, header, text, chars, \
-                    span_of, span_from, span_to \
-             FROM chunks WHERE ord IN ({placeholders})"
-        );
+        let sql = format!("SELECT {UNIT_COLUMNS} FROM chunks c WHERE c.ord IN ({placeholders})");
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(ords), Self::row_to_unit)?;
 
@@ -167,13 +177,15 @@ impl Folio {
         let persons_json = (!persons.is_empty())
             .then(|| serde_json::to_string(persons).expect("string array serialises"));
 
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT c.id, c.ord, c.template, c.person, c.page, c.revid, c.title, c.header, \
-                    c.text, c.chars, c.span_of, c.span_from, c.span_to \
-             FROM chunks c JOIN json_each(?1) o ON c.ord = o.value \
-             WHERE (?2 IS NULL OR c.template IN (SELECT value FROM json_each(?2))) \
-               AND (?3 IS NULL OR c.person IN (SELECT value FROM json_each(?3)))",
-        )?;
+        let mut stmt = self.conn.prepare_cached(concat!(
+            "SELECT ",
+            unit_columns!(),
+            " FROM chunks c JOIN json_each(?1) o ON c.ord = o.value \
+                 WHERE (?2 IS NULL OR c.template IN (SELECT value FROM json_each(?2))) \
+                   AND (?3 IS NULL OR EXISTS (SELECT 1 FROM unit_persons u \
+                        WHERE u.chunk_id = c.id \
+                          AND u.person_id IN (SELECT value FROM json_each(?3))))"
+        ))?;
         let rows = stmt.query_map(
             rusqlite::params![ords_json, templates_json, persons_json],
             Self::row_to_unit,
@@ -192,11 +204,11 @@ impl Folio {
     }
 
     pub fn unit_by_id(&self, id: &str) -> Result<Option<Unit>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, ord, template, person, page, revid, title, header, text, chars, \
-                    span_of, span_from, span_to \
-             FROM chunks WHERE id = ?1",
-        )?;
+        let mut stmt = self.conn.prepare(concat!(
+            "SELECT ",
+            unit_columns!(),
+            " FROM chunks c WHERE c.id = ?1"
+        ))?;
         let mut rows = stmt.query_map([id], Self::row_to_unit)?;
         match rows.next() {
             Some(unit) => Ok(Some(unit?)),
@@ -215,13 +227,13 @@ impl Folio {
         else {
             return Ok(Vec::new());
         };
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT id, ord, template, person, page, revid, title, header, text, chars, \
-                    span_of, span_from, span_to \
-             FROM chunks \
-             WHERE span_of = ?1 AND span_to >= ?2 AND span_from <= ?3 AND id <> ?4 \
-             ORDER BY span_from",
-        )?;
+        let mut stmt = self.conn.prepare_cached(concat!(
+            "SELECT ",
+            unit_columns!(),
+            " FROM chunks c \
+                 WHERE c.span_of = ?1 AND c.span_to >= ?2 AND c.span_from <= ?3 AND c.id <> ?4 \
+                 ORDER BY c.span_from"
+        ))?;
         let rows = stmt.query_map(
             rusqlite::params![span_of, from - before, to + after, unit.id],
             Self::row_to_unit,
@@ -282,7 +294,7 @@ impl Folio {
 
     pub fn person(&self, person_id: &str) -> Result<Option<Person>> {
         let mut stmt = self.conn.prepare(
-            "SELECT person_id, primary_page, display, forms, material, confidence \
+            "SELECT person_id, primary_page, display, forms, material, persona_confidence \
              FROM persons WHERE person_id = ?1",
         )?;
         let mut rows = stmt.query_map([person_id], Self::row_to_person)?;
@@ -324,16 +336,16 @@ impl Folio {
             id: row.get(0)?,
             ord: row.get(1)?,
             template: row.get(2)?,
-            person: row.get(3)?,
-            page: row.get(4)?,
-            revid: row.get(5)?,
-            title: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-            header: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-            text: row.get(8)?,
-            chars: row.get(9)?,
-            span_of: row.get(10)?,
-            span_from: row.get(11)?,
-            span_to: row.get(12)?,
+            page: row.get(3)?,
+            revid: row.get(4)?,
+            title: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            header: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+            text: row.get(7)?,
+            chars: row.get(8)?,
+            span_of: row.get(9)?,
+            span_from: row.get(10)?,
+            span_to: row.get(11)?,
+            persons: serde_json::from_str(&row.get::<_, String>(12)?).unwrap_or_default(),
         })
     }
 
@@ -345,7 +357,7 @@ impl Folio {
             display: row.get(2)?,
             forms: serde_json::from_str(&forms_json).unwrap_or_default(),
             material: row.get(4)?,
-            confidence: row.get(5)?,
+            persona_confidence: row.get(5)?,
         })
     }
 }

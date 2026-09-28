@@ -10,8 +10,6 @@ pub struct Unit {
     /// Dense index into the vector store. Also the FTS rowid.
     pub ord: i64,
     pub template: String,
-    /// Present when the unit belongs to a person rather than merely mentioning one.
-    pub person: Option<String>,
     pub page: String,
     /// Source revision. Every unit has one; it is what makes redistribution traceable.
     pub revid: Option<i64>,
@@ -24,6 +22,9 @@ pub struct Unit {
     pub span_of: Option<String>,
     pub span_from: Option<i64>,
     pub span_to: Option<i64>,
+    /// Every person the unit belongs to (all speakers of a dialogue unit), sorted. Empty
+    /// when it merely mentions people.
+    pub persons: Vec<String>,
 }
 
 impl Unit {
@@ -77,12 +78,12 @@ pub struct Person {
     pub display: String,
     /// `[{page, kind}]`, canonical form first.
     pub forms: Vec<PersonForm>,
-    /// Source material in characters. Drives `confidence`.
+    /// Source material in characters. Drives `persona_confidence`.
     pub material: i64,
     /// Normalised material volume, not a quality judgement. Used to *change behaviour*
     /// rather than to apologise: a thinly covered person should be written as terse and
     /// unwilling to speculate, which is a characterisation.
-    pub confidence: f64,
+    pub persona_confidence: f64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
