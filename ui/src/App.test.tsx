@@ -98,8 +98,17 @@ test("world drawer: visibility on every row, hurt shows the quote and its effect
     expect(row.querySelector(".fact-meta")!.textContent).not.toBe("");
   }
   expect(within(drawer).getByText("Mira Vale's trust went down because of this")).toBeDefined();
+  // Edit = retract + write anew: the new wording is live, the old one sits under Deleted.
+  const row = within(drawer).getByText("Mira noticed you prefer short answers.").closest("li")!;
+  await user.click(within(row).getByRole("button", { name: "Edit" }));
+  const box = within(row).getByLabelText("New wording");
+  await user.clear(box);
+  await user.type(box, "Mira noticed you like brief replies.");
+  await user.click(within(row).getByRole("button", { name: "Save" }));
+  expect(await within(drawer).findByText("Mira noticed you like brief replies.")).toBeDefined();
   await user.click(within(drawer).getByRole("button", { name: "Deleted" }));
-  expect(await within(drawer).findByRole("button", { name: "Restore" })).toBeDefined();
+  expect(await within(drawer).findByText("Mira noticed you prefer short answers.")).toBeDefined();
+  expect(within(drawer).getAllByRole("button", { name: "Restore" }).length).toBe(2);
 });
 
 test("library form: not-connected notice, search, roster", async () => {

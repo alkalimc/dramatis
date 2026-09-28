@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import type { QuotaStatus, Settings, Tier, WindowSpan } from "../api";
+import type { QuietHours, QuotaStatus, Settings, Tier, WindowSpan } from "../api";
 import { useT } from "../i18n";
 import { when } from "../lib/format";
 import { useActions, useApi, useStore } from "../store";
@@ -85,7 +85,14 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
 function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings) => void }) {
   const t = useT();
   const id = useId();
-  const quiet = settings.quiet_hours;
+  // The engine fills the default hours on first run; re-enabling restores the last ones.
+  const [last, setLast] = useState<QuietHours>(settings.quiet_hours ?? { from: "", to: "" });
+  const [on, setOn] = useState(settings.quiet_hours !== null);
+  const hours = settings.quiet_hours ?? last;
+  const update = (next: QuietHours) => {
+    setLast(next);
+    if (next.from && next.to) save({ ...settings, quiet_hours: next });
+  };
   return (
     <section className="quiet" aria-labelledby={`${id}-h`}>
       <h3 id={`${id}-h`}>{t("quiet.title")}</h3>
@@ -93,18 +100,22 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
         <label>
           <input
             type="checkbox"
-            checked={quiet !== null}
-            onChange={(e) => save({ ...settings, quiet_hours: e.target.checked ? { from: "23:00", to: "07:00" } : null })}
+            checked={on}
+            onChange={(e) => {
+              setOn(e.target.checked);
+              if (!e.target.checked) save({ ...settings, quiet_hours: null });
+              else if (last.from && last.to) save({ ...settings, quiet_hours: last });
+            }}
           />{" "}
           {t("quiet.dnd")}
         </label>
-        {quiet && (
+        {on && (
           <>
             <label>
-              {t("quiet.from")} <input type="time" value={quiet.from} onChange={(e) => save({ ...settings, quiet_hours: { ...quiet, from: e.target.value } })} />
+              {t("quiet.from")} <input type="time" value={hours.from} onChange={(e) => update({ ...hours, from: e.target.value })} />
             </label>
             <label>
-              {t("quiet.to")} <input type="time" value={quiet.to} onChange={(e) => save({ ...settings, quiet_hours: { ...quiet, to: e.target.value } })} />
+              {t("quiet.to")} <input type="time" value={hours.to} onChange={(e) => update({ ...hours, to: e.target.value })} />
             </label>
           </>
         )}

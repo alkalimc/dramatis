@@ -26,12 +26,13 @@ export function ErrorBar() {
   const error = useStore((s) => s.error);
   const names = useStore((s) => s.names);
   const dispatch = useDispatch();
+  const shown = error ? errorText(error, t, names) : null;
   return (
     <div className="error-bar" role="status" aria-live="polite">
-      {error && (
+      {shown && (
         <>
-          <span>{errorText(error, t, names).text}</span>
-          {errorText(error, t, names).detail && <code className="raw">{errorText(error, t, names).detail}</code>}
+          <span>{shown.text}</span>
+          {shown.detail && <code className="raw">{shown.detail}</code>}
           <button type="button" className="link" onClick={() => dispatch({ type: "error", error: null })}>
             {t("drawer.close")}
           </button>

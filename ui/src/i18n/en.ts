@@ -38,7 +38,6 @@ export const en = {
 
   // ---- channels and messages ----
   "channel.host": "{host}",
-  "channel.direct": "{name}",
   "channel.group.untitled": "Group",
   "channel.group.members": "Members: {names}",
   "channel.more": "More",
@@ -58,7 +57,6 @@ export const en = {
   "message.relayed": "relayed",
   "message.note": "Note",
   "message.sources": "Sources ({count})",
-  "message.source": "Source {n}",
   "message.play": "Read aloud",
   "message.playing": "Playing",
   "message.actions": "Actions for this message",
@@ -294,7 +292,6 @@ export const en = {
   "endpoints.roles": "Roles",
   "endpoints.role.chat": "Chat",
   "endpoints.role.tts": "Read aloud",
-  "endpoints.role.profile": "Profile",
   "endpoints.role.off": "Off",
   "endpoints.role.none": "Not set",
   "endpoints.reasoning": "Reasoning",

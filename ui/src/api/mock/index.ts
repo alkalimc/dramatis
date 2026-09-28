@@ -726,7 +726,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!f) return fail({ code: "not_found" });
       if (!text.trim()) return fail({ code: "invalid", field: "text" });
       facts.set(id, { ...f, retracted: true });
-      const next = addFact({ ...f, id: undefined as never, author: USER, text, retracted: false, created_at: iso() });
+      const { id: _old, created_at: _at, ...rest } = f;
+      const next = addFact({ ...rest, author: USER, text, retracted: false });
       setTimeout(() => announceWorld({ kind: "fact", id }, { kind: "fact", id: next.id }));
       return ok(next.id);
     },

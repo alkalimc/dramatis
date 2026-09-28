@@ -138,6 +138,7 @@ export function CaseDrawer({ id }: { id: TaskId }) {
         ← {t("case.back")}
       </button>
       <header className="drawer-head">
+        <p className="muted small">{t("case.question")}</p>
         <h2>{cf.task.question}</h2>
         <span className="tag">{t("cases.pinned")}</span>
       </header>

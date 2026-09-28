@@ -19,8 +19,36 @@ export function RosterDrawer() {
           {t("roster.new_group")}
         </button>
       </header>
+      <GroupList />
       <RosterList />
     </div>
+  );
+}
+
+function GroupList() {
+  const t = useT();
+  const actions = useActions();
+  const groups = useStore((s) => s.channels).filter((c) => c.kind === "group");
+  return (
+    <section className="groups" aria-labelledby="groups-h">
+      <h3 id="groups-h">{t("group.list")}</h3>
+      {groups.length === 0 ? (
+        <p className="muted">{t("group.list.empty")}</p>
+      ) : (
+        <ul>
+          {groups.map((g) => (
+            <li key={g.id}>
+              <button type="button" className="link name" onClick={() => actions.open(g.id)}>
+                {g.topic ?? t("channel.group.untitled")}
+              </button>{" "}
+              <span className="muted small">
+                {g.participants.map((p) => p.name).join(" · ")} · {t(`mode.${g.mode}`)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

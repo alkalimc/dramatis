@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { api as defaultApi, type Api } from "./api";
 import { useT } from "./i18n";
-import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Store } from "./store";
+import { createActions, createStore, Provider, subscribe, useActions, useApi, useDispatch, useStore, type Drawer, type Store } from "./store";
 import { ErrorBar } from "./ui/ErrorBar";
 import { AskCard } from "./screens/Ask";
 import { CaseDrawer, CasesDrawer } from "./screens/Cases";
@@ -110,6 +110,7 @@ function drawerKey(d: Drawer | null): string | null {
 function Header() {
   const t = useT();
   const actions = useActions();
+  const { mock } = useApi();
   const dispatch = useDispatch();
   const clock = useStore((s) => s.clock);
   const drawer = useStore((s) => s.drawer);
@@ -129,6 +130,7 @@ function Header() {
           {t("host.name")}
         </button>
       </h1>
+      {mock && <span className="tag">{t("app.mock")}</span>}
       {clock && (
         <p className="clock" aria-label={t("clock.label")}>
           <time>
