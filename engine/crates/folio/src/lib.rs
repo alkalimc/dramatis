@@ -372,15 +372,11 @@ impl Folio {
 
     /// A prompt slot for a subject, with local override support left to the caller.
     pub fn prompt(&self, subject: &str, slot: &str) -> Result<Option<String>> {
-        let body: Option<String> = self
+        let mut stmt = self
             .conn
-            .query_row(
-                "SELECT body FROM prompts WHERE subject = ?1 AND slot = ?2",
-                [subject, slot],
-                |row| row.get(0),
-            )
-            .ok();
-        Ok(body)
+            .prepare_cached("SELECT body FROM prompts WHERE subject = ?1 AND slot = ?2")?;
+        let mut rows = stmt.query_map([subject, slot], |row| row.get::<_, String>(0))?;
+        Ok(rows.next().transpose()?)
     }
 
     /// In-world phrasing for a runtime surface. The client renders these; it never
@@ -388,6 +384,13 @@ impl Folio {
     /// into the fiction.
     pub fn wording(&self, key: &str) -> Option<&str> {
         self.manifest.wording.get(key).map(String::as_str)
+    }
+
+    /// The string standing for the user's name in unit text and prompts (manifest
+    /// `user_placeholder`). Substituting it is the assembler's job; this crate returns
+    /// stored text as stored.
+    pub fn user_placeholder(&self) -> &str {
+        &self.manifest.user_placeholder
     }
 
     fn row_to_unit(row: &rusqlite::Row<'_>) -> rusqlite::Result<Unit> {

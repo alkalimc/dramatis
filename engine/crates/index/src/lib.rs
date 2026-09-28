@@ -3,7 +3,7 @@
 //! ```text
 //! query ─ alias expansion ─ lexical: FTS5 + BM25 over pre-segmented tokens, filters in SQL
 //!       → retrieve.candidates ─ weight by the asking person's knowledge ─ merge memories
-//!       → drop units already in the session ─ retrieve.top_k ─ neighbours, returned hits only
+//!       → retrieve.top_k ─ set aside units already in the session ─ neighbours, returned hits only
 //! ```
 //!
 //! Only the lexical path exists. `SearchMode::Hybrid` and `Dense` are part of the request
@@ -33,6 +33,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use folio::{Folio, Unit};
+use serde::{Deserialize, Serialize};
 
 pub use confidence::{Confidence, Level};
 pub use segment::{Kind as SegmenterKind, Segmenter};
@@ -43,7 +44,8 @@ pub type PersonId = String;
 pub type ChunkId = String;
 
 /// Which retrieval paths to run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SearchMode {
     /// Every path the corpus and this build support. Today that is the lexical path.
     #[default]
@@ -55,7 +57,8 @@ pub enum SearchMode {
     Dense,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RerankPolicy {
     /// Rerank when a reranker is available. None is, so this never reranks.
     #[default]
@@ -67,7 +70,8 @@ pub enum RerankPolicy {
 
 /// Restrictions applied in SQL before candidates are cut, so a filter can never empty a
 /// result the corpus could fill. Empty lists mean no restriction.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Filters {
     pub templates: Vec<String>,
     /// Units attributed to any of these people (forms already folded into the person).
@@ -81,19 +85,22 @@ impl Filters {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SearchRequest {
     pub query: String,
     pub mode: SearchMode,
-    /// Hits to return; 0 means `retrieve.top_k`.
+    /// Size of the ranked window; 0 means `retrieve.top_k`.
     pub top_k: usize,
     pub filters: Filters,
     /// Whose knowledge weights the ranking, and who may receive memories. `None` is the
     /// maintainer surface: every unit unweighted, no memories.
     pub as_person: Option<PersonId>,
-    /// Units (and memory ids) already in the session. They are never returned as hits;
-    /// the ones that would have been are listed in [`SearchResponse::excluded`] so the
-    /// caller can refer to them by id.
+    /// Units (and memory ids) already in the session. One that ranks inside the window
+    /// keeps its place but is not returned in full: it is listed in
+    /// [`SearchResponse::excluded`] so the caller can cite it by id. The window is not
+    /// refilled from further down, since a follow-up on the same topic would otherwise
+    /// pull in ever weaker material each turn.
     pub exclude: Vec<ChunkId>,
     pub rerank: RerankPolicy,
 }
@@ -108,7 +115,8 @@ impl SearchRequest {
 }
 
 /// Where a hit sits relative to the asking person.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Source {
     /// A unit attributed to them: they said it, or it is about them.
     Own,
@@ -120,10 +128,11 @@ pub enum Source {
     OutOfScope,
     /// A caller-supplied memory.
     Memory,
-    /// No `as_person`: the maintainer surface, where nothing is weighted.
-    Unscoped,
 }
 
+/// What a hit carries: a corpus unit, or a caller-supplied memory.
+// Unboxed: a search holds at most `retrieve.candidates` of these at once.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Item {
     Unit(Unit),
@@ -150,7 +159,8 @@ impl Item {
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub item: Item,
-    pub source: Source,
+    /// `None` only on the maintainer surface (no `as_person`), where nothing is weighted.
+    pub source: Option<Source>,
     /// Ranking score: `unweighted` times the source's `retrieve.scope_weight`.
     pub score: f64,
     /// BM25, as the corpus statistics give it.
@@ -166,7 +176,7 @@ pub struct SearchResponse {
     /// On unweighted scores, excluded units included: having shown the answer already
     /// does not make the corpus less sure of it.
     pub confidence: Confidence,
-    /// Excluded ids that ranked inside the returned window, best first.
+    /// Excluded ids that ranked inside the window, best first.
     pub excluded: Vec<String>,
     /// Set when the query named an entity by an alias.
     pub resolved: Option<Resolved>,
@@ -381,7 +391,8 @@ impl Index {
         let mut trace = Trace::default();
 
         let started = Instant::now();
-        let (resolved, ambiguous, query, filters) = self.normalise(&request.query, &request.filters)?;
+        let (resolved, ambiguous, query, filters) =
+            self.normalise(&request.query, &request.filters)?;
         trace.normalise_us = started.elapsed().as_micros();
 
         let started = Instant::now();
@@ -389,53 +400,27 @@ impl Index {
         trace.lexical_us = started.elapsed().as_micros();
         trace.lexical_candidates = candidates.len();
 
-        let excluded: HashSet<&str> = request.exclude.iter().map(String::as_str).collect();
-
-        // Memories first: they are cheap, and they feed confidence like any unit.
+        // Memories are scored first; they feed confidence like any unit. A filter the
+        // caller set describes corpus units, so it leaves no room for memories; the person
+        // filter the alias stage adds does not count, since it only narrows the corpus.
         let started = Instant::now();
         let mut ranked: Vec<Hit> = Vec::new();
-        if !memories.is_empty() && filters.is_empty() {
-            let stats = self.corpus_stats()?;
-            let terms = memory::terms(&self.segmenter, &query);
-            let weight = self.params.scope_weight.memory;
-            for (id, text) in memories {
-                let unweighted = memory::bm25(&self.segmenter, stats, &terms, text, |t| {
-                    self.document_frequency(t)
-                })?;
-                if unweighted > 0.0 {
-                    ranked.push(Hit {
-                        item: Item::Memory {
-                            id: id.to_string(),
-                            text: text.to_string(),
-                        },
-                        source: Source::Memory,
-                        score: unweighted * weight,
-                        unweighted,
-                        neighbours: Vec::new(),
-                    });
-                }
-            }
+        if !memories.is_empty() && request.filters.is_empty() {
+            ranked.extend(self.score_memories(&query, memories)?);
         }
         trace.memory_us = started.elapsed().as_micros();
 
         let started = Instant::now();
+        let score: HashMap<i64, f64> = candidates.iter().map(|c| (c.ord, c.score)).collect();
         match &request.as_person {
-            // Unweighted: order is already final, so only fetch what can be returned —
-            // the window plus as many as exclusion might skip.
+            // Unweighted: the lexical order is final, so only the window is fetched.
             None => {
-                let excluded_ords: HashSet<i64> = self
-                    .folio
-                    .ords_for_ids(&request.exclude)?
-                    .into_iter()
-                    .collect();
-                let wanted = top_k + candidates.iter().filter(|c| excluded_ords.contains(&c.ord)).count();
-                let ords: Vec<i64> = candidates.iter().take(wanted).map(|c| c.ord).collect();
-                let score: HashMap<i64, f64> = candidates.iter().map(|c| (c.ord, c.score)).collect();
+                let ords: Vec<i64> = candidates.iter().take(top_k).map(|c| c.ord).collect();
                 for unit in self.folio.units_by_ord(&ords)? {
                     let unweighted = score[&unit.ord];
                     ranked.push(Hit {
                         item: Item::Unit(unit),
-                        source: Source::Unscoped,
+                        source: None,
                         score: unweighted,
                         unweighted,
                         neighbours: Vec::new(),
@@ -448,14 +433,13 @@ impl Index {
                 let units = self.folio.units_by_ord(&ords)?;
                 trace.fetch_us = started.elapsed().as_micros();
                 let started = Instant::now();
-                let score: HashMap<i64, f64> = candidates.iter().map(|c| (c.ord, c.score)).collect();
                 let sources = self.sources(person, &units)?;
                 for (unit, source) in units.into_iter().zip(sources) {
                     let unweighted = score[&unit.ord];
                     ranked.push(Hit {
                         score: unweighted * self.weight(source),
                         item: Item::Unit(unit),
-                        source,
+                        source: Some(source),
                         unweighted,
                         neighbours: Vec::new(),
                     });
@@ -464,6 +448,8 @@ impl Index {
             }
         }
 
+        // Unweighted, and before exclusion: having shown the answer already does not make
+        // the corpus less sure of it.
         let confidence = Confidence::of(
             &ranked.iter().map(|h| h.unweighted).collect::<Vec<_>>(),
             top_k,
@@ -477,31 +463,58 @@ impl Index {
                 .then(b.unweighted.total_cmp(&a.unweighted))
                 .then_with(|| a.item.id().cmp(b.item.id()))
         });
-        let mut hits = Vec::with_capacity(top_k);
-        let mut skipped = Vec::new();
-        for hit in ranked {
-            if hits.len() >= top_k {
-                break;
-            }
-            if excluded.contains(hit.item.id()) {
-                skipped.push(hit.item.id().to_string());
-            } else {
-                hits.push(hit);
-            }
-        }
+        ranked.truncate(top_k);
+        let exclude: HashSet<&str> = request.exclude.iter().map(String::as_str).collect();
+        let (skipped, mut hits): (Vec<Hit>, Vec<Hit>) = ranked
+            .into_iter()
+            .partition(|hit| exclude.contains(hit.item.id()));
 
         let started = Instant::now();
-        self.expand(&mut hits, &excluded)?;
+        self.expand(&mut hits, &exclude)?;
         trace.expand_us = started.elapsed().as_micros();
 
         Ok(SearchResponse {
             hits,
             confidence,
-            excluded: skipped,
+            excluded: skipped
+                .into_iter()
+                .map(|h| h.item.id().to_string())
+                .collect(),
             resolved,
             ambiguous,
             trace,
         })
+    }
+
+    /// BM25 of each memory against the query on the corpus's statistics; non-matching
+    /// memories are dropped. Document frequencies are looked up once per query term.
+    fn score_memories(&self, query: &str, memories: &[(&str, &str)]) -> Result<Vec<Hit>> {
+        let stats = self.corpus_stats()?;
+        let terms = memory::terms(&self.segmenter, query);
+        let mut df: HashMap<&str, i64> = HashMap::new();
+        for term in &terms {
+            if !df.contains_key(term.as_str()) {
+                df.insert(term, memory::document_frequency(self.folio.conn(), term)?);
+            }
+        }
+        let weight = self.params.scope_weight.memory;
+        let mut out = Vec::new();
+        for (id, text) in memories {
+            let unweighted = memory::bm25(&self.segmenter, stats, &terms, text, |t| df[t]);
+            if unweighted > 0.0 {
+                out.push(Hit {
+                    item: Item::Memory {
+                        id: id.to_string(),
+                        text: text.to_string(),
+                    },
+                    source: Some(Source::Memory),
+                    score: unweighted * weight,
+                    unweighted,
+                    neighbours: Vec::new(),
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// One unit by id, with `neighbours` adjacent units on each side.
@@ -528,10 +541,11 @@ impl Index {
         &self,
         topic: &str,
         scope: Option<&[PersonId]>,
-        exclude: &[PersonId],
         k: usize,
+        exclude: &[PersonId],
     ) -> Result<People> {
-        let (_, _, query, _) = self.normalise_with(topic, &Filters::default(), Normalise::Expand)?;
+        let (_, _, query, _) =
+            self.normalise_with(topic, &Filters::default(), Normalise::Expand)?;
         let Some(expression) = self.segmenter.match_expression(&query) else {
             return Ok(self.people(Vec::new()));
         };
@@ -539,8 +553,8 @@ impl Index {
             return Ok(self.people(Vec::new()));
         }
         let scope_json = scope.map(|s| serde_json::to_string(s).expect("strings serialise"));
-        let exclude_json =
-            (!exclude.is_empty()).then(|| serde_json::to_string(exclude).expect("strings serialise"));
+        let exclude_json = (!exclude.is_empty())
+            .then(|| serde_json::to_string(exclude).expect("strings serialise"));
 
         // The MATCH is materialised once, then joined to attribution. Ranking by the best
         // own unit (rather than a sum) keeps a person with one exact line ahead of one who
@@ -605,7 +619,7 @@ impl Index {
     /// any) and who may interject (the others at or above `interject.min_confidence`,
     /// i.e. `Level::High`).
     pub fn rank_participants(&self, text: &str, participants: &[PersonId]) -> Result<People> {
-        self.find_people(text, Some(participants), &[], participants.len())
+        self.find_people(text, Some(participants), participants.len(), &[])
     }
 
     fn people(&self, persons: Vec<PersonMatch>) -> People {
@@ -622,7 +636,7 @@ impl Index {
             Source::Own => w.own,
             Source::Lived => w.lived,
             Source::InScope => w.in_scope,
-            Source::OutOfScope | Source::Unscoped => w.out_of_scope,
+            Source::OutOfScope => w.out_of_scope,
             Source::Memory => w.memory,
         }
     }
@@ -656,7 +670,10 @@ impl Index {
                         let terms = terms.as_deref().unwrap_or_default();
                         let haystack = format!("{}\n{}\n{}", unit.title, unit.header, unit.text)
                             .to_lowercase();
-                        if terms.iter().any(|t| !t.is_empty() && haystack.contains(t.as_str())) {
+                        if terms
+                            .iter()
+                            .any(|t| !t.is_empty() && haystack.contains(t.as_str()))
+                        {
                             Source::InScope
                         } else {
                             Source::OutOfScope
@@ -695,10 +712,6 @@ impl Index {
         }
         let stats = memory::CorpusStats::read(self.folio.conn())?;
         Ok(self.stats.get_or_init(|| stats))
-    }
-
-    fn document_frequency(&self, term: &str) -> Result<i64> {
-        memory::document_frequency(self.folio.conn(), term)
     }
 
     fn normalise(
@@ -839,7 +852,9 @@ impl Index {
                  ORDER BY score DESC, rowid LIMIT ?2",
             )?;
             let rows = stmt.query_map(rusqlite::params![expression, limit], read)?;
-            return rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into);
+            return rows
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(Into::into);
         }
 
         // An empty list is bound as SQL NULL and its predicate short-circuits, so one
@@ -868,6 +883,7 @@ impl Index {
             ],
             read,
         )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 }

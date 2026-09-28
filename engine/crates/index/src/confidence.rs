@@ -1,27 +1,30 @@
 //! How sure retrieval is that the corpus holds an answer at all.
 //!
 //! Two signals on **unweighted** scores: the best score, and the normalised entropy of the
-//! top-k score distribution. Weighting by the asking person's knowledge reorders hits but
+//! top-k score distribution (softmax over BM25, see [`entropy`]). Weighting by the asking person's knowledge reorders hits but
 //! must not change this answer, or "the corpus has nothing" and "he would not know" would
 //! collapse into one low number and the caller could no longer tell a hand-off from a
 //! fallback.
 
+use serde::{Deserialize, Serialize};
+
 use crate::params::ConfidenceBands;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Level {
     High,
     Medium,
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Confidence {
     pub level: Level,
     /// Best unweighted score, 0 when nothing matched.
     pub top1: f64,
-    /// Shannon entropy of the top-k unweighted scores, normalised by `ln(k)` into [0, 1].
-    /// 0 for fewer than two scores.
+    /// Entropy of the softmax over the top-k unweighted scores, normalised by `ln(k)` into
+    /// [0, 1]: 1 when they are level, near 0 when one stands clear. 0 for fewer than two.
     pub entropy: f64,
 }
 
@@ -57,14 +60,23 @@ pub fn level_of_score(score: f64, bands: &ConfidenceBands) -> Level {
     level(score, 0.0, bands)
 }
 
+/// Entropy of the softmax over `scores`, normalised by `ln(n)`.
+///
+/// BM25 is a sum of per-term log-odds weights, so a score *difference* is what carries
+/// meaning; read as proportions, a top-k window of BM25 scores is nearly always flat
+/// because its scores sit within a few percent of each other. The softmax turns a gap of
+/// one BM25 point into odds of e : 1.
 fn entropy(scores: &[f64]) -> f64 {
-    let total: f64 = scores.iter().sum();
-    if scores.len() < 2 || total <= 0.0 {
+    if scores.len() < 2 {
         return 0.0;
     }
-    let raw: f64 = scores
+    let max = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let weights: Vec<f64> = scores.iter().map(|s| (s - max).exp()).collect();
+    let total: f64 = weights.iter().sum();
+    let raw: f64 = weights
         .iter()
-        .map(|s| s / total)
+        .map(|w| w / total)
+        .filter(|p| *p > 0.0)
         .map(|p| -p * p.ln())
         .sum();
     raw / (scores.len() as f64).ln()
@@ -100,6 +112,14 @@ mod tests {
         let c = Confidence::of(&[7.0; 6], 6, &bands());
         assert!((c.entropy - 1.0).abs() < 1e-9);
         assert_eq!(c.level, Level::Medium);
+    }
+
+    #[test]
+    fn a_one_point_gap_is_already_a_peak() {
+        // Proportions would call 17 vs 16 flat; as log-odds it is e : 1.
+        let near = Confidence::of(&[17.0, 16.0], 2, &bands());
+        let level = Confidence::of(&[17.0, 17.0], 2, &bands());
+        assert!(near.entropy < 0.9 && (level.entropy - 1.0).abs() < 1e-9);
     }
 
     #[test]

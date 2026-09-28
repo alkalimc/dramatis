@@ -49,6 +49,12 @@ pub struct Manifest {
     pub wording: BTreeMap<String, String>,
     /// `[open, close]` around a reply line that describes action rather than speech.
     pub scene_marker: (String, String),
+    /// Stands for the user's name in stored text (unit bodies, prompts). The corpus holds
+    /// it verbatim; whoever assembles model-visible text substitutes it. Empty when the
+    /// corpus declares none.
+    pub user_placeholder: String,
+    /// In-world year = local year minus this.
+    pub year_offset: i64,
 }
 
 fn get<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<Option<T>> {
@@ -103,6 +109,8 @@ impl Manifest {
             wording: get(conn, "wording")?.unwrap_or_default(),
             scene_marker: get(conn, "scene_marker")?
                 .unwrap_or_else(|| ("*".to_string(), "*".to_string())),
+            user_placeholder: get(conn, "user_placeholder")?.unwrap_or_default(),
+            year_offset: get(conn, "clock.year_offset")?.unwrap_or(0),
         })
     }
 
@@ -155,6 +163,22 @@ mod tests {
         let manifest = Manifest::load(&conn).unwrap();
         assert_eq!(manifest.requires, IMPLEMENTED);
         assert_eq!(manifest.scene_marker, ("*".into(), "*".into()));
+        assert_eq!(
+            (manifest.user_placeholder.as_str(), manifest.year_offset),
+            ("", 0)
+        );
+    }
+
+    #[test]
+    fn reads_the_placeholder_and_the_clock_offset() {
+        let conn = manifest_with(&[
+            ("format_version", "2"),
+            ("user_placeholder", r#""{user}""#),
+            ("clock.year_offset", "100"),
+        ]);
+        let manifest = Manifest::load(&conn).unwrap();
+        assert_eq!(manifest.user_placeholder, "{user}");
+        assert_eq!(manifest.year_offset, 100);
     }
 
     #[test]

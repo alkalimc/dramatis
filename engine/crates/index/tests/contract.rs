@@ -36,7 +36,7 @@ fn lexical_search_finds_the_known_unit_and_expands_it() -> anyhow::Result<()> {
     let unit = top.item.unit().expect("a corpus unit");
     assert_eq!(unit.page, "Chapter 2");
     assert!(unit.text.contains(KNOWN_TERM));
-    assert_eq!(top.source, Source::Unscoped);
+    assert_eq!(top.source, None);
     assert_eq!(top.neighbours.len(), 2, "one neighbour on each side");
     assert!(top.neighbours.iter().all(|n| n.adjacent_to(unit)));
     assert!(response.confidence.top1 > 0.0);
@@ -52,9 +52,9 @@ fn lexical_search_finds_the_known_unit_and_expands_it() -> anyhow::Result<()> {
     for hit in &scoped.hits {
         let unit = hit.item.unit().expect("a corpus unit");
         if unit.persons.iter().any(|p| p == "Alice") {
-            assert_eq!(hit.source, Source::Own, "{}", unit.id);
+            assert_eq!(hit.source, Some(Source::Own), "{}", unit.id);
         } else {
-            assert_ne!(hit.source, Source::Unscoped, "{}", unit.id);
+            assert!(hit.source.is_some(), "{}", unit.id);
         }
     }
 
@@ -68,7 +68,7 @@ fn lexical_search_finds_the_known_unit_and_expands_it() -> anyhow::Result<()> {
     assert!(!response.hits.is_empty());
 
     // People are found by their own units: every reason is attributed to its person.
-    let people = index.find_people("lighthouse", None, &[], 5)?;
+    let people = index.find_people("lighthouse", None, 5, &[])?;
     for found in &people.persons {
         assert!(found.reason.persons.contains(&found.person), "{found:?}");
     }

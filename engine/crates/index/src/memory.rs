@@ -92,10 +92,10 @@ pub(crate) fn bm25(
     stats: &CorpusStats,
     terms: &[String],
     text: &str,
-    mut df: impl FnMut(&str) -> Result<i64>,
-) -> Result<f64> {
+    df: impl Fn(&str) -> i64,
+) -> f64 {
     if terms.is_empty() {
-        return Ok(0.0);
+        return 0.0;
     }
     // Index-side segmentation: the memory is scored as a unit would have been indexed.
     let tokens: Vec<String> = segmenter
@@ -115,12 +115,12 @@ pub(crate) fn bm25(
         if freq == 0.0 {
             continue;
         }
-        let hits = df(term)? as f64;
+        let hits = df(term) as f64;
         let idf = ((stats.rows - hits + 0.5) / (hits + 0.5)).ln();
         let idf = if idf <= 0.0 { 1e-6 } else { idf };
         score += idf * (freq * (K1 + 1.0)) / (freq + K1 * (1.0 - B + B * len / avg_len));
     }
-    Ok(score)
+    score
 }
 
 #[cfg(test)]
@@ -131,7 +131,7 @@ mod tests {
     fn varints_decode_like_sqlite() {
         assert_eq!(varint(&[0x05], 0), Some((5, 1)));
         assert_eq!(varint(&[0x81, 0x00], 0), Some((128, 2)));
-        assert_eq!(varint(&[0x83, 0xcd, 0x53], 0), Some((59123, 3)));
+        assert_eq!(varint(&[0x83, 0xcd, 0x53], 0), Some((59091, 3)));
         assert_eq!(varint(&[0x81], 0), None, "truncated input");
     }
 
@@ -142,10 +142,10 @@ mod tests {
             rows: 1000.0,
             avg_len: 4.0,
         };
-        let df = |t: &str| Ok(if t == "rare" { 2 } else { 400 });
-        let rare = bm25(&seg, &stats, &["rare".into()], "a rare word", df).unwrap();
-        let common = bm25(&seg, &stats, &["common".into()], "a common word", df).unwrap();
+        let df = |t: &str| if t == "rare" { 2 } else { 400 };
+        let rare = bm25(&seg, &stats, &["rare".into()], "a rare word", df);
+        let common = bm25(&seg, &stats, &["common".into()], "a common word", df);
         assert!(rare > common && common > 0.0);
-        assert_eq!(bm25(&seg, &stats, &["absent".into()], "a word", df).unwrap(), 0.0);
+        assert_eq!(bm25(&seg, &stats, &["absent".into()], "a word", df), 0.0);
     }
 }

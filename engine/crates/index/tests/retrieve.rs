@@ -2,9 +2,7 @@
 
 use folio::fixture::{Builder, TempFolio, UnitSpec};
 use index::params::{ConfidenceBands, Retrieve};
-use index::{
-    Error, Filters, Index, Item, Level, RerankPolicy, SearchMode, SearchRequest, Source,
-};
+use index::{Error, Filters, Index, Item, Level, RerankPolicy, SearchMode, SearchRequest, Source};
 
 /// Two scenes and some lore.
 ///
@@ -26,13 +24,62 @@ fn corpus() -> TempFolio {
             ..Default::default()
         });
     };
-    unit(&mut b, "h1", "dialogue", "harbor", "the boats come home at dusk", &["ann"]);
-    unit(&mut b, "h2", "dialogue", "harbor", "light the lantern for the boats", &["ben"]);
-    unit(&mut b, "h3", "dialogue", "harbor", "the tide turns quietly", &[]);
-    unit(&mut b, "m1", "dialogue", "market", "a lantern costs two coins", &["cid"]);
-    unit(&mut b, "m2", "dialogue", "market", "cid counts the coins twice", &["cid"]);
-    unit(&mut b, "l1", "lore", "Lighthouse", "the lighthouse lantern burns oil", &[]);
-    unit(&mut b, "l2", "lore", "Lantern", "a lantern is a portable lamp lantern", &[]);
+    unit(
+        &mut b,
+        "h1",
+        "dialogue",
+        "harbor",
+        "the boats come home at dusk",
+        &["ann"],
+    );
+    unit(
+        &mut b,
+        "h2",
+        "dialogue",
+        "harbor",
+        "light the lantern for the boats",
+        &["ben"],
+    );
+    unit(
+        &mut b,
+        "h3",
+        "dialogue",
+        "harbor",
+        "the tide turns quietly",
+        &[],
+    );
+    unit(
+        &mut b,
+        "m1",
+        "dialogue",
+        "market",
+        "a lantern costs two coins",
+        &["cid"],
+    );
+    unit(
+        &mut b,
+        "m2",
+        "dialogue",
+        "market",
+        "cid counts the coins twice",
+        &["cid"],
+    );
+    unit(
+        &mut b,
+        "l1",
+        "lore",
+        "Lighthouse",
+        "the lighthouse lantern burns oil",
+        &[],
+    );
+    unit(
+        &mut b,
+        "l2",
+        "lore",
+        "Lantern",
+        "a lantern is a portable lamp lantern",
+        &[],
+    );
     for filler in 0..20 {
         let id = format!("f{filler}");
         let text = format!("filler text number {filler} about nothing");
@@ -44,7 +91,9 @@ fn corpus() -> TempFolio {
             ..Default::default()
         });
     }
-    b.person("ann", None).person("ben", None).person("cid", None);
+    b.person("ann", None)
+        .person("ben", None)
+        .person("cid", None);
     b.scope("ann", "h1", "self")
         .scope("ann", "h2", "lived")
         .scope("ann", "h3", "lived");
@@ -75,7 +124,7 @@ fn without_a_person_nothing_is_weighted() {
     let index = open(&file, params());
     let response = index.search(&SearchRequest::new("lantern")).unwrap();
     assert_eq!(response.hits.len(), 4);
-    assert!(response.hits.iter().all(|h| h.source == Source::Unscoped));
+    assert!(response.hits.iter().all(|h| h.source.is_none()));
     assert!(response.hits.iter().all(|h| h.score == h.unweighted));
     // Repeating the term wins on BM25.
     assert_eq!(response.hits[0].item.id(), "l2");
@@ -96,7 +145,7 @@ fn every_hit_is_tagged_by_where_it_sits_for_the_person() {
             .hits
             .iter()
             .find(|h| h.item.id() == id)
-            .map(|h| h.source)
+            .and_then(|h| h.source)
     };
     assert_eq!(source("h1"), Some(Source::Own));
     assert_eq!(source("h2"), Some(Source::Lived));
@@ -132,7 +181,13 @@ fn weighting_reorders_but_confidence_reads_unweighted_scores() {
 #[test]
 fn filters_apply_before_the_cut() {
     let file = corpus();
-    let index = open(&file, Retrieve { candidates: 1, ..params() });
+    let index = open(
+        &file,
+        Retrieve {
+            candidates: 1,
+            ..params()
+        },
+    );
     for filters in [
         Filters {
             persons: vec!["cid".into()],
@@ -159,18 +214,23 @@ fn filters_apply_before_the_cut() {
 }
 
 #[test]
-fn excluded_units_are_not_returned_but_are_reported() {
+fn excluded_units_keep_their_place_but_are_listed_by_id() {
     let file = corpus();
-    let index = open(&file, Retrieve { top_k: 2, ..params() });
+    let index = open(
+        &file,
+        Retrieve {
+            top_k: 2,
+            ..params()
+        },
+    );
     let full = index.search(&SearchRequest::new("lantern")).unwrap();
     let first = full.hits[0].item.id().to_string();
     let request = SearchRequest {
-        exclude: vec![first.clone()],
+        exclude: vec![first.clone(), "not-in-the-window".into()],
         ..SearchRequest::new("lantern")
     };
     let response = index.search(&request).unwrap();
-    assert!(!ids(&response.hits).contains(&first.as_str()));
-    assert_eq!(response.hits.len(), 2, "the window is refilled");
+    assert_eq!(ids(&response.hits), [full.hits[1].item.id()], "no refill");
     assert_eq!(response.excluded, [first]);
     assert_eq!(response.confidence, full.confidence);
 }
@@ -178,7 +238,13 @@ fn excluded_units_are_not_returned_but_are_reported() {
 #[test]
 fn neighbours_are_fetched_for_returned_hits_only() {
     let file = corpus();
-    let index = open(&file, Retrieve { neighbours: 1, ..params() });
+    let index = open(
+        &file,
+        Retrieve {
+            neighbours: 1,
+            ..params()
+        },
+    );
     let request = SearchRequest {
         top_k: 1,
         filters: Filters {
@@ -229,7 +295,10 @@ fn only_the_lexical_path_exists() {
         rerank: RerankPolicy::Always,
         ..SearchRequest::new("lantern")
     };
-    assert!(matches!(index.search(&always), Err(Error::RerankUnavailable)));
+    assert!(matches!(
+        index.search(&always),
+        Err(Error::RerankUnavailable)
+    ));
 }
 
 #[test]
@@ -241,14 +310,17 @@ fn memories_rank_with_the_corpus() {
         ..SearchRequest::new("lantern coins")
     };
     let memories = [
-        ("fact:1", "the user lost a lantern and two coins at the market"),
+        (
+            "fact:1",
+            "the user lost a lantern and two coins at the market",
+        ),
         ("fact:2", "the user prefers tea"),
     ];
     let response = index.search_with_memories(&request, &memories).unwrap();
     let memory: Vec<&index::Hit> = response
         .hits
         .iter()
-        .filter(|h| h.source == Source::Memory)
+        .filter(|h| h.source == Some(Source::Memory))
         .collect();
     assert_eq!(memory.len(), 1, "a memory that does not match is not a hit");
     assert!(matches!(&memory[0].item, Item::Memory { id, .. } if id == "fact:1"));
@@ -265,7 +337,13 @@ fn memories_rank_with_the_corpus() {
         ..request
     };
     let response = index.search_with_memories(&request, &memories).unwrap();
-    assert!(response.hits.iter().all(|h| h.source != Source::Memory));
+    assert!(
+        response
+            .hits
+            .iter()
+            .all(|h| h.source != Some(Source::Memory))
+    );
+    assert_eq!(response.excluded, ["fact:1"]);
 }
 
 #[test]
@@ -281,7 +359,7 @@ fn an_alias_query_reaches_its_person() {
 fn find_people_aggregates_own_units_by_person() {
     let file = corpus();
     let index = open(&file, params());
-    let people = index.find_people("lantern coins", None, &[], 5).unwrap();
+    let people = index.find_people("lantern coins", None, 5, &[]).unwrap();
     let order: Vec<&str> = people.persons.iter().map(|p| p.person.as_str()).collect();
     assert_eq!(order, ["cid", "ben"], "ann has no own unit about it");
     let cid = people.get("cid").unwrap();
@@ -290,17 +368,31 @@ fn find_people_aggregates_own_units_by_person() {
     assert!(cid.score >= people.get("ben").unwrap().score);
 
     // Excluded people are removed before the cut.
-    let people = index.find_people("lantern coins", None, &["cid".into()], 1).unwrap();
+    let people = index
+        .find_people("lantern coins", None, 1, &["cid".into()])
+        .unwrap();
     assert_eq!(people.persons.len(), 1);
     assert_eq!(people.persons[0].person, "ben");
 
     // A scope restricts the candidates; an empty scope finds nobody.
     let people = index
-        .find_people("lantern", Some(&["ann".into(), "ben".into()]), &[], 5)
+        .find_people("lantern", Some(&["ann".into(), "ben".into()]), 5, &[])
         .unwrap();
     assert_eq!(people.persons.len(), 1);
-    assert!(index.find_people("lantern", Some(&[]), &[], 5).unwrap().persons.is_empty());
-    assert!(index.find_people("", None, &[], 5).unwrap().persons.is_empty());
+    assert!(
+        index
+            .find_people("lantern", Some(&[]), 5, &[])
+            .unwrap()
+            .persons
+            .is_empty()
+    );
+    assert!(
+        index
+            .find_people("", None, 5, &[])
+            .unwrap()
+            .persons
+            .is_empty()
+    );
 }
 
 #[test]
@@ -311,10 +403,43 @@ fn participants_are_ranked_with_their_levels() {
         high_top1: 0.5,
         high_entropy: 1.0,
     };
-    let index = open(&file, Retrieve { confidence: bands, ..params() });
+    let index = open(
+        &file,
+        Retrieve {
+            confidence: bands,
+            ..params()
+        },
+    );
     let group = ["ann".to_string(), "ben".into(), "cid".into()];
     let ranked = index.rank_participants("coins", &group).unwrap();
     assert_eq!(ranked.persons[0].person, "cid", "addressed");
     assert_eq!(ranked.persons[0].level, Level::High);
     assert!(ranked.get("ann").is_none(), "no own unit matched");
+}
+
+#[test]
+fn a_memory_scores_exactly_as_the_unit_it_copies() {
+    // Same text, same corpus statistics: the hand-rolled BM25 must agree with FTS5's.
+    let file = corpus();
+    let index = open(&file, params());
+    let request = SearchRequest {
+        as_person: Some("cid".into()),
+        top_k: 20,
+        ..SearchRequest::new("lantern coins")
+    };
+    let memories = [("fact:copy", "a lantern costs two coins")];
+    let response = index.search_with_memories(&request, &memories).unwrap();
+    let unweighted = |id: &str| {
+        response
+            .hits
+            .iter()
+            .find(|h| h.item.id() == id)
+            .map(|h| h.unweighted)
+            .unwrap()
+    };
+    let (unit, memory) = (unweighted("m1"), unweighted("fact:copy"));
+    assert!(
+        (unit - memory).abs() < 1e-6 * unit,
+        "unit {unit} vs memory {memory}"
+    );
 }

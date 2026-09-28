@@ -112,6 +112,8 @@ fn toy_folio_honours_the_contract() -> anyhow::Result<()> {
     );
     assert_eq!(manifest.format_version, SUPPORTED_FORMAT_VERSION);
     assert_eq!(manifest.scene_marker, ("*".to_string(), "*".to_string()));
+    assert_eq!(folio.user_placeholder(), "{user}");
+    assert_eq!(manifest.year_offset, 100);
 
     for (table, expected) in V2_SCHEMA {
         let found = columns(&folio, table)?;

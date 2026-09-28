@@ -15,8 +15,9 @@
 
 use std::collections::HashMap;
 
+use index::confidence::level;
 use index::params::ConfidenceBands;
-use index::{Index, SearchRequest};
+use index::{Index, Level, SearchRequest};
 
 use crate::error::Result;
 use crate::runner::{Config, configure};
@@ -36,13 +37,22 @@ pub struct Calibration {
     pub bands: ConfidenceBands,
     /// Youden's J at `low_top1`, family-weighted.
     pub low_separation: f64,
-    /// Family-weighted share of queries at `High`, and how often those were answered.
-    pub high_coverage: f64,
-    pub high_precision: f64,
-    /// Family-weighted share of queries at `Low`, and how often those were answered.
+    /// The bands applied to the samples that chose them.
+    pub fit: Assessment,
+    pub samples: usize,
+}
+
+/// Family-weighted share of queries at each level, and the share of those whose top hit
+/// was relevant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Assessment {
+    pub samples: usize,
+    pub high_share: f64,
+    pub high_answered: f64,
+    pub medium_share: f64,
+    pub medium_answered: f64,
     pub low_share: f64,
     pub low_answered: f64,
-    pub samples: usize,
 }
 
 /// Run the suite through `index` as `config` describes and collect one sample per query.
@@ -91,7 +101,11 @@ pub fn fit(samples: &[Sample], high_precision: f64) -> Option<Calibration> {
         .sum();
     let negative: f64 = 1.0 - positive;
 
-    let mut cuts: Vec<f64> = samples.iter().map(|s| s.top1).filter(|t| *t > 0.0).collect();
+    let mut cuts: Vec<f64> = samples
+        .iter()
+        .map(|s| s.top1)
+        .filter(|t| *t > 0.0)
+        .collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
     if cuts.is_empty() {
@@ -163,32 +177,61 @@ pub fn fit(samples: &[Sample], high_precision: f64) -> Option<Calibration> {
     }
     let (high_top1, high_entropy, high_coverage, precision) = best.or(fallback)?;
 
-    let (mut low_share, mut low_right) = (0.0, 0.0);
-    for (s, w) in samples.iter().zip(&weight) {
-        if s.top1 < low.0 {
-            low_share += w;
-            if s.answered {
-                low_right += w;
-            }
-        }
-    }
+    let bands = ConfidenceBands {
+        low_top1: low.0,
+        high_top1,
+        high_entropy,
+    };
+    let check = assess(samples, &bands);
+    debug_assert!((check.high_share - high_coverage).abs() < 1e-9);
+    debug_assert!((check.high_answered - precision).abs() < 1e-9);
     Some(Calibration {
-        bands: ConfidenceBands {
-            low_top1: low.0,
-            high_top1,
-            high_entropy,
-        },
+        bands,
         low_separation: low.1,
-        high_coverage,
-        high_precision: precision,
-        low_share,
-        low_answered: if low_share > 0.0 {
-            low_right / low_share
-        } else {
-            0.0
-        },
+        fit: check,
         samples: samples.len(),
     })
+}
+
+/// How a set of bands sorts `samples`: family-weighted share at each level and how often
+/// the top hit was relevant there. Used on the fitting subset and again on a wider run,
+/// so the bands are never reported only on the data that chose them.
+pub fn assess(samples: &[Sample], bands: &ConfidenceBands) -> Assessment {
+    let mut per_family: HashMap<&str, usize> = HashMap::new();
+    for s in samples {
+        *per_family.entry(&s.family).or_default() += 1;
+    }
+    let families = per_family.len().max(1) as f64;
+    let mut share = [0.0; 3];
+    let mut right = [0.0; 3];
+    for s in samples {
+        let w = 1.0 / (per_family[s.family.as_str()] as f64 * families);
+        let at = match level(s.top1, s.entropy, bands) {
+            Level::High => 0,
+            Level::Medium => 1,
+            Level::Low => 2,
+        };
+        share[at] += w;
+        if s.answered {
+            right[at] += w;
+        }
+    }
+    let rate = |i: usize| {
+        if share[i] > 0.0 {
+            right[i] / share[i]
+        } else {
+            0.0
+        }
+    };
+    Assessment {
+        samples: samples.len(),
+        high_share: share[0],
+        high_answered: rate(0),
+        medium_share: share[1],
+        medium_answered: rate(1),
+        low_share: share[2],
+        low_answered: rate(2),
+    }
 }
 
 #[cfg(test)]
@@ -212,10 +255,14 @@ mod tests {
             samples.push(sample("f", 5.0 + i as f64 * 0.01, 0.5, true));
         }
         let fit = fit(&samples, 0.9).unwrap();
-        assert!(fit.bands.low_top1 > 1.49 && fit.bands.low_top1 <= 5.0, "{fit:?}");
+        assert!(
+            fit.bands.low_top1 > 1.49 && fit.bands.low_top1 <= 5.0,
+            "{fit:?}"
+        );
         assert!((fit.low_separation - 1.0).abs() < 1e-9);
-        assert!(fit.high_precision >= 0.9);
+        assert!(fit.fit.high_answered >= 0.9);
         assert!(fit.bands.high_top1 >= fit.bands.low_top1);
+        assert!(fit.fit.low_answered < 0.5, "{fit:?}");
     }
 
     #[test]
@@ -229,7 +276,7 @@ mod tests {
         }
         let fit = fit(&samples, 0.9).unwrap();
         assert!(fit.bands.high_entropy < 0.95, "{fit:?}");
-        assert!(fit.high_precision >= 0.9);
+        assert!(fit.fit.high_answered >= 0.9);
     }
 
     #[test]
@@ -240,7 +287,31 @@ mod tests {
             .collect();
         samples.extend((0..10).map(|i| sample("small", 8.0 + i as f64 * 0.1, 0.5, false)));
         let fit = fit(&samples, 0.9).unwrap();
-        assert!(fit.high_precision < 0.9, "the small family is half the weight");
+        assert!(
+            fit.fit.high_answered < 0.9,
+            "the small family is half the weight"
+        );
+    }
+
+    #[test]
+    fn shares_cover_every_sample_once() {
+        let samples = [
+            sample("a", 9.0, 0.1, true),
+            sample("a", 1.0, 0.9, false),
+            sample("b", 4.0, 0.9, true),
+        ];
+        let bands = ConfidenceBands {
+            low_top1: 2.0,
+            high_top1: 6.0,
+            high_entropy: 0.5,
+        };
+        let a = assess(&samples, &bands);
+        assert!((a.high_share + a.medium_share + a.low_share - 1.0).abs() < 1e-9);
+        assert_eq!(
+            (a.high_share, a.medium_share, a.low_share),
+            (0.25, 0.5, 0.25)
+        );
+        assert_eq!((a.high_answered, a.low_answered), (1.0, 0.0));
     }
 
     #[test]
