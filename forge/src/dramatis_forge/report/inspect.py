@@ -161,13 +161,12 @@ def _merge_orders(orders: list[list[str]]) -> list[str]:
     """
     out: list[str] = []
     for keys in orders:
-        at = 0
-        for key in keys:
+        for i, key in enumerate(keys):
             if key in out:
-                at = out.index(key) + 1
-            else:
-                out.insert(at, key)
-                at += 1
+                continue
+            # Before the next key of this record that is already placed; with none, last.
+            after = next((out.index(k) for k in keys[i + 1:] if k in out), len(out))
+            out.insert(after, key)
     return out
 
 
