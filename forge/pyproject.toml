@@ -11,6 +11,7 @@ dependencies = [
     "rich>=13.9",
     "tenacity>=9.0",
     "pyyaml>=6.0",
+    "keyring==25.7.0",
 ]
 
 [project.optional-dependencies]
