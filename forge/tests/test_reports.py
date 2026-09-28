@@ -24,7 +24,8 @@ def test_boundary_selection_is_deterministic(built, pack):
         first, second = samples.select(a, pack), samples.select(a, pack)
     assert first.routes == second.routes
     story = reasons(first, "story · dialogue")
-    assert story["Chapter 1"] == ["first", "kind", "kind", "kind"]  # first choice/line/scene
+    # first choice/line/scene, and the first scene addressing the reader by placeholder
+    assert story["Chapter 1"] == ["first", "kind", "kind", "kind", "placeholder"]
     kinds = {f["kind"] for t, why in first.routes["story · dialogue"].items()
              for key, f in why if key == "kind"}
     assert kinds == {"choice", "line", "scene"}
@@ -34,6 +35,7 @@ def test_boundary_selection_is_deterministic(built, pack):
     people = reasons(first, "people · prose")
     assert people["Alice"][:2] == ["first", "largest"] and "multi_form" in people["Alice"]
     assert "smallest" in people["Alice (Winter)"]
+    assert people["Bob"] == ["watch"]  # the pack's watch list
 
 
 def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):

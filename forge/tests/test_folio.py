@@ -67,6 +67,7 @@ def test_manifest_shape(built, pack):
     assert m["requires"] == ["neighbor_expand"]
     assert m["wording"] == dict(pack.wording) and m["scene_marker"] == ["*", "*"]
     assert m["clock.year_offset"] == 100
+    assert m["user_placeholder"] == "{user}"
 
 
 def test_v2_tables_exist_and_enforce_their_checks(built):

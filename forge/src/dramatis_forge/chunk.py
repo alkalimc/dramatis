@@ -103,7 +103,7 @@ def _split(text: str, limit: int, breaks: tuple[str, ...]) -> list[str]:
 
 
 def _lore(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
-    for r in archive.db.execute("SELECT page,path,text,revid FROM lore ORDER BY page,path,sig"):
+    for r in archive.db.execute("SELECT page,path,text,revid FROM lore ORDER BY page,seq"):
         path = json.loads(r["path"])
         breadcrumb = " › ".join(path)
         head = header.format(page=r["page"], path=f" › {breadcrumb}" if breadcrumb else "")
@@ -227,13 +227,16 @@ def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Itera
     revids = {row["title"]: row["revid"]
               for row in archive.db.execute("SELECT title,revid FROM raw.pages")}
     for r in archive.db.execute(
-        "SELECT page,subject,idx,title,trigger,text FROM voices ORDER BY subject,idx"
+        "SELECT page,subject,idx,variant,title,trigger,text FROM voices ORDER BY subject,page,seq"
     ):
         person = person_of.get(r["subject"], r["subject"])
+        # A variant is the same slot recorded again with other words; naming it in the
+        # header keeps the two lines from reading as one line said twice.
+        title = " · ".join(x for x in (r["title"], r["variant"]) if x)
         head = header.format(
             person=person,
             trigger=r["trigger"] or label("voice"),
-            title=f" · {r['title']}" if r["title"] else "",
+            title=f" · {title}" if title else "",
         )
         yield Chunk(
             template=t.name, page=r["page"], text=r["text"], header=head,
@@ -307,7 +310,7 @@ def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Ite
     ref_revids = {row["title"]: row["revid"]
                   for row in archive.db.execute("SELECT title,revid FROM raw.pages")}
     for r in archive.db.execute(
-        "SELECT page,name,grp,description,source FROM char_refs ORDER BY name,grp"
+        "SELECT page,name,grp,description,source FROM char_refs ORDER BY page,seq"
     ):
         person = person_of.get(r["name"])
         head = header.format(
@@ -331,7 +334,7 @@ def _letter(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iter
     revids = {row["title"]: row["revid"]
               for row in archive.db.execute("SELECT title,revid FROM raw.pages")}
     for i, r in enumerate(archive.db.execute(
-        "SELECT page,sender,date,title,body FROM letters ORDER BY page,sig"
+        "SELECT page,sender,date,title,body FROM letters ORDER BY page,seq"
     )):
         head = header.format(
             sender=r["sender"] or label("unsigned"),

@@ -16,6 +16,7 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 import mwparserfromhell as mw
 
@@ -154,6 +155,94 @@ def find_header(table: str, *needles: str) -> tuple[list[str], int] | None:
     return None
 
 
+RE_SPAN = re.compile(r'\b(row|col)span\s*=\s*"?(\d+)"?', re.I)
+
+
+@dataclass(frozen=True)
+class Cell:
+    text: str          # raw cell source, attributes removed
+    header: bool       # written with `!`
+
+
+def _row_cells(segment: str) -> list[tuple[str, bool, int, int]]:
+    """(source, is_header, rowspan, colspan) for each cell in one `|-` segment."""
+    out: list[tuple[str, bool, int, int]] = []
+    for line in segment.splitlines():
+        s = line.strip()
+        if not s or s.startswith(("|}", "{|", "|+")):
+            continue
+        if s[0] not in "|!":
+            if out:  # a cell's text continued onto the next line
+                src, hdr, rs, cs = out[-1]
+                out[-1] = (src + "\n" + s, hdr, rs, cs)
+            continue
+        header = s[0] == "!"
+        sep = "!!" if header else "||"
+        for part in s[1:].split(sep):
+            attrs, bar, body = part.partition("|")
+            if bar and ("=" in attrs or RE_SPAN.search(attrs)) and "[[" not in attrs \
+                    and "{{" not in attrs:
+                spans = dict((k.lower(), int(v)) for k, v in RE_SPAN.findall(attrs))
+                out.append((body.strip(), header, spans.get("row", 1), spans.get("col", 1)))
+            else:
+                out.append((part.strip(), header, 1, 1))
+    return out
+
+
+def table_grid(table: str) -> list[list[Cell]]:
+    """A wikitable as the rectangular grid a browser shows.
+
+    `rowspan` and `colspan` are expanded: a spanned cell appears in every slot it
+    covers, so column *i* of every row means the same thing. Reading cells by position
+    without this attaches every value after a spanned cell to the wrong column — the
+    header says one language and the data is another.
+    """
+    grid: list[list[Cell]] = []
+    carry: dict[int, tuple[Cell, int]] = {}  # column -> (cell, rows still to fill)
+    for segment in re.split(r"^\|-.*$", table, flags=re.M):
+        cells = _row_cells(segment)
+        if not cells:
+            continue
+        row: list[Cell] = []
+        col = 0
+        for src, header, rs, cs in cells:
+            col = _fill_carried(row, col, carry)
+            cell = Cell(src, header)
+            for _ in range(cs):
+                row.append(cell)
+                if rs > 1:
+                    carry[col] = (cell, rs - 1)
+                col += 1
+        _fill_carried(row, col, carry)
+        grid.append(row)
+    return grid
+
+
+def _fill_carried(row: list[Cell], col: int, carry: dict[int, tuple[Cell, int]]) -> int:
+    """Append cells still spanning down from rows above, starting at `col`; return the
+    next free column."""
+    while col in carry:
+        cell, left = carry[col]
+        row.append(cell)
+        if left <= 1:
+            del carry[col]
+        else:
+            carry[col] = (cell, left - 1)
+        col += 1
+    return col
+
+
+def header_rows(grid: list[list[Cell]]) -> int:
+    """How many leading rows are all-header: a table's column labels, however stacked."""
+    n = 0
+    for row in grid:
+        if row and all(c.header for c in row):
+            n += 1
+        else:
+            break
+    return n
+
+
 def tabs(wikitext: str, css_class: str) -> dict[str, str]:
     """Named tab panes `<div id="name" class="css_class">…</div>` on a page."""
     if not css_class:
@@ -185,6 +274,7 @@ class Cleaner:
             re.compile(rf"</?(?:{'|'.join(map(re.escape, rules.strip_tags))})\b[^>]*>", re.I)
             if rules.strip_tags else None)
         self._macro_shape = re.compile(rules.macro_shape) if rules.macro_shape else None
+        self._letters = re.compile(rules.letters) if rules.letters else None
 
     def tabs(self, wikitext: str) -> dict[str, str]:
         """Named tab panes, if the site uses them (`InlineRules.tab_class`)."""
@@ -229,7 +319,11 @@ class Cleaner:
         s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
 
         code = mw.parse(s)
-        for node in code.filter_templates(recursive=True):
+        # Innermost first: an outer template that keeps a parameter then keeps its
+        # children's rendered text. Outermost first replaced the outer node with its raw
+        # parameter, detaching the children unprocessed, and the brace sweep below then
+        # deleted them — a name wrapped in a marker template vanished.
+        for node in reversed(code.filter_templates(recursive=True)):
             raw = template_name(node)
             name = raw.lower()
             try:
@@ -238,7 +332,11 @@ class Cleaner:
                 if name.startswith("#"):
                     code.remove(node)
                 elif name in self.rules.literal:
-                    code.replace(node, self.rules.literal[name])
+                    value = self.rules.literal[name]
+                    if callable(value):
+                        value = value({str(p.name).strip(): str(p.value).strip()
+                                       for p in node.params if p.showkey})
+                    code.replace(node, value)
                 elif name in self.rules.drop:
                     code.remove(node)
                 elif raw in self.rules.content:
@@ -336,6 +434,30 @@ class Cleaner:
             if len(text) >= min_chars:
                 out.append({"path": tuple(stack), "text": text})
         return out
+
+    def visible(self, wikitext: str) -> int:
+        """Letters a reader of the page sees: markup, comments and links resolved, digits,
+        punctuation and whitespace not counted. The yardstick for guard G3's yield check.
+
+        Deliberately generous: templates in the drop list are kept, tables are kept as
+        cell text. It measures what the page shows, so a parser that leaves something
+        out on purpose does so against a known total.
+        """
+        s = strip_comments(wikitext)
+        s = re.sub(r"<ref[^>]*>.*?</ref>", "", s, flags=re.S)
+        s = re.sub(r"\{\{\s*#[^{}]*\}\}", "", s)
+        s = re.sub(r"\[\[(?:[^\]|]*\|)?([^\]|]*)\]\]", r"\1", s)
+        s = re.sub(r"<[^<>]+>", "", s)
+        # Template names and parameter names are markup; parameter values are text.
+        s = re.sub(r"\{\{\s*[^|{}]*", "", s)
+        s = re.sub(r"\|\s*[^|=\n{}\[\]]{1,24}=", "", s)
+        return self.letters(s)
+
+    def letters(self, text: str) -> int:
+        """Letters of the corpus language in plain text (`InlineRules.letters`)."""
+        if self._letters is not None:
+            return len(self._letters.findall(text))
+        return sum(1 for ch in text if ch.isalpha())
 
     def is_meta_page(self, title: str) -> bool:
         return bool(self.rules.meta_pages) and title.startswith(self.rules.meta_pages)

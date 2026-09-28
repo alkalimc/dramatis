@@ -212,6 +212,11 @@ class Route:
     title: str | None = None
     title_prefix: str | None = None
     label: str = ""
+    #: Least share of a page's visible letters (`Cleaner.visible`) its records must
+    #: carry, or guard G3 reports the page with its ratio. 0 disables the check. Set
+    #: per route because what a page may legitimately leave out (gameplay tables,
+    #: real-world commentary, other languages) differs by layout.
+    min_yield: float = 0.0
 
     def matches(self, seed: str, title: str) -> bool:
         if seed != self.seed:
@@ -271,8 +276,11 @@ class InlineRules:
     text_param: Mapping[str, int] = field(default_factory=dict)
     #: Replace with assembled body text (see ContentSpec).
     content: Mapping[str, ContentSpec] = field(default_factory=dict)
-    #: Replace with a fixed string, e.g. the player-name macro.
-    literal: Mapping[str, str] = field(default_factory=dict)
+    #: Replace with a fixed string, e.g. the player-name macro. A callable receives the
+    #: template's named parameters and returns the replacement, for a template whose
+    #: rendering depends on them (an optional prefix, say).
+    literal: Mapping[str, str | Callable[[Mapping[str, str]], str]] = field(
+        default_factory=dict)
     #: Plain-text substitutions applied after the template pass: engine-level macros
     #: that are not templates at all, so no template rule can reach them.
     macros: tuple[tuple[Any, str], ...] = ()
@@ -294,6 +302,10 @@ class InlineRules:
     lead_section: str = "lead"
     #: Joins a content template's qualifier to its body.
     qualifier_sep: str = ": "
+    #: Regular-expression character class of the corpus language's letters, for
+    #: measuring yield (`Cleaner.visible`). Empty counts every letter, which on a page
+    #: carrying other languages or file names measures the wrong thing.
+    letters: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -398,9 +410,14 @@ class FindingNote:
     guard: str
     pattern: str
     reason: str
+    #: Optional regular expression the finding's page must match (full match), for a
+    #: judgement about particular pages rather than a kind of finding.
+    page: str = ""
 
-    def explains(self, guard: str, detail: str) -> bool:
-        return guard == self.guard and re.search(self.pattern, detail) is not None
+    def explains(self, guard: str, detail: str, page: str | None = None) -> bool:
+        if guard != self.guard or re.search(self.pattern, detail) is None:
+            return False
+        return not self.page or re.fullmatch(self.page, page or "") is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -638,6 +655,13 @@ class Pack:
     roster: RosterRules = field(default_factory=RosterRules)
     #: Reviewed explanations for expected low-severity findings. See `FindingNote`.
     finding_notes: tuple[FindingNote, ...] = ()
+    #: How the corpus writes the user's name wherever the source addresses the reader
+    #: (folio manifest `user_placeholder`). Stored as is; the runtime substitutes it when
+    #: it assembles text, never the builder.
+    user_placeholder: str = "{user}"
+    #: Pages every sample includes, title -> why a reviewer should keep reading them
+    #: (a past defect, a layout no boundary rule reaches). Titles not held are skipped.
+    sample_pages: Mapping[str, str] = field(default_factory=dict)
     #: The source's own table of contents, annotated with what we took and why not.
     coverage: tuple[CoverageRow, ...] = ()
     #: page title -> alias kind, for pages whose entire output is dictionary entries

@@ -183,7 +183,8 @@ CREATE TABLE IF NOT EXISTS template_stats (
 -- capabilities the reader must implement, or refuse to load), segmenter, stopwords,
 -- wording (JSON object: every user-facing string and in-world name, the client's only
 -- source of UI text), scene_marker (JSON [open, close] wrapping a scene line),
--- clock.year_offset (integer: in-world year = local year minus this).
+-- clock.year_offset (integer: in-world year = local year minus this), user_placeholder
+-- (string standing for the user's name in stored text; substituted at assembly only).
 CREATE TABLE IF NOT EXISTS manifest (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

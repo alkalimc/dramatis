@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS scenes (
     category    TEXT,
     grp         TEXT,
     source_ref  TEXT,
-    revid       INTEGER
+    revid       INTEGER,
+    source_page TEXT                 -- the page the body was read from
 );
 CREATE TABLE IF NOT EXISTS lines (
     scene   TEXT NOT NULL,
@@ -105,14 +106,17 @@ CREATE TABLE IF NOT EXISTS voices (
     page    TEXT NOT NULL,
     subject TEXT NOT NULL,
     idx     INTEGER NOT NULL,
+    variant TEXT NOT NULL DEFAULT '',
+    seq     INTEGER NOT NULL,        -- position among the page's voice records
     title   TEXT,
     trigger TEXT,
     text    TEXT NOT NULL,
     condition TEXT,
-    PRIMARY KEY (page, idx)
+    PRIMARY KEY (page, idx, variant)
 );
 CREATE TABLE IF NOT EXISTS lore (
     page  TEXT NOT NULL,
+    seq   INTEGER NOT NULL,          -- position among the page's lore records
     path  TEXT NOT NULL,
     sig   TEXT NOT NULL,
     text  TEXT NOT NULL,
@@ -121,6 +125,7 @@ CREATE TABLE IF NOT EXISTS lore (
 );
 CREATE TABLE IF NOT EXISTS letters (
     page   TEXT NOT NULL,
+    seq    INTEGER NOT NULL,
     sender TEXT,
     date   TEXT,
     title  TEXT,
@@ -130,6 +135,7 @@ CREATE TABLE IF NOT EXISTS letters (
 );
 CREATE TABLE IF NOT EXISTS terms (
     page         TEXT NOT NULL,
+    seq          INTEGER NOT NULL,
     term         TEXT NOT NULL,
     translations TEXT NOT NULL DEFAULT '{}',   -- JSON: label -> rendering
     category     TEXT,
@@ -137,6 +143,7 @@ CREATE TABLE IF NOT EXISTS terms (
 );
 CREATE TABLE IF NOT EXISTS char_refs (
     page        TEXT NOT NULL,
+    seq         INTEGER NOT NULL,
     name        TEXT NOT NULL,
     grp         TEXT,
     sig         TEXT NOT NULL,

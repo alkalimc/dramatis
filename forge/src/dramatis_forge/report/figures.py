@@ -412,18 +412,18 @@ def _d_aliases(src: _Sources, member: str | None):
     return _count(src.archive.execute("select count(*) from aliases").fetchone()[0])
 
 
-def _findings(src: _Sources) -> list[tuple[str, str, str]]:
-    """(guard, severity, detail) for every finding of the latest run of each stage."""
+def _findings(src: _Sources) -> list[tuple[str, str, str, str | None]]:
+    """(guard, severity, detail, page) for every finding of the latest run of each stage."""
     assert src.archive is not None
     return src.once("findings", lambda: [tuple(r) for r in src.archive.execute(
-        "select guard, severity, detail from guard_findings")])  # type: ignore[return-value]
+        "select guard, severity, detail, page from guard_findings")])  # type: ignore[return-value]
 
 
 def _by_guard(src: _Sources) -> dict[str, list[int]]:
     """[high, low] per guard, every guard listed, including those with nothing to report:
     a guard absent from the counts is otherwise indistinguishable from one that never ran."""
     counts = {g: [0, 0] for g in GUARDS}
-    for guard, severity, _detail in _findings(src):
+    for guard, severity, _detail, _page in _findings(src):
         counts.setdefault(guard, [0, 0])[0 if severity == HIGH else 1] += 1
     return counts
 
@@ -457,8 +457,8 @@ def _d_guards_unattributed(src: _Sources, _m: str | None):
     """Low-severity findings no reviewed note in the pack explains (`Pack.finding_notes`)."""
     notes = src.pack.finding_notes
     return _count(sum(
-        1 for guard, severity, detail in _findings(src)
-        if severity != HIGH and not any(n.explains(guard, detail) for n in notes)))
+        1 for guard, severity, detail, page in _findings(src)
+        if severity != HIGH and not any(n.explains(guard, detail, page) for n in notes)))
 
 
 def _d_tokens_unit(src: _Sources, member: str | None):

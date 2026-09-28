@@ -133,7 +133,7 @@ PACK = Pack(
     ),
     routes=(
         Route("story", parse_story, label="dialogue"),
-        Route("people", parse_prose, label="prose"),
+        Route("people", parse_prose, label="prose", min_yield=0.5),
     ),
     followups=(),
     inline=InlineRules(
@@ -141,7 +141,9 @@ PACK = Pack(
         text_param={"color": -1},
         content={"Quote": ContentSpec(positional=(1,), prefix=(0,))},
         literal={"reader": "the reader"},
-        macros=((re.compile(r"\$\{player\}"), "the reader"),),
+        # The reader's name stays a placeholder in the corpus; the runtime fills it in.
+        macros=((re.compile(r"\$\{player\}"), "{user}"),),
+        letters=r"[A-Za-z]",
         macro_shape=r"\$\{\w+\}",
     ),
     identity=IdentityRules(resolve=resolve_identity, form_order={"alt": 1}),
@@ -174,6 +176,7 @@ PACK = Pack(
         FindingNote("G3", "marked as having no script", "interludes carry no script"),
     ),
     roster=ROSTER,
+    sample_pages={"Bob": "the only person without a birthday"},
     wording={"host.name": "Keeper", "user.title": "Captain {name}"},
     year_offset=100,
     audit=DocAudit(id_prefixes=("D",), planned_keys=("units.later",)),

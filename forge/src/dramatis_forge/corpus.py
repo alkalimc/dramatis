@@ -196,6 +196,7 @@ def run(
         folio.set_meta("wording", dict(pack.wording))
         folio.set_meta("scene_marker", list(pack.scene_marker))
         folio.set_meta("clock.year_offset", pack.year_offset)
+        folio.set_meta("user_placeholder", pack.user_placeholder)
         # Written last: the fingerprint has to cover everything above it.
         folio.set_meta("build_fingerprint", _fingerprint(folio))
         folio.optimize()

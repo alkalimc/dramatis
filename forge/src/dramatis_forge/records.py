@@ -16,6 +16,12 @@ another. Keying it by `(page, section_path, sig)` lets genuine duplicates
 collapse while genuine distinct text coexists — and, crucially, makes the two
 cases *distinguishable*, which a bare count never is.
 
+**Records keep source order.** Every kind that can hold several records per page
+carries `seq`, its position among that page's records of the kind as the parser produced
+them (normalisation assigns it). Readers order by it. Sorting by heading path, name or
+signature instead reorders the source: a chronology reads out of sequence and a sample
+cannot be read side by side with the page it came from.
+
 **Insert must not replace.** `INSERT OR REPLACE` on a colliding key destroys a
 row and reports success. `INSERT OR IGNORE` plus a count of what was ignored
 turns the same event into a number that has to be explained.
@@ -33,7 +39,7 @@ from typing import Any, ClassVar
 #: vocabulary rather than with the store because it describes the *rules*, not the
 #: file: a pack can add a seed set without invalidating any parse, and a parser fix
 #: can change every record while the schema stands still.
-PARSER_VERSION = 2
+PARSER_VERSION = 3
 
 
 def sig(*parts: object) -> str:
@@ -69,6 +75,11 @@ class Record:
     def chars(self) -> int:
         return 0
 
+    @property
+    def prose(self) -> str:
+        """Every piece of source text the record carries, for measuring yield."""
+        return ""
+
 
 @dataclass(frozen=True, slots=True)
 class Scene(Record):
@@ -81,16 +92,22 @@ class Scene(Record):
 
     KIND: ClassVar[str] = "scene"
     TABLE: ClassVar[str] = "scenes"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("id", "category", "grp", "source_ref", "revid")
+    COLUMNS: ClassVar[tuple[str, ...]] = (
+        "id", "category", "grp", "source_ref", "revid", "source_page")
 
     page: str
     category: str = ""
     group: str = ""
     source_ref: str = ""
     revid: int | None = None
+    #: The page whose text the body was parsed from, when it is not `page` itself: a
+    #: body transcluded from a subpage is stored once, under the scene, and this says
+    #: where it was read. `revid` is that page's revision.
+    source_page: str = ""
 
     def row(self) -> tuple[Any, ...]:
-        return (self.page, self.category, self.group, self.source_ref, self.revid)
+        return (self.page, self.category, self.group, self.source_ref, self.revid,
+                self.source_page or self.page)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +134,10 @@ class Line(Record):
     def chars(self) -> int:
         return len(self.text)
 
+    @property
+    def prose(self) -> str:
+        return self.text
+
 
 @dataclass(frozen=True, slots=True)
 class Choice(Record):
@@ -139,6 +160,10 @@ class Choice(Record):
     @property
     def chars(self) -> int:
         return sum(len(o) for o in self.options)
+
+    @property
+    def prose(self) -> str:
+        return "".join(self.options)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +188,13 @@ class Dossier(Record):
         n = sum(len(s.get("text", "")) for s in self.sections)
         return n + sum(len(v) for v in self.items.values() if isinstance(v, str))
 
+    @property
+    def prose(self) -> str:
+        parts = [*self.fields.values()]
+        parts += [s.get("title", "") + s.get("text", "") for s in self.sections]
+        parts += [v if isinstance(v, str) else _j(v) for v in self.items.values()]
+        return "".join(parts)
+
 
 @dataclass(frozen=True, slots=True)
 class Voice(Record):
@@ -176,7 +208,7 @@ class Voice(Record):
     KIND: ClassVar[str] = "voice"
     TABLE: ClassVar[str] = "voices"
     COLUMNS: ClassVar[tuple[str, ...]] = (
-        "page", "subject", "idx", "title", "trigger", "text", "condition",
+        "page", "subject", "idx", "variant", "seq", "title", "trigger", "text", "condition",
     )
 
     page: str
@@ -186,14 +218,22 @@ class Voice(Record):
     title: str = ""
     trigger: str = ""
     condition: str = ""
+    #: A second recording of the same slot with different words (an outfit's own voice
+    #: set, say): empty for the base line. The source's label, opaque here.
+    variant: str = ""
+    seq: int = 0
 
     def row(self) -> tuple[Any, ...]:
-        return (self.page, self.subject, self.idx, self.title, self.trigger, self.text,
-                self.condition)
+        return (self.page, self.subject, self.idx, self.variant, self.seq, self.title,
+                self.trigger, self.text, self.condition)
 
     @property
     def chars(self) -> int:
         return len(self.text)
+
+    @property
+    def prose(self) -> str:
+        return self.title + self.text + self.condition
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,19 +242,25 @@ class Lore(Record):
 
     KIND: ClassVar[str] = "lore"
     TABLE: ClassVar[str] = "lore"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("page", "path", "sig", "text", "revid")
+    COLUMNS: ClassVar[tuple[str, ...]] = ("page", "seq", "path", "sig", "text", "revid")
 
     page: str
     path: tuple[str, ...]
     text: str
     revid: int | None = None
+    seq: int = 0
 
     def row(self) -> tuple[Any, ...]:
-        return (self.page, _j(list(self.path)), sig(self.text), self.text, self.revid)
+        return (self.page, self.seq, _j(list(self.path)), sig(self.text), self.text,
+                self.revid)
 
     @property
     def chars(self) -> int:
         return len(self.text)
+
+    @property
+    def prose(self) -> str:
+        return "".join(self.path) + self.text
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,20 +269,27 @@ class Letter(Record):
 
     KIND: ClassVar[str] = "letter"
     TABLE: ClassVar[str] = "letters"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("page", "sender", "date", "title", "sig", "body")
+    COLUMNS: ClassVar[tuple[str, ...]] = (
+        "page", "seq", "sender", "date", "title", "sig", "body")
 
     page: str
     body: str
     sender: str = ""
     date: str = ""
     title: str = ""
+    seq: int = 0
 
     def row(self) -> tuple[Any, ...]:
-        return (self.page, self.sender, self.date, self.title, sig(self.body), self.body)
+        return (self.page, self.seq, self.sender, self.date, self.title, sig(self.body),
+                self.body)
 
     @property
     def chars(self) -> int:
         return len(self.body)
+
+    @property
+    def prose(self) -> str:
+        return self.sender + self.title + self.date + self.body
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,19 +302,25 @@ class Term(Record):
 
     KIND: ClassVar[str] = "term"
     TABLE: ClassVar[str] = "terms"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("page", "term", "translations", "category")
+    COLUMNS: ClassVar[tuple[str, ...]] = ("page", "seq", "term", "translations", "category")
 
     page: str
     term: str
+    #: Label -> rendering, in the source's column order.
     translations: dict[str, str] = field(default_factory=dict)
     category: str = ""
+    seq: int = 0
 
     def row(self) -> tuple[Any, ...]:
-        return (self.page, self.term, _j(self.translations), self.category)
+        return (self.page, self.seq, self.term, _j(self.translations), self.category)
 
     @property
     def chars(self) -> int:
         return len(self.term) + sum(len(v) for v in self.translations.values())
+
+    @property
+    def prose(self) -> str:
+        return self.term + "".join(self.translations.values())
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,23 +335,29 @@ class CharRef(Record):
 
     KIND: ClassVar[str] = "char_ref"
     TABLE: ClassVar[str] = "char_refs"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("page", "name", "grp", "sig", "description", "source")
+    COLUMNS: ClassVar[tuple[str, ...]] = (
+        "page", "seq", "name", "grp", "sig", "description", "source")
 
     page: str
     name: str
     description: str
     group: str = ""
     source: str = ""
+    seq: int = 0
 
     def row(self) -> tuple[Any, ...]:
         return (
-            self.page, self.name, self.group,
+            self.page, self.seq, self.name, self.group,
             sig(self.description), self.description, self.source,
         )
 
     @property
     def chars(self) -> int:
         return len(self.description)
+
+    @property
+    def prose(self) -> str:
+        return self.name + self.description + self.source
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,3 +388,6 @@ KINDS: tuple[type[Record], ...] = (
     Scene, Line, Choice, Dossier, Voice, Lore, Letter, Term, CharRef, Alias,
 )
 ORDER: tuple[str, ...] = tuple(k.KIND for k in KINDS)
+#: Kinds whose records carry `seq`, their order among one page's records.
+SEQUENCED: frozenset[str] = frozenset(
+    k.KIND for k in KINDS if "seq" in k.COLUMNS and k.KIND not in ("line", "choice"))
