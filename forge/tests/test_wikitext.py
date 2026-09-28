@@ -133,3 +133,16 @@ def test_visible_counts_what_a_reader_sees_in_the_corpus_letters():
     # Parameter names and template names are markup; values, link labels and tag
     # contents are text; `letters` keeps lower-case only, so XYZ is another language.
     assert cleaner.visible(source) == len("abcdefgh")
+
+
+def test_table_grid_reads_an_empty_attribute_prefix_as_attributes():
+    grid = table_grid("{|\n! A !! B !! C\n|-\n|x||y|||-\n|}")
+    assert [c.text for c in grid[1]] == ["x", "y", "-"]
+
+
+def test_sections_carry_their_offset_and_headings_resolve_at_any_point(clean):
+    body = "== A ==\nText under A, long enough to be kept.\n=== B ===\nText under B, also kept.\n"
+    sections = clean.split_sections(body, min_chars=5)
+    assert [s["at"] for s in sections] == [0, body.index("=== B")]
+    assert clean.headings_at(body, body.index("Text under B")) == ("A", "B")
+    assert clean.headings_at(body, 0) == ()

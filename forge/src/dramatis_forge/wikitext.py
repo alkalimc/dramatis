@@ -179,9 +179,12 @@ def _row_cells(segment: str) -> list[tuple[str, bool, int, int]]:
         header = s[0] == "!"
         sep = "!!" if header else "||"
         for part in s[1:].split(sep):
+            # `attrs | content`, as MediaWiki reads a cell: text before the first bare
+            # `|` is attributes, even when empty (`|||-` is an empty-attribute cell
+            # holding `-`). A `|` inside a link or template is not that separator.
             attrs, bar, body = part.partition("|")
-            if bar and ("=" in attrs or RE_SPAN.search(attrs)) and "[[" not in attrs \
-                    and "{{" not in attrs:
+            if bar and (not attrs.strip() or "=" in attrs or RE_SPAN.search(attrs)) \
+                    and "[[" not in attrs and "{{" not in attrs:
                 spans = dict((k.lower(), int(v)) for k, v in RE_SPAN.findall(attrs))
                 out.append((body.strip(), header, spans.get("row", 1), spans.get("col", 1)))
             else:
@@ -405,6 +408,9 @@ class Cleaner:
     ) -> list[dict]:
         """Split prose into sections keyed by their heading path.
 
+        Each section also carries `at`, its offset in `body`, so a caller merging these
+        with records read another way can put everything back in source order.
+
         The heading stack is kept so a leaf entry carries its ancestry: an entry
         under "human races" means something different from the same words under
         "reconstructed history", and a retrieval unit that has lost that is a unit
@@ -415,12 +421,12 @@ class Cleaner:
         if not marks:
             text = self.text(body, warn)
             if len(text) >= min_chars:
-                out.append({"path": (), "text": text})
+                out.append({"path": (), "text": text, "at": 0})
             return out
 
         lead = self.text(body[: marks[0].start()], warn)
         if len(lead) >= min_chars:
-            out.append({"path": (self.rules.lead_section,), "text": lead})
+            out.append({"path": (self.rules.lead_section,), "text": lead, "at": 0})
 
         stack: list[str] = []
         for i, m in enumerate(marks):
@@ -432,8 +438,16 @@ class Cleaner:
                 continue
             text = self.text(body[m.end(): end], warn)
             if len(text) >= min_chars:
-                out.append({"path": tuple(stack), "text": text})
+                out.append({"path": tuple(stack), "text": text, "at": m.start()})
         return out
+
+    @staticmethod
+    def headings_at(body: str, offset: int) -> tuple[str, ...]:
+        """The heading path in force at `offset` of `body`, outermost first."""
+        stack: list[str] = []
+        for m in RE_SECTION.finditer(body, 0, offset):
+            stack = stack[: max(len(m.group(1)) - 2, 0)] + [m.group(2).strip()]
+        return tuple(stack)
 
     def visible(self, wikitext: str) -> int:
         """Letters a reader of the page sees: markup, comments and links resolved, digits,
