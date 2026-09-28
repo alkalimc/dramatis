@@ -8,7 +8,8 @@
   `persona.tone_rules`, `fallback_line` non-empty; and the user is named only by the
   corpus's placeholder: no altered placeholder, no other name (the pack's patterns).
 ⑥ prescriptive phrasing: capability claims and negative knowledge lists in
-  `system_prompt` and `tone_rules` (the host's `in_world` too, which sits beside them).
+  `system_prompt` and `tone_rules` (the host's `in_world` too, which sits beside them),
+  outside quoted examples of the person's own words.
   Those behaviours come from retrieval and visibility, and a claim that disagrees with
   what retrieval returns makes the model invent.
 
@@ -68,6 +69,8 @@ class Lexicons:
         self.meta = [(t, _term_pattern(t)) for t in gen.meta_terms]
         self.meta += [(p, re.compile(p)) for p in gen.meta_patterns]
         self.prescriptive = [(p, re.compile(p, re.IGNORECASE)) for p in gen.prescriptive_patterns]
+        self.quoted = [re.compile(f"{re.escape(o)}[^{re.escape(c)}\n]*{re.escape(c)}")
+                       for o, c in gen.quotes]
         self.placeholder = placeholder
         self.user_names = [(p, re.compile(p)) for p in gen.user_name_patterns]
         # The placeholder's word outside a whole placeholder, in any case, means the model
@@ -93,6 +96,8 @@ class Lexicons:
         return self._hits(text, self.meta)
 
     def prescriptive_hits(self, text: str) -> list[str]:
+        for rx in self.quoted:
+            text = rx.sub(" ", text)
         return self._hits(text, self.prescriptive)
 
 

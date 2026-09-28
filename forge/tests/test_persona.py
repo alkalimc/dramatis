@@ -318,6 +318,17 @@ def test_prescriptive_phrasing_fails_gate_six():
     assert all(f.slot == "system_prompt" for f in v.findings)
 
 
+def test_quoted_examples_are_not_prescriptive_but_can_still_leak():
+    base = output_of("responses_ok.json")
+    quoted = {**base, "tone_rules": [*base["tone_rules"],
+                                     'Cuts a topic off: "Never bring that up again."']}
+    assert judge(quoted).passed
+    bare = {**base, "tone_rules": [*base["tone_rules"], "Never bring up the war."]}
+    assert judge(bare).count(PRESCRIPTIVE) == 1
+    leak = {**base, "tone_rules": [*base["tone_rules"], 'Says "this game is rigged".']}
+    assert judge(leak).count(META) == 1
+
+
 def test_meta_leak_fails_gate_two():
     v = judge(output_of("responses_meta_leak.json"))
     assert v.count(META) == 1 and v.findings[0].slot == "tone_rules"

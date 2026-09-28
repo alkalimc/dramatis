@@ -68,6 +68,10 @@ class Generator:
     meta_patterns: tuple[str, ...] = ()
     #: Regular expressions for capability claims and negative knowledge lists.
     prescriptive_patterns: tuple[str, ...] = ()
+    #: Quotation marks (open, close) around an example of the person's own words. The
+    #: prescriptive gate skips quoted spans, since "never bring that up", quoted, is
+    #: something they say rather than something they are told; the meta gate does not.
+    quotes: tuple[tuple[str, str], ...] = (("\u201c", "\u201d"), ('"', '"'))
     #: Section headings of the material block, keyed by material kind (see `material`).
     labels: Mapping[str, str] = field(default_factory=dict)
     #: Reclassify units by title: (from kind, regular expression matched in full against
