@@ -279,6 +279,7 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
     dialogue = [t for t, s in shapes.items() if s == "dialogue"]
     names = set(src.names)
     rules = _Rules(gen)
+    display = src.names[0] if src.names else HOST
     story: list[Line] = []
     seen: set[str] = set()
     if dialogue and names:
@@ -292,7 +293,9 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
                 words = rules.clean(words)
                 if words and words not in seen:
                     seen.add(words)
-                    story.append(Line(page, title or page, words, count(before + words),
+                    # Tagged with the host, like a person's lines with their form: the
+                    # scene is already the group heading.
+                    story.append(Line(display, title or page, words, count(before + words),
                                       before))
     items: list[Item] = []
     for template, page, title, text, span_of in db.execute(
@@ -306,7 +309,6 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
         body = rules.body(text)
         if body:
             items.append(Item(kind, page, title, body, count(title + body)))
-    display = src.names[0] if src.names else HOST
     mat = Material(subject=HOST, display=display, forms=list(src.names))
     _budget(mat, items, story, p)
     return mat

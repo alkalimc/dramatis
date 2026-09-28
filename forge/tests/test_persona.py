@@ -284,6 +284,8 @@ def test_host_material_is_found_by_name(paths):
     assert [s.text for s in mat.story] == [
         f"Welcome back, {PLACEHOLDER}. Two messages are waiting.", "One, from the ferry office."]
     assert [i.kind for i in mat.items] == ["lore"]
+    assert {s.form_page for s in mat.story} == {"Signal"}
+    assert mat.story[1].before == "Carol: Anything for me?"
 
 
 def test_estimate_counts_wide_characters_one_each():
