@@ -113,7 +113,13 @@ pub fn open_segment(
 }
 
 /// Append one entry after the prefix; returns its sequence number.
-pub fn append(conn: &Connection, segment: SegmentId, role: Role, bytes: &[u8], at: i64) -> Result<u32> {
+pub fn append(
+    conn: &Connection,
+    segment: SegmentId,
+    role: Role,
+    bytes: &[u8],
+    at: i64,
+) -> Result<u32> {
     let seq: u32 = conn.query_row(
         "SELECT coalesce(max(seq) + 1, 0) FROM log_entry WHERE segment = ?1",
         [segment],
@@ -124,14 +130,17 @@ pub fn append(conn: &Connection, segment: SegmentId, role: Role, bytes: &[u8], a
         (segment, seq, role.as_str(), bytes, at),
     )
     .map_err(|e| match e {
-        rusqlite::Error::SqliteFailure(_, _) => Error::Invalid(format!("segment {segment} does not exist")),
+        rusqlite::Error::SqliteFailure(_, _) => {
+            Error::Invalid(format!("segment {segment} does not exist"))
+        }
         e => e.into(),
     })?;
     Ok(seq)
 }
 
 pub fn entries(conn: &Connection, segment: SegmentId) -> Result<Vec<Entry>> {
-    let mut stmt = conn.prepare("SELECT seq, role, bytes, at FROM log_entry WHERE segment = ?1 ORDER BY seq")?;
+    let mut stmt =
+        conn.prepare("SELECT seq, role, bytes, at FROM log_entry WHERE segment = ?1 ORDER BY seq")?;
     let rows = stmt.query_map([segment], |r| {
         Ok(Entry {
             seq: r.get(0)?,
@@ -146,7 +155,11 @@ pub fn entries(conn: &Connection, segment: SegmentId) -> Result<Vec<Entry>> {
 /// The memories a segment's opening block may carry for `speaker`: in a channel only
 /// he and the user read, everything he may recall; in one others read, only what every
 /// person there may recall ([`fact::shared_visible`]). The host has none.
-pub fn opening_memories(conn: &Connection, channel: ChannelId, speaker: Option<&PersonId>) -> Result<Vec<Fact>> {
+pub fn opening_memories(
+    conn: &Connection,
+    channel: ChannelId,
+    speaker: Option<&PersonId>,
+) -> Result<Vec<Fact>> {
     fact::visible_to(conn, speaker, channel)
 }
 

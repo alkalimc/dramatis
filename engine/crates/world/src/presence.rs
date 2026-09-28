@@ -22,9 +22,17 @@ pub enum Activity {
     /// Unread messages from him; `at` is the newest.
     Messaged { at: i64 },
     /// He answered a request.
-    Replied { task: TaskId, question: String, at: i64 },
+    Replied {
+        task: TaskId,
+        question: String,
+        at: i64,
+    },
     /// A commitment with him is due and has not been brought up.
-    CommitmentDue { fact: FactId, text: String, due: i64 },
+    CommitmentDue {
+        fact: FactId,
+        text: String,
+        due: i64,
+    },
     /// He opened with a seed and the user has not read it.
     CameBy { message: MessageId, at: i64 },
     /// It is his birthday today (his corpus profile's field).
@@ -59,7 +67,10 @@ pub trait Birthdays {
 
 impl Birthdays for Vec<(PersonId, MonthDay)> {
     fn born_on(&self, day: MonthDay) -> Vec<PersonId> {
-        self.iter().filter(|(_, d)| *d == day).map(|(p, _)| p.clone()).collect()
+        self.iter()
+            .filter(|(_, d)| *d == day)
+            .map(|(p, _)| p.clone())
+            .collect()
     }
 }
 
@@ -71,7 +82,9 @@ pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<
 
     let mut reply_msgs = Vec::new();
     for t in task::replied_unread(conn)? {
-        let (Some(person), Some(reply)) = (t.assignee.clone(), t.reply) else { continue };
+        let (Some(person), Some(reply)) = (t.assignee.clone(), t.reply) else {
+            continue;
+        };
         reply_msgs.push(reply);
         let at = message::get(conn, reply)?.at;
         items.push(Waiting {
@@ -159,7 +172,11 @@ pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<
         Activity::Messaged { at } => (3, *at),
         Activity::Birthday => (4, 0),
     };
-    items.sort_by(|a, b| rank(&a.activity).cmp(&rank(&b.activity)).then(a.person.cmp(&b.person)));
+    items.sort_by(|a, b| {
+        rank(&a.activity)
+            .cmp(&rank(&b.activity))
+            .then(a.person.cmp(&b.person))
+    });
     Ok(Digest { items })
 }
 
@@ -219,7 +236,11 @@ pub fn on_presence(
         }
         Planned::Held(h) => Some(h),
     };
-    Ok(Presence { digest, calls, held })
+    Ok(Presence {
+        digest,
+        calls,
+        held,
+    })
 }
 
 #[cfg(test)]
@@ -239,7 +260,16 @@ mod tests {
     #[test]
     fn empty_world_empty_digest_and_no_call() {
         let w = world();
-        let pres = on_presence(&w, at(T0), Tier::Middle, &Params::default(), &none(), &[], &NoTopic).unwrap();
+        let pres = on_presence(
+            &w,
+            at(T0),
+            Tier::Middle,
+            &Params::default(),
+            &none(),
+            &[],
+            &NoTopic,
+        )
+        .unwrap();
         assert!(pres.digest.is_empty());
         assert!(pres.calls.is_empty());
         assert_eq!(pres.held, Some(Held::NoSeed));
@@ -250,7 +280,17 @@ mod tests {
         let w = world();
         let office = std::env::temp_dir();
         // A reply.
-        let a = task::ask(&w, &p("a"), "q", Some(3), None, Tier::Middle, &Default::default(), T0).unwrap();
+        let a = task::ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(3),
+            None,
+            Tier::Middle,
+            &Default::default(),
+            T0,
+        )
+        .unwrap();
         task::report(&w, &p("a"), a.task, "answer", &[], None, &office, T0 + 1).unwrap();
         // A message.
         let cb = channel::direct(&w, &p("b")).unwrap();
@@ -259,7 +299,13 @@ mod tests {
         // A due commitment.
         let f = fact::write(
             &w,
-            &NewFact::new(Actor::User, Audience::Participants(cb), FactKind::Commitment, "call").due(T0),
+            &NewFact::new(
+                Actor::User,
+                Audience::Participants(cb),
+                FactKind::Commitment,
+                "call",
+            )
+            .due(T0),
             0,
         )
         .unwrap()
@@ -268,15 +314,36 @@ mod tests {
         let cd = channel::direct(&w, &p("d")).unwrap();
         message::append(&w, cd, &Actor::Person(p("d")), "psst", None, None, T0).unwrap();
         bond::set_mode(&w, &p("d"), Mode::Disabled).unwrap();
-        let born = vec![(p("e"), MonthDay { month: 3, day: 10 }), (p("f"), MonthDay { month: 3, day: 11 })];
+        let born = vec![
+            (p("e"), MonthDay { month: 3, day: 10 }),
+            (p("f"), MonthDay { month: 3, day: 11 }),
+        ];
 
         let d = digest(&w, at(T0 + 10), &born).unwrap();
-        let kinds: Vec<_> = d.items.iter().map(|i| (i.person.0.as_str(), &i.activity)).collect();
+        let kinds: Vec<_> = d
+            .items
+            .iter()
+            .map(|i| (i.person.0.as_str(), &i.activity))
+            .collect();
         assert_eq!(
             kinds,
             vec![
-                ("a", &Activity::Replied { task: a.task, question: "q".into(), at: T0 + 1 }),
-                ("b", &Activity::CommitmentDue { fact: f, text: "call".into(), due: T0 }),
+                (
+                    "a",
+                    &Activity::Replied {
+                        task: a.task,
+                        question: "q".into(),
+                        at: T0 + 1
+                    }
+                ),
+                (
+                    "b",
+                    &Activity::CommitmentDue {
+                        fact: f,
+                        text: "call".into(),
+                        due: T0
+                    }
+                ),
                 ("b", &Activity::Messaged { at: T0 + 3 }),
                 ("e", &Activity::Birthday),
             ]
@@ -294,18 +361,60 @@ mod tests {
         let cb = channel::direct(&w, &p("b")).unwrap();
         message::append(&w, cb, &Actor::Person(p("b")), "hi", None, None, T0).unwrap();
         let params = Params::default();
-        let pres = on_presence(&w, at(T0 + HOUR), Tier::Middle, &params, &none(), &[], &NoTopic).unwrap();
+        let pres = on_presence(
+            &w,
+            at(T0 + HOUR),
+            Tier::Middle,
+            &params,
+            &none(),
+            &[],
+            &NoTopic,
+        )
+        .unwrap();
         assert!(matches!(pres.calls.as_slice(), [Call::HostLine(_)]));
 
         let mut quiet = params.clone();
-        quiet.quota = Quota { quiet_at: 0.5, ..Quota::default() };
+        quiet.quota = Quota {
+            quiet_at: 0.5,
+            ..Quota::default()
+        };
         quiet.quota.window_5h.middle = 100.0;
-        record_usage(&w, T0, Shape::Direct, None, "m", Usage { uncached: 60, ..Usage::default() }, None, &params.cost)
-            .unwrap();
-        let pres = on_presence(&w, at(T0 + HOUR), Tier::Middle, &quiet, &none(), &[], &NoTopic).unwrap();
+        record_usage(
+            &w,
+            T0,
+            Shape::Direct,
+            None,
+            "m",
+            Usage {
+                uncached: 60,
+                ..Usage::default()
+            },
+            None,
+            &params.cost,
+        )
+        .unwrap();
+        let pres = on_presence(
+            &w,
+            at(T0 + HOUR),
+            Tier::Middle,
+            &quiet,
+            &none(),
+            &[],
+            &NoTopic,
+        )
+        .unwrap();
         assert!(!pres.digest.is_empty(), "the panel still shows");
         assert!(pres.calls.is_empty());
-        let pres = on_presence(&w, at(T0 + HOUR), Tier::Ultra, &quiet, &none(), &[], &NoTopic).unwrap();
+        let pres = on_presence(
+            &w,
+            at(T0 + HOUR),
+            Tier::Ultra,
+            &quiet,
+            &none(),
+            &[],
+            &NoTopic,
+        )
+        .unwrap();
         assert_eq!(pres.calls.len(), 1, "no bands without windows");
     }
 
@@ -313,10 +422,27 @@ mod tests {
     fn idle_conversations_end_with_a_wrapup_on_presence() {
         let w = world();
         let c = channel::direct(&w, &p("a")).unwrap();
-        session::open(&w, c, &p("a"), session::Budget::User, session::Cause::Addressed, T0).unwrap();
+        session::open(
+            &w,
+            c,
+            &p("a"),
+            session::Budget::User,
+            session::Cause::Addressed,
+            T0,
+        )
+        .unwrap();
         let params = Params::default();
         assert!(is_return(&w, T0 + HOUR, false, &params).unwrap());
-        let pres = on_presence(&w, at(T0 + HOUR), Tier::Middle, &params, &none(), &[], &NoTopic).unwrap();
+        let pres = on_presence(
+            &w,
+            at(T0 + HOUR),
+            Tier::Middle,
+            &params,
+            &none(),
+            &[],
+            &NoTopic,
+        )
+        .unwrap();
         assert_eq!(pres.calls, vec![Call::Wrapup { channel: c }]);
     }
 }

@@ -67,7 +67,12 @@ fn apply(conn: &Connection, b: &Bond, exact: f64) -> Result<()> {
 /// In a group every other person there who has spoken becomes (or stays) an acquaintance
 /// of the speaker: the pair bond is created at 0 on the first shared turn and grows like
 /// any other.
-pub fn shared_turn(conn: &Connection, channel: ChannelId, speaker: &PersonId, params: &Trust) -> Result<()> {
+pub fn shared_turn(
+    conn: &Connection,
+    channel: ChannelId,
+    speaker: &PersonId,
+    params: &Trust,
+) -> Result<()> {
     let ch = channel::get(conn, channel)?;
     if !ch.has(&Actor::Person(speaker.clone())) {
         return Err(Error::NotParticipant {
@@ -139,9 +144,11 @@ pub(crate) fn take_hurt(conn: &Connection, fact: &Fact, params: &Trust) -> Resul
 
 fn delta(conn: &Connection, fact: &Fact) -> Result<f64> {
     Ok(conn
-        .query_row("SELECT trust_delta FROM fact WHERE id = ?1", [fact.id], |r| {
-            r.get::<_, Option<f64>>(0)
-        })?
+        .query_row(
+            "SELECT trust_delta FROM fact WHERE id = ?1",
+            [fact.id],
+            |r| r.get::<_, Option<f64>>(0),
+        )?
         .unwrap_or(0.0))
 }
 
@@ -232,13 +239,22 @@ mod tests {
         assert_eq!(pb.trust, 0, "starts at 0");
         assert_eq!(bond::pair_bond(&w, &p("a"), &p("c")).unwrap(), None);
         shared_turn(&w, g, &p("b"), &params).unwrap();
-        assert_eq!(bond::pair_bond(&w, &p("a"), &p("b")).unwrap().unwrap().trust_exact, 0.5);
+        assert_eq!(
+            bond::pair_bond(&w, &p("a"), &p("b"))
+                .unwrap()
+                .unwrap()
+                .trust_exact,
+            0.5
+        );
     }
 
     #[test]
     fn hurt_takes_and_retraction_gives_back_exactly() {
         let w = world();
-        let params = Trust { h: 15.0, ..Trust::default() };
+        let params = Trust {
+            h: 15.0,
+            ..Trust::default()
+        };
         let c = channel::direct(&w, &p("a")).unwrap();
         let hurt = |text: &str| {
             let f = fact::write(

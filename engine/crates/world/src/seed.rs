@@ -39,7 +39,10 @@ pub enum SeedKind {
 
 impl SeedKind {
     pub fn is_event(&self) -> bool {
-        matches!(self, Self::Commitment(_) | Self::Conclusion(_) | Self::Pinned(_))
+        matches!(
+            self,
+            Self::Commitment(_) | Self::Conclusion(_) | Self::Pinned(_)
+        )
     }
 
     fn encode(&self) -> (&'static str, String) {
@@ -245,7 +248,9 @@ fn queued_candidates(conn: &Connection) -> Result<Vec<Candidate>> {
     };
     let mut out = Vec::new();
     for (person, k, r, material) in rows {
-        let Some(kind) = SeedKind::decode(&k, &r) else { continue };
+        let Some(kind) = SeedKind::decode(&k, &r) else {
+            continue;
+        };
         let valid = match &kind {
             SeedKind::Conclusion(f) => !fact::get(conn, *f)?.retracted,
             SeedKind::Pinned(t) => task::get(conn, *t)?.pinned,
@@ -324,12 +329,18 @@ fn daily_candidates(conn: &Connection, now: Now, words: &[WordsHit]) -> Result<V
 /// the user (never = longest). Ties break by person, then seed, for determinism.
 pub fn order(candidates: &mut [Candidate]) {
     candidates.sort_by(|a, b| {
-        (!a.kind.is_event(), a.last_seen.map_or(i64::MIN, |t| t), &a.person, &a.kind).cmp(&(
-            !b.kind.is_event(),
-            b.last_seen.map_or(i64::MIN, |t| t),
-            &b.person,
-            &b.kind,
-        ))
+        (
+            !a.kind.is_event(),
+            a.last_seen.unwrap_or(i64::MIN),
+            &a.person,
+            &a.kind,
+        )
+            .cmp(&(
+                !b.kind.is_event(),
+                b.last_seen.unwrap_or(i64::MIN),
+                &b.person,
+                &b.kind,
+            ))
     });
 }
 
@@ -345,7 +356,12 @@ pub fn candidates(conn: &Connection, occasion: &Occasion<'_>, now: Now) -> Resul
 }
 
 /// Unprompted openings delivered in `[since, now]`, optionally for one person.
-pub fn delivered_count(conn: &Connection, person: Option<&PersonId>, since: i64, now: i64) -> Result<u32> {
+pub fn delivered_count(
+    conn: &Connection,
+    person: Option<&PersonId>,
+    since: i64,
+    now: i64,
+) -> Result<u32> {
     Ok(conn.query_row(
         "SELECT count(*) FROM seed WHERE delivered_at BETWEEN ?1 AND ?2 AND (?3 IS NULL OR person = ?3)",
         (since, now, person),
@@ -370,7 +386,8 @@ fn place(conn: &Connection, c: &Candidate, topic: &dyn TopicMatch) -> Result<Opt
         }
     }
     let mode = bond::mode(conn, &c.person)?;
-    let may = mode == Mode::Enabled || (mode == Mode::Frozen && matches!(c.kind, SeedKind::Commitment(_)));
+    let may = mode == Mode::Enabled
+        || (mode == Mode::Frozen && matches!(c.kind, SeedKind::Commitment(_)));
     if !may {
         return Ok(None);
     }
@@ -415,7 +432,9 @@ pub fn plan(
         if delivered_count(conn, Some(&c.person), day, now.ms)? >= limits.seed.per_agent_day {
             continue;
         }
-        let Some(channel) = place(conn, &c, topic)? else { continue };
+        let Some(channel) = place(conn, &c, topic)? else {
+            continue;
+        };
         let fact = match c.kind {
             SeedKind::Commitment(f) | SeedKind::Conclusion(f) | SeedKind::Memory(f) => Some(f),
             _ => None,
@@ -459,7 +478,14 @@ pub fn delivered(conn: &Connection, opening: &Opening, message: MessageId, now: 
         }
         _ => Cause::Opening,
     };
-    session::open(conn, opening.channel, &opening.person, Budget::User, cause, now)?;
+    session::open(
+        conn,
+        opening.channel,
+        &opening.person,
+        Budget::User,
+        cause,
+        now,
+    )?;
     Ok(())
 }
 
@@ -534,7 +560,13 @@ mod tests {
         let c = channel::direct(w, &p(person)).unwrap();
         fact::write(
             w,
-            &NewFact::new(Actor::Person(p(person)), Audience::Participants(c), FactKind::Fact, text).about(About::User),
+            &NewFact::new(
+                Actor::Person(p(person)),
+                Audience::Participants(c),
+                FactKind::Fact,
+                text,
+            )
+            .about(About::User),
             at,
         )
         .unwrap()
@@ -542,11 +574,27 @@ mod tests {
     }
 
     fn presence(w: &Connection, env: &Env, now: Now) -> Planned {
-        plan(w, &Occasion::Presence { words: &[] }, now, &env.limits(), &NoTopic).unwrap()
+        plan(
+            w,
+            &Occasion::Presence { words: &[] },
+            now,
+            &env.limits(),
+            &NoTopic,
+        )
+        .unwrap()
     }
 
     fn deliver(w: &Connection, o: &Opening, at: i64) {
-        let m = message::append(w, o.channel, &Actor::Person(o.person.clone()), "hello", None, None, at).unwrap();
+        let m = message::append(
+            w,
+            o.channel,
+            &Actor::Person(o.person.clone()),
+            "hello",
+            None,
+            None,
+            at,
+        )
+        .unwrap();
         delivered(w, o, m, at).unwrap();
     }
 
@@ -569,21 +617,35 @@ mod tests {
         memory_about_user(&w, "b", "m-b", 1);
         bond::touch_user(&w, &p("a"), 10).unwrap();
         bond::touch_user(&w, &p("b"), 5).unwrap();
-        let Planned::Open(o) = presence(&w, &env, at(T0)) else { panic!() };
+        let Planned::Open(o) = presence(&w, &env, at(T0)) else {
+            panic!()
+        };
         assert_eq!(o.person, p("b"), "b has gone longer without talking");
-        let conclusion = fact::write(&w, &NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, "x"), 2)
-            .unwrap()
-            .id();
+        let conclusion = fact::write(
+            &w,
+            &NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, "x"),
+            2,
+        )
+        .unwrap()
+        .id();
         queue_hits(
             &w,
             Event::Conclusion(conclusion),
-            &[Hit { person: p("c"), material: vec!["u1".into()] }],
+            &[Hit {
+                person: p("c"),
+                material: vec!["u1".into()],
+            }],
             3,
         )
         .unwrap();
         bond::touch_user(&w, &p("c"), 99).unwrap();
-        let Planned::Open(o) = presence(&w, &env, at(T0)) else { panic!() };
-        assert_eq!((o.person.clone(), o.kind.clone()), (p("c"), SeedKind::Conclusion(conclusion)));
+        let Planned::Open(o) = presence(&w, &env, at(T0)) else {
+            panic!()
+        };
+        assert_eq!(
+            (o.person.clone(), o.kind.clone()),
+            (p("c"), SeedKind::Conclusion(conclusion))
+        );
         assert_eq!(o.material, vec!["u1".to_owned()]);
     }
 
@@ -594,9 +656,18 @@ mod tests {
         bond::set_mode(&w, &p("off"), Mode::Disabled).unwrap();
         let case = task::open_case(&w, "q", 1).unwrap();
         let hits = [
-            Hit { person: p("a"), material: vec![] },
-            Hit { person: p("frozen"), material: vec![] },
-            Hit { person: p("off"), material: vec![] },
+            Hit {
+                person: p("a"),
+                material: vec![],
+            },
+            Hit {
+                person: p("frozen"),
+                material: vec![],
+            },
+            Hit {
+                person: p("off"),
+                material: vec![],
+            },
         ];
         assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 1).unwrap(), 1);
         assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 2).unwrap(), 0);
@@ -613,12 +684,19 @@ mod tests {
         let c = channel::direct(&w, &p("fz")).unwrap();
         let f = fact::write(
             &w,
-            &NewFact::new(Actor::User, Audience::Participants(c), FactKind::Commitment, "call back").due(T0 - 1),
+            &NewFact::new(
+                Actor::User,
+                Audience::Participants(c),
+                FactKind::Commitment,
+                "call back",
+            )
+            .due(T0 - 1),
             1,
         )
         .unwrap()
         .id();
-        let Planned::Open(o) = plan(&w, &Occasion::Event, at(T0), &env.limits(), &NoTopic).unwrap() else {
+        let Planned::Open(o) = plan(&w, &Occasion::Event, at(T0), &env.limits(), &NoTopic).unwrap()
+        else {
             panic!()
         };
         assert_eq!((o.person.clone(), o.channel, o.fact), (p("fz"), c, Some(f)));
@@ -628,7 +706,14 @@ mod tests {
         assert!(session::is_thawed(&w, &p("fz")).unwrap());
         assert_eq!(bond::mode(&w, &p("fz")).unwrap(), Mode::Frozen);
         assert_eq!(
-            plan(&w, &Occasion::Event, at(T0 + 2 * HOUR), &env.limits(), &NoTopic).unwrap(),
+            plan(
+                &w,
+                &Occasion::Event,
+                at(T0 + 2 * HOUR),
+                &env.limits(),
+                &NoTopic
+            )
+            .unwrap(),
             Planned::Held(Held::NoSeed),
             "brought up once"
         );
@@ -651,22 +736,35 @@ mod tests {
         // In conversation: the user wrote five minutes ago.
         let other = channel::direct(&w, &p("x")).unwrap();
         message::append(&w, other, &Actor::User, "hey", None, None, T0 - 5 * 60_000).unwrap();
-        assert_eq!(presence(&w, &env, at(T0)), Planned::Held(Held::InConversation));
+        assert_eq!(
+            presence(&w, &env, at(T0)),
+            Planned::Held(Held::InConversation)
+        );
         let later = at(T0 + HOUR);
-        let Planned::Open(o) = presence(&w, &env, later) else { panic!() };
+        let Planned::Open(o) = presence(&w, &env, later) else {
+            panic!()
+        };
         deliver(&w, &o, later.ms);
         // Per person per day.
         memory_about_user(&w, "a", "m2", 2);
-        assert_eq!(presence(&w, &env, at(T0 + 3 * HOUR)), Planned::Held(Held::PerAgent));
+        assert_eq!(
+            presence(&w, &env, at(T0 + 3 * HOUR)),
+            Planned::Held(Held::PerAgent)
+        );
         // Next local day it goes out: the held seed was kept.
-        let Planned::Open(o2) = presence(&w, &env, at(T0 + DAY)) else { panic!() };
+        let Planned::Open(o2) = presence(&w, &env, at(T0 + DAY)) else {
+            panic!()
+        };
         assert_eq!(o2.kind, SeedKind::Memory(FactId(2)));
         // Quota band not open.
         env.quota.band = Band::Quiet;
         assert_eq!(presence(&w, &env, at(T0 + DAY)), Planned::Held(Held::Quota));
         env.quota.band = Band::Open;
         env.seed.daily_total = 0;
-        assert_eq!(presence(&w, &env, at(T0 + DAY)), Planned::Held(Held::DailyTotal));
+        assert_eq!(
+            presence(&w, &env, at(T0 + DAY)),
+            Planned::Held(Held::DailyTotal)
+        );
     }
 
     #[test]
@@ -676,16 +774,37 @@ mod tests {
         enable(&w, &["a", "b"]);
         settings::set(&w, settings::USER_BIRTHDAY, "03-10").unwrap();
         let cands = candidates(&w, &Occasion::Presence { words: &[] }, at(T0)).unwrap();
-        assert_eq!(cands.iter().filter(|c| matches!(c.kind, SeedKind::Birthday(2026))).count(), 2);
-        assert!(candidates(&w, &Occasion::Event, at(T0)).unwrap().is_empty(), "daily seeds only on presence");
-        assert!(candidates(&w, &Occasion::Presence { words: &[] }, at(T0 + DAY)).unwrap().is_empty());
+        assert_eq!(
+            cands
+                .iter()
+                .filter(|c| matches!(c.kind, SeedKind::Birthday(2026)))
+                .count(),
+            2
+        );
+        assert!(
+            candidates(&w, &Occasion::Event, at(T0)).unwrap().is_empty(),
+            "daily seeds only on presence"
+        );
+        assert!(
+            candidates(&w, &Occasion::Presence { words: &[] }, at(T0 + DAY))
+                .unwrap()
+                .is_empty()
+        );
 
         let ca = channel::direct(&w, &p("a")).unwrap();
         let m = message::append(&w, ca, &Actor::User, "about ships", None, None, 1).unwrap();
         let words = [
-            WordsHit { person: p("a"), message: m, material: vec!["u9".into()] },
+            WordsHit {
+                person: p("a"),
+                message: m,
+                material: vec!["u9".into()],
+            },
             // b never heard it.
-            WordsHit { person: p("b"), message: m, material: vec![] },
+            WordsHit {
+                person: p("b"),
+                message: m,
+                material: vec![],
+            },
         ];
         let cands = candidates(&w, &Occasion::Presence { words: &words }, at(T0 + DAY)).unwrap();
         assert_eq!(cands.len(), 1);
@@ -701,18 +820,26 @@ mod tests {
         let g = channel::create_group(&w, &[p("a"), p("b")], Some("ships"), Origin::User).unwrap();
         let f = fact::write(
             &w,
-            &NewFact::new(Actor::User, Audience::Participants(g), FactKind::Commitment, "meet").due(T0 - 1),
+            &NewFact::new(
+                Actor::User,
+                Audience::Participants(g),
+                FactKind::Commitment,
+                "meet",
+            )
+            .due(T0 - 1),
             1,
         )
         .unwrap()
         .id();
         // The group is frozen: he opens in his direct channel.
-        let Planned::Open(o) = plan(&w, &Occasion::Event, at(T0), &env.limits(), &NoTopic).unwrap() else {
+        let Planned::Open(o) = plan(&w, &Occasion::Event, at(T0), &env.limits(), &NoTopic).unwrap()
+        else {
             panic!()
         };
         assert_ne!(o.channel, g);
         channel::set_mode(&w, g, Mode::Enabled).unwrap();
-        let Planned::Open(o) = plan(&w, &Occasion::Event, at(T0), &env.limits(), &NoTopic).unwrap() else {
+        let Planned::Open(o) = plan(&w, &Occasion::Event, at(T0), &env.limits(), &NoTopic).unwrap()
+        else {
             panic!()
         };
         assert_eq!((o.channel, o.fact), (g, Some(f)));
@@ -725,10 +852,21 @@ mod tests {
         }
         memory_about_user(&w, "a", "likes ships", 2);
         fact::mark_delivered(&w, f).unwrap();
-        let Planned::Open(o) = presence(&w, &env, at(T0)) else { panic!() };
-        assert_ne!(o.channel, g, "a single-person seed does not pick a group by members");
-        let Planned::Open(o) = plan(&w, &Occasion::Presence { words: &[] }, at(T0), &env.limits(), &Ships).unwrap()
-        else {
+        let Planned::Open(o) = presence(&w, &env, at(T0)) else {
+            panic!()
+        };
+        assert_ne!(
+            o.channel, g,
+            "a single-person seed does not pick a group by members"
+        );
+        let Planned::Open(o) = plan(
+            &w,
+            &Occasion::Presence { words: &[] },
+            at(T0),
+            &env.limits(),
+            &Ships,
+        )
+        .unwrap() else {
             panic!()
         };
         assert_eq!(o.channel, g);

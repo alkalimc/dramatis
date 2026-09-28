@@ -55,7 +55,11 @@ proptest! {
                     let res = task::request_join(&w, root.channel, &caller, &p(next), Some(turns), T0);
                     match res {
                         Ok(j) => {
-                            on.push((p(next), j.task.expect("inside a request")));
+                            // A caller whose request is done pulls someone in outside
+                            // any request: he answers once and the tree is untouched.
+                            if let Some(t) = j.task {
+                                on.push((p(next), t));
+                            }
                             next += 1;
                             prop_assert_eq!(task::tree_turns_left(&w, root.task).unwrap(), before);
                         }

@@ -91,7 +91,7 @@ impl Default for Cost {
 }
 
 /// `ask.*`: default turn budget of a request, per tier.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ask {
     pub turns: AskTurns,
@@ -131,14 +131,6 @@ impl Default for AskTurns {
             extra_high: 24,
             max: 32,
             ultra: 48,
-        }
-    }
-}
-
-impl Default for Ask {
-    fn default() -> Self {
-        Self {
-            turns: AskTurns::default(),
         }
     }
 }

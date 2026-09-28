@@ -72,7 +72,8 @@ pub struct Session {
     pub closed_at: Option<i64>,
 }
 
-const COLUMNS: &str = "id, channel, person, cause, task, replies_left, opened_at, last_at, closed_at";
+const COLUMNS: &str =
+    "id, channel, person, cause, task, replies_left, opened_at, last_at, closed_at";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Session> {
     let task: Option<TaskId> = row.get("task")?;
@@ -94,7 +95,9 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Session> {
 }
 
 fn query(conn: &Connection, filter: &str, params: impl rusqlite::Params) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM session WHERE {filter} ORDER BY id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM session WHERE {filter} ORDER BY id"
+    ))?;
     let rows = stmt.query_map(params, read)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -106,7 +109,11 @@ pub fn get(conn: &Connection, id: SessionId) -> Result<Session> {
 }
 
 /// The person's open session in a channel.
-pub fn current(conn: &Connection, channel: ChannelId, person: &PersonId) -> Result<Option<Session>> {
+pub fn current(
+    conn: &Connection,
+    channel: ChannelId,
+    person: &PersonId,
+) -> Result<Option<Session>> {
     Ok(query(
         conn,
         "channel = ?1 AND person = ?2 AND closed_at IS NULL",
@@ -143,18 +150,20 @@ pub fn open(
         Budget::User => (None, None),
     };
     if let Some(s) = current(conn, channel, person)? {
-        let replace = match (s.budget, budget) {
-            (_, Budget::Task(_)) => true,
-            (Budget::Replies(_), Budget::User) => true,
-            _ => false,
-        };
+        let replace = matches!(
+            (s.budget, budget),
+            (_, Budget::Task(_)) | (Budget::Replies(_), Budget::User)
+        );
         if replace {
             conn.execute(
                 "UPDATE session SET task = ?2, replies_left = ?3, cause = ?4, last_at = ?5 WHERE id = ?1",
                 (s.id.0, task, replies, cause.as_str(), now),
             )?;
         } else {
-            conn.execute("UPDATE session SET last_at = ?2 WHERE id = ?1", (s.id.0, now))?;
+            conn.execute(
+                "UPDATE session SET last_at = ?2 WHERE id = ?1",
+                (s.id.0, now),
+            )?;
         }
         return Ok(s.id);
     }
@@ -176,7 +185,9 @@ pub fn may_reply(conn: &Connection, channel: ChannelId, person: &PersonId) -> Re
     match current(conn, channel, person)? {
         Some(s) => Ok(match s.budget {
             Budget::Replies(n) => n > 0,
-            Budget::Task(t) => crate::task::get(conn, t)?.status == crate::types::TaskStatus::Active,
+            Budget::Task(t) => {
+                crate::task::get(conn, t)?.status == crate::types::TaskStatus::Active
+            }
             Budget::User => true,
         }),
         None => Ok(mode == Mode::Enabled),
@@ -186,14 +197,25 @@ pub fn may_reply(conn: &Connection, channel: ChannelId, person: &PersonId) -> Re
 /// He replied: record the activity and spend a reply from a reply budget. A session
 /// whose replies are used up closes; the returned channel then needs a wrap-up if no
 /// other session there is still open.
-pub fn replied(conn: &Connection, channel: ChannelId, person: &PersonId, now: i64) -> Result<Option<ChannelId>> {
+pub fn replied(
+    conn: &Connection,
+    channel: ChannelId,
+    person: &PersonId,
+    now: i64,
+) -> Result<Option<ChannelId>> {
     let Some(s) = current(conn, channel, person)? else {
         return Ok(None);
     };
-    conn.execute("UPDATE session SET last_at = ?2 WHERE id = ?1", (s.id.0, now))?;
+    conn.execute(
+        "UPDATE session SET last_at = ?2 WHERE id = ?1",
+        (s.id.0, now),
+    )?;
     if let Budget::Replies(n) = s.budget {
         let left = n.saturating_sub(1);
-        conn.execute("UPDATE session SET replies_left = ?2 WHERE id = ?1", (s.id.0, left))?;
+        conn.execute(
+            "UPDATE session SET replies_left = ?2 WHERE id = ?1",
+            (s.id.0, left),
+        )?;
         if left == 0 {
             return close(conn, s.id, now);
         }
@@ -225,14 +247,18 @@ pub fn close(conn: &Connection, id: SessionId, now: i64) -> Result<Option<Channe
     if s.closed_at.is_some() {
         return Ok(None);
     }
-    conn.execute("UPDATE session SET closed_at = ?2 WHERE id = ?1", (id.0, now))?;
+    conn.execute(
+        "UPDATE session SET closed_at = ?2 WHERE id = ?1",
+        (id.0, now),
+    )?;
     Ok((open_in(conn, s.channel)? == 0).then_some(s.channel))
 }
 
 /// A request is done: its session ends.
 pub fn close_for_task(conn: &Connection, task: TaskId, now: i64) -> Result<Option<ChannelId>> {
     let ids: Vec<i64> = {
-        let mut stmt = conn.prepare("SELECT id FROM session WHERE task = ?1 AND closed_at IS NULL")?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM session WHERE task = ?1 AND closed_at IS NULL")?;
         let rows = stmt.query_map([task], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
@@ -255,7 +281,11 @@ pub fn close_channel(conn: &Connection, channel: ChannelId, now: i64) -> Result<
 
 /// Close every session idle for `session.idle_timeout`; returns the channels whose
 /// conversation thereby ended (each needs one wrap-up), in id order.
-pub fn expire_idle(conn: &Connection, now: i64, params: &params::Session) -> Result<Vec<ChannelId>> {
+pub fn expire_idle(
+    conn: &Connection,
+    now: i64,
+    params: &params::Session,
+) -> Result<Vec<ChannelId>> {
     let stale = query(
         conn,
         "closed_at IS NULL AND last_at + ?1 <= ?2",
@@ -299,11 +329,22 @@ mod tests {
         let s = open(&w, c, &p("a"), Budget::User, Cause::Addressed, T0).unwrap();
         assert!(is_thawed(&w, &p("a")).unwrap());
         assert!(may_reply(&w, c, &p("a")).unwrap());
-        assert_eq!(bond::mode(&w, &p("a")).unwrap(), Mode::Frozen, "the mode itself never changes");
+        assert_eq!(
+            bond::mode(&w, &p("a")).unwrap(),
+            Mode::Frozen,
+            "the mode itself never changes"
+        );
         // Idle timeout ends it and asks for a wrap-up; he is frozen again.
         let idle = SessionParams::default();
-        assert!(expire_idle(&w, T0 + idle.idle_timeout_ms() - 1, &idle).unwrap().is_empty());
-        assert_eq!(expire_idle(&w, T0 + idle.idle_timeout_ms(), &idle).unwrap(), vec![c]);
+        assert!(
+            expire_idle(&w, T0 + idle.idle_timeout_ms() - 1, &idle)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            expire_idle(&w, T0 + idle.idle_timeout_ms(), &idle).unwrap(),
+            vec![c]
+        );
         assert!(!is_thawed(&w, &p("a")).unwrap());
         assert!(!may_reply(&w, c, &p("a")).unwrap());
         assert!(get(&w, s).unwrap().closed_at.is_some());
@@ -316,7 +357,11 @@ mod tests {
         open(&w, c, &p("a"), Budget::User, Cause::Addressed, T0).unwrap();
         let idle = SessionParams::default();
         touch_channel(&w, c, T0 + 20 * 60_000).unwrap();
-        assert!(expire_idle(&w, T0 + idle.idle_timeout_ms(), &idle).unwrap().is_empty());
+        assert!(
+            expire_idle(&w, T0 + idle.idle_timeout_ms(), &idle)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -350,7 +395,17 @@ mod tests {
     #[test]
     fn a_request_session_ends_with_the_request() {
         let w = world();
-        let a = crate::task::ask(&w, &p("a"), "q", Some(2), None, crate::Tier::Middle, &Default::default(), T0).unwrap();
+        let a = crate::task::ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(2),
+            None,
+            crate::Tier::Middle,
+            &Default::default(),
+            T0,
+        )
+        .unwrap();
         let s = current(&w, a.channel, &p("a")).unwrap().unwrap();
         assert_eq!((s.budget, s.cause), (Budget::Task(a.task), Cause::Ask));
         assert_eq!(close_for_task(&w, a.task, T0 + 1).unwrap(), Some(a.channel));

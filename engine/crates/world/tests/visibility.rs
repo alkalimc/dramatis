@@ -58,7 +58,10 @@ fn ids(facts: Vec<fact::Fact>) -> Vec<world::FactId> {
 fn candidate_set_is_filtered_by_audience() {
     let s = scene();
     let c_dm = channel::direct(&s.w, &p("c")).unwrap();
-    assert_eq!(ids(fact::visible_to(&s.w, Some(&p("c")), c_dm).unwrap()), [s.world_fact]);
+    assert_eq!(
+        ids(fact::visible_to(&s.w, Some(&p("c")), c_dm).unwrap()),
+        [s.world_fact]
+    );
     assert_eq!(
         ids(fact::visible_to(&s.w, Some(&p("a")), s.direct_a).unwrap()),
         [s.world_fact, s.group_fact, s.own_a, s.direct_fact]
@@ -82,7 +85,10 @@ fn as_person_comes_from_the_speaker() {
         channel::as_person(&s.w, s.group, &Actor::Person(p("b"))).unwrap(),
         Some(p("b"))
     );
-    assert_eq!(channel::as_person(&s.w, s.group, &Actor::Host).unwrap(), None);
+    assert_eq!(
+        channel::as_person(&s.w, s.group, &Actor::Host).unwrap(),
+        None
+    );
     assert!(channel::as_person(&s.w, s.group, &Actor::Person(p("c"))).is_err());
     assert!(fact::visible_to(&s.w, Some(&p("c")), s.group).is_err());
 }
@@ -95,8 +101,14 @@ fn shared_log_carries_only_shared_material() {
     let s = scene();
     let shared = ids(fact::shared_visible(&s.w, s.group).unwrap());
     assert_eq!(shared, [s.world_fact, s.group_fact]);
-    assert_eq!(ids(fact::visible_to(&s.w, Some(&p("a")), s.group).unwrap()), shared);
-    assert_eq!(ids(log::opening_memories(&s.w, s.group, Some(&p("a"))).unwrap()), shared);
+    assert_eq!(
+        ids(fact::visible_to(&s.w, Some(&p("a")), s.group).unwrap()),
+        shared
+    );
+    assert_eq!(
+        ids(log::opening_memories(&s.w, s.group, Some(&p("a"))).unwrap()),
+        shared
+    );
     // A direct channel with a colleague pulled in is shared too.
     channel::add_participant(&s.w, s.direct_a, &Actor::Person(p("c"))).unwrap();
     let shared_dm = ids(fact::shared_visible(&s.w, s.direct_a).unwrap());
@@ -125,7 +137,15 @@ fn rollover_summary_inherits_the_channel_audience() {
     let summary = out.summary.unwrap();
     assert_eq!(summary.audience, Audience::Participants(s.direct_a));
     assert!(log::open_segment(&s.w, s.group, [b"A", b"B", b"C"], "{}", Some(&summary), 2).is_err());
-    log::open_segment(&s.w, s.direct_a, [b"A", b"B", b"C"], "{}", Some(&summary), 2).unwrap();
+    log::open_segment(
+        &s.w,
+        s.direct_a,
+        [b"A", b"B", b"C"],
+        "{}",
+        Some(&summary),
+        2,
+    )
+    .unwrap();
     // Wrap-up memories are scoped the same way: b cannot recall them.
     let out = wrapup::apply(
         &s.w,

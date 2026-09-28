@@ -13,12 +13,12 @@ pub mod bond;
 pub mod channel;
 pub mod clock;
 pub mod fact;
+pub mod log;
 pub mod message;
 pub mod params;
 pub mod presence;
 pub mod quota;
 pub mod seed;
-pub mod log;
 pub mod session;
 pub mod settings;
 pub mod task;
@@ -71,7 +71,10 @@ pub enum Error {
     ChannelClosed(ChannelId),
 
     #[error("`{person}` is not a participant of channel {channel}")]
-    NotParticipant { person: PersonId, channel: ChannelId },
+    NotParticipant {
+        person: PersonId,
+        channel: ChannelId,
+    },
 
     /// `request_join` asked for more turns than the caller can hand over while keeping
     /// the one it is spending now.

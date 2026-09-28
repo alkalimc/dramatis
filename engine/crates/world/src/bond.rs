@@ -250,7 +250,10 @@ mod tests {
         assert_eq!(pair_bond(&w, &p("b"), &p("a")).unwrap(), None);
         ensure_pair_bond(&w, &p("b"), &p("a")).unwrap();
         let bond = pair_bond(&w, &p("a"), &p("b")).unwrap().unwrap();
-        assert_eq!((bond.a.clone(), bond.b.clone(), bond.trust), (Actor::Person(p("a")), p("b"), 0));
+        assert_eq!(
+            (bond.a.clone(), bond.b.clone(), bond.trust),
+            (Actor::Person(p("a")), p("b"), 0)
+        );
         assert_eq!(pair_bond(&w, &p("b"), &p("a")).unwrap(), Some(bond));
         assert_eq!(pair_bonds_of(&w, &p("b")).unwrap().len(), 1);
         assert!(ensure_pair_bond(&w, &p("a"), &p("a")).is_err());

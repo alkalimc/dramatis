@@ -48,6 +48,21 @@ pub fn user_name(conn: &Connection) -> Result<Option<String>> {
     Ok(get::<Option<String>>(conn, USER_NAME)?.flatten())
 }
 
+/// Set (or with `None` / blank, clear) the user's name. Returns whether it changed: a
+/// rename means every channel must roll over its segment, since sent bytes are never
+/// rewritten and the name reaches the model only through new ones.
+pub fn set_user_name(conn: &Connection, name: Option<&str>) -> Result<bool> {
+    let name = name.map(str::trim).filter(|n| !n.is_empty());
+    if user_name(conn)?.as_deref() == name {
+        return Ok(false);
+    }
+    match name {
+        Some(n) => set(conn, USER_NAME, n)?,
+        None => unset(conn, USER_NAME)?,
+    }
+    Ok(true)
+}
+
 pub fn user_birthday(conn: &Connection) -> Result<Option<MonthDay>> {
     Ok(get::<Option<MonthDay>>(conn, USER_BIRTHDAY)?.flatten())
 }
@@ -84,7 +99,10 @@ mod tests {
         assert_eq!(user_name(&w).unwrap(), None);
         assert_eq!(intensity(&w).unwrap(), Tier::Middle);
         assert!(notifications(&w).unwrap());
-        assert_eq!(quiet_hours(&w, &seed).unwrap(), Some(seed.quiet_hours.clone()));
+        assert_eq!(
+            quiet_hours(&w, &seed).unwrap(),
+            Some(seed.quiet_hours.clone())
+        );
 
         set(&w, USER_NAME, "someone").unwrap();
         set(&w, USER_BIRTHDAY, "02-29").unwrap();
@@ -101,6 +119,12 @@ mod tests {
         assert_eq!(quiet_hours(&w, &seed).unwrap(), None);
         assert!(!notifications(&w).unwrap());
         assert_eq!(voice(&w, &p("p1")).unwrap().as_deref(), Some("v2"));
+
+        assert!(!set_user_name(&w, Some(" someone ")).unwrap(), "same name");
+        assert!(set_user_name(&w, Some("other")).unwrap());
+        assert!(set_user_name(&w, Some("  ")).unwrap());
+        assert_eq!(user_name(&w).unwrap(), None);
+        assert!(!set_user_name(&w, None).unwrap());
 
         unset(&w, QUIET_HOURS).unwrap();
         assert!(quiet_hours(&w, &seed).unwrap().is_some());

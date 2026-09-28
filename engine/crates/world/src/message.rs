@@ -89,9 +89,13 @@ pub fn append(
 }
 
 pub fn get(conn: &Connection, id: MessageId) -> Result<Message> {
-    conn.query_row(&format!("SELECT {COLUMNS} FROM message WHERE id = ?1"), [id], read)
-        .optional()?
-        .ok_or_else(|| not_found("message", id))
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM message WHERE id = ?1"),
+        [id],
+        read,
+    )
+    .optional()?
+    .ok_or_else(|| not_found("message", id))
 }
 
 /// Up to `limit` messages before `before` (all when `None`), oldest first.
@@ -113,7 +117,11 @@ pub fn history(
 }
 
 /// Messages after `after` (all when `None`), oldest first.
-pub fn since(conn: &Connection, channel: ChannelId, after: Option<MessageId>) -> Result<Vec<Message>> {
+pub fn since(
+    conn: &Connection,
+    channel: ChannelId,
+    after: Option<MessageId>,
+) -> Result<Vec<Message>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM message WHERE channel = ?1 AND (?2 IS NULL OR id > ?2) ORDER BY id"
     ))?;
@@ -127,7 +135,11 @@ pub fn last(conn: &Connection, channel: ChannelId) -> Result<Option<Message>> {
 
 /// When the user last wrote anywhere.
 pub fn last_user_message_at(conn: &Connection) -> Result<Option<i64>> {
-    Ok(conn.query_row("SELECT max(at) FROM message WHERE author = 'user'", [], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT max(at) FROM message WHERE author = 'user'",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 /// The user's recent words in channels `person` is in, newest first: the material the
@@ -193,6 +205,9 @@ mod tests {
         append(&w, mine, &Actor::User, "to a", None, None, 5).unwrap();
         append(&w, other, &Actor::User, "to b", None, None, 6).unwrap();
         let seen = user_words_seen_by(&w, &p("a"), 0, 10).unwrap();
-        assert_eq!(seen.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["to a"]);
+        assert_eq!(
+            seen.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
+            ["to a"]
+        );
     }
 }

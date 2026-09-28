@@ -63,13 +63,19 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Task> {
 }
 
 pub fn get(conn: &Connection, id: TaskId) -> Result<Task> {
-    conn.query_row(&format!("SELECT {COLUMNS} FROM task WHERE id = ?1"), [id], read)
-        .optional()?
-        .ok_or_else(|| not_found("task", id))
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM task WHERE id = ?1"),
+        [id],
+        read,
+    )
+    .optional()?
+    .ok_or_else(|| not_found("task", id))
 }
 
 fn query(conn: &Connection, filter: &str, params: impl rusqlite::Params) -> Result<Vec<Task>> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM task WHERE {filter} ORDER BY id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM task WHERE {filter} ORDER BY id"
+    ))?;
     let rows = stmt.query_map(params, read)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -118,6 +124,7 @@ pub fn tree_turns_left(conn: &Connection, id: TaskId) -> Result<u32> {
     Ok(tree(conn, root.id)?.iter().map(|t| t.turns_left).sum())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert(
     conn: &Connection,
     question: &str,
@@ -148,6 +155,7 @@ pub struct Asked {
 /// absent: the tier's default. `parent`: file it under a pinned question. Opens the
 /// person's triggered session on this request (thawing him if frozen). The caller then
 /// appends the harness turn to his direct channel.
+#[allow(clippy::too_many_arguments)]
 pub fn ask(
     conn: &Connection,
     person: &PersonId,
@@ -169,13 +177,35 @@ pub fn ask(
     if let Some(p) = parent {
         let parent = get(conn, p)?;
         if !parent.pinned {
-            return Err(Error::Invalid(format!("request {p} is not a pinned question")));
+            return Err(Error::Invalid(format!(
+                "request {p} is not a pinned question"
+            )));
         }
     }
     let ch = channel::direct(conn, person)?;
-    let id = insert(conn, question.trim(), Some(person), parent, turns, Some(turns), false, Some(ch), now)?;
-    session::open(conn, ch, person, session::Budget::Task(id), session::Cause::Ask, now)?;
-    Ok(Asked { task: id, channel: ch })
+    let id = insert(
+        conn,
+        question.trim(),
+        Some(person),
+        parent,
+        turns,
+        Some(turns),
+        false,
+        Some(ch),
+        now,
+    )?;
+    session::open(
+        conn,
+        ch,
+        person,
+        session::Budget::Task(id),
+        session::Cause::Ask,
+        now,
+    )?;
+    Ok(Asked {
+        task: id,
+        channel: ch,
+    })
 }
 
 /// A pinned question nobody is on yet.
@@ -183,7 +213,17 @@ pub fn open_case(conn: &Connection, question: &str, now: i64) -> Result<TaskId> 
     if question.trim().is_empty() {
         return Err(Error::Invalid("a question needs text".into()));
     }
-    insert(conn, question.trim(), None, None, 0, Some(0), true, None, now)
+    insert(
+        conn,
+        question.trim(),
+        None,
+        None,
+        0,
+        Some(0),
+        true,
+        None,
+        now,
+    )
 }
 
 pub fn set_pinned(conn: &Connection, id: TaskId, pinned: bool) -> Result<()> {
@@ -197,7 +237,11 @@ pub fn pinned(conn: &Connection) -> Result<Vec<Task>> {
 }
 
 /// The active request a person is working on in a channel, if any (newest first).
-pub fn active_for(conn: &Connection, person: &PersonId, channel: ChannelId) -> Result<Option<Task>> {
+pub fn active_for(
+    conn: &Connection,
+    person: &PersonId,
+    channel: ChannelId,
+) -> Result<Option<Task>> {
     Ok(query(
         conn,
         "assignee = ?1 AND channel = ?2 AND status = 'active'",
@@ -336,6 +380,7 @@ pub struct Reported {
 /// the request is done. Someone with no such active request gets [`Error::NoTask`].
 /// Closing a request also closes its session; the caller applies trust growth for a
 /// request the user gave ([`crate::trust::task_done`]) when `granted` is set.
+#[allow(clippy::too_many_arguments)]
 pub fn report(
     conn: &Connection,
     person: &PersonId,
@@ -369,7 +414,15 @@ pub fn report(
         }
         None => None,
     };
-    let msg = message::append(conn, ch, &Actor::Person(person.clone()), text, None, None, now)?;
+    let msg = message::append(
+        conn,
+        ch,
+        &Actor::Person(person.clone()),
+        text,
+        None,
+        None,
+        now,
+    )?;
     conn.execute(
         "UPDATE task SET status = 'done', cites = ?2, note_path = ?3, reply = ?4, turns_left = 0
          WHERE id = ?1",
@@ -399,7 +452,9 @@ pub fn force_close(
     now: i64,
 ) -> Result<Reported> {
     let t = get(conn, id)?;
-    let person = t.assignee.ok_or_else(|| Error::Invalid(format!("request {id} has nobody on it")))?;
+    let person = t
+        .assignee
+        .ok_or_else(|| Error::Invalid(format!("request {id} has nobody on it")))?;
     report(conn, &person, id, text, cites, None, office, now)
 }
 
@@ -446,23 +501,64 @@ mod tests {
     #[test]
     fn ask_uses_the_tier_default_and_refuses_disabled() {
         let w = world();
-        let a = ask(&w, &p("a"), "why?", None, None, Tier::High, &Ask::default(), T0).unwrap();
+        let a = ask(
+            &w,
+            &p("a"),
+            "why?",
+            None,
+            None,
+            Tier::High,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
         let t = get(&w, a.task).unwrap();
         assert_eq!((t.turns_left, t.granted), (16, Some(16)));
         assert_eq!(t.channel, Some(a.channel));
         assert_eq!(tree_budget(&w, a.task).unwrap(), 16);
         bond::set_mode(&w, &p("off"), Mode::Disabled).unwrap();
         assert!(matches!(
-            ask(&w, &p("off"), "q", Some(3), None, Tier::Low, &Ask::default(), T0),
+            ask(
+                &w,
+                &p("off"),
+                "q",
+                Some(3),
+                None,
+                Tier::Low,
+                &Ask::default(),
+                T0
+            ),
             Err(Error::Disabled(_))
         ));
-        assert!(ask(&w, &p("a"), "q", Some(0), None, Tier::Low, &Ask::default(), T0).is_err());
+        assert!(
+            ask(
+                &w,
+                &p("a"),
+                "q",
+                Some(0),
+                None,
+                Tier::Low,
+                &Ask::default(),
+                T0
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn request_join_splits_and_refuses_what_it_cannot_give() {
         let w = world();
-        let a = ask(&w, &p("a"), "q", Some(4), None, Tier::Middle, &Ask::default(), T0).unwrap();
+        let a = ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(4),
+            None,
+            Tier::Middle,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
         let j = request_join(&w, a.channel, &p("a"), &p("b"), Some(2), T0).unwrap();
         let child = j.task.unwrap();
         assert_eq!(get(&w, a.task).unwrap().turns_left, 2);
@@ -480,7 +576,11 @@ mod tests {
             request_join(&w, a.channel, &p("c"), &p("d"), None, T0),
             Err(Error::NotEnoughTurns { asked: 1, spare: 0 })
         ));
-        assert!(channel::get(&w, a.channel).unwrap().has(&Actor::Person(p("c"))));
+        assert!(
+            channel::get(&w, a.channel)
+                .unwrap()
+                .has(&Actor::Person(p("c")))
+        );
     }
 
     #[test]
@@ -503,7 +603,17 @@ mod tests {
     #[test]
     fn turns_left_three_bands() {
         let w = world();
-        let a = ask(&w, &p("a"), "q", Some(3), None, Tier::Middle, &Ask::default(), T0).unwrap();
+        let a = ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(3),
+            None,
+            Tier::Middle,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
         assert_eq!(harness(3), Harness::Normal);
         assert_eq!(spend_turn(&w, a.task).unwrap(), Harness::Normal);
         assert_eq!(spend_turn(&w, a.task).unwrap(), Harness::MustReportThisTurn);
@@ -521,7 +631,17 @@ mod tests {
     #[test]
     fn report_stores_reply_cites_and_note_under_office() {
         let w = world();
-        let a = ask(&w, &p("a"), "q", Some(3), None, Tier::Middle, &Ask::default(), T0).unwrap();
+        let a = ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(3),
+            None,
+            Tier::Middle,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
         let dir = office();
         let cite = Citation {
             page: "P".into(),
@@ -534,7 +654,17 @@ mod tests {
             report(&w, &p("b"), a.task, "x", &[], None, &dir, T0),
             Err(Error::NoTask { .. })
         ));
-        let r = report(&w, &p("a"), a.task, "found it", &[cite.clone()], Some("# Note"), &dir, T0 + 5).unwrap();
+        let r = report(
+            &w,
+            &p("a"),
+            a.task,
+            "found it",
+            std::slice::from_ref(&cite),
+            Some("# Note"),
+            &dir,
+            T0 + 5,
+        )
+        .unwrap();
         let t = get(&w, a.task).unwrap();
         assert_eq!(t.cites, vec![cite]);
         assert_eq!(t.note_path.as_deref(), Some(note_rel_path(a.task).as_str()));
@@ -557,11 +687,33 @@ mod tests {
     fn pinned_questions_hold_requests_as_separate_trees() {
         let w = world();
         let case = open_case(&w, "the big one", T0).unwrap();
-        let a = ask(&w, &p("a"), "part", Some(5), Some(case), Tier::Middle, &Ask::default(), T0).unwrap();
+        let a = ask(
+            &w,
+            &p("a"),
+            "part",
+            Some(5),
+            Some(case),
+            Tier::Middle,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
         assert_eq!(get(&w, a.task).unwrap().parent, Some(case));
         assert_eq!(tree_root(&w, a.task).unwrap().id, a.task);
         assert_eq!(tree_budget(&w, case).unwrap(), 0);
         assert_eq!(pinned(&w).unwrap().len(), 1);
-        assert!(ask(&w, &p("a"), "x", Some(1), Some(a.task), Tier::Middle, &Ask::default(), T0).is_err());
+        assert!(
+            ask(
+                &w,
+                &p("a"),
+                "x",
+                Some(1),
+                Some(a.task),
+                Tier::Middle,
+                &Ask::default(),
+                T0
+            )
+            .is_err()
+        );
     }
 }

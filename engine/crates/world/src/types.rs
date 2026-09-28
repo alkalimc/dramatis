@@ -172,19 +172,15 @@ macro_rules! text_enum {
 
 text_enum! {
     /// Whether a person or a group may act without being addressed.
+    #[derive(Default)]
     Mode {
         /// May speak unprompted, with a seed, within the daily limits.
         Enabled = "enabled",
         /// Never speaks first; still answers when triggered. Everyone starts here.
+        #[default]
         Frozen = "frozen",
         /// Cannot be triggered and never appears in any option offered to a model.
         Disabled = "disabled",
-    }
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self::Frozen
     }
 }
 
@@ -233,20 +229,16 @@ text_enum! {
 
 text_enum! {
     /// The intensity slider, the only quota control.
+    #[derive(Default)]
     Tier {
         Low = "low",
+        #[default]
         Middle = "middle",
         High = "high",
         ExtraHigh = "extra_high",
         Max = "max",
         /// No windows; only the daily experience limits apply.
         Ultra = "ultra",
-    }
-}
-
-impl Default for Tier {
-    fn default() -> Self {
-        Self::Middle
     }
 }
 

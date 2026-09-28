@@ -33,10 +33,14 @@ impl Audience {
     }
 
     fn decode(kind: &str, reference: Option<String>) -> rusqlite::Result<Self> {
-        let bad = || rusqlite::Error::InvalidColumnType(0, "audience".into(), rusqlite::types::Type::Text);
+        let bad = || {
+            rusqlite::Error::InvalidColumnType(0, "audience".into(), rusqlite::types::Type::Text)
+        };
         Ok(match (kind, reference) {
             ("world", None) => Self::World,
-            ("participants", Some(r)) => Self::Participants(ChannelId(r.parse().map_err(|_| bad())?)),
+            ("participants", Some(r)) => {
+                Self::Participants(ChannelId(r.parse().map_err(|_| bad())?))
+            }
             ("self", Some(r)) => Self::Own(PersonId(r)),
             _ => return Err(bad()),
         })
@@ -130,7 +134,10 @@ pub enum Written {
     New(FactId),
     /// Same kind, audience and text as an existing fact (live or retracted); nothing was
     /// written. A retracted duplicate stays retracted.
-    Duplicate { existing: FactId, retracted: bool },
+    Duplicate {
+        existing: FactId,
+        retracted: bool,
+    },
 }
 
 impl Written {
@@ -152,7 +159,10 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Fact> {
     Ok(Fact {
         id: row.get("id")?,
         author: row.get("author")?,
-        audience: Audience::decode(&row.get::<_, String>("audience_kind")?, row.get("audience_ref")?)?,
+        audience: Audience::decode(
+            &row.get::<_, String>("audience_kind")?,
+            row.get("audience_ref")?,
+        )?,
         kind: row.get("kind")?,
         about: About::decode(row.get("about_kind")?, row.get("about_ref")?),
         due: row.get("due")?,
@@ -164,7 +174,9 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Fact> {
 }
 
 fn query(conn: &Connection, filter: &str, params: impl rusqlite::Params) -> Result<Vec<Fact>> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM fact WHERE {filter} ORDER BY id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM fact WHERE {filter} ORDER BY id"
+    ))?;
     let rows = stmt.query_map(params, read)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -232,9 +244,13 @@ pub fn write(conn: &Connection, new: &NewFact, now: i64) -> Result<Written> {
 }
 
 pub fn get(conn: &Connection, id: FactId) -> Result<Fact> {
-    conn.query_row(&format!("SELECT {COLUMNS} FROM fact WHERE id = ?1"), [id], read)
-        .optional()?
-        .ok_or_else(|| not_found("fact", id))
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM fact WHERE id = ?1"),
+        [id],
+        read,
+    )
+    .optional()?
+    .ok_or_else(|| not_found("fact", id))
 }
 
 /// Delete: gone from retrieval, seeds and every reader; restorable. Retracting a hurt
@@ -341,7 +357,10 @@ pub fn shared_visible(conn: &Connection, channel: ChannelId) -> Result<Vec<Fact>
     let Some((first, rest)) = persons.split_first() else {
         return query(conn, "retracted = 0 AND audience_kind = 'world'", []);
     };
-    let mut keep: BTreeSet<FactId> = visible_to_person(conn, first)?.iter().map(|f| f.id).collect();
+    let mut keep: BTreeSet<FactId> = visible_to_person(conn, first)?
+        .iter()
+        .map(|f| f.id)
+        .collect();
     for p in rest {
         let theirs: BTreeSet<FactId> = visible_to_person(conn, p)?.iter().map(|f| f.id).collect();
         keep.retain(|id| theirs.contains(id));
@@ -356,7 +375,11 @@ pub fn shared_visible(conn: &Connection, channel: ChannelId) -> Result<Vec<Fact>
 /// ranking. `None` is the maintainer face (the host's search): no memories at all. A
 /// person alone with the user sees all he may recall; in a channel others read he gets
 /// only [`shared_visible`], because what he retrieves lands in the shared log.
-pub fn visible_to(conn: &Connection, as_person: Option<&PersonId>, channel: ChannelId) -> Result<Vec<Fact>> {
+pub fn visible_to(
+    conn: &Connection,
+    as_person: Option<&PersonId>,
+    channel: ChannelId,
+) -> Result<Vec<Fact>> {
     let Some(person) = as_person else {
         return Ok(Vec::new());
     };
@@ -409,7 +432,8 @@ pub fn conclusion_of(conn: &Connection, task: TaskId) -> Result<Option<Fact>> {
 pub fn write_conclusion(conn: &Connection, task: TaskId, text: &str, now: i64) -> Result<FactId> {
     crate::task::get(conn, task)?;
     let old = conclusion_of(conn, task)?;
-    let new = NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, text).about(About::Task(task));
+    let new = NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, text)
+        .about(About::Task(task));
     if let Some(old) = &old {
         if normalize(&old.text) == normalize(text) {
             return Ok(old.id);
@@ -439,7 +463,12 @@ pub enum Scope {
 
 /// The drawer: all facts (live, or only deleted ones under [`Scope::Deleted`]) matching
 /// the scope, optionally only those about or recallable by a person, or about a request.
-pub fn list(conn: &Connection, scope: Scope, person: Option<&PersonId>, task: Option<TaskId>) -> Result<Vec<Fact>> {
+pub fn list(
+    conn: &Connection,
+    scope: Scope,
+    person: Option<&PersonId>,
+    task: Option<TaskId>,
+) -> Result<Vec<Fact>> {
     let mut facts = all(conn, true)?;
     facts.retain(|f| match scope {
         Scope::Deleted => f.retracted,
@@ -491,16 +520,29 @@ mod tests {
         assert!(first.is_new());
         assert_eq!(
             write(&w, &note(aud.clone(), "  likes TEA "), 2).unwrap(),
-            Written::Duplicate { existing: first.id(), retracted: false }
+            Written::Duplicate {
+                existing: first.id(),
+                retracted: false
+            }
         );
         retract(&w, first.id()).unwrap();
         assert_eq!(
             write(&w, &note(aud.clone(), "likes tea"), 3).unwrap(),
-            Written::Duplicate { existing: first.id(), retracted: true }
+            Written::Duplicate {
+                existing: first.id(),
+                retracted: true
+            }
         );
-        assert!(get(&w, first.id()).unwrap().retracted, "a deleted error does not come back");
+        assert!(
+            get(&w, first.id()).unwrap().retracted,
+            "a deleted error does not come back"
+        );
         // Another audience or kind is another memory.
-        assert!(write(&w, &note(Audience::World, "likes tea"), 4).unwrap().is_new());
+        assert!(
+            write(&w, &note(Audience::World, "likes tea"), 4)
+                .unwrap()
+                .is_new()
+        );
         restore(&w, first.id()).unwrap();
         assert!(!get(&w, first.id()).unwrap().retracted);
         assert!(write(&w, &note(aud, " . "), 5).is_err());
@@ -510,14 +552,21 @@ mod tests {
     fn edit_is_retract_plus_write() {
         let w = world();
         let c = channel::direct(&w, &p("a")).unwrap();
-        let f = write(&w, &note(Audience::Participants(c), "old").about(About::User), 1)
-            .unwrap()
-            .id();
+        let f = write(
+            &w,
+            &note(Audience::Participants(c), "old").about(About::User),
+            1,
+        )
+        .unwrap()
+        .id();
         let n = edit(&w, f, "new", 2).unwrap();
         assert_ne!(n, f);
         assert!(get(&w, f).unwrap().retracted);
         let nf = get(&w, n).unwrap();
-        assert_eq!((nf.text.as_str(), nf.about, nf.author), ("new", Some(About::User), Actor::User));
+        assert_eq!(
+            (nf.text.as_str(), nf.about, nf.author),
+            ("new", Some(About::User), Actor::User)
+        );
         // Editing back to the deleted text restores it instead of duplicating.
         assert_eq!(edit(&w, n, "old", 3).unwrap(), f);
         assert!(!get(&w, f).unwrap().retracted);
@@ -529,20 +578,38 @@ mod tests {
         let g = channel::create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
         let da = channel::direct(&w, &p("a")).unwrap();
         let world_f = write(&w, &note(Audience::World, "w"), 1).unwrap().id();
-        let group_f = write(&w, &note(Audience::Participants(g), "g"), 1).unwrap().id();
-        let own_a = write(&w, &note(Audience::Own(p("a")), "own"), 1).unwrap().id();
-        let direct_a = write(&w, &note(Audience::Participants(da), "d"), 1).unwrap().id();
+        let group_f = write(&w, &note(Audience::Participants(g), "g"), 1)
+            .unwrap()
+            .id();
+        let own_a = write(&w, &note(Audience::Own(p("a")), "own"), 1)
+            .unwrap()
+            .id();
+        let direct_a = write(&w, &note(Audience::Participants(da), "d"), 1)
+            .unwrap()
+            .id();
         let ids = |fs: Vec<Fact>| fs.into_iter().map(|f| f.id).collect::<Vec<_>>();
 
-        assert_eq!(ids(visible_to_person(&w, &p("a")).unwrap()), [world_f, group_f, own_a, direct_a]);
-        assert_eq!(ids(visible_to_person(&w, &p("b")).unwrap()), [world_f, group_f]);
+        assert_eq!(
+            ids(visible_to_person(&w, &p("a")).unwrap()),
+            [world_f, group_f, own_a, direct_a]
+        );
+        assert_eq!(
+            ids(visible_to_person(&w, &p("b")).unwrap()),
+            [world_f, group_f]
+        );
         assert_eq!(ids(visible_to_person(&w, &p("c")).unwrap()), [world_f]);
         assert!(can_see(&w, &p("b"), group_f).unwrap());
         assert!(!can_see(&w, &p("b"), own_a).unwrap());
 
         // Alone with the user he has all of his; in the group only the shared part.
-        assert_eq!(ids(visible_to(&w, Some(&p("a")), da).unwrap()), [world_f, group_f, own_a, direct_a]);
-        assert_eq!(ids(visible_to(&w, Some(&p("a")), g).unwrap()), [world_f, group_f]);
+        assert_eq!(
+            ids(visible_to(&w, Some(&p("a")), da).unwrap()),
+            [world_f, group_f, own_a, direct_a]
+        );
+        assert_eq!(
+            ids(visible_to(&w, Some(&p("a")), g).unwrap()),
+            [world_f, group_f]
+        );
         assert!(visible_to(&w, None, g).unwrap().is_empty());
 
         // Joining later is having been brought in: he now recalls the room's memories.
@@ -551,7 +618,10 @@ mod tests {
 
         retract(&w, group_f).unwrap();
         assert!(!can_see(&w, &p("a"), group_f).unwrap());
-        assert_eq!(audience_persons(&w, &Audience::Participants(g)).unwrap(), Some(vec![p("a"), p("b"), p("c")]));
+        assert_eq!(
+            audience_persons(&w, &Audience::Participants(g)).unwrap(),
+            Some(vec![p("a"), p("b"), p("c")])
+        );
     }
 
     #[test]
@@ -576,7 +646,13 @@ mod tests {
         let c = channel::direct(&w, &p("a")).unwrap();
         let f = write(
             &w,
-            &NewFact::new(Actor::User, Audience::Participants(c), FactKind::Commitment, "call").due(10),
+            &NewFact::new(
+                Actor::User,
+                Audience::Participants(c),
+                FactKind::Commitment,
+                "call",
+            )
+            .due(10),
             0,
         )
         .unwrap()

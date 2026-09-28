@@ -49,11 +49,13 @@ impl Channel {
 
     /// Accepts new messages: not deleted, and not a disabled group.
     pub fn is_open(&self) -> bool {
-        self.deleted_at.is_none() && !(self.kind == ChannelKind::Group && self.mode == Mode::Disabled)
+        self.deleted_at.is_none()
+            && !(self.kind == ChannelKind::Group && self.mode == Mode::Disabled)
     }
 }
 
-const COLUMNS: &str = "id, kind, origin, topic, mode, log_segment, read_up_to, direct_with, deleted_at";
+const COLUMNS: &str =
+    "id, kind, origin, topic, mode, log_segment, read_up_to, direct_with, deleted_at";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Channel> {
     let owner: Option<String> = row.get("direct_with")?;
@@ -81,7 +83,11 @@ pub fn participants(conn: &Connection, channel: ChannelId) -> Result<Vec<Actor>>
 
 pub fn get(conn: &Connection, id: ChannelId) -> Result<Channel> {
     let mut ch = conn
-        .query_row(&format!("SELECT {COLUMNS} FROM channel WHERE id = ?1"), [id], read)
+        .query_row(
+            &format!("SELECT {COLUMNS} FROM channel WHERE id = ?1"),
+            [id],
+            read,
+        )
         .optional()?
         .ok_or_else(|| not_found("channel", id))?;
     ch.participants = participants(conn, id)?;
@@ -106,9 +112,11 @@ pub fn list(conn: &Connection) -> Result<Vec<Channel>> {
 
 fn find_direct(conn: &Connection, owner: &str) -> Result<Option<ChannelId>> {
     let found = conn
-        .query_row("SELECT id FROM channel WHERE direct_with = ?1", [owner], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT id FROM channel WHERE direct_with = ?1",
+            [owner],
+            |r| r.get(0),
+        )
         .optional()?;
     if found.is_some() {
         return Ok(found);
@@ -217,9 +225,14 @@ pub fn add_participant(conn: &Connection, channel: ChannelId, who: &Actor) -> Re
 pub fn set_mode(conn: &Connection, channel: ChannelId, mode: Mode) -> Result<()> {
     let ch = get(conn, channel)?;
     if ch.kind != ChannelKind::Group || ch.deleted_at.is_some() {
-        return Err(Error::Invalid(format!("channel {channel} is not a live group")));
+        return Err(Error::Invalid(format!(
+            "channel {channel} is not a live group"
+        )));
     }
-    conn.execute("UPDATE channel SET mode = ?2 WHERE id = ?1", (channel, mode))?;
+    conn.execute(
+        "UPDATE channel SET mode = ?2 WHERE id = ?1",
+        (channel, mode),
+    )?;
     Ok(())
 }
 
@@ -249,7 +262,10 @@ pub fn delete_group(conn: &Connection, channel: ChannelId, now: i64) -> Result<(
 
 pub fn set_topic(conn: &Connection, channel: ChannelId, topic: Option<&str>) -> Result<()> {
     get(conn, channel)?;
-    conn.execute("UPDATE channel SET topic = ?2 WHERE id = ?1", (channel, topic))?;
+    conn.execute(
+        "UPDATE channel SET topic = ?2 WHERE id = ?1",
+        (channel, topic),
+    )?;
     Ok(())
 }
 
@@ -297,7 +313,11 @@ pub fn enabled_groups_of(conn: &Connection, person: &PersonId) -> Result<Vec<Cha
 /// The `as_person` a speaker's retrieval runs as in this channel. The host has none (its
 /// search is the maintainer face: all of the corpus, no memories), and a person who is
 /// not a participant cannot speak here at all.
-pub fn as_person(conn: &Connection, channel: ChannelId, speaker: &Actor) -> Result<Option<PersonId>> {
+pub fn as_person(
+    conn: &Connection,
+    channel: ChannelId,
+    speaker: &Actor,
+) -> Result<Option<PersonId>> {
     let ch = get(conn, channel)?;
     match speaker {
         Actor::User | Actor::Host => Ok(None),
@@ -341,6 +361,40 @@ pub fn address(
     Ok(None)
 }
 
+/// Who adds one line after the addressed reply in a group: among the enabled members
+/// other than `addressed`, the one whose own units matched best in the addressing
+/// retrieval (`hits`: person and confidence), if that is above `min_confidence`. Only in
+/// an enabled group, and only while the quota band lets unprompted speech through. One
+/// per user turn; an interjection never triggers another, so the caller asks once.
+pub fn interjector(
+    conn: &Connection,
+    channel: ChannelId,
+    addressed: &PersonId,
+    hits: &[(PersonId, f64)],
+    min_confidence: f64,
+    quota: &crate::quota::Status,
+) -> Result<Option<PersonId>> {
+    let ch = get(conn, channel)?;
+    let unprompted = crate::quota::decide(quota, crate::quota::CallKind::Interjection).allowed();
+    if ch.kind != ChannelKind::Group || ch.mode != Mode::Enabled || !ch.is_open() || !unprompted {
+        return Ok(None);
+    }
+    let members = ch.persons();
+    let mut best: Option<(&PersonId, f64)> = None;
+    for (p, score) in hits {
+        if p == addressed || !members.contains(p) || *score <= min_confidence {
+            continue;
+        }
+        if bond::mode(conn, p)? != Mode::Enabled {
+            continue;
+        }
+        if best.is_none_or(|(_, b)| *score > b) {
+            best = Some((p, *score));
+        }
+    }
+    Ok(best.map(|(p, _)| p.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,7 +409,7 @@ mod tests {
         let ch = get(&w, a).unwrap();
         assert_eq!(ch.person(), Some(&p("p1")));
         assert_eq!(ch.persons(), vec![p("p1"), p("p2")]);
-        assert_eq!(direct(&w, &p("p2")).unwrap() != a, true);
+        assert_ne!(direct(&w, &p("p2")).unwrap(), a);
         let h = host(&w).unwrap();
         assert!(get(&w, h).unwrap().is_host_channel());
         assert_eq!(host(&w).unwrap(), h);
@@ -372,7 +426,10 @@ mod tests {
         assert!(matches!(direct(&w, &p("off")), Err(Error::Disabled(_))));
         let g = create_group(&w, &[p("a"), p("b")], Some("t"), Origin::User).unwrap();
         let ch = get(&w, g).unwrap();
-        assert_eq!((ch.mode, ch.kind, ch.topic.as_deref()), (Mode::Frozen, ChannelKind::Group, Some("t")));
+        assert_eq!(
+            (ch.mode, ch.kind, ch.topic.as_deref()),
+            (Mode::Frozen, ChannelKind::Group, Some("t"))
+        );
         assert!(add_participant(&w, g, &Actor::Person(p("off"))).is_err());
         set_mode(&w, g, Mode::Enabled).unwrap();
         assert_eq!(enabled_groups_of(&w, &p("a")).unwrap().len(), 1);
@@ -398,7 +455,10 @@ mod tests {
     fn as_person_is_filled_from_the_speaker_never_the_model() {
         let w = world();
         let g = create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
-        assert_eq!(as_person(&w, g, &Actor::Person(p("a"))).unwrap(), Some(p("a")));
+        assert_eq!(
+            as_person(&w, g, &Actor::Person(p("a"))).unwrap(),
+            Some(p("a"))
+        );
         assert_eq!(as_person(&w, g, &Actor::Host).unwrap(), None);
         assert!(matches!(
             as_person(&w, g, &Actor::Person(p("c"))),
@@ -410,13 +470,62 @@ mod tests {
     fn addressing_order() {
         let w = world();
         let g = create_group(&w, &[p("a"), p("b"), p("c")], None, Origin::User).unwrap();
-        assert_eq!(address(&w, g, Some(&p("b")), &[p("a")]).unwrap(), Some(p("b")));
-        assert_eq!(address(&w, g, Some(&p("x")), &[p("x"), p("c")]).unwrap(), Some(p("c")));
+        assert_eq!(
+            address(&w, g, Some(&p("b")), &[p("a")]).unwrap(),
+            Some(p("b"))
+        );
+        assert_eq!(
+            address(&w, g, Some(&p("x")), &[p("x"), p("c")]).unwrap(),
+            Some(p("c"))
+        );
         assert_eq!(address(&w, g, None, &[]).unwrap(), None);
         crate::message::append(&w, g, &Actor::Person(p("a")), "hi", None, None, 1).unwrap();
         assert_eq!(address(&w, g, None, &[]).unwrap(), Some(p("a")));
         bond::set_mode(&w, &p("a"), Mode::Disabled).unwrap();
         assert_eq!(address(&w, g, Some(&p("a")), &[p("a")]).unwrap(), None);
+    }
+
+    #[test]
+    fn one_enabled_member_above_the_threshold_interjects() {
+        let w = world();
+        let open = crate::quota::status(&w, crate::Tier::Middle, 0, &Default::default()).unwrap();
+        let g = create_group(&w, &[p("a"), p("b"), p("c"), p("d")], None, Origin::User).unwrap();
+        for x in ["b", "c", "d"] {
+            bond::set_mode(&w, &p(x), Mode::Enabled).unwrap();
+        }
+        let hits = [
+            (p("a"), 0.9),
+            (p("b"), 0.6),
+            (p("c"), 0.7),
+            (p("d"), 0.2),
+            (p("x"), 0.99),
+        ];
+        assert_eq!(
+            interjector(&w, g, &p("a"), &hits, 0.5, &open).unwrap(),
+            None,
+            "frozen group"
+        );
+        set_mode(&w, g, Mode::Enabled).unwrap();
+        assert_eq!(
+            interjector(&w, g, &p("a"), &hits, 0.5, &open).unwrap(),
+            Some(p("c"))
+        );
+        assert_eq!(
+            interjector(&w, g, &p("c"), &hits, 0.5, &open).unwrap(),
+            Some(p("b"))
+        );
+        assert_eq!(
+            interjector(&w, g, &p("a"), &hits, 0.8, &open).unwrap(),
+            None
+        );
+        let quiet = crate::quota::Status {
+            band: crate::quota::Band::Quiet,
+            ..open
+        };
+        assert_eq!(
+            interjector(&w, g, &p("a"), &hits, 0.5, &quiet).unwrap(),
+            None
+        );
     }
 
     #[test]

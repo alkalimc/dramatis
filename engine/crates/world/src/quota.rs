@@ -45,6 +45,7 @@ pub fn points(usage: Usage, prices: Option<Prices>, cost: &Cost) -> f64 {
 }
 
 /// Record one call. Points are fixed now, with the prices now in force.
+#[allow(clippy::too_many_arguments)]
 pub fn record_usage(
     conn: &Connection,
     at: i64,
@@ -60,7 +61,16 @@ pub fn record_usage(
     conn.execute(
         "INSERT INTO meter(at, shape, channel, model, uncached, cached, output, points)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![at, shape, channel, model, n(usage.uncached)?, n(usage.cached)?, n(usage.output)?, pts],
+        rusqlite::params![
+            at,
+            shape,
+            channel,
+            model,
+            n(usage.uncached)?,
+            n(usage.cached)?,
+            n(usage.output)?,
+            pts
+        ],
     )?;
     Ok(pts)
 }
@@ -136,7 +146,9 @@ pub enum Decision {
     /// Blocked by the quiet band: unprompted speech is off.
     Quiet,
     /// Blocked until `release_at`; the host explains with the pack's fixed line.
-    Exhausted { release_at: Option<i64> },
+    Exhausted {
+        release_at: Option<i64>,
+    },
 }
 
 impl Decision {
@@ -157,7 +169,8 @@ fn band_of(u: f64, quota: &Quota) -> Band {
 
 /// Meter rows in `(now - span, now]`, oldest first.
 fn rows(conn: &Connection, now: i64, span: i64) -> Result<Vec<(i64, f64)>> {
-    let mut stmt = conn.prepare("SELECT at, points FROM meter WHERE at > ?1 AND at <= ?2 ORDER BY at")?;
+    let mut stmt =
+        conn.prepare("SELECT at, points FROM meter WHERE at > ?1 AND at <= ?2 ORDER BY at")?;
     let rows = stmt.query_map((now - span, now), |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -181,7 +194,11 @@ fn release(rows: &[(i64, f64)], target: f64, span: i64) -> Option<i64> {
 fn window(conn: &Connection, span: Span, limit: f64, now: i64, quota: &Quota) -> Result<Window> {
     let rows = rows(conn, now, span.ms())?;
     let pts: f64 = rows.iter().map(|r| r.1).sum();
-    let used = if limit > 0.0 { pts / limit } else { f64::INFINITY };
+    let used = if limit > 0.0 {
+        pts / limit
+    } else {
+        f64::INFINITY
+    };
     let target = match band_of(used, quota) {
         Band::Open => None,
         Band::Quiet => Some(limit * quota.quiet_at),
@@ -233,7 +250,13 @@ pub fn status(conn: &Connection, tier: Tier, now: i64, quota: &Quota) -> Result<
 }
 
 /// May a call of this kind be made now?
-pub fn can_call(conn: &Connection, tier: Tier, kind: CallKind, now: i64, quota: &Quota) -> Result<Decision> {
+pub fn can_call(
+    conn: &Connection,
+    tier: Tier,
+    kind: CallKind,
+    now: i64,
+    quota: &Quota,
+) -> Result<Decision> {
     Ok(decide(&status(conn, tier, now, quota)?, kind))
 }
 
@@ -305,7 +328,10 @@ mod tests {
             cached: 400,
             output: 10,
         };
-        assert_eq!(points(u, None, &Cost::default()), 100.0 + 0.25 * 400.0 + 4.0 * 10.0);
+        assert_eq!(
+            points(u, None, &Cost::default()),
+            100.0 + 0.25 * 400.0 + 4.0 * 10.0
+        );
         let prices = Prices {
             input: 2.0,
             cached_input: 0.2,
@@ -341,9 +367,15 @@ mod tests {
         assert_eq!(st.release_at, Some(T0 + SPAN_5H_MS), "105 - 50 = 55 < 100");
         assert!(matches!(
             decide(&st, CallKind::UserInitiated),
-            Decision::Exhausted { release_at: Some(_) }
+            Decision::Exhausted {
+                release_at: Some(_)
+            }
         ));
-        assert_eq!(s(T0 + SPAN_5H_MS).band, Band::Open, "55 < 80 after the first leaves");
+        assert_eq!(
+            s(T0 + SPAN_5H_MS).band,
+            Band::Open,
+            "55 < 80 after the first leaves"
+        );
         assert_eq!(s(T0 + 2 * HOUR + SPAN_5H_MS).band, Band::Open);
     }
 
@@ -366,7 +398,11 @@ mod tests {
         spend(&w, T0, 1_000_000_000);
         let st = status(&w, Tier::Ultra, T0, &Quota::default()).unwrap();
         assert_eq!((st.band, st.windows.len()), (Band::Open, 0));
-        assert!(can_call(&w, Tier::Ultra, CallKind::Opening, T0, &Quota::default()).unwrap().allowed());
+        assert!(
+            can_call(&w, Tier::Ultra, CallKind::Opening, T0, &Quota::default())
+                .unwrap()
+                .allowed()
+        );
     }
 
     #[test]
@@ -390,7 +426,10 @@ mod tests {
         spend(&w, T0, 5);
         let by = spent_by_shape(&w, T0, Span::FiveHours).unwrap();
         assert_eq!(by, vec![(Shape::Direct, 5.0), (Shape::Wrapup, 17.5)]);
-        assert_eq!(cache_hit(&w, T0, Span::FiveHours).unwrap(), Some(30.0 / 45.0));
+        assert_eq!(
+            cache_hit(&w, T0, Span::FiveHours).unwrap(),
+            Some(30.0 / 45.0)
+        );
         assert_eq!(cache_hit(&w, T0 - DAY, Span::FiveHours).unwrap(), None);
     }
 }

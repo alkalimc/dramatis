@@ -46,14 +46,23 @@ pub struct Args {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Skipped {
     /// Beyond `wrapup.max_facts`.
-    OverLimit { text: String },
+    OverLimit {
+        text: String,
+    },
     /// A commitment without a usable due time.
-    NoDue { text: String },
+    NoDue {
+        text: String,
+    },
     /// Repeats an existing memory (live or deleted).
-    Duplicate { text: String, existing: FactId },
+    Duplicate {
+        text: String,
+        existing: FactId,
+    },
     Empty,
     /// The hurt names nobody who is here (or someone disabled).
-    NoTarget { quote: String },
+    NoTarget {
+        quote: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,7 +113,10 @@ pub fn apply(
             continue;
         }
         let new = match m.kind {
-            MemoryKind::Fact => NewFact::new(author.clone(), audience.clone(), FactKind::Fact, text).about(About::User),
+            MemoryKind::Fact => {
+                NewFact::new(author.clone(), audience.clone(), FactKind::Fact, text)
+                    .about(About::User)
+            }
             MemoryKind::Commitment => {
                 let Some(due) = m.due.as_deref().and_then(|d| clock::parse_due(d, now)) else {
                     out.skipped.push(Skipped::NoDue { text: text.into() });
@@ -132,10 +144,13 @@ pub fn apply(
         if fact::normalize(quote).is_empty() {
             out.skipped.push(Skipped::Empty);
         } else if !valid {
-            out.skipped.push(Skipped::NoTarget { quote: quote.into() });
+            out.skipped.push(Skipped::NoTarget {
+                quote: quote.into(),
+            });
         } else {
             let person = target.expect("valid");
-            let new = NewFact::new(Actor::User, audience.clone(), FactKind::Hurt, quote).about(About::Person(person));
+            let new = NewFact::new(Actor::User, audience.clone(), FactKind::Hurt, quote)
+                .about(About::Person(person));
             match fact::write(conn, &new, now.ms)? {
                 Written::New(id) => {
                     trust::take_hurt(conn, &fact::get(conn, id)?, trust_params)?;
@@ -194,26 +209,52 @@ mod tests {
         let args = Args {
             facts: vec![
                 mem(MemoryKind::Commitment, "no time", None),
-                mem(MemoryKind::Commitment, "call on friday", Some("2026-03-13T18:00")),
+                mem(
+                    MemoryKind::Commitment,
+                    "call on friday",
+                    Some("2026-03-13T18:00"),
+                ),
                 mem(MemoryKind::Fact, "likes rain", None),
                 mem(MemoryKind::Fact, "third", None),
             ],
             hurt: None,
             summary: Some("  they talked  ".into()),
         };
-        let out = apply(&w, c, &Actor::Person(p("a")), &args, at(T0), &WrapupParams::default(), &Trust::default()).unwrap();
+        let out = apply(
+            &w,
+            c,
+            &Actor::Person(p("a")),
+            &args,
+            at(T0),
+            &WrapupParams::default(),
+            &Trust::default(),
+        )
+        .unwrap();
         assert_eq!(out.facts.len(), 2);
         assert_eq!(
             out.skipped,
-            vec![Skipped::NoDue { text: "no time".into() }, Skipped::OverLimit { text: "third".into() }]
+            vec![
+                Skipped::NoDue {
+                    text: "no time".into()
+                },
+                Skipped::OverLimit {
+                    text: "third".into()
+                }
+            ]
         );
         let commitment = fact::get(&w, out.facts[0]).unwrap();
         assert_eq!(commitment.kind, FactKind::Commitment);
         assert!(commitment.due.is_some());
         assert_eq!(commitment.audience, Audience::Participants(c));
-        assert_eq!(fact::get(&w, out.facts[1]).unwrap().about, Some(About::User));
+        assert_eq!(
+            fact::get(&w, out.facts[1]).unwrap().about,
+            Some(About::User)
+        );
         let s = out.summary.unwrap();
-        assert_eq!((s.text.as_str(), s.audience.clone()), ("they talked", Audience::Participants(c)));
+        assert_eq!(
+            (s.text.as_str(), s.audience.clone()),
+            ("they talked", Audience::Participants(c))
+        );
         check_summary_target(&s, c).unwrap();
         assert!(check_summary_target(&s, ChannelId(c.0 + 1)).is_err());
     }
@@ -227,9 +268,27 @@ mod tests {
             ..Args::default()
         };
         let author = Actor::Person(p("a"));
-        let first = apply(&w, c, &author, &args, at(T0), &WrapupParams::default(), &Trust::default()).unwrap();
+        let first = apply(
+            &w,
+            c,
+            &author,
+            &args,
+            at(T0),
+            &WrapupParams::default(),
+            &Trust::default(),
+        )
+        .unwrap();
         fact::retract(&w, first.facts[0]).unwrap();
-        let again = apply(&w, c, &author, &args, at(T0), &WrapupParams::default(), &Trust::default()).unwrap();
+        let again = apply(
+            &w,
+            c,
+            &author,
+            &args,
+            at(T0),
+            &WrapupParams::default(),
+            &Trust::default(),
+        )
+        .unwrap();
         assert!(again.facts.is_empty());
         assert!(matches!(again.skipped[0], Skipped::Duplicate { .. }));
     }
@@ -247,22 +306,73 @@ mod tests {
             ..Args::default()
         };
         let params = (WrapupParams::default(), Trust::default());
-        let out = apply(&w, g, &author, &hurt(None, "you are useless"), at(T0), &params.0, &params.1).unwrap();
-        assert!(matches!(out.skipped[0], Skipped::NoTarget { .. }), "a group needs a person");
-        let out = apply(&w, g, &author, &hurt(Some("zz"), "x"), at(T0), &params.0, &params.1).unwrap();
+        let out = apply(
+            &w,
+            g,
+            &author,
+            &hurt(None, "you are useless"),
+            at(T0),
+            &params.0,
+            &params.1,
+        )
+        .unwrap();
+        assert!(
+            matches!(out.skipped[0], Skipped::NoTarget { .. }),
+            "a group needs a person"
+        );
+        let out = apply(
+            &w,
+            g,
+            &author,
+            &hurt(Some("zz"), "x"),
+            at(T0),
+            &params.0,
+            &params.1,
+        )
+        .unwrap();
         assert!(matches!(out.skipped[0], Skipped::NoTarget { .. }));
-        let out = apply(&w, g, &author, &hurt(Some("b"), "you are useless"), at(T0), &params.0, &params.1).unwrap();
+        let out = apply(
+            &w,
+            g,
+            &author,
+            &hurt(Some("b"), "you are useless"),
+            at(T0),
+            &params.0,
+            &params.1,
+        )
+        .unwrap();
         let h = fact::get(&w, out.hurt.unwrap()).unwrap();
-        assert_eq!((h.kind, h.author, h.about), (FactKind::Hurt, Actor::User, Some(About::Person(p("b")))));
+        assert_eq!(
+            (h.kind, h.author, h.about),
+            (FactKind::Hurt, Actor::User, Some(About::Person(p("b"))))
+        );
         assert_eq!(bond::user_bond(&w, &p("b")).unwrap().trust, 85);
         fact::retract(&w, h.id).unwrap();
         assert_eq!(bond::user_bond(&w, &p("b")).unwrap().trust, 100);
         // In a direct channel the target is its person.
         let c = channel::direct(&w, &p("c")).unwrap();
-        let out = apply(&w, c, &Actor::Person(p("c")), &hurt(None, "cruel"), at(T0), &params.0, &params.1).unwrap();
+        let out = apply(
+            &w,
+            c,
+            &Actor::Person(p("c")),
+            &hurt(None, "cruel"),
+            at(T0),
+            &params.0,
+            &params.1,
+        )
+        .unwrap();
         assert!(out.hurt.is_some());
         bond::set_mode(&w, &p("c"), Mode::Disabled).unwrap();
-        let out = apply(&w, c, &Actor::Person(p("c")), &hurt(None, "again"), at(T0), &params.0, &params.1).unwrap();
+        let out = apply(
+            &w,
+            c,
+            &Actor::Person(p("c")),
+            &hurt(None, "again"),
+            at(T0),
+            &params.0,
+            &params.1,
+        )
+        .unwrap();
         assert!(out.hurt.is_none());
     }
 }

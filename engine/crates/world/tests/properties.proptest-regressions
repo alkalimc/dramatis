@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc b0f912779547b23620156b3685060abdf02c05ea20f98d51a027541b97f81dad # shrinks to grant = 1, ops = [Report { who: 0 }, Join { from: 0, turns: 1 }]
