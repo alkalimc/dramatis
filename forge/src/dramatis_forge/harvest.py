@@ -27,12 +27,11 @@ Pages that leave scope are snapshotted into `raw.removed` before they are delete
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from . import baseline as baseline_mod
 from .archive import Archive
-from .guards import HIGH, LOW, Finding, check_drift
+from .guards import HIGH, LOW, Finding
 from .pack import HarvestContext, Pack
 from .report import inspect as inspect_mod
 from .wiki import TITLES_LIMIT, Wiki
@@ -60,12 +59,8 @@ class Scope:
         return {t for key in pack.fetch_seeds for t in self.seeds.get(key, ())}
 
 
-def scope(wiki: Wiki, pack: Pack, *, baseline: Mapping[str, int] | None, progress=None) -> Scope:
-    """Run every enumerator, resolve alias sets, check drift against `baseline`.
-
-    `baseline` is the accepted seed counts (`forge baseline accept`); None means none has
-    been accepted, which is itself one low finding.
-    """
+def scope(wiki: Wiki, pack: Pack, *, progress=None) -> Scope:
+    """Run every enumerator and resolve alias sets."""
     sc = Scope()
     ctx = HarvestContext()
     say = progress or (lambda _m: None)
@@ -98,10 +93,8 @@ def scope(wiki: Wiki, pack: Pack, *, baseline: Mapping[str, int] | None, progres
         if sc.seeds.get(key):
             sc.disambigs.update(wiki.links(sc.seeds[key]))
 
-    # Discovered sets are absent here by construction, so they are checked after the
-    # followups have run rather than reported as a shortfall that is only stage order.
-    counts = {k: len(v) for k, v in sc.seeds.items() if k not in pack.discovered_seeds}
-    sc.findings += check_drift(counts, baseline, labels=pack.seed_labels)
+    # Seed-set drift is checked at build time from the stored sets (`normalize`), so an
+    # accepted baseline takes effect on the next build without another sync.
     sc.findings += _overlap_findings(sc, pack)
     return sc
 
@@ -214,9 +207,7 @@ def plan(wiki: Wiki, archive: Archive, pack: Pack, *, full: bool = False,
     after = set(before)
     if p.full or rescope:
         say("enumerating seed sets (paged index queries; the slow part)")
-        accepted = baseline_mod.load(archive.path)
-        p.scope = scope(wiki, pack, baseline=accepted.seeds if accepted else None,
-                        progress=progress)
+        p.scope = scope(wiki, pack, progress=progress)
         fresh = p.scope.fetch_titles(pack)
         # `gone` only over the seeds enumeration covers: discovered sets are never
         # enumerated, so subtracting them would drop every discovered page each sync.
@@ -283,12 +274,6 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
             archive.drop_page(title, inspect_mod.collect(archive, title, pack))
 
     res.findings = list(p.findings)
-    accepted = baseline_mod.load(archive.path)
-    if accepted is not None:
-        found = {k: archive.count("seeds", "seed=?", (k,)) for k in pack.discovered_seeds}
-        res.findings += check_drift(
-            found, {k: v for k, v in accepted.seeds.items() if k in found},
-            what="discovered", labels=pack.seed_labels)
     archive.write_findings([f.row() for f in res.findings], stage="sync")
 
     revid_after = _held_revids(archive)

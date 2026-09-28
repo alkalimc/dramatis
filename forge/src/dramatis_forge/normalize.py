@@ -98,6 +98,14 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
     for seed_key, n in sorted(unrouted.items()):
         rep.ledger.add("G3", f"{seed_key}: {n} pages fetched with no route to parse them")
 
+    # ---- seed-set drift, from the stored sets against the accepted baseline ----
+    # Here rather than in `sync`, so the finding always reflects the current baseline:
+    # `forge baseline accept` followed by `forge build` clears a reviewed shrink.
+    accepted = baseline_mod.load(archive.path)
+    rep.ledger.extend(guards.check_drift(
+        archive.seed_counts(), accepted.seeds if accepted else None,
+        labels=pack.seed_labels))
+
     # ---- identity, before aliases: alias targets resolve through it ----
     roster_titles = frozenset(archive.titles_in(pack.roster_seeds))
     roster = identity_mod.Roster()
@@ -106,7 +114,6 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
                  for t in roster_titles if archive.page(t) is not None}
         roster = identity_mod.resolve(pack.identity, pages, roster_titles)
         rep.ledger.extend(roster.findings)
-        accepted = baseline_mod.load(archive.path)
         rep.ledger.extend(guards.check_drift(
             roster.counts(), accepted.identity if accepted else None, guard="G4"))
         rep.persons = len(roster)
