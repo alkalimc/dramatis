@@ -55,7 +55,8 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
         console.print(f"generator [bold]{rep.version}[/bold] · "
                       + " · ".join(f"{k} {v}" for k, v in sorted(rep.by_status().items())))
         console.print(f"persona.meta_leak {rep.meta_leak} · prescriptive.rate "
-                      f"{rep.prescriptive_rate} · roster without a persona {len(rep.missing)}")
+                      f"{rep.prescriptive_rate} · roster without a persona {len(rep.missing)} "
+                      f"(skipped, no words of their own: {len(rep.skipped)})")
         for path in result.written[:2]:
             console.print(f"[cyan]{path}[/cyan]")
         if probe:

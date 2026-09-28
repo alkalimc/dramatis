@@ -116,7 +116,8 @@ def build_folio(path: Path, *, placeholder: str = PLACEHOLDER) -> Path:
       (a dossier unit whose title the generator reclassifies), an item description (to
       be dropped), voice lines on both forms, a character note, and story lines under her
       name and under her second form's name.
-    - Bob, Carol, Erin, Frank: decreasing material; Dan: roster person with none.
+    - Bob, Carol, Frank, Gil: decreasing material, each with words of their own (voice or
+      dialogue). Erin: an identity card only, so no persona. Dan: roster person with none.
     - The host speaks in one scene under the name `Signal`, and one lore unit describes it.
     """
     units = [
@@ -150,13 +151,17 @@ def build_folio(path: Path, *, placeholder: str = PLACEHOLDER) -> Path:
              "Carol: Anything for me?\nSignal: One, from the ferry office.", "Chapter 3"),
         unit(15, "lore", "Codex", "Places › Signal",
              "The signal office relays every message in the harbour.", "Codex#Places"),
+        unit(16, "voice", "Frank/voice", "Greeting", "Soup's on.", "Frank#voice"),
+        unit(17, "profile", "Gil", "Gil identity card", "role: Porter", "Gil#card"),
+        unit(18, "voice", "Gil/voice", "Greeting", "Mind the crates.", "Gil#voice"),
     ]
     owners = [("profile:0000", "Alice"), ("profile:0001", "Alice"), ("profile:0002", "Alice"),
               ("profile:0003", "Alice"), ("voice:0004", "Alice"), ("voice:0005", "Alice"),
               ("profile:0006", "Alice"), ("dialogue:0007", "Alice"), ("dialogue:0007", "Bob"),
               ("dialogue:0008", "Alice"), ("dialogue:0008", "Bob"), ("profile:0009", "Bob"),
               ("voice:0010", "Bob"), ("profile:0011", "Carol"), ("dialogue:0014", "Carol"),
-              ("profile:0012", "Erin"), ("profile:0013", "Frank")]
+              ("profile:0012", "Erin"), ("profile:0013", "Frank"), ("voice:0016", "Frank"),
+              ("profile:0017", "Gil"), ("voice:0018", "Gil")]
     persons = [
         ("Alice", "Alice", "Alice", json.dumps([{"page": "Alice", "kind": "canonical"},
                                                 {"page": "Alice (Winter)", "kind": "alt"}]),
@@ -171,6 +176,8 @@ def build_folio(path: Path, *, placeholder: str = PLACEHOLDER) -> Path:
          0.1, None),
         ("Frank", "Frank", "Frank", json.dumps([{"page": "Frank", "kind": "canonical"}]), "{}",
          60, 0.15, None),
+        ("Gil", "Gil", "Gil", json.dumps([{"page": "Gil", "kind": "canonical"}]), "{}", 70,
+         0.2, None),
     ]
     with Folio.create(path) as f:
         f.add_chunks(units)

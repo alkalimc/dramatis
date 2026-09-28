@@ -2,7 +2,8 @@
 
 `<pack dir>/persona/report.json` and `REPORT.md`: every subject's status and, for a
 subject that failed, the reasons; the measured keys `persona.meta_leak` and
-`prescriptive.rate`; the roster persons still missing.
+`prescriptive.rate`; the roster persons still missing, and those skipped as having no
+words of their own.
 
 `--probe` also writes `<pack dir>/persona/probe/<subject>.md` (material summary, the
 generated slots, gate results) and `<subject>.json` (the request as sent, minus the key,
@@ -64,7 +65,8 @@ def _markdown(rep: Report, probe: bool) -> str:
         "- subjects: " + " · ".join(f"{k} {v}" for k, v in sorted(rep.by_status().items())),
         f"- usage: input {u.input:,} (cached {u.cached:,}) · output {u.output:,} "
         f"(reasoning {u.reasoning:,})",
-        f"- roster persons without a persona: {len(rep.missing)}",
+        f"- roster persons without a persona: {len(rep.missing)} (skipped, no words of "
+        f"their own: {len(rep.skipped)})",
         "",
     ]
     failed = [o for o in rep.outcomes if o.reasons]

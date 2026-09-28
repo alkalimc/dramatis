@@ -10,6 +10,11 @@ Resume rule, per subject, in order:
 3. Otherwise one call. A person with no material is not called at all: a generator
    given nothing will invent someone.
 
+Before all of that, a roster person with fewer than `persona.min_own_units` voice and
+dialogue units is skipped, with no material assembled and no call, and any rows they
+hold are removed: with no words of their own there is no voice to write down, only a
+card to embellish. The probe set and `--only` apply the same rule.
+
 `--force` skips 1 and 2. A call that fails for good leaves the folio untouched and is
 reported; a reply that fails a gate removes the subject's rows, so the roster shows the
 person as missing rather than an older persona.
@@ -31,14 +36,14 @@ from typing import Any
 from . import gates, store
 from .client import CallError, Client, Usage
 from .generator import Generator, fill
-from .material import HOST, Counter, Material, for_host, for_person
+from .material import HOST, Counter, Material, for_host, for_person, speech_units
 from .params import Persona
 
 PROBE_THICK = 3
 PROBE_THIN = 2
 
-WRITTEN, RESUMED, RESTORED, FAILED, ERROR, EMPTY = (
-    "written", "resumed", "restored", "failed", "error", "no material")
+WRITTEN, RESUMED, RESTORED, FAILED, ERROR, EMPTY, SKIPPED = (
+    "written", "resumed", "restored", "failed", "error", "no material", "skipped")
 
 
 @dataclass
@@ -63,6 +68,10 @@ class Report:
     outcomes: list[Outcome] = field(default_factory=list)
     #: Roster persons with no rows after the run, whatever the reason.
     missing: list[str] = field(default_factory=list)
+
+    @property
+    def skipped(self) -> list[Outcome]:
+        return [o for o in self.outcomes if o.status == SKIPPED]
 
     def by_status(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -97,7 +106,8 @@ class Report:
         """The run's measured keys, as written to the report JSON."""
         return {"generator_version": self.version, "meta_leak": self.meta_leak,
                 "prescriptive_rate": self.prescriptive_rate, "judged": len(self.judged),
-                "missing": len(self.missing), "counter": self.counter}
+                "missing": len(self.missing), "skipped": len(self.skipped),
+                "counter": self.counter}
 
 
 # --------------------------------------------------------------------------- #
@@ -122,18 +132,29 @@ def resolve_subject(db: sqlite3.Connection, name: str) -> str | None:
     return row[0] if row else None
 
 
-def probe_set(db: sqlite3.Connection) -> list[str]:
-    """The thickest three by material, then the thinnest two by `persona_confidence`
-    among persons who have any material. The thin end is where prescriptive phrasing
-    shows up first: the less a generator has, the more it reaches for "you talk little".
+def ineligible(db: sqlite3.Connection, p: Persona) -> dict[str, str]:
+    """Roster persons below `persona.min_own_units`, each with the reason."""
+    units = speech_units(db)
+    return {person: (f"{units.get(person, 0)} voice or dialogue unit(s) of their own, fewer "
+                     f"than persona.min_own_units {p.min_own_units}")
+            for person in roster(db) if units.get(person, 0) < p.min_own_units}
+
+
+def probe_set(db: sqlite3.Connection, p: Persona) -> list[str]:
+    """Among eligible persons, the thickest three by material, then the thinnest two by
+    `persona_confidence`. The thin end is where prescriptive phrasing shows up first: the
+    less a generator has, the more it reaches for "you talk little".
     """
-    thick = [r[0] for r in db.execute(
-        "SELECT person_id FROM persons ORDER BY material DESC, person_id LIMIT ?",
-        (PROBE_THICK,))]
+    skip = ineligible(db, p)
+    ranked = [r[0] for r in db.execute(
+        "SELECT person_id FROM persons WHERE material > 0 "
+        "ORDER BY material DESC, person_id")]
+    eligible = [person for person in ranked if person not in skip]
+    thick = eligible[:PROBE_THICK]
     thin = [r[0] for r in db.execute(
-        "SELECT person_id FROM persons WHERE material > 0 AND person_id NOT IN "
-        f"({','.join('?' * len(thick))}) ORDER BY persona_confidence, material, person_id "
-        "LIMIT ?", (*thick, PROBE_THIN))]
+        "SELECT person_id FROM persons WHERE material > 0 "
+        "ORDER BY persona_confidence, material, person_id")
+        if r[0] not in skip and r[0] not in thick][:PROBE_THIN]
     return thick + thin
 
 
@@ -190,9 +211,13 @@ def _material(ctx: Context, subject: str) -> Material:
     return for_person(ctx.db, subject, ctx.gen, ctx.params, ctx.count, ctx.sep)
 
 
-def one(ctx: Context, subject: str, lex: gates.Lexicons) -> Outcome:
+def one(ctx: Context, subject: str, lex: gates.Lexicons,
+        skip: dict[str, str] | None = None) -> Outcome:
     host = subject == HOST
     fields = ctx.gen.fields(host)
+    if skip and subject in skip:
+        store.remove(ctx.db, subject, fields)
+        return Outcome(subject, SKIPPED, reasons=[skip[subject]])
 
     def judge(output: dict[str, Any]) -> gates.Verdict:
         return gates.check(output, host=host, gen=ctx.gen, lex=lex, p=ctx.params,
@@ -248,9 +273,10 @@ def _settle(ctx: Context, out: Outcome, judge: Callable[[dict], gates.Verdict],
 def run(ctx: Context, subjects: list[str], counter_name: str) -> Report:
     rep = Report(version=ctx.version, counter=counter_name, placeholder=ctx.placeholder)
     lex = gates.Lexicons(ctx.gen, ctx.placeholder)
+    skip = ineligible(ctx.db, ctx.params)
     try:
         for i, subject in enumerate(subjects, 1):
-            out = one(ctx, subject, lex)
+            out = one(ctx, subject, lex, skip)
             rep.outcomes.append(out)
             ctx.say(f"[{i}/{len(subjects)}] {subject}: {out.status}"
                     + (f" — {out.reasons[0]}" if out.reasons else ""))

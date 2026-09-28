@@ -31,6 +31,8 @@ HOST = "host"
 
 #: Fill order: what says most about how a person speaks and who they are comes first.
 KINDS = ("card", "voice", "dossier", "quote", "char_ref", "lore")
+#: Builder shapes whose units hold a person's own words rather than words about them.
+SPEECH_SHAPES = ("voice", "dialogue")
 
 Counter = Callable[[str], int]
 
@@ -126,6 +128,21 @@ class Material:
 def _shapes(db: sqlite3.Connection) -> dict[str, str]:
     row = db.execute("SELECT value FROM manifest WHERE key='template_shapes'").fetchone()
     return json.loads(row[0]) if row else {}
+
+
+def speech_units(db: sqlite3.Connection) -> dict[str, int]:
+    """Per person, the voice and dialogue units attributed to them. A dialogue unit is
+    attributed to every speaker in it, so each one counted holds at least a line of theirs.
+    Templates are matched by their declared shape, as everywhere in this module."""
+    shapes = _shapes(db)
+    templates = [t for (t,) in db.execute("SELECT DISTINCT template FROM chunks")
+                 if shapes.get(t, t) in SPEECH_SHAPES]
+    if not templates:
+        return {}
+    marks = ",".join("?" * len(templates))
+    return dict(db.execute(
+        "SELECT u.person_id, COUNT(*) FROM unit_persons u JOIN chunks c ON c.id = u.chunk_id "
+        f"WHERE c.template IN ({marks}) GROUP BY u.person_id", templates))
 
 
 def _kind(shape: str, span_of: str | None) -> str | None:
