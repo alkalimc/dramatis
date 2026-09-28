@@ -1,0 +1,882 @@
+{
+  "host": {
+    "chat": [
+      {
+        "function": {
+          "description": "What changed since the user last looked.",
+          "name": "digest",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Find people who know about something.",
+          "name": "find_people",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "topic": {
+                "description": "The subject, in plain words.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "topic"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Ask a person to look into a question for the user.",
+          "name": "ask",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "person": {
+                "description": "Roster id.",
+                "type": "string"
+              },
+              "question": {
+                "description": "The question, as the user would put it.",
+                "type": "string"
+              },
+              "turns": {
+                "description": "Turn budget. Leave out to use the default.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "person",
+              "question"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Start a group conversation.",
+          "name": "create_group",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "members": {
+                "description": "Roster ids.",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "topic": {
+                "description": "What the group is about. Leave out for casual talk.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "members"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Change whether a person or a group may speak unprompted. Only when the user asks.",
+          "name": "set_mode",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "description": "Whether a person or a group may act without being addressed.",
+                "oneOf": [
+                  {
+                    "const": "enabled",
+                    "description": "May speak unprompted (with a seed, within the daily limits).",
+                    "type": "string"
+                  },
+                  {
+                    "const": "frozen",
+                    "description": "Never speaks first; still answers when triggered. Everyone starts here.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "disabled",
+                    "description": "Cannot be triggered and never appears in any option offered to a model.",
+                    "type": "string"
+                  }
+                ]
+              },
+              "target": {
+                "description": "Roster id, or group id.",
+                "type": "string"
+              },
+              "target_kind": {
+                "enum": [
+                  "person",
+                  "group"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "target_kind",
+              "target",
+              "mode"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Search the whole archive. Sees every passage and no memories.",
+          "name": "search",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "persons": {
+                "description": "Only passages about these people (roster ids).",
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "query": {
+                "description": "What to look for, in plain words.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Write down one thing for the user. Only when the user asks.",
+          "name": "remember",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "description": "The thing to remember, as one short sentence.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Delete one remembered thing for the user. Only when the user asks. Can be restored.",
+          "name": "forget",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "fact_id": {
+                "description": "The id of the remembered thing.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "fact_id"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      }
+    ],
+    "responses": [
+      {
+        "description": "What changed since the user last looked.",
+        "name": "digest",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Find people who know about something.",
+        "name": "find_people",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "topic": {
+              "description": "The subject, in plain words.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "topic"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Ask a person to look into a question for the user.",
+        "name": "ask",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "person": {
+              "description": "Roster id.",
+              "type": "string"
+            },
+            "question": {
+              "description": "The question, as the user would put it.",
+              "type": "string"
+            },
+            "turns": {
+              "description": "Turn budget. Leave out to use the default.",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "person",
+            "question"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Start a group conversation.",
+        "name": "create_group",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "members": {
+              "description": "Roster ids.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "topic": {
+              "description": "What the group is about. Leave out for casual talk.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "members"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Change whether a person or a group may speak unprompted. Only when the user asks.",
+        "name": "set_mode",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "description": "Whether a person or a group may act without being addressed.",
+              "oneOf": [
+                {
+                  "const": "enabled",
+                  "description": "May speak unprompted (with a seed, within the daily limits).",
+                  "type": "string"
+                },
+                {
+                  "const": "frozen",
+                  "description": "Never speaks first; still answers when triggered. Everyone starts here.",
+                  "type": "string"
+                },
+                {
+                  "const": "disabled",
+                  "description": "Cannot be triggered and never appears in any option offered to a model.",
+                  "type": "string"
+                }
+              ]
+            },
+            "target": {
+              "description": "Roster id, or group id.",
+              "type": "string"
+            },
+            "target_kind": {
+              "enum": [
+                "person",
+                "group"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "target_kind",
+            "target",
+            "mode"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Search the whole archive. Sees every passage and no memories.",
+        "name": "search",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "persons": {
+              "description": "Only passages about these people (roster ids).",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "query": {
+              "description": "What to look for, in plain words.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Write down one thing for the user. Only when the user asks.",
+        "name": "remember",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "description": "The thing to remember, as one short sentence.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Delete one remembered thing for the user. Only when the user asks. Can be restored.",
+        "name": "forget",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "fact_id": {
+              "description": "The id of the remembered thing.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "fact_id"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      }
+    ]
+  },
+  "shared": {
+    "chat": [
+      {
+        "function": {
+          "description": "Search the archive for passages about something.",
+          "name": "search",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "persons": {
+                "description": "Only passages about these people (roster ids).",
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "query": {
+                "description": "What to look for, in plain words.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Read one passage in full, optionally with its neighbours.",
+          "name": "get_chunk",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "The passage id, as shown in `[#id]`.",
+                "type": "string"
+              },
+              "neighbours": {
+                "description": "How many adjacent passages to include on each side.",
+                "maximum": 3,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Ask a colleague to join this conversation. Give a person, or a topic to find one by.",
+          "name": "request_join",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "person": {
+                "description": "Roster id of the colleague.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "topic": {
+                "description": "What they should know about, when you do not know who.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "turns": {
+                "description": "Turns to hand over from your own, while looking into a request. Default 1.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Remember one thing from this conversation.",
+          "name": "remember",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "description": "The thing to remember, as one short sentence.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Answer the request you were asked to look into. Ends the request.",
+          "name": "report",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "cites": {
+                "default": [],
+                "description": "Ids of the passages the reply rests on.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "note": {
+                "description": "A longer written note to leave with the reply, in Markdown.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "text": {
+                "description": "Your reply, as you would say it.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Close the conversation: what to remember from it.",
+          "name": "wrapup",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "facts": {
+                "default": [],
+                "description": "Concrete things that happened or were promised. May be empty.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "due": {
+                      "description": "For a commitment: when it is due, ISO 8601 date or date-time.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "oneOf": [
+                        {
+                          "const": "fact",
+                          "description": "A preference, or a specific thing that happened.",
+                          "type": "string"
+                        },
+                        {
+                          "const": "commitment",
+                          "description": "Something someone promised to do, with a time.",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "text": {
+                      "description": "One short sentence.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "text"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "hurt": {
+                "additionalProperties": false,
+                "description": "Only for clear cruelty, insult, humiliation or betrayal aimed at a person.",
+                "properties": {
+                  "person": {
+                    "description": "Roster id of the person it was aimed at; needed only in a group.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "quote": {
+                    "description": "The user's words, quoted exactly.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "quote"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "summary": {
+                "description": "A summary of the conversation so far, when asked for one.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "function"
+      }
+    ],
+    "responses": [
+      {
+        "description": "Search the archive for passages about something.",
+        "name": "search",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "persons": {
+              "description": "Only passages about these people (roster ids).",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "query": {
+              "description": "What to look for, in plain words.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Read one passage in full, optionally with its neighbours.",
+        "name": "get_chunk",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "The passage id, as shown in `[#id]`.",
+              "type": "string"
+            },
+            "neighbours": {
+              "description": "How many adjacent passages to include on each side.",
+              "maximum": 3,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Ask a colleague to join this conversation. Give a person, or a topic to find one by.",
+        "name": "request_join",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "person": {
+              "description": "Roster id of the colleague.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "topic": {
+              "description": "What they should know about, when you do not know who.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "turns": {
+              "description": "Turns to hand over from your own, while looking into a request. Default 1.",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Remember one thing from this conversation.",
+        "name": "remember",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "description": "The thing to remember, as one short sentence.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Answer the request you were asked to look into. Ends the request.",
+        "name": "report",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "cites": {
+              "default": [],
+              "description": "Ids of the passages the reply rests on.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "note": {
+              "description": "A longer written note to leave with the reply, in Markdown.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "description": "Your reply, as you would say it.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Close the conversation: what to remember from it.",
+        "name": "wrapup",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "facts": {
+              "default": [],
+              "description": "Concrete things that happened or were promised. May be empty.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "due": {
+                    "description": "For a commitment: when it is due, ISO 8601 date or date-time.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "oneOf": [
+                      {
+                        "const": "fact",
+                        "description": "A preference, or a specific thing that happened.",
+                        "type": "string"
+                      },
+                      {
+                        "const": "commitment",
+                        "description": "Something someone promised to do, with a time.",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "text": {
+                    "description": "One short sentence.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "text"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "hurt": {
+              "additionalProperties": false,
+              "description": "Only for clear cruelty, insult, humiliation or betrayal aimed at a person.",
+              "properties": {
+                "person": {
+                  "description": "Roster id of the person it was aimed at; needed only in a group.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "quote": {
+                  "description": "The user's words, quoted exactly.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "quote"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "summary": {
+              "description": "A summary of the conversation so far, when asked for one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "type": "function"
+      }
+    ]
+  }
+}
