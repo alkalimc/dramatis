@@ -659,9 +659,6 @@ class Pack:
     #: (folio manifest `user_placeholder`). Stored as is; the runtime substitutes it when
     #: it assembles text, never the builder.
     user_placeholder: str = "{user}"
-    #: Pages every sample includes, title -> why a reviewer should keep reading them
-    #: (a past defect, a layout no boundary rule reaches). Titles not held are skipped.
-    sample_pages: Mapping[str, str] = field(default_factory=dict)
     #: The source's own table of contents, annotated with what we took and why not.
     coverage: tuple[CoverageRow, ...] = ()
     #: page title -> alias kind, for pages whose entire output is dictionary entries
