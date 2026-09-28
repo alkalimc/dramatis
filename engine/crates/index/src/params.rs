@@ -41,10 +41,12 @@ impl Default for Retrieve {
 ///
 /// `Low` when the best score is under `low_top1` or the window is flatter than
 /// `low_entropy`; `High` when the best score reaches `high_top1` and the window is at least
-/// as peaked as `high_entropy`; `Medium` otherwise. `top1` is a raw BM25 score, so its
-/// scale belongs to the corpus. These defaults are uncalibrated starting points; the
-/// register's values come from `dramatis-cli calibrate` on the structural suite and are
-/// supplied through `params.toml`.
+/// as peaked as `high_entropy`; `Medium` otherwise.
+///
+/// `top1` is a raw BM25 score, so its scale belongs to the corpus. **The defaults are
+/// uncalibrated placeholders** (the entropy half of `Low` is off): the register's values
+/// come from `dramatis-cli calibrate` on the corpus's structural suite and reach the engine
+/// through `params.toml`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ConfidenceBands {
@@ -65,7 +67,7 @@ impl Default for ConfidenceBands {
             low_top1: 5.0,
             low_entropy: 1.0,
             high_top1: 10.0,
-            high_entropy: 0.95,
+            high_entropy: 0.5,
         }
     }
 }

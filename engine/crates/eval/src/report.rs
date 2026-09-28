@@ -107,6 +107,44 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
     out
 }
 
+/// Report keys for one run, one row each: `eval.questions`, `eval.baseline.macro_ndcg`
+/// (from `baseline`, the run without the alias stage, when given) and per family
+/// `eval.family.<family>.{ndcg,negwin,questions}`.
+pub fn keys(config: &Config, outcome: &Outcome, baseline: Option<&Outcome>) -> String {
+    let per_family = by_family(&outcome.scored);
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "## Keys
+
+From `{}`; nDCG at {}.
+
+| Key | Value |
+| --- | ---: |",
+        config.label(),
+        config.k
+    );
+    let _ = writeln!(out, "| `eval.questions` | {} |", outcome.scored.len());
+    if let Some(baseline) = baseline {
+        let macro_avg = macro_average(&by_family(&baseline.scored));
+        let _ = writeln!(
+            out,
+            "| `eval.baseline.macro_ndcg` | {:.3} |",
+            macro_avg.ndcg
+        );
+    }
+    for (family, a) in &per_family {
+        let _ = writeln!(out, "| `eval.family.{family}.ndcg` | {:.3} |", a.ndcg);
+        let _ = writeln!(
+            out,
+            "| `eval.family.{family}.negwin` | {:.1}% |",
+            a.negative_win_rate * 100.0
+        );
+        let _ = writeln!(out, "| `eval.family.{family}.questions` | {} |", a.queries);
+    }
+    out
+}
+
 /// The same numbers as JSON, for machine-readable result files and for anyone re-analysing
 /// them.
 pub fn json(config: &Config, outcome: &Outcome) -> serde_json::Value {

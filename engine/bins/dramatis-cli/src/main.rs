@@ -98,8 +98,8 @@ enum Command {
         /// The suite, as JSONL. Defaults to $DRAMATIS_SUITE.
         #[arg(long)]
         suite: Option<PathBuf>,
-        /// Cut-off for every metric; 0 means `retrieve.top_k`.
-        #[arg(long, default_value_t = 0)]
+        /// Cut-off for every metric (the window retrieved is this wide).
+        #[arg(long, default_value_t = 10)]
         k: usize,
         /// Score a stratified subsample. 0 means the whole suite.
         #[arg(long, default_value_t = 0)]
@@ -721,7 +721,6 @@ fn evaluate(
 ) -> Result<()> {
     let mut index = open_index(path)?;
     let (suite, full) = load_suite(suite_path, sample)?;
-    let k = if k == 0 { index.params().top_k } else { k };
 
     println!("corpus     {} units", index.folio().manifest().unit_count);
     println!("suite      {} queries", suite.queries.len());
@@ -767,6 +766,11 @@ fn evaluate(
             .unwrap_or_default(),
         suite.queries.len(),
     );
+    // The shipped setting is the last run; with --compare-alias the first is the baseline.
+    let (shipped_config, shipped) = runs.last().expect("at least one run");
+    let baseline = (runs.len() > 1).then(|| &runs[0].1);
+    markdown.push_str(&eval::report::keys(shipped_config, shipped, baseline));
+    markdown.push('\n');
     let mut reports = Vec::new();
     for (i, (config, outcome)) in runs.iter().enumerate() {
         let mut notes = vec![note.clone()];
