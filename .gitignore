@@ -60,3 +60,6 @@ scratch/
 
 # Toy folio written by `make contract`
 forge/.contract/
+
+# UI dependencies
+node_modules/
