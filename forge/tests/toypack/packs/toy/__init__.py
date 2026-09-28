@@ -176,7 +176,6 @@ PACK = Pack(
         FindingNote("G3", "marked as having no script", "interludes carry no script"),
     ),
     roster=ROSTER,
-    sample_pages={"Bob": "the only person without a birthday"},
     wording={"host.name": "Keeper", "user.title": "Captain {name}"},
     year_offset=100,
     audit=DocAudit(id_prefixes=("D",), planned_keys=("units.later",)),

@@ -24,8 +24,7 @@ def test_boundary_selection_is_deterministic(built, pack):
         first, second = samples.select(a, pack), samples.select(a, pack)
     assert first.routes == second.routes
     story = reasons(first, "story · dialogue")
-    # first choice/line/scene, and the first scene addressing the reader by placeholder
-    assert story["Chapter 1"] == ["first", "kind", "kind", "kind", "placeholder"]
+    assert story["Chapter 1"] == ["first", "kind", "kind", "kind"]  # first choice/line/scene
     kinds = {f["kind"] for t, why in first.routes["story · dialogue"].items()
              for key, f in why if key == "kind"}
     assert kinds == {"choice", "line", "scene"}
@@ -35,7 +34,7 @@ def test_boundary_selection_is_deterministic(built, pack):
     people = reasons(first, "people · prose")
     assert people["Alice"][:2] == ["first", "largest"] and "multi_form" in people["Alice"]
     assert "smallest" in people["Alice (Winter)"]
-    assert people["Bob"] == ["watch"]  # the pack's watch list
+    assert "Bob" not in people  # no boundary reaches it
 
 
 def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):
@@ -63,6 +62,17 @@ def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):
     assert "lighthouse" in removed.read_text(encoding="utf-8")
     assert '"lines"' in (out / "changes" / "Chapter_2.2-records.json").read_text(encoding="utf-8")
     assert count >= 3
+
+
+def test_samples_start_from_an_empty_directory(built, pack, paths):
+    stale = [paths.samples / "changes" / "Gone.1-source.wikitext", paths.samples / "old.md"]
+    for path in stale:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("stale", encoding="utf-8")
+    with Archive(built.archive, readonly=True) as a:
+        samples.write(a, pack, paths.samples)
+    assert not any(p.exists() for p in stale)
+    assert (paths.samples / "INDEX.md").exists()
 
 
 def test_residue_scan_finds_leftover_markup(built, pack):

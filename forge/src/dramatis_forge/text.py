@@ -150,9 +150,6 @@ TEXT: Mapping[str, str] = {
     "samples.why.kind": "first yielding `{kind}` records",
     "samples.why.alias": "alias-producing page",
     "samples.why.multi_form": "first person with several forms",
-    "samples.why.watch": "on the pack's watch list: {note}",
-    "samples.why.placeholder": "first page with the user placeholder `{placeholder}`",
-    "samples.why.low_yield": "lowest yield on this route (guard G3)",
 }
 
 

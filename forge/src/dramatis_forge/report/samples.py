@@ -30,6 +30,7 @@ from pathlib import Path
 
 from ..archive import Archive
 from ..guards import HIGH
+from ..normalize import YIELD_DETAIL
 from ..pack import Pack
 from ..text import table_head
 from . import inspect as inspect_mod
@@ -132,11 +133,13 @@ def select(archive: Archive, pack: Pack) -> Selection:
         flagged = next((t for t in titles if t in findings), None)
         if flagged is not None:
             sel.add(label, flagged, "findings")
-        # G3 records exactly the pages that produced nothing, with the stated reason.
-        # Counting records per page cannot tell: a record may be filed under another
-        # page's id (a transcluded body's lines belong to its parent's scene).
+        # G3 records the pages that produced nothing, with the stated reason. Counting
+        # records per page cannot tell: a record may be filed under another page's id
+        # (a transcluded body's lines belong to its parent's scene). A yield shortfall is
+        # G3 too, but that page produced records; it counts as a finding, not as empty.
         for t in titles:
-            reason = next((d for g, d in findings.get(t, []) if g == "G3"), None)
+            reason = next((d for g, d in findings.get(t, [])
+                           if g == "G3" and not d.startswith(YIELD_DETAIL)), None)
             if reason is not None:
                 sel.add(label, t, "empty", reason=reason)
                 break
@@ -152,38 +155,7 @@ def select(archive: Archive, pack: Pack) -> Selection:
         "SELECT person_id FROM persons WHERE form_count > 1 ORDER BY person_id LIMIT 1")
     if person in route_of:
         sel.add(route_of[person], person, "multi_form")
-    # Pages the pack asks every reviewer to keep reading.
-    for title, note in pack.sample_pages.items():
-        if title in route_of:
-            sel.add(route_of[title], title, "watch", note=note)
-    # The first page, per route, whose text addresses the reader: the placeholder must
-    # survive normalisation intact, and only reading shows that it did.
-    placeholder = pack.user_placeholder
-    if placeholder:
-        for kind in ("line", "voice", "letter", "lore"):
-            table, column, page = _TEXT_OF[kind]
-            for (title,) in archive.db.execute(
-                f"SELECT DISTINCT {page} FROM {table} WHERE instr({column}, ?) > 0 "
-                f"ORDER BY {page}", (placeholder,)
-            ):
-                if title in route_of:
-                    sel.add(route_of[title], title, "placeholder", placeholder=placeholder)
-                    break
-    # One page per kind of yield shortfall G3 recorded: they are the likeliest place
-    # for text to be going missing quietly.
-    shortfalls = sorted(
-        (float(m.group(1)), page) for page, found in findings.items()
-        for g, d in found if g == "G3" and (m := _YIELD.match(d)))
-    by_route: dict[str, str] = {}
-    for _ratio, page in shortfalls:
-        if page in route_of and route_of[page] not in by_route:
-            by_route[route_of[page]] = page
-            sel.add(route_of[page], page, "low_yield")
     return sel
-
-
-#: The detail G3 writes for a yield shortfall; group 1 is the percentage.
-_YIELD = re.compile(r"^yield (\d+)%")
 
 
 @dataclass
