@@ -5,7 +5,8 @@
   other persons' sessions must never contain the host's meta vocabulary.
 ⑤ structure and budget: schema complete, `system_prompt` within `persona.prompt_tokens`,
   `capability_line` within `persona.capability_chars`, `tone_rules` count within
-  `persona.tone_rules`, `fallback_line` non-empty.
+  `persona.tone_rules`, `fallback_line` non-empty; and the user is named only by the
+  corpus's placeholder: no altered placeholder, no other name (the pack's patterns).
 ⑥ prescriptive phrasing: capability claims and negative knowledge lists in
   `system_prompt` and `tone_rules` (the host's `in_world` too, which sits beside them).
   Those behaviours come from retrieval and visibility, and a claim that disagrees with
@@ -63,10 +64,26 @@ def _term_pattern(term: str) -> re.Pattern[str]:
 class Lexicons:
     """The generator's lexicons, compiled once per run."""
 
-    def __init__(self, gen: Generator) -> None:
+    def __init__(self, gen: Generator, placeholder: str = "") -> None:
         self.meta = [(t, _term_pattern(t)) for t in gen.meta_terms]
         self.meta += [(p, re.compile(p)) for p in gen.meta_patterns]
         self.prescriptive = [(p, re.compile(p, re.IGNORECASE)) for p in gen.prescriptive_patterns]
+        self.placeholder = placeholder
+        self.user_names = [(p, re.compile(p)) for p in gen.user_name_patterns]
+        # The placeholder's word outside a whole placeholder, in any case, means the model
+        # rewrote the token, which assembly then cannot substitute. A corpus's placeholder
+        # word is not ordinary prose, so this does not fire on text that merely uses it.
+        inner = re.sub(r"^\W+|\W+$", "", placeholder)
+        self.bare = (re.compile(re.escape(inner), re.IGNORECASE)
+                     if inner and inner != placeholder else None)
+
+    def user_name_hits(self, text: str) -> list[str]:
+        hits = self._hits(text, self.user_names)
+        if self.bare is not None:
+            rest = text.replace(self.placeholder, "")
+            hits += [f"altered placeholder near {rest[max(m.start() - 2, 0):m.end() + 2]!r}"
+                     for m in self.bare.finditer(rest)]
+        return hits
 
     @staticmethod
     def _hits(text: str, patterns: Iterable[tuple[str, re.Pattern[str]]]) -> list[str]:
@@ -121,6 +138,13 @@ def check(output: dict, *, host: bool, gen: Generator, lex: Lexicons, p: Persona
     if isinstance(rules, list) and not lo <= len(rules) <= hi:
         add(Finding(STRUCTURE, "tone_rules",
                     f"{len(rules)} rules, outside persona.tone_rules {lo}-{hi}"))
+
+    # ⑤ the user is named only by the placeholder, in every slot.
+    for name in gen.fields(host):
+        for text in _texts(output, name):
+            for hit in lex.user_name_hits(text):
+                add(Finding(STRUCTURE, name, f"names the user other than by the placeholder: "
+                                             f"{hit}"))
 
     # ② every slot that reaches a session other than the host's own meta layer.
     for name in gen.fields(host):

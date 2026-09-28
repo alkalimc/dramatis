@@ -33,6 +33,7 @@ def write(rep: Report, root: Path, *, probe: bool) -> list[Path]:
     data = {
         "generator_version": rep.version,
         "counter": rep.counter,
+        "user_placeholder": rep.placeholder,
         "probe": probe,
         "figures": keys(rep),
         "status": rep.by_status(),
@@ -57,6 +58,7 @@ def _markdown(rep: Report, probe: bool) -> str:
         "",
         f"- generator version: `{rep.version}`",
         f"- token counter: {rep.counter}",
+        f"- user-name placeholder: {('`' + rep.placeholder + '`') if rep.placeholder else 'none'}",
         f"- `persona.meta_leak`: {rep.meta_leak}",
         f"- `prescriptive.rate`: {rep.prescriptive_rate}",
         "- subjects: " + " · ".join(f"{k} {v}" for k, v in sorted(rep.by_status().items())),

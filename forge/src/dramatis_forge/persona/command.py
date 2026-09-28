@@ -7,6 +7,7 @@ network. The CLI passes neither and gets the real ones.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ def execute(
     lookup: KeyLookup | None = None,
     transport: httpx.BaseTransport | None = None,
     counter: Callable[[str], int] | None = None,
+    generator: generator_mod.Generator | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> Result:
     if not paths.folio.exists():
@@ -73,8 +75,10 @@ def execute(
                          'add under [roles]: persona = { profile = "<name>", '
                          'model = "<id>", reasoning = "high" }')
     params = Persona.load(params_path if params_path is not None else paths.home / "params.toml")
-    gen = generator_mod.load(pack)
-    version = gen.version(model=role.model, reasoning=role.reasoning, params=params)
+    gen = generator or generator_mod.load(pack)
+    placeholder = user_placeholder(paths.folio)
+    version = gen.version(model=role.model, reasoning=role.reasoning, params=params,
+                          placeholder=placeholder)
     if counter is not None:
         count, counter_name = counter, "injected"
     else:
@@ -97,7 +101,8 @@ def execute(
         subjects = _subjects(db, gen, probe=probe, only=only)
         ctx = Context(db=db, gen=gen, params=params, version=version, count=count,
                       sep=pack.chunking.sep("label"), cache=RawCache(root / "raw"),
-                      connect=connect, force=force, progress=progress)
+                      connect=connect, placeholder=placeholder, force=force,
+                      progress=progress)
         rep = run(ctx, subjects, counter_name)
         written = report_mod.write(rep, root, probe=probe)
         if probe:
@@ -110,6 +115,17 @@ def execute(
     finally:
         db.close()
     return Result(report=rep, written=written)
+
+
+def user_placeholder(folio: Path) -> str:
+    """The corpus's user-name placeholder from the folio manifest; empty when it has none."""
+    db = sqlite3.connect(f"file:{folio}?mode=ro", uri=True)
+    try:
+        row = db.execute("SELECT value FROM manifest WHERE key='user_placeholder'").fetchone()
+    finally:
+        db.close()
+    value = json.loads(row[0]) if row else ""
+    return value if isinstance(value, str) else ""
 
 
 def _subjects(db: sqlite3.Connection, gen: generator_mod.Generator, *, probe: bool,

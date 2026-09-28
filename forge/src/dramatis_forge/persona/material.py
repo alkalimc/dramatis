@@ -133,11 +133,10 @@ def _kind(shape: str, span_of: str | None) -> str | None:
 
 
 class _Rules:
-    """The generator's reclassification and rewrite rules, compiled once per run."""
+    """The generator's reclassification rules, compiled once per run."""
 
     def __init__(self, gen: Generator) -> None:
         self.kinds = [(src, re.compile(rx), dst) for src, rx, dst in gen.title_kinds]
-        self.rewrite = [(re.compile(rx), to) for rx, to in gen.rewrite]
 
     def kind(self, kind: str | None, title: str) -> str | None:
         if kind is None:
@@ -147,9 +146,10 @@ class _Rules:
                 return None if dst == "drop" else dst
         return kind
 
-    def clean(self, text: str) -> str:
-        for rx, to in self.rewrite:
-            text = rx.sub(to, text)
+    @staticmethod
+    def clean(text: str) -> str:
+        # Verbatim, placeholder included: the user's name is substituted only when the
+        # runtime assembles a session.
         return text.strip()
 
 

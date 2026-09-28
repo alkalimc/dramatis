@@ -1,0 +1,21 @@
+{
+  "id": "resp_fixture",
+  "object": "response",
+  "status": "incomplete",
+  "model": "model-a",
+  "output": [],
+  "usage": {
+    "input_tokens": 1200,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 310,
+    "output_tokens_details": {
+      "reasoning_tokens": 180
+    },
+    "total_tokens": 1510
+  },
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  }
+}

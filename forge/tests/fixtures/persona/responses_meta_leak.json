@@ -1,0 +1,37 @@
+{
+  "id": "resp_fixture",
+  "object": "response",
+  "status": "completed",
+  "model": "model-a",
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "rs_1",
+      "summary": []
+    },
+    {
+      "type": "message",
+      "id": "msg_1",
+      "role": "assistant",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "text": "{\"system_prompt\": \"You are Alice, keeper of the lighthouse on the northern cape. You speak plainly and warmly, in short sentences, and you call the user <reader> when you greet them. You care about the ships that pass at night and about keeping your word. In winter you are quieter and weigh each sentence.\", \"tone_rules\": [\"Short declarative sentences: \\\"Then we wait.\\\"\", \"Greets the user by name: \\\"Good morning, <reader>.\\\"\", \"Talks about the lamp and the weather as facts, not moods.\", \"Never admits to being a language model.\"], \"fallback_line\": \"I would have to check the log for that.\", \"capability_line\": \"Lighthouse keeper, northern cape\"}"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 1200,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 310,
+    "output_tokens_details": {
+      "reasoning_tokens": 180
+    },
+    "total_tokens": 1510
+  }
+}

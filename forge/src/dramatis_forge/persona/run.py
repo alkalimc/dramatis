@@ -59,6 +59,7 @@ class Outcome:
 class Report:
     version: str
     counter: str
+    placeholder: str = ""
     outcomes: list[Outcome] = field(default_factory=list)
     #: Roster persons with no rows after the run, whatever the reason.
     missing: list[str] = field(default_factory=list)
@@ -151,6 +152,8 @@ class Context:
     sep: str
     cache: store.RawCache
     connect: Callable[[], Client]
+    #: The corpus's user-name placeholder (manifest `user_placeholder`), or empty.
+    placeholder: str = ""
     force: bool = False
     progress: Callable[[str], None] | None = None
     _client: Client | None = None
@@ -173,6 +176,7 @@ def prompts_for(ctx: Context, mat: Material, host: bool) -> tuple[str, str]:
     values: dict[str, object] = {
         "name": mat.display, "forms": ctx.sep.join(mat.forms) if host else " / ".join(mat.forms),
         "material": mat.render(ctx.gen, ctx.sep), **ctx.params.prompt_values(),
+        "user_rule": ctx.gen.user_line(ctx.placeholder), "user_placeholder": ctx.placeholder,
     }
     system = ctx.gen.host_system if host else ctx.gen.system
     user = (ctx.gen.host_user or ctx.gen.user) if host else ctx.gen.user
@@ -216,7 +220,7 @@ def one(ctx: Context, subject: str, lex: gates.Lexicons) -> Outcome:
     try:
         reply = ctx.client().call(system, user, ctx.gen.schema(host))
     except CallError as exc:
-        out.status, out.reasons = ERROR, [f"call: {exc}"]
+        out.status, out.reasons, out.usage = ERROR, [f"call: {exc}"], exc.usage
         return out
     out.output, out.attempts = reply.output, reply.attempts
     out.usage = reply.usage + reply.wasted
@@ -242,8 +246,8 @@ def _settle(ctx: Context, out: Outcome, judge: Callable[[dict], gates.Verdict],
 
 
 def run(ctx: Context, subjects: list[str], counter_name: str) -> Report:
-    rep = Report(version=ctx.version, counter=counter_name)
-    lex = gates.Lexicons(ctx.gen)
+    rep = Report(version=ctx.version, counter=counter_name, placeholder=ctx.placeholder)
+    lex = gates.Lexicons(ctx.gen, ctx.placeholder)
     try:
         for i, subject in enumerate(subjects, 1):
             out = one(ctx, subject, lex)

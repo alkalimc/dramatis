@@ -35,7 +35,7 @@ HOST_FIELDS = ("in_world", "meta")
 #: Placeholders a user template may use; each is replaced literally, so a template may
 #: contain any other braces (a JSON example, say) without escaping.
 PLACEHOLDERS = ("name", "forms", "material", "prompt_tokens", "prompt_chars",
-                "capability_chars", "tone_min", "tone_max")
+                "capability_chars", "tone_min", "tone_max", "user_rule", "user_placeholder")
 
 
 @dataclass(frozen=True)
@@ -75,9 +75,13 @@ class Generator:
     #: folio tells a dossier section from an archive quote only by title, and some units
     #: (an item description, a menu caption) are about something other than the person.
     title_kinds: tuple[tuple[str, str, str], ...] = ()
-    #: (regular expression, replacement) applied to material text, e.g. a placeholder
-    #: the corpus keeps literally where the source substitutes the user's name.
-    rewrite: tuple[tuple[str, str], ...] = ()
+    #: The prompt line about addressing the user, filled into `{user_rule}` when the corpus
+    #: declares a user-name placeholder (`{user_placeholder}` is replaced by it). Material
+    #: and output keep the placeholder verbatim; only runtime assembly substitutes it.
+    user_rule: str = ""
+    #: Regular expressions for other names for the user in generated text (a made-up
+    #: name, a title followed by something other than the placeholder).
+    user_name_patterns: tuple[str, ...] = ()
 
     def label_for(self, kind: str) -> str:
         return self.labels.get(kind) or DEFAULT_LABELS.get(kind, kind)
@@ -93,7 +97,11 @@ class Generator:
         return {"type": "object", "properties": props, "required": list(self.fields(host)),
                 "additionalProperties": False}
 
-    def version(self, *, model: str, reasoning: str | None, params: Persona) -> str:
+    def user_line(self, placeholder: str) -> str:
+        return fill(self.user_rule, {"user_placeholder": placeholder}) if placeholder else ""
+
+    def version(self, *, model: str, reasoning: str | None, params: Persona,
+                placeholder: str = "") -> str:
         """Digest of everything that changes what the model is asked. Gate lexicons are
         left out on purpose: a resumed run re-checks stored rows against the current
         lexicons, so tightening a gate costs no regeneration for rows that still pass."""
@@ -101,7 +109,7 @@ class Generator:
         for part in (CODE_VERSION, self.system, self.user, self.host_system, self.host_user,
                      json.dumps(self.schema(True), sort_keys=True),
                      json.dumps(dict(self.labels), sort_keys=True, ensure_ascii=False),
-                     repr(self.title_kinds), repr(self.rewrite), repr(self.host),
+                     repr(self.title_kinds), self.user_rule, placeholder, repr(self.host),
                      model, reasoning or "", repr(params.prompt_values()),
                      str(params.material_tokens), str(params.story_tokens)):
             h.update(part.encode())
@@ -156,6 +164,7 @@ square brackets. Several forms are one person at different times or in different
 say how their speech differs between them if it does. Voice lines are text only: take
 wording, address and habits from them, never anything about a voice or its trigger.
 Story lines are things they said; other speakers' lines are context.
+{user_rule}
 
 Fields:
 - system_prompt: continuous prose in the second person, at most {prompt_chars} characters.
@@ -206,6 +215,9 @@ DEFAULT = Generator(
     label="default",
     system=_DEFAULT_SYSTEM,
     user=_DEFAULT_USER,
+    user_rule=("The material writes the user's name as {user_placeholder}. Wherever the "
+               "person addresses the user by name, write {user_placeholder} exactly as it "
+               "is; never make up a name for the user."),
     meta_terms=DEFAULT_META_TERMS,
     prescriptive_patterns=DEFAULT_PRESCRIPTIVE,
 )

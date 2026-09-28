@@ -34,12 +34,6 @@ READ_TIMEOUT = 600.0
 RETRY_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
 
 
-class CallError(Exception):
-    """A call that failed for good. `raw` is the last response body, if any."""
-
-    def __init__(self, message: str, raw: Any = None) -> None:
-        super().__init__(message)
-        self.raw = raw
 
 
 class _Transient(Exception):
@@ -62,6 +56,16 @@ class Usage:
     def as_dict(self) -> dict[str, int]:
         return {"input": self.input, "cached": self.cached, "output": self.output,
                 "reasoning": self.reasoning}
+
+
+class CallError(Exception):
+    """A call that failed for good. `raw` is the last response body, if any; `usage` is
+    what the failed attempts were billed."""
+
+    def __init__(self, message: str, raw: Any = None, usage: Usage | None = None) -> None:
+        super().__init__(message)
+        self.raw = raw
+        self.usage = usage or Usage()
 
 
 @dataclass
@@ -209,6 +213,9 @@ class Client:
                     try:
                         text = _text_of(raw, self.wire)
                         output = parse_output(text)
+                    except CallError as exc:  # a refusal: final, billed all the same
+                        exc.usage = wasted + usage
+                        raise
                     except _Transient:
                         wasted = wasted + usage
                         raise
@@ -220,7 +227,7 @@ class Client:
         except RetryError as exc:
             last = exc.last_attempt.exception()
             raise CallError(f"gave up after {attempts} attempt(s): {last}",
-                            getattr(last, "raw", None)) from last
+                            getattr(last, "raw", None), wasted) from last
         raise CallError("no attempt was made")  # pragma: no cover - stop allows one
 
     def _once(self, path: str, body: dict) -> dict:
