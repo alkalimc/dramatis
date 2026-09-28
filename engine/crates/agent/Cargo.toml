@@ -8,3 +8,24 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+api = { path = "../api" }
+folio = { path = "../folio" }
+index = { path = "../index" }
+world = { path = "../world" }
+async-trait.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+thiserror.workspace = true
+# Only the request-building and SSE plumbing is used (`byot`): the body is assembled
+# byte for byte from the session log, so the typed request structs are never built.
+async-openai = { version = "=0.42.0", default-features = false, features = ["rustls", "byot", "chat-completion", "responses", "model"] }
+futures = "=0.3.34"
+tokio = { version = "=1.53.1", features = ["sync"] }
+# Apple keychain only: the one supported platform. Elsewhere keyring falls back to its
+# in-memory mock store, which keeps the workspace building on CI hosts.
+keyring = { version = "=3.6.3", features = ["apple-native"] }
+
+[dev-dependencies]
+folio = { path = "../folio", features = ["fixture"] }
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync"] }
