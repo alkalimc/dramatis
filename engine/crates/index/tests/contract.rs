@@ -4,8 +4,8 @@
 
 use std::path::PathBuf;
 
-use folio::Folio;
-use index::{Index, Mode, Normalise, Request};
+use index::params::Retrieve;
+use index::{Index, Normalise, SearchRequest, Source};
 
 /// A word that occurs in exactly one toy dialogue line.
 const KNOWN_TERM: &str = "zephyrine";
@@ -28,35 +28,49 @@ fn lexical_search_finds_the_known_unit_and_expands_it() -> anyhow::Result<()> {
     let Some(path) = contract_folio() else {
         return Ok(());
     };
-    let folio = Folio::open(&path)?;
-    let index = Index::new(&folio);
+    let mut index = Index::open(&path, Retrieve::default())?;
     assert_eq!(index.segmenter().name(), "char-bigram");
 
-    let request = Request {
-        query: KNOWN_TERM.to_string(),
-        mode: Mode::Lexical,
-        expand: 1,
-        ..Request::default()
-    };
-    let response = index.search(&request, None)?;
+    let response = index.search(&SearchRequest::new(KNOWN_TERM))?;
     let top = response.hits.first().expect("the known term is indexed");
-    assert_eq!(top.unit.page, "Chapter 2");
-    assert!(top.unit.text.contains(KNOWN_TERM));
-    assert!(top.lexical_rank == Some(0));
-    assert_eq!(top.context.len(), 2);
-    assert!(top.context.iter().all(|n| n.adjacent_to(&top.unit)));
+    let unit = top.item.unit().expect("a corpus unit");
+    assert_eq!(unit.page, "Chapter 2");
+    assert!(unit.text.contains(KNOWN_TERM));
+    assert_eq!(top.source, None);
+    assert_eq!(top.neighbours.len(), 2, "one neighbour on each side");
+    assert!(top.neighbours.iter().all(|n| n.adjacent_to(unit)));
+    assert!(response.confidence.top1 > 0.0);
 
-    // An alias query is resolved to its person before searching.
-    let request = Request {
-        query: "Alice (Winter)".to_string(),
-        mode: Mode::Lexical,
-        normalise: Normalise::Expand,
-        ..Request::default()
+    // As a person: attribution and the materialised scope decide the tag, and weighting
+    // never changes confidence.
+    let request = SearchRequest {
+        as_person: Some("Alice".into()),
+        ..SearchRequest::new(KNOWN_TERM)
     };
-    let response = index.search(&request, None)?;
+    let scoped = index.search(&request)?;
+    assert_eq!(scoped.confidence, response.confidence);
+    for hit in &scoped.hits {
+        let unit = hit.item.unit().expect("a corpus unit");
+        if unit.persons.iter().any(|p| p == "Alice") {
+            assert_eq!(hit.source, Some(Source::Own), "{}", unit.id);
+        } else {
+            assert!(hit.source.is_some(), "{}", unit.id);
+        }
+    }
+
+    // An alias query is resolved to its person before searching. Expansion only: the
+    // person filter depends on attribution the toy corpus need not carry.
+    index.set_normalise(Normalise::Expand);
+    let response = index.search(&SearchRequest::new("Alice (Winter)"))?;
     let resolved = response.resolved.expect("alternate form is an alias");
     assert_eq!(resolved.target, "Alice");
     assert_eq!(resolved.person.as_deref(), Some("Alice"));
     assert!(!response.hits.is_empty());
+
+    // People are found by their own units: every reason is attributed to its person.
+    let people = index.find_people("lighthouse", None, 5, &[])?;
+    for found in &people.persons {
+        assert!(found.reason.persons.contains(&found.person), "{found:?}");
+    }
     Ok(())
 }

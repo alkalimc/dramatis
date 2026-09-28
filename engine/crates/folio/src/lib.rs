@@ -16,6 +16,8 @@
 //! quietly skipped that would return answers which look complete and are not.
 
 pub mod error;
+#[cfg(feature = "fixture")]
+pub mod fixture;
 pub mod manifest;
 pub mod unit;
 pub mod vectors;
@@ -27,7 +29,7 @@ use rusqlite::{Connection, OpenFlags};
 
 pub use error::{Error, Result};
 pub use manifest::Manifest;
-pub use unit::{Person, PersonForm, TemplateStats, Unit};
+pub use unit::{Person, PersonForm, Scope, TemplateStats, Unit};
 pub use vectors::Vectors;
 
 /// The column list every unit query selects, in `row_to_unit` order, over `chunks c`.
@@ -42,7 +44,12 @@ macro_rules! unit_columns {
             (SELECT person_id FROM unit_persons WHERE chunk_id = c.id ORDER BY person_id))"
     };
 }
-const UNIT_COLUMNS: &str = unit_columns!();
+
+macro_rules! person_columns {
+    () => {
+        "person_id, primary_page, display, forms, material, persona_confidence, birthday"
+    };
+}
 
 /// An opened corpus.
 pub struct Folio {
@@ -123,19 +130,26 @@ impl Folio {
         Ok(count as usize)
     }
 
-    /// Fetch units by ordinal, in one statement.
+    /// Fetch units by ordinal, returned in the order requested.
     ///
-    /// Returned in the order requested, not the order SQLite produced them: callers pass
-    /// ranked ordinals and expect ranked units back.
+    /// The statement shape is **fixed** and cached. An earlier version built SQL with one
+    /// placeholder per ordinal, so every distinct candidate count produced a new statement
+    /// to parse and plan; measured on a real corpus, preparation consumed most of the
+    /// latency budget of a query whose execution was a small fraction of it. Ordinals
+    /// arrive as a JSON array through one bound parameter and `json_each` turns it into
+    /// rows, so the plan is the same for any count. SQL does not preserve the caller's
+    /// ranking, so results are reordered on the way out.
     pub fn units_by_ord(&self, ords: &[i64]) -> Result<Vec<Unit>> {
         if ords.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = vec!["?"; ords.len()].join(",");
-        let sql = format!("SELECT {UNIT_COLUMNS} FROM chunks c WHERE c.ord IN ({placeholders})");
-        let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(ords), Self::row_to_unit)?;
-
+        let ords_json = serde_json::to_string(ords).expect("i64 array always serialises");
+        let mut stmt = self.conn.prepare_cached(concat!(
+            "SELECT ",
+            unit_columns!(),
+            " FROM chunks c JOIN json_each(?1) o ON c.ord = o.value"
+        ))?;
+        let rows = stmt.query_map([ords_json], Self::row_to_unit)?;
         let mut found: HashMap<i64, Unit> = HashMap::with_capacity(ords.len());
         for unit in rows {
             let unit = unit?;
@@ -144,67 +158,23 @@ impl Folio {
         Ok(ords.iter().filter_map(|ord| found.remove(ord)).collect())
     }
 
-    /// Fetch units by ordinal, with filters applied by the database, capped at `limit`.
-    ///
-    /// The statement shape is **fixed** and cached. That is the whole point: an earlier
-    /// version built SQL with one placeholder per ordinal, so every distinct candidate count
-    /// produced a new statement to parse and plan. Measured on a real corpus, that consumed
-    /// most of the latency budget for a query whose execution was a small fraction of it —
-    /// the cost was all preparation.
-    ///
-    /// Ordinals arrive as a JSON array through one bound parameter, and filters as two more.
-    /// `json_each` turns the array into rows SQLite can join against, so the plan is stable
-    /// no matter how many candidates there are.
-    ///
-    /// Ranking lives in `ords` and SQL will not preserve it, so results are reordered on the
-    /// way out.
-    pub fn units_filtered(
-        &self,
-        ords: &[i64],
-        templates: &[String],
-        persons: &[String],
-        limit: usize,
-    ) -> Result<Vec<Unit>> {
-        if ords.is_empty() || limit == 0 {
+    /// Unit ordinals for a list of unit ids. Unknown ids are skipped: a stored id whose page
+    /// has since changed simply no longer names a unit.
+    pub fn ords_for_ids(&self, ids: &[String]) -> Result<Vec<i64>> {
+        if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let ords_json = serde_json::to_string(ords).expect("i64 array always serialises");
-        // An empty filter list is encoded as SQL NULL, and the predicate short-circuits on
-        // it. This keeps one statement covering all four filter combinations rather than
-        // four statements, each with its own preparation cost.
-        let templates_json = (!templates.is_empty())
-            .then(|| serde_json::to_string(templates).expect("string array serialises"));
-        let persons_json = (!persons.is_empty())
-            .then(|| serde_json::to_string(persons).expect("string array serialises"));
-
-        let mut stmt = self.conn.prepare_cached(concat!(
-            "SELECT ",
-            unit_columns!(),
-            " FROM chunks c JOIN json_each(?1) o ON c.ord = o.value \
-                 WHERE (?2 IS NULL OR c.template IN (SELECT value FROM json_each(?2))) \
-                   AND (?3 IS NULL OR EXISTS (SELECT 1 FROM unit_persons u \
-                        WHERE u.chunk_id = c.id \
-                          AND u.person_id IN (SELECT value FROM json_each(?3))))"
-        ))?;
-        let rows = stmt.query_map(
-            rusqlite::params![ords_json, templates_json, persons_json],
-            Self::row_to_unit,
+        let ids_json = serde_json::to_string(ids).expect("string array serialises");
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT ord FROM chunks WHERE id IN (SELECT value FROM json_each(?1))",
         )?;
-
-        let mut found: HashMap<i64, Unit> = HashMap::new();
-        for unit in rows {
-            let unit = unit?;
-            found.insert(unit.ord, unit);
-        }
-        Ok(ords
-            .iter()
-            .filter_map(|ord| found.remove(ord))
-            .take(limit)
-            .collect())
+        let rows = stmt.query_map([ids_json], |row| row.get::<_, i64>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn unit_by_id(&self, id: &str) -> Result<Option<Unit>> {
-        let mut stmt = self.conn.prepare(concat!(
+        let mut stmt = self.conn.prepare_cached(concat!(
             "SELECT ",
             unit_columns!(),
             " FROM chunks c WHERE c.id = ?1"
@@ -293,15 +263,104 @@ impl Folio {
     }
 
     pub fn person(&self, person_id: &str) -> Result<Option<Person>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT person_id, primary_page, display, forms, material, persona_confidence \
-             FROM persons WHERE person_id = ?1",
-        )?;
+        let mut stmt = self.conn.prepare_cached(concat!(
+            "SELECT ",
+            person_columns!(),
+            " FROM persons WHERE person_id = ?1"
+        ))?;
         let mut rows = stmt.query_map([person_id], Self::row_to_person)?;
         match rows.next() {
             Some(person) => Ok(Some(person?)),
             None => Ok(None),
         }
+    }
+
+    /// The whole roster, ordered by id.
+    pub fn persons(&self) -> Result<Vec<Person>> {
+        let mut stmt = self.conn.prepare_cached(concat!(
+            "SELECT ",
+            person_columns!(),
+            " FROM persons ORDER BY person_id"
+        ))?;
+        let rows = stmt.query_map([], Self::row_to_person)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// People whose birthday is `mm_dd` (`MM-DD`), ordered by id.
+    pub fn persons_born_on(&self, mm_dd: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT person_id FROM persons WHERE birthday = ?1 ORDER BY person_id",
+        )?;
+        let rows = stmt.query_map([mm_dd], |row| row.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// Everyone who shares scenes with `person`, most shared scenes first.
+    ///
+    /// Pairs are stored once with `a < b`, so both columns are searched.
+    pub fn cooccur(&self, person: &str) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT b, scenes FROM cooccur WHERE a = ?1 \
+             UNION ALL SELECT a, scenes FROM cooccur WHERE b = ?1 \
+             ORDER BY 2 DESC, 1",
+        )?;
+        let rows = stmt.query_map([person], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// Shared scenes for one pair, in either order; 0 when they never met.
+    pub fn cooccur_pair(&self, a: &str, b: &str) -> Result<i64> {
+        let (a, b) = if a < b { (a, b) } else { (b, a) };
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT scenes FROM cooccur WHERE a = ?1 AND b = ?2")?;
+        let mut rows = stmt.query_map([a, b], |row| row.get::<_, i64>(0))?;
+        Ok(rows.next().transpose()?.unwrap_or(0))
+    }
+
+    /// How each of `chunk_ids` sits in `person`'s first-hand knowledge. Units outside it
+    /// are absent from the map.
+    pub fn knowledge_scope(
+        &self,
+        person: &str,
+        chunk_ids: &[String],
+    ) -> Result<HashMap<String, Scope>> {
+        if chunk_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let ids_json = serde_json::to_string(chunk_ids).expect("string array serialises");
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT chunk_id, kind FROM knowledge_scope \
+             WHERE person_id = ?1 AND chunk_id IN (SELECT value FROM json_each(?2))",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![person, ids_json], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (id, kind) = row?;
+            // The schema's CHECK admits exactly these two kinds.
+            let scope = if kind == "self" {
+                Scope::Own
+            } else {
+                Scope::Lived
+            };
+            out.insert(id, scope);
+        }
+        Ok(out)
+    }
+
+    /// Terms that put a lore unit inside `person`'s domain.
+    pub fn topic_terms(&self, person: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT term FROM topic_terms WHERE person_id = ?1 ORDER BY term")?;
+        let rows = stmt.query_map([person], |row| row.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn person_count(&self) -> Result<usize> {
@@ -313,15 +372,11 @@ impl Folio {
 
     /// A prompt slot for a subject, with local override support left to the caller.
     pub fn prompt(&self, subject: &str, slot: &str) -> Result<Option<String>> {
-        let body: Option<String> = self
+        let mut stmt = self
             .conn
-            .query_row(
-                "SELECT body FROM prompts WHERE subject = ?1 AND slot = ?2",
-                [subject, slot],
-                |row| row.get(0),
-            )
-            .ok();
-        Ok(body)
+            .prepare_cached("SELECT body FROM prompts WHERE subject = ?1 AND slot = ?2")?;
+        let mut rows = stmt.query_map([subject, slot], |row| row.get::<_, String>(0))?;
+        Ok(rows.next().transpose()?)
     }
 
     /// In-world phrasing for a runtime surface. The client renders these; it never
@@ -329,6 +384,13 @@ impl Folio {
     /// into the fiction.
     pub fn wording(&self, key: &str) -> Option<&str> {
         self.manifest.wording.get(key).map(String::as_str)
+    }
+
+    /// The string standing for the user's name in unit text and prompts (manifest
+    /// `user_placeholder`). Substituting it is the assembler's job; this crate returns
+    /// stored text as stored.
+    pub fn user_placeholder(&self) -> &str {
+        &self.manifest.user_placeholder
     }
 
     fn row_to_unit(row: &rusqlite::Row<'_>) -> rusqlite::Result<Unit> {
@@ -358,6 +420,7 @@ impl Folio {
             forms: serde_json::from_str(&forms_json).unwrap_or_default(),
             material: row.get(4)?,
             persona_confidence: row.get(5)?,
+            birthday: row.get(6)?,
         })
     }
 }

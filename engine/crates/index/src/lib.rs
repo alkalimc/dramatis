@@ -1,64 +1,211 @@
-//! Hybrid retrieval over a `.folio`.
+//! Retrieval over a `.folio`.
 //!
 //! ```text
-//! query ─ alias expansion ─┬─ lexical: FTS5 + BM25 over pre-segmented tokens ──┐
-//!                          └─ dense:   exact SIMD-shaped scan over f16 vectors ┘
-//!                                   → RRF fusion → (rerank) → top-k
-//!                                                      └→ neighbour expansion, hits only
+//! query ─ alias expansion ─ lexical: FTS5 + BM25 over pre-segmented tokens, filters in SQL
+//!       → retrieve.candidates ─ weight by the asking person's knowledge ─ merge memories
+//!       → retrieve.top_k ─ set aside units already in the session ─ neighbours, returned hits only
 //! ```
 //!
-//! Three properties of this pipeline are consequences of measurement rather than taste.
+//! Only the lexical path exists. `SearchMode::Hybrid` and `Dense` are part of the request
+//! so a dense path can be added without changing callers; until then they fail loudly
+//! rather than quietly answering from the lexical path.
 //!
 //! **Alias expansion is not optional.** Measured: a query naming an entity by an alias in
 //! another language or script matches *zero* units when the alias occurs nowhere in the
 //! corpus text — the source records it as a redirect, not as prose. The table lookup is the
-//! only path to those entities, so without it the retriever scores near zero on such
-//! queries.
+//! only path to those entities.
 //!
-//! **The dense path is exact.** A corpus of tens of thousands of units at typical encoder
-//! widths fits the resident budget as f16, so there is no approximate index — one fewer
-//! dependency, no build step, and no approximation error to contaminate the
-//! dimension-ablation curve.
+//! **Weighting is not filtering.** A person's own units, the scenes they lived through and
+//! lore inside their topics rank higher for them, but nothing is removed: "the corpus has
+//! nothing" and "this is not his field" must stay distinguishable, which is also why
+//! confidence is computed on unweighted scores.
 //!
-//! **There is no span-merge stage.** Units are stored exactly once. An earlier corpus
-//! design overlapped dialogue windows and needed a merge pass to stop a top-6 being three
-//! passages shown twice; storing once and widening ranked hits on demand is cheaper and
-//! gives truer context.
+//! **There is no span-merge stage.** Units are stored exactly once; ranked hits are widened
+//! to their neighbours on demand, which is cheaper and gives truer context than overlapping
+//! windows.
 
+pub mod confidence;
+mod memory;
+pub mod params;
 pub mod segment;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use folio::{Folio, Unit};
+use serde::{Deserialize, Serialize};
 
+pub use confidence::{Confidence, Level};
 pub use segment::{Kind as SegmenterKind, Segmenter};
 
+/// Roster id (`persons.person_id`).
+pub type PersonId = String;
+/// Unit id (`chunks.id`).
+pub type ChunkId = String;
+
+/// Which retrieval paths to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    /// Every path the corpus and this build support. Today that is the lexical path.
+    #[default]
+    Auto,
+    /// Lexical and dense, fused. Needs vectors and a query encoder.
+    Hybrid,
+    Lexical,
+    /// Dense only. Needs vectors and a query encoder.
+    Dense,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RerankPolicy {
+    /// Rerank when a reranker is available. None is, so this never reranks.
+    #[default]
+    Auto,
+    /// Fail if no reranker is available.
+    Always,
+    Never,
+}
+
+/// Restrictions applied in SQL before candidates are cut, so a filter can never empty a
+/// result the corpus could fill. Empty lists mean no restriction.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Filters {
+    pub templates: Vec<String>,
+    /// Units attributed to any of these people (forms already folded into the person).
+    pub persons: Vec<PersonId>,
+    pub pages: Vec<String>,
+}
+
+impl Filters {
+    pub fn is_empty(&self) -> bool {
+        self.templates.is_empty() && self.persons.is_empty() && self.pages.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchRequest {
+    pub query: String,
+    pub mode: SearchMode,
+    /// Size of the ranked window; 0 means `retrieve.top_k`.
+    pub top_k: usize,
+    pub filters: Filters,
+    /// Whose knowledge weights the ranking, and who may receive memories. `None` is the
+    /// maintainer surface: every unit unweighted, no memories.
+    pub as_person: Option<PersonId>,
+    /// Units (and memory ids) already in the session. One that ranks inside the window
+    /// keeps its place but is not returned in full: it is listed in
+    /// [`SearchResponse::excluded`] so the caller can cite it by id. The window is not
+    /// refilled from further down, since a follow-up on the same topic would otherwise
+    /// pull in ever weaker material each turn.
+    pub exclude: Vec<ChunkId>,
+    pub rerank: RerankPolicy,
+}
+
+impl SearchRequest {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            ..Self::default()
+        }
+    }
+}
+
+/// Where a hit sits relative to the asking person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    /// A unit attributed to them: they said it, or it is about them.
+    Own,
+    /// Another unit of a scene they speak in.
+    Lived,
+    /// A lore unit inside their topics.
+    InScope,
+    /// Everything else in the corpus. Still retrievable; they would have to look it up.
+    OutOfScope,
+    /// A caller-supplied memory.
+    Memory,
+}
+
+/// What a hit carries: a corpus unit, or a caller-supplied memory.
+// Unboxed: a search holds at most `retrieve.candidates` of these at once.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone)]
+pub enum Item {
+    Unit(Unit),
+    Memory { id: String, text: String },
+}
+
+impl Item {
+    /// The unit id or memory id.
+    pub fn id(&self) -> &str {
+        match self {
+            Item::Unit(unit) => &unit.id,
+            Item::Memory { id, .. } => id,
+        }
+    }
+
+    pub fn unit(&self) -> Option<&Unit> {
+        match self {
+            Item::Unit(unit) => Some(unit),
+            Item::Memory { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Hit {
+    pub item: Item,
+    /// `None` only on the maintainer surface (no `as_person`), where nothing is weighted.
+    pub source: Option<Source>,
+    /// Ranking score: `unweighted` times the source's `retrieve.scope_weight`.
+    pub score: f64,
+    /// BM25, as the corpus statistics give it.
+    pub unweighted: f64,
+    /// Adjacent units of the same source sequence (`retrieve.neighbours` on each side),
+    /// minus any that are hits themselves or excluded.
+    pub neighbours: Vec<Unit>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchResponse {
+    pub hits: Vec<Hit>,
+    /// On unweighted scores, excluded units included: having shown the answer already
+    /// does not make the corpus less sure of it.
+    pub confidence: Confidence,
+    /// Excluded ids that ranked inside the window, best first.
+    pub excluded: Vec<String>,
+    /// Set when the query named an entity by an alias.
+    pub resolved: Option<Resolved>,
+    /// Set when the query is a name the source records as ambiguous. Hits are the
+    /// unrestricted best effort.
+    pub ambiguous: Option<Ambiguity>,
+    pub trace: Trace,
+}
+
 /// What to do with a query that names something the source records under another name.
-///
-/// Redirects, real-name tables and alternate-form entries are synonymy the source's editors
-/// wrote by hand. Using it is a table lookup, so it costs nothing worth measuring; *not*
-/// using it means an entity whose only name in another language is a redirect is unreachable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Normalise {
     /// Take the query as typed.
     Off,
     /// Add the canonical name's tokens to the query.
     Expand,
-    /// Add the tokens, and when the alias names exactly one person, restrict to them.
+    /// Add the tokens, and when the alias names exactly one person and the request has no
+    /// person filter, restrict to them.
     #[default]
     ExpandAndFilter,
 }
 
-/// What the alias stage found. Carried on the response so a caller can say what it
-/// understood the query to mean, rather than silently answering a different question.
+/// What the alias stage found, so a caller can say what it understood the query to mean.
 #[derive(Debug, Clone)]
 pub struct Resolved {
     pub alias: String,
     pub target: String,
-    /// The roster id, when the target is a person. Aliases also point at events,
-    /// places and items, which have no person to filter by.
-    pub person: Option<String>,
-    /// How the single target was arrived at.
+    /// The roster id, when the target is a person.
+    pub person: Option<PersonId>,
     pub how: How,
 }
 
@@ -70,134 +217,61 @@ pub enum How {
     Qualified,
 }
 
-/// The alias names several things, and nothing in the query said which.
-///
-/// This is a *reportable state*, not a failure. A source may maintain a disambiguation page
-/// listing several different things sharing one name; a retriever that silently picked one would be
-/// answering a question the user did not ask, and one that returned nothing would be hiding
-/// information the corpus has. The right behaviour is to answer broadly and let the caller
-/// ask which — which it can only do if the candidates reach it.
+/// The alias names several things and nothing in the query said which. A reportable
+/// state, not a failure: picking one would answer a question the user did not ask.
 #[derive(Debug, Clone)]
 pub struct Ambiguity {
     pub alias: String,
-    /// Every target the source declares for this name, in a stable order.
     pub candidates: Vec<String>,
 }
 
-/// Which paths to run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Mode {
-    /// Both paths, fused. Requires vectors.
-    #[default]
-    Hybrid,
-    /// Lexical only — exact nouns, and the only mode available without an encoder.
-    Lexical,
-    /// Dense only.
-    Dense,
+/// One person found for a topic, by their own units.
+#[derive(Debug, Clone)]
+pub struct PersonMatch {
+    pub person: PersonId,
+    /// Best unweighted score among their own units.
+    pub score: f64,
+    /// `score` read against `retrieve.confidence` on its own. `High` is the interjection
+    /// bar (`interject.min_confidence` is the high boundary).
+    pub level: Level,
+    /// Own units that matched.
+    pub matched: usize,
+    /// The best-matching own unit: the reason to offer them.
+    pub reason: Unit,
 }
 
 #[derive(Debug, Clone)]
-pub struct Request {
-    pub query: String,
-    pub mode: Mode,
-    pub top_k: usize,
-    /// Restrict to these templates. Empty means all.
-    pub templates: Vec<String>,
-    /// Restrict to these people. A caller should pass `person_id`s already resolved
-    /// through the alias dictionary, so an alternate-form name reaches the one person.
-    pub persons: Vec<String>,
-    /// How many candidates each path contributes before fusion.
-    pub candidates: usize,
-    /// Whether to consult the alias dictionary. See [`Normalise`].
-    pub normalise: Normalise,
-    /// Widen each returned hit by this many neighbouring units on each side.
-    pub expand: i64,
+pub struct People {
+    /// Best first; ties broken by id so the order is reproducible.
+    pub persons: Vec<PersonMatch>,
+    /// Over the returned people's best scores.
+    pub confidence: Confidence,
 }
 
-impl Default for Request {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            mode: Mode::default(),
-            top_k: 6,
-            templates: Vec::new(),
-            persons: Vec::new(),
-            candidates: 50,
-            normalise: Normalise::default(),
-            expand: 0,
-        }
+impl People {
+    pub fn get(&self, person: &str) -> Option<&PersonMatch> {
+        self.persons.iter().find(|p| p.person == person)
     }
 }
 
-/// How sure we are that the corpus contains an answer at all.
-///
-/// Three signals, each measuring something the others miss. The third exists because the
-/// first two both stay quiet in the case that matters most: when every candidate is
-/// middlingly relevant, top-1 looks acceptable and the paths agree, yet the right
-/// behaviour is to admit the archive has no clear answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Confidence {
-    High,
-    Medium,
-    Low,
-}
-
-#[derive(Debug, Clone)]
-pub struct Signals {
-    /// Best fused score. Low means nothing relevant exists.
-    pub top_score: f64,
-    /// Overlap between the two paths' candidate sets. Low means lexical and semantic
-    /// matching disagree about what the query is even about.
-    pub path_agreement: f64,
-    /// Normalised entropy of the score distribution. High means flat — many candidates,
-    /// none of them clearly right.
-    pub score_entropy: f64,
-    pub level: Confidence,
-}
-
-#[derive(Debug, Clone)]
-pub struct Hit {
-    pub unit: Unit,
-    pub score: f64,
-    pub lexical_rank: Option<usize>,
-    pub dense_rank: Option<usize>,
-    /// Units adjacent in the source sequence, when `expand > 0`.
-    pub context: Vec<Unit>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Response {
-    pub hits: Vec<Hit>,
-    pub signals: Signals,
-    /// Set when the query named an entity by an alias.
-    pub resolved: Option<Resolved>,
-    /// Set when the query named something the source records as ambiguous and the query did
-    /// not say which. The hits are still the unrestricted best effort.
-    pub ambiguous: Option<Ambiguity>,
-    pub trace: Trace,
-}
-
-/// Per-stage timings. Latency is a design constraint here, so it is measured by default
-/// rather than behind a flag: a number nobody collects is a number nobody can defend.
+/// Per-stage timings, measured by default: latency is a design constraint here.
 #[derive(Debug, Clone, Default)]
 pub struct Trace {
     pub normalise_us: u128,
     pub lexical_us: u128,
-    pub dense_us: u128,
-    pub fuse_us: u128,
+    pub scope_us: u128,
+    pub memory_us: u128,
     pub fetch_us: u128,
     pub expand_us: u128,
     pub lexical_candidates: usize,
-    pub dense_candidates: usize,
-    pub scanned: usize,
 }
 
 impl Trace {
     pub fn total_us(&self) -> u128 {
         self.normalise_us
             + self.lexical_us
-            + self.dense_us
-            + self.fuse_us
+            + self.scope_us
+            + self.memory_us
             + self.fetch_us
             + self.expand_us
     }
@@ -209,199 +283,497 @@ pub enum Error {
     Folio(#[from] folio::Error),
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error("{mode:?} needs vectors, which this corpus has not had written yet")]
-    VectorsRequired { mode: Mode },
-    #[error("dense search needs a query embedding")]
-    EmbeddingRequired,
+    #[error("{0:?} search needs a dense path, which this build does not have; use Auto or Lexical")]
+    DenseUnavailable(SearchMode),
+    #[error("reranking was required, but no reranker is available")]
+    RerankUnavailable,
+    #[error("memories can only be ranked for a person; the maintainer surface sees none")]
+    MemoryWithoutPerson,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Reciprocal-rank-fusion constant. 60 is the value from the original description and is
-/// kept because there is no local evidence to justify moving it; the ablation matrix has a
-/// slot for revisiting it against the structural benchmark.
-const RRF_K: f64 = 60.0;
-
-pub struct Index<'a> {
-    folio: &'a Folio,
+/// The retriever: an opened corpus, its segmenter and the `retrieve.*` parameters.
+///
+/// Owns the corpus connection, so it is `Send` but not `Sync`; share it behind a mutex.
+pub struct Index {
+    folio: Folio,
     segmenter: Segmenter,
+    params: params::Retrieve,
+    normalise: Normalise,
+    stats: std::cell::OnceCell<memory::CorpusStats>,
 }
 
-impl<'a> Index<'a> {
-    /// Build an index view over an opened corpus.
-    ///
-    /// The segmenter and its stopword list are chosen from the corpus manifest, not
-    /// configured: they must match what built the lexical index, and making that a caller's choice would invite a mismatch
-    /// whose only symptom is quietly worse results.
-    pub fn new(folio: &'a Folio) -> Self {
+/// A lexical candidate before weighting.
+#[derive(Debug, Clone, Copy)]
+struct Candidate {
+    ord: i64,
+    score: f64,
+}
+
+impl Index {
+    /// The segmenter and its stopwords come from the corpus manifest, not from the caller:
+    /// they must match what built the lexical index, and a mismatch has no symptom other
+    /// than quietly worse results.
+    pub fn new(folio: Folio, params: params::Retrieve) -> Self {
         let manifest = folio.manifest();
         let segmenter = Segmenter::for_corpus(manifest.segmenter_name(), &manifest.stopwords);
-        Self { folio, segmenter }
+        Self {
+            folio,
+            segmenter,
+            params,
+            normalise: Normalise::default(),
+            stats: std::cell::OnceCell::new(),
+        }
+    }
+
+    pub fn open(path: impl AsRef<std::path::Path>, params: params::Retrieve) -> Result<Self> {
+        Ok(Self::new(Folio::open(path)?, params))
+    }
+
+    pub fn folio(&self) -> &Folio {
+        &self.folio
     }
 
     pub fn segmenter(&self) -> &Segmenter {
         &self.segmenter
     }
 
-    /// Search. `embedding` is required for any mode that uses the dense path.
-    pub fn search(&self, request: &Request, embedding: Option<&[f32]>) -> Result<Response> {
+    pub fn params(&self) -> &params::Retrieve {
+        &self.params
+    }
+
+    pub fn set_params(&mut self, params: params::Retrieve) {
+        self.params = params;
+    }
+
+    /// What the alias stage may do. The default expands and, for a bare person name,
+    /// filters to that person; the other settings exist to be measured against it.
+    pub fn set_normalise(&mut self, normalise: Normalise) {
+        self.normalise = normalise;
+    }
+
+    /// Search the corpus. No memories: see [`Index::search_with_memories`].
+    pub fn search(&self, request: &SearchRequest) -> Result<SearchResponse> {
+        self.search_with_memories(request, &[])
+    }
+
+    /// Search the corpus and rank caller-supplied memories `(id, text)` alongside it.
+    ///
+    /// The caller decides which memories this person may see: visibility is applied when
+    /// the candidate list is built, never here, so a filtered-out memory cannot shrink a
+    /// result after the fact. Memories are scored as BM25 against the corpus's own
+    /// statistics, so their scores sit on the same scale as units, then weighted by
+    /// `retrieve.scope_weight.memory`. Filters describe corpus units, so a request with
+    /// any filter set receives no memories.
+    pub fn search_with_memories(
+        &self,
+        request: &SearchRequest,
+        memories: &[(&str, &str)],
+    ) -> Result<SearchResponse> {
+        match request.mode {
+            SearchMode::Auto | SearchMode::Lexical => {}
+            mode @ (SearchMode::Hybrid | SearchMode::Dense) => {
+                return Err(Error::DenseUnavailable(mode));
+            }
+        }
+        if request.rerank == RerankPolicy::Always {
+            return Err(Error::RerankUnavailable);
+        }
+        if request.as_person.is_none() && !memories.is_empty() {
+            return Err(Error::MemoryWithoutPerson);
+        }
+        let top_k = if request.top_k == 0 {
+            self.params.top_k
+        } else {
+            request.top_k
+        };
         let mut trace = Trace::default();
 
-        let started = std::time::Instant::now();
-        let (resolved, ambiguous, effective) = self.normalise(request)?;
+        let started = Instant::now();
+        let (resolved, ambiguous, query, filters) =
+            self.normalise(&request.query, &request.filters)?;
         trace.normalise_us = started.elapsed().as_micros();
-        let request = &effective;
 
-        let lexical = match request.mode {
-            Mode::Dense => Vec::new(),
-            _ => {
-                let started = std::time::Instant::now();
-                let hits = self.lexical(request)?;
-                trace.lexical_us = started.elapsed().as_micros();
-                trace.lexical_candidates = hits.len();
-                hits
-            }
-        };
+        let started = Instant::now();
+        let candidates = self.lexical(&query, &filters, self.params.candidates.max(top_k))?;
+        trace.lexical_us = started.elapsed().as_micros();
+        trace.lexical_candidates = candidates.len();
 
-        let dense = match request.mode {
-            Mode::Lexical => Vec::new(),
-            _ => {
-                let vectors = self
-                    .folio
-                    .vectors()
-                    .ok_or(Error::VectorsRequired { mode: request.mode })?;
-                let embedding = embedding.ok_or(Error::EmbeddingRequired)?;
-                let started = std::time::Instant::now();
-                let hits = vectors.top_k(embedding, request.candidates)?;
-                trace.dense_us = started.elapsed().as_micros();
-                trace.dense_candidates = hits.len();
-                trace.scanned = vectors.count();
-                // Widen to f64 here, at the boundary: the scan works in f32 because that is what
-                // the vectors are, and everything downstream of fusion works in f64 because
-                // BM25 does. Converting once at the seam beats sprinkling casts through both.
-                hits.into_iter()
-                    .map(|(ord, score)| (ord as i64, score as f64))
-                    .collect()
-            }
-        };
+        // Memories are scored first; they feed confidence like any unit. A filter the
+        // caller set describes corpus units, so it leaves no room for memories; the person
+        // filter the alias stage adds does not count, since it only narrows the corpus.
+        let started = Instant::now();
+        let mut ranked: Vec<Hit> = Vec::new();
+        if !memories.is_empty() && request.filters.is_empty() {
+            ranked.extend(self.score_memories(&query, memories)?);
+        }
+        trace.memory_us = started.elapsed().as_micros();
 
-        let started = std::time::Instant::now();
-        let fused = fuse(&lexical, &dense);
-        let signals = signals(&fused, &lexical, &dense);
-        trace.fuse_us = started.elapsed().as_micros();
-
-        let started = std::time::Instant::now();
-        // Filtering must happen before truncating to top_k — filtering an already-cut list
-        // silently returns fewer results than asked for, or none when the filter excludes
-        // whatever the paths ranked highest (found by asking for a couple of units of a
-        // common template and getting zero, from a corpus holding thousands of them).
-        //
-        // But it must not mean fetching every candidate either: measured on a real corpus,
-        // doing that consumed most of the latency budget. Filtering is expressed in SQL so
-        // the database applies it while fetching, and only the ordinals actually needed
-        // come back.
-        let ords: Vec<i64> = fused.iter().map(|f| f.ord).collect();
-        let units = self.folio.units_filtered(
-            &ords,
-            &request.templates,
-            &request.persons,
-            request.top_k,
-        )?;
-        trace.fetch_us = started.elapsed().as_micros();
-
-        let by_ord: HashMap<i64, &Fused> = fused.iter().map(|f| (f.ord, f)).collect();
-        let mut hits: Vec<Hit> = units
-            .into_iter()
-            .map(|unit| {
-                let entry = by_ord.get(&unit.ord);
-                Hit {
-                    score: entry.map(|f| f.score).unwrap_or(0.0),
-                    lexical_rank: entry.and_then(|f| f.lexical_rank),
-                    dense_rank: entry.and_then(|f| f.dense_rank),
-                    context: Vec::new(),
-                    unit,
+        let started = Instant::now();
+        let score: HashMap<i64, f64> = candidates.iter().map(|c| (c.ord, c.score)).collect();
+        match &request.as_person {
+            // Unweighted: the lexical order is final, so only the window is fetched.
+            None => {
+                let ords: Vec<i64> = candidates.iter().take(top_k).map(|c| c.ord).collect();
+                for unit in self.folio.units_by_ord(&ords)? {
+                    let unweighted = score[&unit.ord];
+                    ranked.push(Hit {
+                        item: Item::Unit(unit),
+                        source: None,
+                        score: unweighted,
+                        unweighted,
+                        neighbours: Vec::new(),
+                    });
                 }
-            })
-            .collect();
-
-        if request.expand > 0 {
-            let started = std::time::Instant::now();
-            for hit in &mut hits {
-                hit.context = self
-                    .folio
-                    .neighbours(&hit.unit, request.expand, request.expand)?;
+                trace.fetch_us = started.elapsed().as_micros();
             }
-            trace.expand_us = started.elapsed().as_micros();
+            Some(person) => {
+                let ords: Vec<i64> = candidates.iter().map(|c| c.ord).collect();
+                let units = self.folio.units_by_ord(&ords)?;
+                trace.fetch_us = started.elapsed().as_micros();
+                let started = Instant::now();
+                let sources = self.sources(person, &units)?;
+                for (unit, source) in units.into_iter().zip(sources) {
+                    let unweighted = score[&unit.ord];
+                    ranked.push(Hit {
+                        score: unweighted * self.weight(source),
+                        item: Item::Unit(unit),
+                        source: Some(source),
+                        unweighted,
+                        neighbours: Vec::new(),
+                    });
+                }
+                trace.scope_us = started.elapsed().as_micros();
+            }
         }
 
-        Ok(Response {
+        // Unweighted, and before exclusion: having shown the answer already does not make
+        // the corpus less sure of it.
+        let confidence = Confidence::of(
+            &ranked.iter().map(|h| h.unweighted).collect::<Vec<_>>(),
+            top_k,
+            &self.params.confidence,
+        );
+
+        // Deterministic order: score, then unweighted score, then id.
+        ranked.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then(b.unweighted.total_cmp(&a.unweighted))
+                .then_with(|| a.item.id().cmp(b.item.id()))
+        });
+        ranked.truncate(top_k);
+        let exclude: HashSet<&str> = request.exclude.iter().map(String::as_str).collect();
+        let (skipped, mut hits): (Vec<Hit>, Vec<Hit>) = ranked
+            .into_iter()
+            .partition(|hit| exclude.contains(hit.item.id()));
+
+        let started = Instant::now();
+        self.expand(&mut hits, &exclude)?;
+        trace.expand_us = started.elapsed().as_micros();
+
+        Ok(SearchResponse {
             hits,
-            signals,
+            confidence,
+            excluded: skipped
+                .into_iter()
+                .map(|h| h.item.id().to_string())
+                .collect(),
             resolved,
             ambiguous,
             trace,
         })
     }
 
+    /// BM25 of each memory against the query on the corpus's statistics; non-matching
+    /// memories are dropped. Document frequencies are looked up once per query term.
+    fn score_memories(&self, query: &str, memories: &[(&str, &str)]) -> Result<Vec<Hit>> {
+        let stats = self.corpus_stats()?;
+        let terms = memory::terms(&self.segmenter, query);
+        let mut df: HashMap<&str, i64> = HashMap::new();
+        for term in &terms {
+            if !df.contains_key(term.as_str()) {
+                df.insert(term, memory::document_frequency(self.folio.conn(), term)?);
+            }
+        }
+        let weight = self.params.scope_weight.memory;
+        let mut out = Vec::new();
+        for (id, text) in memories {
+            let unweighted = memory::bm25(&self.segmenter, stats, &terms, text, |t| df[t]);
+            if unweighted > 0.0 {
+                out.push(Hit {
+                    item: Item::Memory {
+                        id: id.to_string(),
+                        text: text.to_string(),
+                    },
+                    source: Some(Source::Memory),
+                    score: unweighted * weight,
+                    unweighted,
+                    neighbours: Vec::new(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// One unit by id, with `neighbours` adjacent units on each side.
+    pub fn get(&self, id: &str, neighbours: i64) -> Result<Option<(Unit, Vec<Unit>)>> {
+        let Some(unit) = self.folio.unit_by_id(id)? else {
+            return Ok(None);
+        };
+        let around = if neighbours > 0 {
+            self.folio.neighbours(&unit, neighbours, neighbours)?
+        } else {
+            Vec::new()
+        };
+        Ok(Some((unit, around)))
+    }
+
+    /// People whose own units match `topic`, best first, at most `k` (`find_people.k`).
+    ///
+    /// `scope` is the candidate set: `None` for the whole roster, or the participants of a
+    /// group. `exclude` removes people the caller must never offer (disabled ones); it is
+    /// applied in SQL before the cut, so excluding someone never shortens the list.
+    /// The alias stage expands the topic but never filters, since the point is to find
+    /// people other than the one named.
+    pub fn find_people(
+        &self,
+        topic: &str,
+        scope: Option<&[PersonId]>,
+        k: usize,
+        exclude: &[PersonId],
+    ) -> Result<People> {
+        let (_, _, query, _) =
+            self.normalise_with(topic, &Filters::default(), Normalise::Expand)?;
+        let Some(expression) = self.segmenter.match_expression(&query) else {
+            return Ok(self.people(Vec::new()));
+        };
+        if k == 0 || scope.is_some_and(<[PersonId]>::is_empty) {
+            return Ok(self.people(Vec::new()));
+        }
+        let scope_json = scope.map(|s| serde_json::to_string(s).expect("strings serialise"));
+        let exclude_json = (!exclude.is_empty())
+            .then(|| serde_json::to_string(exclude).expect("strings serialise"));
+
+        // The MATCH is materialised once, then joined to attribution. Ranking by the best
+        // own unit (rather than a sum) keeps a person with one exact line ahead of one who
+        // merely mentions the topic often.
+        let mut stmt = self.folio.conn().prepare_cached(
+            "WITH h AS MATERIALIZED (\
+                 SELECT rowid AS ord, -bm25(chunks_fts) AS score \
+                 FROM chunks_fts WHERE chunks_fts MATCH ?1), \
+             p AS (\
+                 SELECT u.person_id AS person, h.ord AS ord, h.score AS score, \
+                        COUNT(*) OVER (PARTITION BY u.person_id) AS matched, \
+                        ROW_NUMBER() OVER (PARTITION BY u.person_id \
+                                           ORDER BY h.score DESC, h.ord) AS r \
+                 FROM h JOIN chunks c ON c.ord = h.ord \
+                        JOIN unit_persons u ON u.chunk_id = c.id \
+                 WHERE (?2 IS NULL OR u.person_id IN (SELECT value FROM json_each(?2))) \
+                   AND (?3 IS NULL OR u.person_id NOT IN (SELECT value FROM json_each(?3)))) \
+             SELECT person, ord, score, matched FROM p WHERE r = 1 \
+             ORDER BY score DESC, person LIMIT ?4",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![expression, scope_json, exclude_json, k as i64],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, f64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )?;
+        let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let ords: Vec<i64> = rows.iter().map(|r| r.1).collect();
+        let units: HashMap<i64, Unit> = self
+            .folio
+            .units_by_ord(&ords)?
+            .into_iter()
+            .map(|u| (u.ord, u))
+            .collect();
+        let bands = &self.params.confidence;
+        let persons = rows
+            .into_iter()
+            .filter_map(|(person, ord, score, matched)| {
+                // Several people can share one best unit, so clone rather than take.
+                let reason = units.get(&ord)?.clone();
+                Some(PersonMatch {
+                    person,
+                    score,
+                    level: confidence::level_of_score(score, bands),
+                    matched: matched as usize,
+                    reason,
+                })
+            })
+            .collect();
+        Ok(self.people(persons))
+    }
+
+    /// Participants ranked by their best own-unit match for `text`. A participant with no
+    /// matching own unit is absent.
+    ///
+    /// One call answers both group questions: who is addressed (the first entry, when
+    /// any) and who may interject (the others at or above `interject.min_confidence`,
+    /// i.e. `Level::High`).
+    pub fn rank_participants(&self, text: &str, participants: &[PersonId]) -> Result<People> {
+        self.find_people(text, Some(participants), participants.len(), &[])
+    }
+
+    fn people(&self, persons: Vec<PersonMatch>) -> People {
+        let scores: Vec<f64> = persons.iter().map(|p| p.score).collect();
+        People {
+            confidence: Confidence::of(&scores, scores.len().max(1), &self.params.confidence),
+            persons,
+        }
+    }
+
+    fn weight(&self, source: Source) -> f64 {
+        let w = &self.params.scope_weight;
+        match source {
+            Source::Own => w.own,
+            Source::Lived => w.lived,
+            Source::InScope => w.in_scope,
+            Source::OutOfScope => w.out_of_scope,
+            Source::Memory => w.memory,
+        }
+    }
+
+    /// Classify units against a person's knowledge: own and lived from the materialised
+    /// scope (attribution also counts as own, which is what `self` means), then topic terms
+    /// for lore-shaped units.
+    fn sources(&self, person: &str, units: &[Unit]) -> Result<Vec<Source>> {
+        let ids: Vec<String> = units.iter().map(|u| u.id.clone()).collect();
+        let scope = self.folio.knowledge_scope(person, &ids)?;
+        let manifest = self.folio.manifest();
+        let mut terms: Option<Vec<String>> = None;
+        let mut out = Vec::with_capacity(units.len());
+        for unit in units {
+            let source = if unit.persons.iter().any(|p| p == person) {
+                Source::Own
+            } else {
+                match scope.get(&unit.id) {
+                    Some(folio::Scope::Own) => Source::Own,
+                    Some(folio::Scope::Lived) => Source::Lived,
+                    None if manifest.shape_of(&unit.template) == "lore" => {
+                        if terms.is_none() {
+                            terms = Some(
+                                self.folio
+                                    .topic_terms(person)?
+                                    .into_iter()
+                                    .map(|t| t.to_lowercase())
+                                    .collect(),
+                            );
+                        }
+                        let terms = terms.as_deref().unwrap_or_default();
+                        let haystack = format!("{}\n{}\n{}", unit.title, unit.header, unit.text)
+                            .to_lowercase();
+                        if terms
+                            .iter()
+                            .any(|t| !t.is_empty() && haystack.contains(t.as_str()))
+                        {
+                            Source::InScope
+                        } else {
+                            Source::OutOfScope
+                        }
+                    }
+                    None => Source::OutOfScope,
+                }
+            };
+            out.push(source);
+        }
+        Ok(out)
+    }
+
+    /// Widen returned unit hits to their neighbours. Neighbours that are themselves hits,
+    /// or already in the session, are dropped: they would be sent twice.
+    fn expand(&self, hits: &mut [Hit], excluded: &HashSet<&str>) -> Result<()> {
+        let n = self.params.neighbours;
+        if n <= 0 {
+            return Ok(());
+        }
+        let returned: HashSet<String> = hits.iter().map(|h| h.item.id().to_string()).collect();
+        for hit in hits.iter_mut() {
+            let Item::Unit(unit) = &hit.item else {
+                continue;
+            };
+            let mut around = self.folio.neighbours(unit, n, n)?;
+            around.retain(|u| !returned.contains(&u.id) && !excluded.contains(u.id.as_str()));
+            hit.neighbours = around;
+        }
+        Ok(())
+    }
+
+    fn corpus_stats(&self) -> Result<&memory::CorpusStats> {
+        if let Some(stats) = self.stats.get() {
+            return Ok(stats);
+        }
+        let stats = memory::CorpusStats::read(self.folio.conn())?;
+        Ok(self.stats.get_or_init(|| stats))
+    }
+
+    fn normalise(
+        &self,
+        query: &str,
+        filters: &Filters,
+    ) -> Result<(Option<Resolved>, Option<Ambiguity>, String, Filters)> {
+        self.normalise_with(query, filters, self.normalise)
+    }
+
     /// The alias stage: turn a query that names an entity by another name into one that
     /// names it by the name the corpus actually uses.
     ///
-    /// Two rules, both lookups against relations the source declares. Neither infers anything:
-    /// no name similarity, no edit distance. A wrong inference about who someone is would be
-    /// undiscoverable in the output, which is why the identity contract forbids it
-    /// outright.
+    /// Two rules, both lookups against relations the source declares; neither infers
+    /// anything (no name similarity, no edit distance), because a wrong inference about who
+    /// someone is would be undiscoverable in the output.
     ///
-    /// **Whole query is an alias.** Deliberately narrow. A name can be both a redirect to an
-    /// entity and an ordinary noun, so substituting it mid-sentence would rewrite queries
-    /// that were already right. The narrow form fires on bare-name lookups — the case that is
-    /// otherwise unanswerable, since an alias in another language appears nowhere in the
-    /// text.
+    /// **Whole query is an alias.** Deliberately narrow: a name can be both a redirect and
+    /// an ordinary noun, so substituting it mid-sentence would rewrite queries that were
+    /// already right.
     ///
-    /// **Alias plus a qualifier naming one of its own candidates.** When the source's
-    /// disambiguation page lists several things sharing a name, a query of the form
-    /// `<name> <qualifier>`, where the qualifier is one of those candidates, has named one
-    /// of them. Reading that is not guessing, because the candidate list came from the
-    /// source.
+    /// **Alias plus a qualifier naming one of its own candidates.** When the source lists
+    /// several things sharing a name, `<name> <qualifier>` with the qualifier one of those
+    /// candidates has named one of them.
     ///
-    /// Expansion *adds* to the query rather than replacing it. An alias that is also real
-    /// text — a nickname a character is called in dialogue — should still match where it
-    /// literally occurs.
-    fn normalise(
+    /// Expansion *adds* to the query rather than replacing it, so an alias that is also
+    /// real text still matches where it literally occurs.
+    fn normalise_with(
         &self,
-        request: &Request,
-    ) -> Result<(Option<Resolved>, Option<Ambiguity>, Request)> {
-        if request.normalise == Normalise::Off {
-            return Ok((None, None, request.clone()));
-        }
-        let query = request.query.trim();
-        if query.is_empty() {
-            return Ok((None, None, request.clone()));
+        query: &str,
+        filters: &Filters,
+        normalise: Normalise,
+    ) -> Result<(Option<Resolved>, Option<Ambiguity>, String, Filters)> {
+        let unchanged = || (None, None, query.to_string(), filters.clone());
+        let trimmed = query.trim();
+        if normalise == Normalise::Off || trimmed.is_empty() {
+            return Ok(unchanged());
         }
 
-        let (alias, target, how) = match &self.folio.resolve_alias(query)?[..] {
-            [only] => (query.to_string(), only.clone(), How::Unique),
-            [] => match self.qualified(query)? {
+        let (alias, target, how) = match &self.folio.resolve_alias(trimmed)?[..] {
+            [only] => (trimmed.to_string(), only.clone(), How::Unique),
+            [] => match self.qualified(trimmed)? {
                 Some((alias, target)) => (alias, target, How::Qualified),
-                None => return Ok((None, None, request.clone())),
+                None => return Ok(unchanged()),
             },
             several => {
-                // The whole query is a name the source itself records as ambiguous. Report the
-                // candidates and leave the query alone: picking one would answer a different
-                // question, and the disambig family measures exactly this.
+                let (_, _, query, filters) = unchanged();
                 return Ok((
                     None,
                     Some(Ambiguity {
-                        alias: query.to_string(),
+                        alias: trimmed.to_string(),
                         candidates: several.to_vec(),
                     }),
-                    request.clone(),
+                    query,
+                    filters,
                 ));
             }
         };
 
         let person = match how {
-            // A qualified hit names one target out of several, so the person is that target
-            // when it is on the roster — not the alias's whole candidate set.
+            // A qualified hit names one target out of several, so the person is that
+            // target when it is on the roster, not the alias's whole candidate set.
             How::Qualified => self.folio.person(&target)?.map(|p| p.person_id),
             How::Unique => match &self.folio.persons_for_alias(&alias)?[..] {
                 [only] => Some(only.clone()),
@@ -409,10 +781,9 @@ impl<'a> Index<'a> {
             },
         };
 
-        let mut effective = request.clone();
-        effective.query = format!("{query} {target}");
-        if request.normalise == Normalise::ExpandAndFilter
-            && request.persons.is_empty()
+        let mut effective = filters.clone();
+        if normalise == Normalise::ExpandAndFilter
+            && filters.persons.is_empty()
             && let Some(person) = &person
         {
             effective.persons = vec![person.clone()];
@@ -420,11 +791,12 @@ impl<'a> Index<'a> {
         Ok((
             Some(Resolved {
                 alias,
-                target,
+                target: target.clone(),
                 person,
                 how,
             }),
             None,
+            format!("{trimmed} {target}"),
             effective,
         ))
     }
@@ -451,35 +823,33 @@ impl<'a> Index<'a> {
         Ok(None)
     }
 
-    /// BM25 over the pre-segmented column.
+    /// BM25 candidates, best first, with every filter applied in SQL before the cut.
     ///
-    /// FTS5 returns `bm25()` as a negative number where more negative is better; it is
-    /// negated here so every score in this crate improves upward.
+    /// FTS5 returns `bm25()` negative-is-better; it is negated so scores improve upward.
+    /// Filtering after the cut is the failure this shape exists to prevent: a query naming
+    /// a person can place that person's first unit just outside the window, and a list
+    /// filtered afterwards is then empty.
     ///
-    /// **Filters are applied here, not after fusion.** Measured: a query naming a person can
-    /// place that person's first unit just outside the candidate window, so a candidate list
-    /// filtered afterwards is empty — the retriever returns nothing about a person it holds
-    /// many units on. This is the same failure the latency benchmark found between fusion
-    /// and truncation, one stage earlier, and it has the same fix: the filter belongs where
-    /// the candidates are chosen.
-    ///
-    /// There are two statement shapes, not one, and both are cached. The unfiltered shape
-    /// is the common case and measurably cheaper: joining `chunks` costs a noticeable
-    /// fraction of the lexical budget even when the filter predicate short-circuits on NULL,
-    /// because SQLite still probes the index per posting-list row. Two fixed shapes keep
-    /// preparation cached while letting the common path stay as fast as the join-free form.
-    fn lexical(&self, request: &Request) -> Result<Vec<(i64, f64)>> {
-        let Some(expression) = self.segmenter.match_expression(&request.query) else {
+    /// Two fixed statement shapes, both cached. The unfiltered one skips the join to
+    /// `chunks`, which costs a noticeable share of the budget even when every filter
+    /// predicate short-circuits on NULL.
+    fn lexical(&self, query: &str, filters: &Filters, limit: usize) -> Result<Vec<Candidate>> {
+        let Some(expression) = self.segmenter.match_expression(query) else {
             return Ok(Vec::new());
         };
-        let limit = request.candidates as i64;
-        let read = |row: &rusqlite::Row<'_>| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?));
+        let limit = limit as i64;
+        let read = |row: &rusqlite::Row<'_>| {
+            Ok(Candidate {
+                ord: row.get(0)?,
+                score: row.get(1)?,
+            })
+        };
 
-        if request.templates.is_empty() && request.persons.is_empty() {
+        if filters.is_empty() {
             let mut stmt = self.folio.conn().prepare_cached(
                 "SELECT rowid, -bm25(chunks_fts) AS score \
                  FROM chunks_fts WHERE chunks_fts MATCH ?1 \
-                 ORDER BY score DESC LIMIT ?2",
+                 ORDER BY score DESC, rowid LIMIT ?2",
             )?;
             let rows = stmt.query_map(rusqlite::params![expression, limit], read)?;
             return rows
@@ -487,13 +857,11 @@ impl<'a> Index<'a> {
                 .map_err(Into::into);
         }
 
-        // One filtered shape covers all three remaining combinations: an empty list is bound
-        // as SQL NULL and the predicate short-circuits, so this prepares once rather than
-        // once per combination.
-        let templates_json = (!request.templates.is_empty())
-            .then(|| serde_json::to_string(&request.templates).expect("strings serialise"));
-        let persons_json = (!request.persons.is_empty())
-            .then(|| serde_json::to_string(&request.persons).expect("strings serialise"));
+        // An empty list is bound as SQL NULL and its predicate short-circuits, so one
+        // shape covers every combination.
+        let json = |list: &[String]| {
+            (!list.is_empty()).then(|| serde_json::to_string(list).expect("strings serialise"))
+        };
         let mut stmt = self.folio.conn().prepare_cached(
             "SELECT f.rowid, -bm25(chunks_fts) AS score \
              FROM chunks_fts f JOIN chunks c ON c.ord = f.rowid \
@@ -502,155 +870,20 @@ impl<'a> Index<'a> {
                AND (?4 IS NULL OR EXISTS (SELECT 1 FROM unit_persons u \
                     WHERE u.chunk_id = c.id \
                       AND u.person_id IN (SELECT value FROM json_each(?4)))) \
-             ORDER BY score DESC LIMIT ?2",
+               AND (?5 IS NULL OR c.page IN (SELECT value FROM json_each(?5))) \
+             ORDER BY score DESC, f.rowid LIMIT ?2",
         )?;
         let rows = stmt.query_map(
-            rusqlite::params![expression, limit, templates_json, persons_json],
+            rusqlite::params![
+                expression,
+                limit,
+                json(&filters.templates),
+                json(&filters.persons),
+                json(&filters.pages)
+            ],
             read,
         )?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Fused {
-    ord: i64,
-    score: f64,
-    lexical_rank: Option<usize>,
-    dense_rank: Option<usize>,
-}
-
-/// Reciprocal rank fusion.
-///
-/// Ranks rather than raw scores, because BM25 and cosine are not on comparable scales and
-/// never will be — normalising them against each other would mean inventing a conversion
-/// with no basis. Rank fusion needs no such invention.
-fn fuse(lexical: &[(i64, f64)], dense: &[(i64, f64)]) -> Vec<Fused> {
-    let mut merged: HashMap<i64, Fused> = HashMap::new();
-
-    for (rank, (ord, _)) in lexical.iter().enumerate() {
-        let entry = merged.entry(*ord).or_insert(Fused {
-            ord: *ord,
-            score: 0.0,
-            lexical_rank: None,
-            dense_rank: None,
-        });
-        entry.score += 1.0 / (RRF_K + rank as f64 + 1.0);
-        entry.lexical_rank = Some(rank);
-    }
-    for (rank, (ord, _)) in dense.iter().enumerate() {
-        let entry = merged.entry(*ord).or_insert(Fused {
-            ord: *ord,
-            score: 0.0,
-            lexical_rank: None,
-            dense_rank: None,
-        });
-        entry.score += 1.0 / (RRF_K + rank as f64 + 1.0);
-        entry.dense_rank = Some(rank);
-    }
-
-    let mut out: Vec<Fused> = merged.into_values().collect();
-    // Tie-break by ordinal so the same query on the same corpus always returns the same
-    // order. Reproducibility is not optional when the ablation matrix depends on it.
-    out.sort_unstable_by(|a, b| b.score.total_cmp(&a.score).then(a.ord.cmp(&b.ord)));
-    out
-}
-
-fn signals(fused: &[Fused], lexical: &[(i64, f64)], dense: &[(i64, f64)]) -> Signals {
-    let top_score = fused.first().map(|f| f.score).unwrap_or(0.0);
-
-    // Jaccard over the two candidate sets.
-    let lexical_set: std::collections::HashSet<i64> = lexical.iter().map(|(ord, _)| *ord).collect();
-    let dense_set: std::collections::HashSet<i64> = dense.iter().map(|(ord, _)| *ord).collect();
-    let path_agreement = if lexical_set.is_empty() || dense_set.is_empty() {
-        // Only one path ran, so agreement is not measurable. Reporting 0 would read as
-        // "the paths disagree", which is a different and false claim.
-        f64::NAN
-    } else {
-        let intersection = lexical_set.intersection(&dense_set).count() as f64;
-        let union = lexical_set.union(&dense_set).count() as f64;
-        intersection / union
-    };
-
-    // Shannon entropy of the fused scores, normalised to [0, 1] by log(n).
-    let total: f64 = fused.iter().map(|f| f.score).sum();
-    let score_entropy = if total <= 0.0 || fused.len() < 2 {
-        0.0
-    } else {
-        let raw: f64 = fused
-            .iter()
-            .map(|f| f.score / total)
-            .filter(|p| *p > 0.0)
-            .map(|p| -p * p.ln())
-            .sum();
-        raw / (fused.len() as f64).ln()
-    };
-
-    // Thresholds are placeholders pending calibration against the three benchmark suites;
-    // the shape of the rule is what is being fixed here, not the constants.
-    let level = if fused.is_empty() || top_score < 0.012 {
-        Confidence::Low
-    } else if score_entropy > 0.92 || (!path_agreement.is_nan() && path_agreement < 0.05) {
-        Confidence::Medium
-    } else {
-        Confidence::High
-    };
-
-    Signals {
-        top_score,
-        path_agreement,
-        score_entropy,
-        level,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fusion_rewards_appearing_in_both_paths() {
-        let lexical = vec![(1, 5.0), (2, 4.0)];
-        let dense = vec![(2, 0.9), (3, 0.8)];
-        let fused = fuse(&lexical, &dense);
-        assert_eq!(fused[0].ord, 2, "the unit both paths found should lead");
-        assert!(fused[0].lexical_rank.is_some() && fused[0].dense_rank.is_some());
-    }
-
-    #[test]
-    fn fusion_is_deterministic_on_ties() {
-        let lexical = vec![(7, 1.0), (3, 1.0)];
-        let first = fuse(&lexical, &[]);
-        let second = fuse(&lexical, &[]);
-        assert_eq!(
-            first.iter().map(|f| f.ord).collect::<Vec<_>>(),
-            second.iter().map(|f| f.ord).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn agreement_is_not_a_number_when_only_one_path_ran() {
-        let signals = signals(&fuse(&[(1, 1.0)], &[]), &[(1, 1.0)], &[]);
-        assert!(
-            signals.path_agreement.is_nan(),
-            "reporting 0 would claim the paths disagreed"
-        );
-    }
-
-    #[test]
-    fn no_candidates_means_low_confidence() {
-        let signals = signals(&[], &[], &[]);
-        assert_eq!(signals.level, Confidence::Low);
-    }
-
-    #[test]
-    fn a_flat_distribution_is_not_high_confidence() {
-        // Fifty candidates all scoring alike: nothing is clearly right, which is the case
-        // top-1 and path agreement both fail to notice.
-        let lexical: Vec<(i64, f64)> = (0..50).map(|i| (i, 1.0)).collect();
-        let dense: Vec<(i64, f64)> = (0..50).map(|i| (i, 1.0)).collect();
-        let signals = signals(&fuse(&lexical, &dense), &lexical, &dense);
-        assert_ne!(signals.level, Confidence::High);
     }
 }
