@@ -9,7 +9,9 @@ wording, language rules) lives in a **pack** that you supply. This repository sh
 
 ```
 forge/    Python 3.13   sync · build · baseline · report
-engine/   Rust 2024     crates/folio · crates/index · crates/eval · bins/dramatis-cli
+engine/   Rust 2024     crates/folio · crates/index · crates/eval · crates/api
+                        bins/dramatis-cli · bins/dramatis (desktop app, Tauri 2)
+ui/       TypeScript    React 19 + Vite, talks only to the engine's `api` commands
 ```
 
 ## Install
@@ -92,3 +94,29 @@ the English defaults in `forge/src/dramatis_forge/text.py`.
 Code: Apache-2.0. A corpus built with this tool is not covered by that licence; it carries
 whatever terms its source has, and the attribution report gives the per-page provenance
 needed to honour them.
+
+## Desktop app
+
+macOS 13+ on Apple Silicon. Node 24+ and pnpm (the version in `ui/package.json`).
+
+```sh
+cd ui && pnpm i                              # once
+pnpm dev                                     # terminal 1: Vite on 127.0.0.1:5173
+cd engine && cargo run -p dramatis           # terminal 2: debug app, loads the dev server
+```
+
+A debug build loads the UI from the dev server; nothing needs to exist in `ui/dist`. A build
+that embeds the UI (`--features custom-protocol`, which `pnpm tauri build` enables) needs
+`pnpm build` in `ui/` first.
+
+`ui/src/api.gen.ts` is generated from `engine/crates/api`; never edit it. After changing
+a command or event type:
+
+```sh
+cd engine && cargo test -p dramatis --test bindings   # rewrites ui/src/api.gen.ts
+```
+
+The model-facing tool schemas are snapshotted in `engine/crates/api/tests/tools.snapshot.json`;
+after an intended change run `UPDATE_SNAPSHOTS=1 cargo test -p api --test tools`.
+
+UI checks: `cd ui && pnpm exec tsc --noEmit && pnpm exec vitest run`.
