@@ -23,11 +23,12 @@ a property of the corpus language.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from .records import sig
-from .pack import ChunkTemplate, Pack
+from .pack import ChunkPolicy, ChunkTemplate, Pack
 from .archive import Archive
 
 
@@ -192,7 +193,9 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
                 rendered.append((r["seq"], None, r["text"]))
             if r["seq"] + 1 in choices:
                 opts = " / ".join(choices[r["seq"] + 1])
-                rendered.append((r["seq"] + 1, None, f"{policy.mark(label('protagonist'))}{opts}"))
+                # Options the player could pick, not words anyone said: labelled as
+                # such, so a reader never takes an unchosen reply for one that happened.
+                rendered.append((r["seq"] + 1, None, f"{policy.mark(label('options'))}{opts}"))
 
         for group in _turn_aligned(rendered, target, cap, t.absorb_tail):
             uniq: list[str] = []
@@ -204,7 +207,7 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
             owners = tuple(dict.fromkeys(person_of.get(s, s) for s in uniq))
             head = header.format(
                 group=scene["grp"] or scene["category"] or label("story"),
-                scene=scene["id"],
+                scene=policy.scene_name(scene["id"]),
                 speakers=f" · {sep('list').join(uniq[:4])}" if uniq else "",
             )
             body = "\n".join(text for _seq, _s, text in group)
@@ -220,7 +223,7 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
 
 
 def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
-    label = pack.chunking.label
+    policy = pack.chunking
     person_of = archive.person_of()
     # Voice records name their source page; the revision lives with the fetched page.
     # Attribution has to reach every unit, so it is looked up rather than left null.
@@ -238,15 +241,13 @@ def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Itera
         person = person_of.get(r["subject"], r["subject"])
         # A variant is the same slot recorded again with other words; naming it in the
         # header keeps the two lines from reading as one line said twice.
-        title = " · ".join(x for x in (r["title"], r["variant"]) if x)
+        name = policy.voice_name(r["trigger"] or "", r["title"] or "")
         head = header.format(
-            person=person,
-            trigger=r["trigger"] or label("voice"),
-            title=f" · {title}" if title else "",
+            person=person, name=name, variant=f" · {r['variant']}" if r["variant"] else "",
         )
         yield Chunk(
             template=t.name, page=r["page"], text=r["text"], header=head,
-            title=r["title"] or r["trigger"] or label("voice"), persons=(person,),
+            title=name, persons=(person,),
             revid=revids.get(r["page"]),
             span_of=f"{r['subject']}#voice", span_from=r["idx"], span_to=r["idx"],
         )
@@ -357,6 +358,33 @@ def _letter(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iter
                 revid=revids.get(r["page"]),
                 span_of=f"{r['page']}#letter{i}", span_from=i, span_to=i,
             )
+
+
+def archive_triggers(archive: Archive) -> list[str]:
+    """Every voice trigger key the archive holds."""
+    return [r[0] for r in archive.db.execute(
+        "SELECT DISTINCT trigger FROM voices WHERE trigger <> '' ORDER BY trigger")]
+
+
+def engine_meta_test(policy: ChunkPolicy, triggers: list[str]) -> Callable[[str, str, str], bool]:
+    """`(template, page, header) -> bool`: does a unit header still show engine metadata?
+
+    Two kinds: a voice trigger key the archive holds, matched as a whole word anywhere
+    in any header, and a dialogue header that names its scene by the full page title
+    where the pack's page-part rule shortens it.
+    """
+    keys = sorted(set(triggers), key=len, reverse=True)
+    # ASCII word edges: a key glued to text in another script is still the key.
+    key_rx = (re.compile(r"(?<![A-Za-z0-9_-])(?:" + "|".join(map(re.escape, keys))
+                         + r")(?![A-Za-z0-9_-])") if keys else None)
+    dialogue = set(policy.shaped("dialogue"))
+
+    def test(template: str, page: str, header: str) -> bool:
+        if key_rx is not None and key_rx.search(header):
+            return True
+        return (template in dialogue and policy.scene_name(page) != page
+                and page in header)
+    return test
 
 
 BUILDERS = {

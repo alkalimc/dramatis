@@ -109,6 +109,7 @@ def test_v2_figures(built, pack):
     assert sum(v["low"] for v in figs["guards.by_guard"].value.values()) == 3
     assert figs["guards.unattributed"].value == 2
     assert figs["cooccur.pairs"].passed and figs["birthdays"].passed
+    assert figs["units.engine_meta"].value == 0 and figs["units.engine_meta"].passed
     assert figs["units.attributed"].value == 10
     assert figs["cooccur.scenes_per_person"].value == 2.0
     assert 0 < figs["stopword.top_df"].value <= 1 and "(the)" in figs["stopword.top_df"].shown

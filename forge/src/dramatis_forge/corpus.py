@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import __version__, segment
 from .archive import Archive
+from .chunk import archive_triggers, engine_meta_test
 from .chunk import build as build_chunks
 from .config import RunInfo
 from .folio import FOLIO_FORMAT_VERSION, Folio
@@ -48,12 +49,23 @@ class CorpusReport:
     #: quietly serving degraded results.
     requirements: list[str] = field(default_factory=list)
     repeated_header_segments: int = 0
+    #: Headers that still carry game-engine metadata: a voice trigger key, or a scene's
+    #: page-part suffix. Both are noise to retrieval and a model may read them aloud.
+    engine_meta_headers: int = 0
+    #: Voice trigger keys the pack gives no words for.
+    unnamed_triggers: list[str] = field(default_factory=list)
 
 
 def _repeats_a_segment(header: str) -> bool:
     """Does a header name the same thing twice in its breadcrumb?"""
     parts = [p.strip() for p in header.split("›") if p.strip()]
     return len(parts) != len(set(parts))
+
+
+def _engine_meta(archive: Archive, pack: Pack, rep: CorpusReport):
+    keys = archive_triggers(archive)
+    rep.unnamed_triggers = [k for k in keys if k not in pack.chunking.triggers]
+    return engine_meta_test(pack.chunking, keys)
 
 
 def _percentile(values: list[int], q: float) -> int:
@@ -95,6 +107,7 @@ def run(
     # on (manifest `form_copies`); form *differences* are kept as they are. Scenes are
     # left alone: two scenes that share lines are two tellings, not two copies.
     shared = set(pack.chunking.shaped("profile") + pack.chunking.shaped("voice"))
+    engine_meta = _engine_meta(archive, pack, rep)
     first_copy: dict[tuple, tuple[str, str]] = {}
     copies: dict[str, list[str]] = {}
     ord_ = 0
@@ -129,6 +142,8 @@ def run(
             bodies.setdefault(chunk.template, []).append(chunk.chars)
             if _repeats_a_segment(chunk.header):
                 rep.repeated_header_segments += 1
+            if engine_meta(chunk.template, chunk.page, chunk.header):
+                rep.engine_meta_headers += 1
             if chunk.span_of and chunk.span_from is not None and chunk.span_to is not None:
                 spans.setdefault(chunk.template, {}).setdefault(chunk.span_of, []).append(
                     (chunk.span_from, chunk.span_to))
@@ -504,6 +519,14 @@ def _check(
             "carry it again",
             high=rep.repeated_header_segments > rep.chunks * 0.01,
         )
+    if rep.engine_meta_headers:
+        rep.ledger.add(
+            "G5", f"{rep.engine_meta_headers} unit header(s) carry a voice trigger key or a "
+                  "scene's page-part suffix", high=True)
+    if rep.unnamed_triggers:
+        rep.ledger.add(
+            "G5", "voice trigger key(s) the pack gives no words for: "
+                  + ", ".join(rep.unnamed_triggers))
 
 
 #: Manifest keys that describe when and where a build ran rather than what it contains.

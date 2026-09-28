@@ -489,6 +489,15 @@ class ChunkPolicy:
     breaks: tuple[str, ...] = ("\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ")
     #: Punctuation the renderer writes between parts of a unit; keys as in `SEPARATORS`.
     separators: Mapping[str, str] = field(default_factory=dict)
+    #: A voice record's trigger key (the game engine's name for when a line plays) ->
+    #: the words a reader would use. Unit text never carries the key itself: it is no
+    #: help to retrieval, and a model may say it aloud. A line with its own title is
+    #: named by the title; one with neither falls back to the `voice` label.
+    triggers: Mapping[str, str] = field(default_factory=dict)
+    #: Regex for the part of a scene's page title that only splits one story across
+    #: pages (a "before battle" or "after battle" page). Dropped from the header only:
+    #: the page, citation and span keep the full title.
+    page_part: str = ""
 
     def label(self, key: str) -> str:
         return self.labels.get(key) or LABELS[key]
@@ -503,6 +512,14 @@ class ChunkPolicy:
         """An inline marker such as a caption tag, rendered with the pack's brackets."""
         return self.sep("mark").format(word)
 
+    def scene_name(self, page: str) -> str:
+        """A scene's page title as a header shows it, without its page-part suffix."""
+        return re.sub(self.page_part, "", page).strip() or page if self.page_part else page
+
+    def voice_name(self, trigger: str, title: str) -> str:
+        """What a header calls a voice line: its title, else its trigger's words."""
+        return title or self.triggers.get(trigger) or self.label("voice")
+
     def shaped(self, shape: str) -> tuple[str, ...]:
         """Names of the templates built by one builder."""
         return tuple(t.name for t in self.templates if t.builder == shape)
@@ -512,9 +529,9 @@ class ChunkPolicy:
 #: placeholders a pack is expected to replace.
 LABELS: Mapping[str, str] = {
     "subtitle": "subtitle",      # marks a caption line inside a dialogue unit
-    "protagonist": "you",        # who is picking, at a branch point
+    "options": "possible replies",  # marks the player's branch options in a dialogue unit
     "story": "story",            # a scene whose group and type are both absent
-    "voice": "voice",            # a voice line with no trigger recorded
+    "voice": "voice",            # a voice line with no title and no known trigger
     "letter": "letter",          # a letter with no title
     "unsigned": "(unsigned)",    # a letter with no sender
     "card": "identity card",     # the merged-fields unit of a person's dossier
