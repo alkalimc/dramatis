@@ -119,15 +119,23 @@ enum Command {
     Calibrate {
         #[arg(long)]
         suite: Option<PathBuf>,
-        /// Queries to fit on.
-        #[arg(long, default_value_t = 2000)]
-        sample: usize,
-        /// Queries to check on, drawn from those not fitted on. 0 skips the check.
-        #[arg(long, default_value_t = 4000)]
+        /// Queries to fit on, per family (families are weighted equally).
+        #[arg(long, default_value_t = 300)]
+        per_family: usize,
+        /// Queries per family to check on, drawn from those not fitted on. 0 skips it.
+        #[arg(long, default_value_t = 300)]
         holdout: usize,
         /// How often a `high` answer's top hit must be relevant.
-        #[arg(long, default_value_t = 0.9)]
+        #[arg(long, default_value_t = 0.95)]
         high_precision: f64,
+        /// Fit and check on these families only (default: all). Families whose gold set
+        /// is every unit of an entity the alias stage filters to are answered by
+        /// construction and say nothing about the scores.
+        #[arg(long)]
+        family: Vec<String>,
+        /// Write the fitting samples (family, top1, entropy, answered) here as JSONL.
+        #[arg(long)]
+        samples: Option<PathBuf>,
     },
     /// Measure the lexical path: latency distribution, throughput and resident memory.
     Bench {
@@ -205,10 +213,22 @@ fn main() -> Result<()> {
         ),
         Command::Calibrate {
             suite,
-            sample,
+            per_family,
             holdout,
             high_precision,
-        } => calibrate(&folio, &suite_path(suite)?, sample, holdout, high_precision),
+            family,
+            samples,
+        } => calibrate(
+            &folio,
+            &suite_path(suite)?,
+            &Fit {
+                per_family,
+                holdout,
+                high_precision,
+                families: family,
+            },
+            samples.as_deref(),
+        ),
         Command::Bench {
             query,
             suite,
@@ -808,31 +828,61 @@ fn evaluate(
     Ok(())
 }
 
-fn calibrate(
-    path: &Path,
-    suite_path: &Path,
-    sample: usize,
+/// What `calibrate` fits on.
+struct Fit {
+    per_family: usize,
     holdout: usize,
     high_precision: f64,
-) -> Result<()> {
+    families: Vec<String>,
+}
+
+fn calibrate(path: &Path, suite_path: &Path, fit: &Fit, samples_out: Option<&Path>) -> Result<()> {
+    let Fit {
+        per_family,
+        holdout,
+        high_precision,
+        ..
+    } = *fit;
     let mut index = open_index(path)?;
-    let suite = eval::Suite::load(suite_path)
+    let mut suite = eval::Suite::load(suite_path)
         .with_context(|| format!("loading {}", suite_path.display()))?;
-    let fit_on = suite.stratified(sample);
-    let rest = suite.without(&fit_on).stratified(holdout);
+    if !fit.families.is_empty() {
+        suite.queries.retain(|q| fit.families.contains(&q.family));
+    }
+    let fit_on = suite.per_family(per_family);
+    let rest = suite.without(&fit_on).per_family(holdout);
     // The window confidence is read over in production, with the production alias stage.
     let config = eval_config(index.params().top_k, Normalise::ExpandAndFilter);
 
-    println!("fitting on {} queries (stratified)", fit_on.queries.len());
+    println!(
+        "fitting on {} queries (at most {per_family} per family: {})",
+        fit_on.queries.len(),
+        fit_on.families().join(" ")
+    );
     let samples = eval::calibrate::collect(&mut index, &fit_on, &config)?;
+    if let Some(out) = samples_out {
+        let mut lines = String::new();
+        for s in &samples {
+            let row = serde_json::json!({
+                "family": s.family, "top1": s.top1, "entropy": s.entropy, "answered": s.answered,
+            });
+            lines.push_str(&row.to_string());
+            lines.push('\n');
+        }
+        std::fs::write(out, lines)?;
+    }
     let fit = eval::calibrate::fit(&samples, high_precision)
         .context("nothing to calibrate on: no query matched anything")?;
     let b = &fit.bands;
     println!("\n[retrieve.confidence]");
     println!("low_top1 = {:.3}", b.low_top1);
+    println!("low_entropy = {:.3}", b.low_entropy);
     println!("high_top1 = {:.3}", b.high_top1);
     println!("high_entropy = {:.3}", b.high_entropy);
-    println!("\nYouden's J at low_top1: {:.3}", fit.low_separation);
+    println!(
+        "\nYouden's J at the low boundary: {:.3}",
+        fit.low_separation
+    );
     let show = |label: &str, a: &eval::calibrate::Assessment| {
         println!(
             "{label} ({} queries, families weighted equally): high {:.1}% right {:.1}% · \

@@ -45,7 +45,7 @@ impl Confidence {
 }
 
 pub fn level(top1: f64, entropy: f64, bands: &ConfidenceBands) -> Level {
-    if top1 <= 0.0 || top1 < bands.low_top1 {
+    if top1 <= 0.0 || top1 < bands.low_top1 || entropy > bands.low_entropy {
         Level::Low
     } else if top1 >= bands.high_top1 && entropy <= bands.high_entropy {
         Level::High
@@ -88,6 +88,7 @@ mod tests {
 
     fn bands() -> ConfidenceBands {
         ConfidenceBands {
+            low_entropy: 1.0,
             low_top1: 2.0,
             high_top1: 6.0,
             high_entropy: 0.9,
@@ -130,6 +131,18 @@ mod tests {
         let narrow = Confidence::of(&scores, 1, &bands());
         assert_eq!(narrow.entropy, 0.0);
         assert!(wide.entropy > narrow.entropy);
+    }
+
+    #[test]
+    fn a_flat_window_can_be_low_on_its_own() {
+        let strict = ConfidenceBands {
+            low_entropy: 0.5,
+            ..bands()
+        };
+        assert_eq!(level(9.0, 0.95, &strict), Level::Low);
+        assert_eq!(level(9.0, 0.95, &bands()), Level::Medium);
+        // A single score has no window, so only the score bars apply.
+        assert_eq!(level_of_score(9.0, &strict), Level::High);
     }
 
     #[test]

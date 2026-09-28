@@ -39,18 +39,23 @@ impl Default for Retrieve {
 
 /// `retrieve.confidence`: boundaries on the two unweighted signals.
 ///
-/// `top1` is a raw BM25 score, so its scale belongs to the corpus (collection size and
-/// unit length both move it). The values below are uncalibrated starting points; the
-/// register's calibrated values come from `dramatis-cli calibrate` on the structural suite.
+/// `Low` when the best score is under `low_top1` or the window is flatter than
+/// `low_entropy`; `High` when the best score reaches `high_top1` and the window is at least
+/// as peaked as `high_entropy`; `Medium` otherwise. `top1` is a raw BM25 score, so its
+/// scale belongs to the corpus. These defaults are uncalibrated starting points; the
+/// register's values come from `dramatis-cli calibrate` on the structural suite and are
+/// supplied through `params.toml`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ConfidenceBands {
     /// Below this best score the corpus is taken to hold nothing on the query.
     pub low_top1: f64,
-    /// At or above this best score, with a peaked distribution, the answer is clear.
+    /// Above this normalised entropy the window is too flat to name an answer. 1 is
+    /// perfectly flat, so 1 disables the entropy half of `Low`.
+    pub low_entropy: f64,
+    /// At or above this best score, with a peaked window, the answer is clear.
     pub high_top1: f64,
-    /// Normalised entropy of the top-k scores at or below which the distribution counts
-    /// as peaked. 1 is perfectly flat.
+    /// At or below this normalised entropy the window counts as peaked.
     pub high_entropy: f64,
 }
 
@@ -58,6 +63,7 @@ impl Default for ConfidenceBands {
     fn default() -> Self {
         Self {
             low_top1: 5.0,
+            low_entropy: 1.0,
             high_top1: 10.0,
             high_entropy: 0.95,
         }

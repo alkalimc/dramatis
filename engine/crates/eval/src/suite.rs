@@ -107,6 +107,22 @@ impl Suite {
         }
     }
 
+    /// At most `per_family` queries from each family, every n-th within it: for fitting
+    /// where families are weighted equally, so a small family is not a handful of points.
+    pub fn per_family(&self, per_family: usize) -> Suite {
+        let mut by_family: BTreeMap<&str, Vec<&Query>> = BTreeMap::new();
+        for q in &self.queries {
+            by_family.entry(q.family.as_str()).or_default().push(q);
+        }
+        let mut queries = Vec::new();
+        for members in by_family.into_values() {
+            let want = per_family.min(members.len());
+            let step = members.len() as f64 / want.max(1) as f64;
+            queries.extend((0..want).map(|i| members[(i as f64 * step) as usize].clone()));
+        }
+        Suite { queries }
+    }
+
     /// This suite minus the queries of `other`, by qid.
     pub fn without(&self, other: &Suite) -> Suite {
         let taken: HashSet<&str> = other.queries.iter().map(|q| q.qid.as_str()).collect();
@@ -183,5 +199,24 @@ mod tests {
         assert!(picked.iter().any(|&i| families[i] == "small"));
         assert_eq!(picked.iter().filter(|&&i| families[i] == "big").count(), 10);
         assert_eq!(stratify(&families, |f| f, 0).len(), families.len());
+    }
+
+    #[test]
+    fn per_family_caps_each_family() {
+        let query = |qid: usize, family: &str| Query {
+            qid: qid.to_string(),
+            family: family.into(),
+            text: String::new(),
+            stratum: String::new(),
+            gold: BTreeMap::new(),
+            hard_negatives: Vec::new(),
+            note: String::new(),
+        };
+        let mut queries: Vec<Query> = (0..100).map(|i| query(i, "big")).collect();
+        queries.push(query(100, "small"));
+        let suite = Suite { queries };
+        let picked = suite.per_family(10);
+        assert_eq!(picked.queries.len(), 11);
+        assert_eq!(suite.without(&picked).queries.len(), 90);
     }
 }

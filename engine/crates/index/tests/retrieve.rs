@@ -399,6 +399,7 @@ fn find_people_aggregates_own_units_by_person() {
 fn participants_are_ranked_with_their_levels() {
     let file = corpus();
     let bands = ConfidenceBands {
+        low_entropy: 1.0,
         low_top1: 0.1,
         high_top1: 0.5,
         high_entropy: 1.0,
