@@ -16,8 +16,6 @@ pub enum Error {
     },
     #[error(transparent)]
     Index(#[from] index::Error),
-    #[error(transparent)]
-    Folio(#[from] folio::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

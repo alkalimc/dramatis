@@ -24,8 +24,12 @@ fn row(name: &str, a: &Aggregate) -> String {
     )
 }
 
-const HEADER: &str = "| | Queries | nDCG@10 | MRR | P@10 | Relevant units | R@10 | Negative wins | Empty |\n\
-     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |";
+fn header(k: usize) -> String {
+    format!(
+        "| | Queries | nDCG@{k} | MRR | P@{k} | Relevant units | R@{k} | Negative wins | Empty |\n\
+         | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    )
+}
 
 pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String {
     let scored: &[Scored] = &outcome.scored;
@@ -33,6 +37,8 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
     let per_stratum = by_family_and_stratum(scored);
     let macro_avg = macro_average(&per_family);
 
+    let k = config.k;
+    let header = header(k);
     let mut out = String::new();
     let _ = writeln!(out, "## {}\n", config.label());
     let _ = writeln!(
@@ -47,7 +53,7 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
 
     let _ = writeln!(
         out,
-        "### By family (each family weighted equally)\n\n{HEADER}"
+        "### By family (each family weighted equally)\n\n{header}"
     );
     for (family, aggregate) in &per_family {
         let _ = writeln!(out, "{}", row(family, aggregate));
@@ -59,7 +65,7 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
          and it is still a summary, not a conclusion."
     );
 
-    let _ = writeln!(out, "\n### By family × stratum\n\n{HEADER}");
+    let _ = writeln!(out, "\n### By family × stratum\n\n{header}");
     for (family, strata) in &per_stratum {
         for (stratum, aggregate) in strata {
             let _ = writeln!(out, "{}", row(&format!("{family} · {stratum}"), aggregate));
@@ -78,7 +84,7 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
         .max_by(|x, y| x.1.gold_size.total_cmp(&y.1.gold_size));
     let cap_note = match widest {
         Some((family, a)) if a.gold_size > config.k as f64 => format!(
-            "R@10 is capped by the number of relevant units: a `{family}` query has {:.0} \
+            "R@{k} is capped by the number of relevant units: a `{family}` query has {:.0} \
              relevant units on average, so {} slots can recall at most {:.0}%. ",
             a.gold_size,
             config.k,
@@ -88,7 +94,7 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
     };
     let _ = writeln!(
         out,
-        "\n{cap_note}Read this table by nDCG@10 and MRR; read R@10 only alongside the \
+        "\n{cap_note}Read this table by nDCG@{k} and MRR; read R@{k} only alongside the \
          \"Relevant units\" column."
     );
 
@@ -141,7 +147,7 @@ pub fn json(config: &Config, outcome: &Outcome) -> serde_json::Value {
             "label": config.label(),
             "k": config.k,
             "candidates": config.candidates,
-            "mode": format!("{:?}", config.mode).to_lowercase(),
+            "mode": "lexical",
             "normalise": format!("{:?}", config.normalise).to_lowercase(),
         },
         "scored": outcome.scored.len(),

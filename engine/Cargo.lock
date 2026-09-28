@@ -915,7 +915,6 @@ name = "eval"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "folio",
  "index",
  "serde",
  "serde_json",
@@ -999,6 +998,7 @@ name = "folio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "folio",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1727,6 +1727,7 @@ dependencies = [
  "folio",
  "jieba-rs",
  "rusqlite",
+ "serde",
  "serde_json",
  "thiserror 2.0.20",
 ]

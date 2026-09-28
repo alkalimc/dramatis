@@ -13,6 +13,7 @@
 //! point here reports per family and per stratum; the only aggregate offered is a
 //! macro-average, which is a summary, not a result.
 
+pub mod calibrate;
 pub mod error;
 pub mod metrics;
 pub mod report;

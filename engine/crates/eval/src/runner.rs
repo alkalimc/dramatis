@@ -6,8 +6,7 @@
 //! Answering it requires two runs over identical queries, which is why this returns
 //! per-query scores instead of an aggregate.
 
-use folio::Folio;
-use index::{Index, Mode, Normalise, Request};
+use index::{Index, Normalise, SearchRequest};
 
 use crate::error::Result;
 use crate::metrics::{Scored, score};
@@ -18,9 +17,8 @@ use crate::suite::Suite;
 pub struct Config {
     /// Cut-off for every metric. Reported in the metric's name, never left implicit.
     pub k: usize,
-    /// Candidates each path contributes before fusion.
+    /// Lexical candidates taken before truncation (`retrieve.candidates`).
     pub candidates: usize,
-    pub mode: Mode,
     /// How many hard-negative losses to keep for inspection. 0 keeps none.
     pub capture_failures: usize,
     /// What the alias stage is allowed to do. The three settings are the three systems
@@ -33,8 +31,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             k: 10,
-            candidates: 50,
-            mode: Mode::Lexical,
+            candidates: index::params::Retrieve::default().candidates,
             normalise: Normalise::Off,
             capture_failures: 0,
         }
@@ -44,17 +41,12 @@ impl Default for Config {
 impl Config {
     /// A stable name for reports, so a result can never be quoted without its settings.
     pub fn label(&self) -> String {
-        let mode = match self.mode {
-            Mode::Lexical => "lexical",
-            Mode::Dense => "dense",
-            Mode::Hybrid => "hybrid",
-        };
         let alias = match self.normalise {
             Normalise::Off => "",
             Normalise::Expand => "+expand",
             Normalise::ExpandAndFilter => "+expand+filter",
         };
-        format!("{mode}{alias}@{}·c{}", self.k, self.candidates)
+        format!("lexical{alias}@{}·c{}", self.k, self.candidates)
     }
 }
 
@@ -99,14 +91,26 @@ impl Outcome {
     }
 }
 
-/// Score one configuration over the whole suite.
+/// Set the retriever up as `config` describes: its cut-off, candidate count and alias
+/// stage, and no neighbour expansion (neighbours are context, not ranked results).
+pub fn configure(index: &mut Index, config: &Config) {
+    index.set_params(index::params::Retrieve {
+        top_k: config.k,
+        candidates: config.candidates,
+        neighbours: 0,
+        ..index.params().clone()
+    });
+    index.set_normalise(config.normalise);
+}
+
+/// Score one configuration over the whole suite, on the maintainer surface (no person).
 pub fn run(
-    folio: &Folio,
+    index: &mut Index,
     suite: &Suite,
     config: &Config,
     mut progress: impl FnMut(usize, usize),
 ) -> Result<Outcome> {
-    let index = Index::new(folio);
+    configure(index, config);
     let mut scored = Vec::with_capacity(suite.queries.len());
     let mut latencies_us = Vec::with_capacity(suite.queries.len());
     let mut failures: Vec<Failure> = Vec::new();
@@ -119,22 +123,15 @@ pub fn run(
             continue;
         }
 
-        let request = Request {
-            query: query.text.clone(),
-            mode: config.mode,
-            top_k: config.k,
-            templates: Vec::new(),
-            persons: Vec::new(),
-            candidates: config.candidates,
-            normalise: config.normalise,
-            expand: 0,
-        };
-
         let started = std::time::Instant::now();
-        let response = index.search(&request, None)?;
+        let response = index.search(&SearchRequest::new(query.text.as_str()))?;
         latencies_us.push(started.elapsed().as_micros());
 
-        let ranked: Vec<String> = response.hits.iter().map(|h| h.unit.id.clone()).collect();
+        let ranked: Vec<String> = response
+            .hits
+            .iter()
+            .map(|h| h.item.id().to_string())
+            .collect();
         let outcome = score(query, &ranked, config.k);
         if outcome.negative_won && failures.len() < config.capture_failures {
             let negatives: std::collections::HashSet<&str> =
@@ -225,10 +222,9 @@ mod tests {
         let config = Config {
             k: 6,
             candidates: 100,
-            mode: Mode::Hybrid,
             normalise: Normalise::ExpandAndFilter,
             ..Config::default()
         };
-        assert_eq!(config.label(), "hybrid+expand+filter@6·c100");
+        assert_eq!(config.label(), "lexical+expand+filter@6·c100");
     }
 }
