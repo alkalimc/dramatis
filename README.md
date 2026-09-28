@@ -8,8 +8,9 @@ Everything specific to one wiki (which pages to take, how to parse them, identit
 wording, language rules) lives in a **pack** that you supply. This repository ships none.
 
 ```
-forge/    Python 3.13   sync · build · baseline · report
-engine/   Rust 2024     crates/folio · crates/index · crates/eval · crates/api
+forge/    Python 3.13   sync · build · baseline · report · persona
+engine/   Rust 2024     crates/folio · crates/index · crates/eval · crates/world
+                        crates/agent · crates/api
                         bins/dramatis-cli · bins/dramatis (desktop app, Tauri 2)
 ui/       TypeScript    React 19 + Vite, talks only to the engine's `api` commands
 ```
