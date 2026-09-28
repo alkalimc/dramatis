@@ -62,7 +62,7 @@ def test_story_header_drops_the_page_part_but_the_unit_keeps_its_page(tmp_path, 
 def test_engine_metadata_in_a_header_is_detected(tuned):
     test = chunk.engine_meta_test(tuned.chunking, ["HELLO", "BATTLE_START"])
     assert test("voice", "P", "[voice] Ann · HELLO")
-    assert test("voice", "P", "[voice] Ann · 开始BATTLE_START")
+    assert test("voice", "P", "[voice] Ann · éBATTLE_START")
     assert not test("voice", "P", "[voice] Ann · HELLOS greeting")
     assert test("dialogue", "Ch 1/BEG", "[scene] Book · Ch 1/BEG · Ann")
     assert not test("dialogue", "Ch 1/BEG", "[scene] Book · Ch 1 · Ann")
