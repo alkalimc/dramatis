@@ -226,9 +226,15 @@ def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Itera
     # Attribution has to reach every unit, so it is looked up rather than left null.
     revids = {row["title"]: row["revid"]
               for row in archive.db.execute("SELECT title,revid FROM raw.pages")}
-    for r in archive.db.execute(
+    # Person by person, forms in their declared order, lines in page order: when two forms
+    # repeat a line, the first form's unit is the one the corpus keeps.
+    ordinal = {r["page"]: r["ordinal"] for r in archive.db.execute("SELECT page,ordinal FROM forms")}
+    rows = archive.db.execute(
         "SELECT page,subject,idx,variant,title,trigger,text FROM voices ORDER BY subject,page,seq"
-    ):
+    ).fetchall()
+    rows.sort(key=lambda r: (person_of.get(r["subject"], r["subject"]),
+                             ordinal.get(r["subject"], 0), r["subject"]))
+    for r in rows:
         person = person_of.get(r["subject"], r["subject"])
         # A variant is the same slot recorded again with other words; naming it in the
         # header keeps the two lines from reading as one line said twice.

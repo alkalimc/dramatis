@@ -83,3 +83,28 @@ def test_voice_variants_share_a_slot(tmp_path):
 ])
 def test_every_record_exposes_its_prose(record):
     assert ("body" in record.prose) or ("said" in record.prose and "t" in record.prose)
+
+
+def test_a_form_page_repeating_its_person_is_stored_once(built, pack, tmp_path):
+    """Two form pages of one person carrying the same dossier section: one unit, which
+    names the other page. A section only one form has is kept, and scenes that share
+    text are left alone."""
+    from dramatis_forge import corpus
+    from dramatis_forge.records import Dossier
+    same = {"title": "Record", "text": "Keeps the northern light and writes letters."}
+    only = {"title": "Winter", "text": "In winter she wears a heavy coat and says little."}
+    with Archive(built.archive) as a:
+        a.db.execute("DELETE FROM dossiers")
+        a.insert_records([
+            Dossier(page="Alice", fields={"home": "North Cape"}, sections=(same,), revid=1),
+            Dossier(page="Alice (Winter)", sections=(same, only), revid=2),
+        ])
+        a.commit()
+        rep = corpus.run(a, pack, tmp_path / "f.folio", segmenter="bigram")
+    assert rep.form_copies == 1
+    with Folio(tmp_path / "f.folio", readonly=True) as f:
+        rows = f.db.execute("SELECT id, page, text FROM chunks WHERE template='profile' "
+                            "AND title IN ('Record', 'Winter') ORDER BY ord").fetchall()
+        assert [(r["page"], r["text"]) for r in rows] == [
+            ("Alice", same["text"]), ("Alice (Winter)", only["text"])]
+        assert f.get_meta("form_copies") == {rows[0]["id"]: ["Alice (Winter)"]}

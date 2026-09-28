@@ -283,6 +283,29 @@ def _d_cooccur_scenes_per_person(src: _Sources, _m: str | None):
     return round(mean, 1), f"{mean:.1f}"
 
 
+def _d_form_copies(src: _Sources, _m: str | None):
+    """Units stored once because another form page of the same person repeats them."""
+    table = src.meta["folio"].get("form_copies")
+    if not isinstance(table, Mapping):
+        return None
+    return _count(sum(len(v) for v in table.values()))
+
+
+def _d_same_person_copies(src: _Sources, _m: str | None):
+    """Profile and voice units whose exact text is stored twice for one person on two
+    pages. Should be 0 once form copies are collapsed."""
+    assert src.folio is not None
+    names = src.shaped("profile") + src.shaped("voice")
+    if not names:
+        return None
+    marks = ",".join("?" * len(names))
+    return _count(src.folio.execute(
+        "select coalesce(sum(n - 1), 0) from (select count(*) n from chunks c "
+        "join unit_persons u on u.chunk_id = c.id "
+        f"where c.template in ({marks}) group by c.template, u.person_id, c.text "
+        "having count(distinct c.page) > 1)", names).fetchone()[0])
+
+
 def _d_birthdays(src: _Sources, _m: str | None):
     """Persons whose birthday the builder could read as `MM-DD`."""
     assert src.folio is not None
@@ -515,6 +538,8 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "cooccur_pairs": (("folio",), _d_cooccur_pairs),
     "cooccur_scenes_per_person": (("folio",), _d_cooccur_scenes_per_person),
     "birthdays": (("folio",), _d_birthdays),
+    "form_copies": (("folio",), _d_form_copies),
+    "same_person_copies": (("folio",), _d_same_person_copies),
     "stopword_top_df": (("folio",), _d_stopword_top_df),
     "pipeline_hours": (("archive",), _d_pipeline_hours),
     "people_with_material": (("folio",), _d_people_with_material),
