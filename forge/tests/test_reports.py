@@ -164,3 +164,8 @@ def test_say_prefers_pack_text_then_framework_default(pack):
         "- This sync: 1 changed · 2 added · 3 removed")
     with pytest.raises(KeyError):
         pack.say("no.such.key")
+
+
+def test_term_columns_follow_every_record_order():
+    from dramatis_forge.report.inspect import _merge_orders
+    assert _merge_orders([["b", "d"], ["a", "b", "c", "d"], ["e"]]) == ["a", "b", "c", "d", "e"]

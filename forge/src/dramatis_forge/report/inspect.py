@@ -152,6 +152,25 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
     return out
 
 
+def _merge_orders(orders: list[list[str]]) -> list[str]:
+    """One column order agreeing with every record's own key order.
+
+    Each term lists only the renderings it has, in the source's column order; taking
+    labels by first appearance puts a column after one it precedes in the source,
+    whenever the first term to use it skipped the column before it.
+    """
+    out: list[str] = []
+    for keys in orders:
+        at = 0
+        for key in keys:
+            if key in out:
+                at = out.index(key) + 1
+            else:
+                out.insert(at, key)
+                at += 1
+    return out
+
+
 def render(pack: Pack, title: str, row, rec: dict) -> str:
     say, policy = pack.say, pack.chunking
     lsep, list_sep = policy.sep("label"), policy.sep("list")
@@ -235,8 +254,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
                   m["body"], ""]
 
     if "terms" in rec:
-        # Columns in the source's order: first appearance across the page's terms.
-        labels = list(dict.fromkeys(k for t in rec["terms"] for k in t["translations"]))
+        labels = _merge_orders([list(t["translations"]) for t in rec["terms"]])
         L += [say("inspect.terms", n=len(rec["terms"])), "",
               *table_head("|".join([say("inspect.term"), *labels, say("inspect.category")]))]
         for t in rec["terms"]:
