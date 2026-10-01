@@ -62,6 +62,27 @@ impl Agent {
         text: &str,
         image: Option<wire::Image>,
     ) -> Result<Posted> {
+        self.post_with(channel, text, image, &crate::store::MessageMeta::default())
+    }
+
+    /// Pass a quoted excerpt to someone: it is posted in his direct channel as the
+    /// user's message, marked as a retelling. Run [`Agent::respond`] on the result.
+    pub fn relay(&self, excerpt: &str, to: &PersonId) -> Result<Posted> {
+        let ch = self.open_direct(to)?;
+        let meta = crate::store::MessageMeta {
+            relayed: true,
+            ..crate::store::MessageMeta::default()
+        };
+        self.post_with(ch, excerpt, None, &meta)
+    }
+
+    fn post_with(
+        &self,
+        channel: ChannelId,
+        text: &str,
+        image: Option<wire::Image>,
+        meta: &crate::store::MessageMeta,
+    ) -> Result<Posted> {
         if text.trim().is_empty() && image.is_none() {
             return Err(Error::Invalid("empty message".into()));
         }
@@ -72,6 +93,9 @@ impl Agent {
             self.available(&conn, p)?;
         }
         let id = message::append(&conn, channel, &Actor::User, text, None, None, now.ms)?;
+        if !meta.is_empty() {
+            crate::store::complete_message(&conn, id, text, None, meta)?;
+        }
         session::touch_channel(&conn, channel, now.ms)?;
         let stored = message::get(&conn, id)?;
         let host = ch.is_host_channel();
@@ -462,6 +486,73 @@ impl Agent {
         Ok(())
     }
 
+    // ---- channels and modes ----
+
+    /// The direct channel with a person, created on first use. Nobody without a persona
+    /// and nobody disabled gets one.
+    pub fn open_direct(&self, person: &PersonId) -> Result<ChannelId> {
+        let conn = self.db();
+        self.available(&conn, person)?;
+        Ok(channel::direct(&conn, person)?)
+    }
+
+    /// A group the user starts; every member must be someone who can talk.
+    pub fn create_group(&self, members: &[PersonId], topic: Option<&str>) -> Result<ChannelId> {
+        let conn = self.db();
+        for m in members {
+            self.available(&conn, m)?;
+        }
+        let id = channel::create_group(&conn, members, topic, world::Origin::User)?;
+        drop(conn);
+        self.changed(vec![WorldChange::Channel {
+            id: view::channel_id(id),
+        }]);
+        Ok(id)
+    }
+
+    /// Change a person's or a group's mode, as the user. Enabling someone without a
+    /// persona is refused.
+    pub fn set_mode(&self, target: &api::types::Target, mode: api::types::Mode) -> Result<()> {
+        let m = view::world_mode(mode);
+        match target {
+            api::types::Target::Person { id } => {
+                self.set_person_mode(&PersonId(id.0.clone()), m)?;
+            }
+            api::types::Target::Channel { id } => {
+                let ch =
+                    id.0.parse::<i64>()
+                        .map(ChannelId)
+                        .map_err(|_| Error::Invalid(format!("channel `{}`", id.0)))?;
+                channel::set_mode(&self.db(), ch, m)?;
+            }
+        }
+        self.emit(Event::ModeChanged(api::events::ModeChanged {
+            target: target.clone(),
+            mode,
+        }));
+        Ok(())
+    }
+
+    /// Queue event seeds for an event that searched the roster (a conclusion written, a
+    /// question pinned): the people whose own units match `text` best. Run
+    /// [`Agent::on_event`] afterwards to let one of them speak.
+    pub fn queue_event(&self, event: seed::Event, text: &str) -> Result<u32> {
+        let offer = self.offerable(&self.db())?;
+        let people = self
+            .ix()
+            .find_people(text, Some(&offer), self.config.find_people.k, &[])?;
+        let hits: Vec<seed::Hit> = people
+            .persons
+            .iter()
+            .filter(|m| m.level != index::Level::Low)
+            .map(|m| seed::Hit {
+                person: PersonId::from(m.person.as_str()),
+                material: vec![m.reason.id.clone()],
+            })
+            .collect();
+        Ok(seed::queue_hits(&self.db(), event, &hits, self.now().ms)?)
+    }
+
     // ---- requests ----
 
     /// The user asks a person to look into a question. Returns the request at once; the
@@ -560,9 +651,8 @@ impl Agent {
         let Some(seg) = world::log::current(&self.db(), ch)? else {
             return Ok(None);
         };
-        if world::log::entries(&self.db(), seg.id)?.is_empty()
-            || self.segment_wire(seg.id)? != role.profile.wire_api
-        {
+        let empty = world::log::entries(&self.db(), seg.id)?.is_empty();
+        if empty || self.segment_wire(seg.id)? != role.profile.wire_api {
             return Ok(None);
         }
         if !self.decide(CallKind::UserInitiated)?.allowed() {
@@ -868,15 +958,7 @@ impl Agent {
 
     /// Run a planned opening. Returns whether he spoke (the seed is then used).
     async fn opening(&self, o: &Opening) -> Result<bool> {
-        if !self.has_persona(o.person.as_str()) {
-            return Ok(false);
-        }
-        let kind = if matches!(o.kind, SeedKind::Commitment(_)) {
-            CallKind::UserInitiated
-        } else {
-            CallKind::Opening
-        };
-        if !self.decide(kind)?.allowed() {
+        if !self.has_persona(o.person.as_str()) || !self.decide(CallKind::Opening)?.allowed() {
             return Ok(false);
         }
         let seg = self.ensure_segment(o.channel, None).await?;

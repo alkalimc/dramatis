@@ -172,15 +172,42 @@ pub trait Transport: Send + Sync {
     async fn models(&self, target: &Target) -> Result<Vec<String>>;
 }
 
-/// HTTP through `async-openai`.
-#[derive(Debug, Default, Clone)]
-pub struct Http;
+/// HTTP through `async-openai`. The client of the last target is kept, so consecutive
+/// calls reuse its connection (TLS setup is a visible share of the first token's wait).
+#[derive(Default)]
+pub struct Http {
+    last: std::sync::Mutex<Option<(String, String, Client<OpenAIConfig>)>>,
+}
 
-fn client(target: &Target) -> Client<OpenAIConfig> {
-    let mut config = OpenAIConfig::new().with_api_base(target.base_url.trim_end_matches('/'));
-    // Without a key the header is still sent, empty: local servers ignore it.
-    config = config.with_api_key(target.key.as_ref().map(Secret::expose).unwrap_or(""));
-    Client::with_config(config)
+impl fmt::Debug for Http {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Http")
+    }
+}
+
+impl Http {
+    fn client(&self, target: &Target) -> Client<OpenAIConfig> {
+        let base = target.base_url.trim_end_matches('/').to_owned();
+        let key = target.key.as_ref().map(Secret::expose).unwrap_or("");
+        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((b, k, c)) = last.as_ref()
+            && *b == base
+            && k == key
+        {
+            return c.clone();
+        }
+        // Organisation and project headers would come from the environment otherwise:
+        // they mean nothing to other providers. Without a key an empty one is sent,
+        // which local servers ignore.
+        let config = OpenAIConfig::new()
+            .with_api_base(base.clone())
+            .with_api_key(key)
+            .with_org_id("")
+            .with_project_id("");
+        let c = Client::with_config(config);
+        *last = Some((base, key.to_owned(), c.clone()));
+        c
+    }
 }
 
 fn endpoint(e: async_openai::error::OpenAIError) -> Error {
@@ -193,7 +220,7 @@ fn endpoint(e: async_openai::error::OpenAIError) -> Error {
 impl Transport for Http {
     async fn stream(&self, target: &Target, body: Vec<u8>) -> Result<Events> {
         let raw: Box<RawValue> = serde_json::from_slice(&body)?;
-        let c = client(target);
+        let c = self.client(target);
         let events = match target.wire {
             WireApi::Chat => c.chat().create_stream_byot::<_, Value>(raw).await,
             WireApi::Responses => c.responses().create_stream_byot::<_, Value>(raw).await,
@@ -203,7 +230,8 @@ impl Transport for Http {
     }
 
     async fn models(&self, target: &Target) -> Result<Vec<String>> {
-        let list: Value = client(target)
+        let list: Value = self
+            .client(target)
             .models()
             .list_byot()
             .await

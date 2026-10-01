@@ -150,20 +150,17 @@ impl Agent {
                         query: s.query.clone(),
                     },
                 )?;
-                let offer = self.offerable(&self.db())?;
+                let off = bond::disabled(&self.db())?;
                 let persons = s
                     .persons
                     .unwrap_or_default()
                     .into_iter()
-                    .filter(|p| {
-                        offer.contains(p) || self.ix().folio().person(p).ok().flatten().is_some()
-                    })
-                    .filter(|p| {
-                        !bond::is_disabled(&self.db(), &PersonId::from(p.as_str())).unwrap_or(true)
-                    })
+                    .filter(|p| !off.iter().any(|d| d.as_str() == p))
                     .collect();
                 let mut seen = self.seen(seg)?;
-                let resp = self.retrieve(turn.channel, &turn.speaker, &s.query, persons, &seen)?;
+                let mut resp =
+                    self.retrieve(turn.channel, &turn.speaker, &s.query, persons, &seen)?;
+                drop_disabled(&mut resp, &off);
                 let m = assemble::material(&self.ctx(names), &resp, &mut seen, true);
                 turn.level = m.level;
                 turn.shown.extend(m.shown);
@@ -216,15 +213,16 @@ impl Agent {
                 Ok(Ok(self.say(names, "harness.remembered", &[])))
             }
             SharedCall::Report(r) => {
+                // The request this turn runs on, or one he is on in this channel.
                 let task = {
                     let conn = self.db();
-                    match turn.task {
-                        Some(t) => Some(world::task::get(&conn, t)?).filter(|t| {
-                            t.assignee.as_ref() == Some(&me)
-                                && t.status == world::TaskStatus::Active
-                        }),
-                        None => None,
-                    }
+                    let t = match turn.task {
+                        Some(t) => Some(world::task::get(&conn, t)?),
+                        None => world::task::active_for(&conn, &me, turn.channel)?,
+                    };
+                    t.filter(|t| {
+                        t.assignee.as_ref() == Some(&me) && t.status == world::TaskStatus::Active
+                    })
                 };
                 let Some(task) = task else {
                     return Ok(Err(self.refuse(names, "harness.error.no_task", "")));
@@ -581,6 +579,24 @@ impl Agent {
         }
         bond::set_mode(&self.db(), p, mode)?;
         Ok(())
+    }
+}
+
+/// Search results never offer a disabled person's own units.
+fn drop_disabled(resp: &mut index::SearchResponse, off: &[PersonId]) {
+    if off.is_empty() {
+        return;
+    }
+    let gone = |persons: &[String]| {
+        !persons.is_empty()
+            && persons
+                .iter()
+                .all(|p| off.iter().any(|d| d.as_str() == p.as_str()))
+    };
+    resp.hits
+        .retain(|h| h.item.unit().is_none_or(|u| !gone(&u.persons)));
+    for h in &mut resp.hits {
+        h.neighbours.retain(|u| !gone(&u.persons));
     }
 }
 

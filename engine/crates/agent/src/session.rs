@@ -157,12 +157,13 @@ impl Agent {
     ) -> Result<[String; 3]> {
         let ctx = self.ctx(names);
         let c = channel::get(conn, ch)?;
+        // Before the corpus lock below: `recent` takes it too.
+        let recent = match tail {
+            Some(t) => self.recent(conn, ch, t.before)?,
+            None => Vec::new(),
+        };
         if c.is_host_channel() {
             let a = assemble::block_a_host(&ctx, &self.corpus.host_name, &self.corpus.host);
-            let recent = match tail {
-                Some(t) => self.recent(conn, ch, t.before)?,
-                None => Vec::new(),
-            };
             let c_block = assemble::block_c(
                 &ctx,
                 &assemble::Opening {
@@ -232,10 +233,6 @@ impl Agent {
             memories.drain(..memories.len() - keep);
         }
         let owner = (people.len() == 1).then(|| names_of[0].as_str());
-        let recent = match tail {
-            Some(t) => self.recent(conn, ch, t.before)?,
-            None => Vec::new(),
-        };
         let c_block = assemble::block_c(
             &ctx,
             &assemble::Opening {
@@ -517,10 +514,19 @@ impl Agent {
             }
         }
         drop(events);
-        if let Some(e) = failure {
-            return Err(e);
-        }
-        let reply = decoder.finish()?;
+        let reply = match failure.map_or_else(|| decoder.finish(), Err) {
+            Ok(r) => r,
+            Err(e) => {
+                // Nothing reached the log; a message row with no text yet goes too.
+                if let Some(id) = turn.message
+                    && turn.text.is_empty()
+                {
+                    store::discard_message(&self.db(), id)?;
+                    turn.message = None;
+                }
+                return Err(e);
+            }
+        };
         let now = self.now();
         {
             let conn = self.db();

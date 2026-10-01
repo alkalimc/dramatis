@@ -5,8 +5,8 @@
 //! ever rewritten; a segment ends only by rolling over into a new one.
 //!
 //! Locks: the world and the corpus are each behind a mutex that is only held between
-//! awaits. One turn runs at a time (`turns`), so a log is never appended to by two
-//! flows at once.
+//! awaits, always taken in that order (world, then corpus). One flow runs at a time
+//! (`turns`), so a log is never appended to by two flows at once.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -179,6 +179,37 @@ impl Agent {
         if !changes.is_empty() {
             self.emit(Event::WorldChanged(WorldChanged { changes }));
         }
+    }
+
+    /// Run `f` on the world database: read-side commands share the agent's connection.
+    /// `f` must not call back into the agent (the lock is not reentrant).
+    pub fn with_world<T>(&self, f: impl FnOnce(&World) -> T) -> T {
+        f(&self.db())
+    }
+
+    /// Run `f` on the retriever and its corpus. Same rule as [`Agent::with_world`]; when
+    /// both are needed, take the world first.
+    pub fn with_index<T>(&self, f: impl FnOnce(&Index) -> T) -> T {
+        f(&self.ix())
+    }
+
+    /// A channel's messages as the UI renders them, oldest first.
+    pub fn history(
+        &self,
+        channel: world::ChannelId,
+        before: Option<world::MessageId>,
+        limit: u32,
+    ) -> Result<Vec<api::views::Message>> {
+        let offset = self.now().offset_min;
+        let msgs = world::message::history(&self.db(), channel, before, limit)?;
+        Ok(msgs
+            .iter()
+            .map(|m| crate::view::message(m, offset, &self.config.office))
+            .collect())
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 
     /// Whether a person may have a session: he has a persona in the corpus.
