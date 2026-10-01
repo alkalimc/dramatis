@@ -261,6 +261,7 @@ function AddProfile({ view, onDone }: { view: EndpointsView; onDone: () => void 
       <select id={`${id}-w`} value={wire} onChange={(e) => setWire(e.target.value as WireApi)}>
         <option value="chat">chat</option>
         <option value="responses">responses</option>
+        <option value="messages">messages</option>
       </select>
       <p className="row end">
         <button type="button" className="ghost" onClick={onDone}>
