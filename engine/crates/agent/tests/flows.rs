@@ -897,3 +897,49 @@ async fn a_log_continues_across_a_change_of_wire_api() {
         "the whole log is sent"
     );
 }
+
+#[tokio::test]
+async fn a_due_commitment_opens_on_its_own_log_even_for_a_frozen_person() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        let new = NewFact::new(
+            Actor::Person(p("ann")),
+            Audience::Participants(ch),
+            FactKind::Commitment,
+            "Tea together at noon",
+        )
+        .due(T0 - 60_000);
+        fact::write(w, &new, T0 - 3_600_000).unwrap();
+    });
+    e.fake.push([say("It is noon, Dr.Doc. Tea?")]);
+    let opened = e.agent.on_event().await.unwrap();
+    assert_eq!(opened, Some((p("ann"), ch)));
+    let entry = items(&e.fake.json()[0]).last().unwrap().to_string();
+    assert!(
+        entry.contains("A promise is due: Tea together at noon"),
+        "{entry}"
+    );
+    assert_eq!(meter(&e.agent)[0].0, "opening");
+    let due = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    assert!(due[0].delivered, "brought up once");
+    assert_eq!(e.agent.on_event().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_relay_is_posted_as_a_retelling_in_the_recipients_channel() {
+    let e = env(WireApi::Responses);
+    let posted = e
+        .agent
+        .relay("Ann said the water must be cooler.", &p("bo"))
+        .unwrap();
+    e.fake.push([say("Cooler water, then.")]);
+    e.agent.respond(posted.clone()).await.unwrap();
+    let msgs = e.agent.history(posted.channel, None, 5).unwrap();
+    assert!(msgs[0].relayed && msgs[0].text == "Ann said the water must be cooler.");
+    assert_eq!(msgs[1].text, "Cooler water, then.");
+    assert!(matches!(
+        e.agent.relay("x", &p("cy")),
+        Err(agent::Error::NoPersona(_))
+    ));
+}
