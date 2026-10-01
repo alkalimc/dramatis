@@ -10,9 +10,8 @@ use api::endpoints::WireApi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// What must stay byte-identical for a segment's lifetime. Stored as the segment's
-/// `shape`; a mismatch with the current configuration rolls the segment over.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What must stay byte-identical for a segment's lifetime.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shape {
     pub wire: WireApi,
     pub model: String,
@@ -23,14 +22,41 @@ pub struct Shape {
     pub user: String,
 }
 
+/// A segment's `shape` column: the shape with the tool list as a digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stored {
+    pub wire: WireApi,
+    pub model: String,
+    pub reasoning: Option<String>,
+    pub tools: String,
+    pub user: String,
+}
+
 impl Shape {
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("shape serialises")
+        let stored = Stored {
+            wire: self.wire,
+            model: self.model.clone(),
+            reasoning: self.reasoning.clone(),
+            tools: digest(self.tools.as_bytes()),
+            user: self.user.clone(),
+        };
+        serde_json::to_string(&stored).expect("shape serialises")
     }
 
-    pub fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Stored> {
         serde_json::from_str(s).ok()
     }
+}
+
+/// FNV-1a, 64 bits, hex: enough to tell two tool lists apart.
+fn digest(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// A body ready to send.

@@ -331,11 +331,13 @@ impl Agent {
             None => return Ok(Some(Roll::Incompatible)),
             _ => {}
         }
+        // Text only: an attached image is not material, and its encoding would dwarf it.
         let entries = log::entries(&conn, seg.id)?;
         let material: usize = entries
             .iter()
             .filter(|e| e.role != Role::Assistant)
-            .map(|e| e.bytes.len())
+            .flat_map(|e| wire::texts(&e.bytes))
+            .map(|t| t.len())
             .sum();
         let (c, _) = quota::ratios(role.prices(), &self.config.world.cost);
         let roll = &self.config.agent.roll;

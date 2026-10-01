@@ -811,3 +811,27 @@ fn flows_are_send() {
     send(&e.agent.on_rename());
     send(&e.agent.on_event());
 }
+
+#[tokio::test]
+async fn tick_wraps_up_idle_conversations_and_nothing_else() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("hi")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    assert_eq!(e.agent.tick().await.unwrap(), None);
+    assert_eq!(e.fake.bodies().len(), 1, "not idle yet: no call");
+    e.clock.advance(31 * 60_000);
+    e.fake.push([call(
+        "wrapup",
+        json!({"facts": [{"kind": "fact", "text": "Said hello"}]}),
+    )]);
+    e.agent.tick().await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 2);
+    assert_prefix_chain(&e.fake.bodies());
+    assert_eq!(
+        e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
+        1
+    );
+    e.agent.tick().await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 2, "wrapped up once");
+}

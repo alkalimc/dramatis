@@ -790,7 +790,7 @@ impl Agent {
         };
         let has_endpoint = self.chat().is_ok();
         let mut out = PresenceOutcome {
-            digest: planned.digest.clone(),
+            digest: self.persona_digest(planned.digest.clone()),
             host_spoke: false,
             opened: None,
         };
@@ -807,7 +807,10 @@ impl Agent {
                     self.run_wrapup(channel, false).await?;
                 }
                 Call::HostLine(d) if !introduce => {
-                    out.host_spoke = self.host_harness(Some(&d)).await?;
+                    let d = self.persona_digest(d);
+                    if !d.is_empty() {
+                        out.host_spoke = self.host_harness(Some(&d)).await?;
+                    }
                 }
                 Call::HostLine(_) => {}
                 Call::Opening(o) => {
@@ -857,9 +860,35 @@ impl Agent {
     /// The digest, disabled people and people without a persona left out.
     pub fn world_digest(&self, now: world::clock::Now) -> Result<Digest> {
         let birthdays = self.birthdays()?;
-        let mut d = world::presence::digest(&self.db(), now, &birthdays)?;
+        let d = world::presence::digest(&self.db(), now, &birthdays)?;
+        Ok(self.persona_digest(d))
+    }
+
+    fn persona_digest(&self, mut d: Digest) -> Digest {
         d.items.retain(|w| self.has_persona(w.person.as_str()));
-        Ok(d)
+        d
+    }
+
+    /// The periodic step while the app runs: conversations idle past
+    /// `session.idle_timeout` are wrapped up, then due event seeds (a commitment) may
+    /// open. Call it every minute or so; it makes no call when nothing is due.
+    pub async fn tick(&self) -> Result<Option<(PersonId, ChannelId)>> {
+        let ended = {
+            let _turn = self.turns.lock().await;
+            let ended =
+                session::expire_idle(&self.db(), self.now().ms, &self.config.world.session)?;
+            if self.chat().is_ok() {
+                for ch in &ended {
+                    self.run_wrapup(*ch, false).await?;
+                }
+            }
+            ended
+        };
+        let opened = self.on_event().await?;
+        if !ended.is_empty() {
+            self.changed(vec![WorldChange::Digest]);
+        }
+        Ok(opened)
     }
 
     fn birthdays(&self) -> Result<Vec<(PersonId, MonthDay)>> {
