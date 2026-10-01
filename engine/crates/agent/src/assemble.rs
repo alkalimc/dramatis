@@ -59,9 +59,15 @@ fn heading(ctx: &Ctx<'_>, name: &str) -> String {
 
 /// Someone whose persona a person session carries.
 pub enum Member<'a> {
-    Person { name: &'a str, persona: &'a Persona },
+    Person {
+        name: &'a str,
+        persona: &'a Persona,
+    },
     /// The host in someone else's log: its in-world layer only.
-    Host { name: &'a str, in_world: &'a str },
+    Host {
+        name: &'a str,
+        in_world: &'a str,
+    },
 }
 
 /// One member's persona section. Also what a late joiner's entry carries.
@@ -125,7 +131,10 @@ pub fn memory_id(fact: &Fact) -> String {
 pub fn block_c(ctx: &Ctx<'_>, o: &Opening<'_>) -> String {
     let mut parts = Vec::new();
     for (name, tone) in &o.tones {
-        parts.push(ctx.fill(&format!("harness.tone.{}", tone.as_str()), &[("name", name)]));
+        parts.push(ctx.fill(
+            &format!("harness.tone.{}", tone.as_str()),
+            &[("name", name)],
+        ));
     }
     if let Some(t) = o.topic.filter(|t| !t.trim().is_empty()) {
         parts.push(ctx.fill("harness.topic", &[("topic", t.trim())]));
@@ -212,15 +221,16 @@ pub fn material(
         ..Material::default()
     };
     let mut blocks = Vec::new();
-    let mut push_unit = |u: &Unit, out: &mut Material, blocks: &mut Vec<String>| {
-        out.shown.push(u.id.clone());
-        if seen.insert(u.id.clone()) {
-            out.new.push(u.id.clone());
-            blocks.push(unit_block(ctx, u));
-        } else {
-            blocks.push(format!("[#{}]", u.id));
-        }
-    };
+    let push_unit =
+        |u: &Unit, out: &mut Material, blocks: &mut Vec<String>, seen: &mut HashSet<String>| {
+            out.shown.push(u.id.clone());
+            if seen.insert(u.id.clone()) {
+                out.new.push(u.id.clone());
+                blocks.push(unit_block(ctx, u));
+            } else {
+                blocks.push(format!("[#{}]", u.id));
+            }
+        };
     // Excluded ids ranked inside the window come first: they are the best matches.
     for id in &resp.excluded {
         out.shown.push(id.clone());
@@ -232,9 +242,9 @@ pub fn material(
     {
         match item {
             Item::Unit(u) => {
-                push_unit(u, &mut out, &mut blocks);
+                push_unit(u, &mut out, &mut blocks, seen);
                 for n in neighbours {
-                    push_unit(n, &mut out, &mut blocks);
+                    push_unit(n, &mut out, &mut blocks, seen);
                 }
             }
             Item::Memory { id, text } => {

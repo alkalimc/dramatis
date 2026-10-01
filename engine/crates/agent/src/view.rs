@@ -80,7 +80,11 @@ pub fn confidence(l: index::Level) -> t::Confidence {
 }
 
 /// A stored message as the UI renders it. `office` resolves a request's note.
-pub fn message(m: &world::message::Message, offset_min: i32, office: &std::path::Path) -> v::Message {
+pub fn message(
+    m: &world::message::Message,
+    offset_min: i32,
+    office: &std::path::Path,
+) -> v::Message {
     let meta = store::meta_of(m.attachment.as_ref());
     let actions: Vec<ToolAction> = m
         .tool_calls

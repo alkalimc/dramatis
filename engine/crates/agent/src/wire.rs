@@ -316,10 +316,7 @@ mod tests {
             } else {
                 &v["input"]
             };
-            assert_eq!(
-                list.as_array().unwrap().len(),
-                if wire == WireApi::Chat { 4 } else { 4 }
-            );
+            assert_eq!(list.as_array().unwrap().len(), 4);
             assert_eq!(v["stream"], true);
             assert!(v.get("text").is_none(), "no output format");
             assert!(v["tool_choice"].is_object());
@@ -332,7 +329,8 @@ mod tests {
         assert_eq!(v["reasoning"]["effort"], "low");
         assert_eq!(v["tool_choice"], "none");
         let v: Value =
-            serde_json::from_slice(&body(&shape(WireApi::Chat), "x", &[], None).bytes).unwrap();
+            serde_json::from_slice(&body(&shape(WireApi::Chat), "x", &[], Choice::Auto).bytes)
+                .unwrap();
         assert_eq!(v["reasoning_effort"], "low");
         assert!(v.get("prompt_cache_key").is_none());
     }

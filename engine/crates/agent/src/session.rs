@@ -17,7 +17,9 @@ use futures::StreamExt;
 use world::log::{self, Role};
 use world::quota;
 use world::wrapup::Summary;
-use world::{Actor, ChannelId, ChannelKind, MessageId, SegmentId, Shape, TaskId, bond, channel, message};
+use world::{
+    Actor, ChannelId, ChannelKind, MessageId, SegmentId, Shape, TaskId, bond, channel, message,
+};
 
 use crate::agent::{Agent, Event};
 use crate::assemble::{self, Ctx, Member};
@@ -151,12 +153,16 @@ impl Agent {
         ch: ChannelId,
         names: &Names,
         summary: Option<&Summary>,
+        tail: Option<Tail>,
     ) -> Result<[String; 3]> {
         let ctx = self.ctx(names);
         let c = channel::get(conn, ch)?;
         if c.is_host_channel() {
             let a = assemble::block_a_host(&ctx, &self.corpus.host_name, &self.corpus.host);
-            let recent = self.recent(conn, ch)?;
+            let recent = match tail {
+                Some(t) => self.recent(conn, ch, t.before)?,
+                None => Vec::new(),
+            };
             let c_block = assemble::block_c(
                 &ctx,
                 &assemble::Opening {
@@ -165,7 +171,7 @@ impl Agent {
                     memories: &[],
                     memory_owner: None,
                     summary: summary.map(|s| s.text.as_str()),
-                    recent: if summary.is_some() { &recent } else { &[] },
+                    recent: &recent,
                 },
             );
             return Ok([a, String::new(), c_block]);
@@ -187,7 +193,8 @@ impl Agent {
                 .person(p.as_str())?
                 .map(|x| x.display)
                 .unwrap_or_else(|| p.0.clone());
-            let persona = persona::person(folio, p.as_str())?.ok_or_else(|| Error::NoPersona(p.clone()))?;
+            let persona =
+                persona::person(folio, p.as_str())?.ok_or_else(|| Error::NoPersona(p.clone()))?;
             names_of.push(display);
             personas.push(persona);
         }
@@ -209,7 +216,10 @@ impl Agent {
             .zip(&names_of)
             .map(|(p, name)| {
                 let trust = bond::user_bond(conn, p).map(|b| b.trust).unwrap_or(100);
-                (name.as_str(), world::trust::tone(trust, &self.config.world.trust))
+                (
+                    name.as_str(),
+                    world::trust::tone(trust, &self.config.world.trust),
+                )
             })
             .collect::<Vec<_>>();
         let reader = people.first();
@@ -222,10 +232,9 @@ impl Agent {
             memories.drain(..memories.len() - keep);
         }
         let owner = (people.len() == 1).then(|| names_of[0].as_str());
-        let recent = if summary.is_some() {
-            self.recent(conn, ch)?
-        } else {
-            Vec::new()
+        let recent = match tail {
+            Some(t) => self.recent(conn, ch, t.before)?,
+            None => Vec::new(),
         };
         let c_block = assemble::block_c(
             &ctx,
@@ -245,11 +254,16 @@ impl Agent {
         Ok([a, b, c_block])
     }
 
-    /// The last `roll.tail` messages with text, as `(author name, text)`.
-    fn recent(&self, conn: &rusqlite::Connection, ch: ChannelId) -> Result<Vec<(String, String)>> {
+    /// The last `roll.tail` messages with text before `before`, as `(author, text)`.
+    fn recent(
+        &self,
+        conn: &rusqlite::Connection,
+        ch: ChannelId,
+        before: Option<MessageId>,
+    ) -> Result<Vec<(String, String)>> {
         let n = self.config.agent.roll.tail;
         let mut out = Vec::new();
-        let msgs = message::history(conn, ch, None, n.saturating_mul(4).max(n))?;
+        let msgs = message::history(conn, ch, before, n.saturating_mul(4).max(n))?;
         for m in msgs.into_iter().rev().filter(|m| !m.text.trim().is_empty()) {
             if out.len() as u32 >= n {
                 break;
@@ -279,14 +293,20 @@ impl Agent {
         ))
     }
 
-    /// Open the next segment of a channel, with a rollover's summary.
-    pub(crate) fn open_segment(&self, ch: ChannelId, summary: Option<&Summary>) -> Result<SegmentId> {
+    /// Open the next segment of a channel. A rollover passes the old segment's summary
+    /// and a [`Tail`]: the last messages go into the opening block.
+    pub(crate) fn open_segment(
+        &self,
+        ch: ChannelId,
+        summary: Option<&Summary>,
+        tail: Option<Tail>,
+    ) -> Result<SegmentId> {
         let (role, _) = self.chat()?;
         let conn = self.db();
         let names = self.names_now(&conn)?;
         let kind = self.log_kind(&conn, ch)?;
         let shape = self.shape_for(&role, kind, &names);
-        let [a, b, c] = self.prefix(&conn, ch, &names, summary)?;
+        let [a, b, c] = self.prefix(&conn, ch, &names, summary, tail)?;
         let blocks = [wire::system(&a), wire::system(&b), wire::system(&c)];
         let id = log::open_segment(
             &conn,
@@ -334,19 +354,25 @@ impl Agent {
         Ok(None)
     }
 
-    /// Make sure the channel has a segment that can take the next turn.
-    pub(crate) async fn ensure_segment(&self, ch: ChannelId) -> Result<SegmentId> {
+    /// Make sure the channel has a segment that can take the next turn. `before` is a
+    /// message about to be appended, which a rollover's tail must not repeat.
+    pub(crate) async fn ensure_segment(
+        &self,
+        ch: ChannelId,
+        before: Option<MessageId>,
+    ) -> Result<SegmentId> {
         match self.must_roll(ch)? {
             None => {}
             Some(Roll::Fresh) => {
-                self.open_segment(ch, None)?;
+                self.open_segment(ch, None, None)?;
             }
             Some(Roll::Incompatible) => {
-                // Stored items are in another wire format: nothing can be appended.
-                self.open_segment(ch, None)?;
+                // Stored items are in another wire format: nothing more can be appended,
+                // and no wrap-up can run on them either.
+                self.open_segment(ch, None, Some(Tail { before }))?;
             }
             Some(Roll::Rename | Roll::Material | Roll::Window) => {
-                self.roll(ch).await?;
+                self.roll(ch, before).await?;
             }
         }
         Ok(log::current(&self.db(), ch)?
@@ -355,9 +381,9 @@ impl Agent {
     }
 
     /// Roll a channel over: the wrap-up with a summary on the old segment, then a new one.
-    pub(crate) async fn roll(&self, ch: ChannelId) -> Result<SegmentId> {
+    pub(crate) async fn roll(&self, ch: ChannelId, before: Option<MessageId>) -> Result<SegmentId> {
         let summary = self.run_wrapup(ch, true).await?;
-        self.open_segment(ch, summary.as_ref())
+        self.open_segment(ch, summary.as_ref(), Some(Tail { before }))
     }
 
     /// The items of a segment in body order, and the ids it already carries in full.
@@ -394,7 +420,12 @@ impl Agent {
     }
 
     /// Append a harness or user entry.
-    pub(crate) fn append_user(&self, seg: SegmentId, text: &str, image: Option<&wire::Image>) -> Result<()> {
+    pub(crate) fn append_user(
+        &self,
+        seg: SegmentId,
+        text: &str,
+        image: Option<&wire::Image>,
+    ) -> Result<()> {
         let wire = self.segment_wire(seg)?;
         self.append(seg, Role::User, &wire::user(wire, text, image))
     }
@@ -416,7 +447,11 @@ impl Agent {
     }
 
     /// The harness context line when it differs from the last one in this segment.
-    pub(crate) fn context_line(&self, seg: SegmentId, turns: Option<u32>) -> Result<Option<String>> {
+    pub(crate) fn context_line(
+        &self,
+        seg: SegmentId,
+        turns: Option<u32>,
+    ) -> Result<Option<String>> {
         let now = self.now();
         let d = world::clock::in_world_date(now, self.corpus.year_offset);
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
@@ -436,10 +471,11 @@ impl Agent {
                 &names,
                 &[("date", &date), ("time", &time), ("turns", &n.to_string())],
             ),
-            None => self
-                .corpus
-                .wording
-                .fill("harness.context", &names, &[("date", &date), ("time", &time)]),
+            None => self.corpus.wording.fill(
+                "harness.context",
+                &names,
+                &[("date", &date), ("time", &time)],
+            ),
         };
         Ok(Some(line))
     }
@@ -564,10 +600,7 @@ impl Agent {
                     break;
                 }
                 match world::task::harness(t.turns_left) {
-                    world::task::Harness::ForceClose => {
-                        self.force_close(turn, task)?;
-                        break;
-                    }
+                    world::task::Harness::ForceClose => break,
                     world::task::Harness::MustReportThisTurn if !warned => {
                         warned = true;
                         let seg = self.current_segment(turn.channel)?;
@@ -601,17 +634,25 @@ impl Agent {
                 let output = self.dispatch(turn, call).await?;
                 self.append(seg, Role::Tool, &wire::tool_result(wire, &call.id, &output))?;
             }
-            if turn.closed {
+            // A colleague pulled in speaks next; the caller resumes after him.
+            if turn.closed || turn.joined.is_some() {
                 break;
             }
         }
-        if let Some(task) = turn.task
-            && !turn.closed
-            && world::task::get(&self.db(), task)?.turns_left == 0
-        {
+        self.finish_message(turn)
+    }
+
+    /// End of a request's run: still open means the turns ran out or the model answered
+    /// without `report`. Either way what it said is the reply.
+    pub(crate) fn close_open_task(&self, turn: &mut Turn) -> Result<()> {
+        let Some(task) = turn.task else {
+            return Ok(());
+        };
+        let active = world::task::get(&self.db(), task)?.status == world::TaskStatus::Active;
+        if active && !turn.closed {
             self.force_close(turn, task)?;
         }
-        self.finish_message(turn)
+        Ok(())
     }
 
     pub(crate) fn current_segment(&self, ch: ChannelId) -> Result<SegmentId> {
@@ -620,40 +661,82 @@ impl Agent {
             .id)
     }
 
-    /// Turns ran out: what was found goes out as the reply.
+    /// Turns ran out: what was found goes out as the reply. A reply already streamed
+    /// under the turn's message becomes the request's answer as it is; otherwise the
+    /// plain "found nothing" line is sent.
     fn force_close(&self, turn: &mut Turn, task: TaskId) -> Result<()> {
+        let now = self.now();
+        if let Some(id) = turn.message
+            && !turn.text.trim().is_empty()
+        {
+            let cites = self.citations(&turn.text, &turn.shown)?;
+            store::close_task_with(&self.db(), task, id, &cites, now.ms)?;
+            turn.closed = true;
+            let meta = MessageMeta {
+                cites,
+                confidence: turn.level,
+                task: Some(task),
+                ..MessageMeta::default()
+            };
+            self.complete(turn, id, &meta)?;
+            self.task_finished(task)?;
+            return Ok(());
+        }
         let names = self.names_now(&self.db())?;
-        let text = if turn.text.trim().is_empty() {
-            self.corpus.wording.fill("harness.nothing_found", &names, &[])
-        } else {
-            std::mem::take(&mut turn.text)
-        };
-        let cites = self.citations(&text, &turn.shown)?;
-        let reported = world::task::force_close(
-            &self.db(),
-            task,
-            &text,
-            &cites,
-            &self.config.office,
-            self.now().ms,
-        )?;
-        self.after_report(turn, task, reported.message, None)?;
+        let text = self
+            .corpus
+            .wording
+            .fill("harness.nothing_found", &names, &[]);
+        let reported =
+            world::task::force_close(&self.db(), task, &text, &[], &self.config.office, now.ms)?;
+        self.after_report(turn, task, reported.message, None)
+    }
+
+    /// Store a turn's message with its text, actions and meta, and announce it.
+    fn complete(&self, turn: &mut Turn, id: MessageId, meta: &MessageMeta) -> Result<()> {
+        let actions = (!turn.actions.is_empty())
+            .then(|| serde_json::to_value(&turn.actions))
+            .transpose()?;
+        let conn = self.db();
+        store::complete_message(&conn, id, &turn.text, actions.as_ref(), meta)?;
+        let stored = world::message::get(&conn, id)?;
+        drop(conn);
+        turn.message = None;
+        turn.text.clear();
+        turn.actions.clear();
+        self.emit(Event::MessageAdded(MessageAdded {
+            message: crate::view::message(&stored, self.now().offset_min, &self.config.office),
+        }));
         Ok(())
     }
 
-    /// A request was answered by `message`: move the turn's actions onto it, drop the
-    /// empty placeholder, apply trust and announce it.
+    /// A request was answered by `reply` (a new message). What the turn streamed before
+    /// it stays its own message; an empty placeholder is dropped and its actions move
+    /// onto the reply.
     pub(crate) fn after_report(
         &self,
         turn: &mut Turn,
         task: TaskId,
-        message: MessageId,
+        reply: MessageId,
         note: Option<String>,
     ) -> Result<()> {
         turn.closed = true;
-        let conn = self.db();
-        let t = world::task::get(&conn, task)?;
-        let msg = world::message::get(&conn, message)?;
+        if let Some(x) = turn.message {
+            if turn.text.trim().is_empty() {
+                store::discard_message(&self.db(), x)?;
+                turn.message = None;
+            } else {
+                let cites = self.citations(&turn.text, &turn.shown)?;
+                let meta = MessageMeta {
+                    cites,
+                    confidence: turn.level,
+                    ..MessageMeta::default()
+                };
+                self.complete(turn, x, &meta)?;
+            }
+        }
+        let t = world::task::get(&self.db(), task)?;
+        let text = world::message::get(&self.db(), reply)?.text;
         let meta = MessageMeta {
             cites: t.cites.clone(),
             confidence: turn.level,
@@ -661,25 +744,19 @@ impl Agent {
             relayed: false,
             note: note.or(t.note_path.clone()),
         };
-        let actions = serde_json::to_value(&turn.actions)?;
-        store::complete_message(&conn, message, &msg.text, Some(&actions), &meta)?;
-        if let Some(placeholder) = turn.message.take()
-            && world::message::get(&conn, placeholder)?.text.is_empty()
-        {
-            store::discard_message(&conn, placeholder)?;
-        }
+        turn.text = text;
+        self.complete(turn, reply, &meta)?;
+        self.task_finished(task)
+    }
+
+    /// Trust for a request the user gave, and the change announced.
+    fn task_finished(&self, task: TaskId) -> Result<()> {
+        let t = world::task::get(&self.db(), task)?;
         if t.granted.is_some()
             && let Some(p) = &t.assignee
         {
-            world::trust::task_done(&conn, p, &self.config.world.trust)?;
+            world::trust::task_done(&self.db(), p, &self.config.world.trust)?;
         }
-        let stored = world::message::get(&conn, message)?;
-        drop(conn);
-        turn.text.clear();
-        turn.actions.clear();
-        self.emit(Event::MessageAdded(MessageAdded {
-            message: crate::view::message(&stored, self.now().offset_min, &self.config.office),
-        }));
         self.changed(vec![
             api::events::WorldChange::Task {
                 id: crate::view::task_id(task),
@@ -706,31 +783,29 @@ impl Agent {
 
     /// Store the turn's reply text with its actions and citations, and announce it.
     fn finish_message(&self, turn: &mut Turn) -> Result<()> {
-        if turn.wrapup {
-            return Ok(());
-        }
-        if turn.message.is_none() && turn.text.is_empty() {
+        if turn.wrapup || (turn.message.is_none() && turn.text.is_empty()) {
             return Ok(());
         }
         let id = self.message_for(turn)?;
-        let cites = self.citations(&turn.text, &turn.shown)?;
         let meta = MessageMeta {
-            cites,
+            cites: self.citations(&turn.text, &turn.shown)?,
             confidence: turn.level,
             ..MessageMeta::default()
         };
-        let actions = (!turn.actions.is_empty())
-            .then(|| serde_json::to_value(&turn.actions))
-            .transpose()?;
-        let conn = self.db();
-        store::complete_message(&conn, id, &turn.text, actions.as_ref(), &meta)?;
-        let stored = world::message::get(&conn, id)?;
-        drop(conn);
-        self.emit(Event::MessageAdded(MessageAdded {
-            message: crate::view::message(&stored, self.now().offset_min, &self.config.office),
-        }));
+        // The turn's text is complete; a later forced close reads it from here.
+        let text = turn.text.clone();
+        self.complete(turn, id, &meta)?;
+        turn.text = text;
+        turn.message = Some(id);
         Ok(())
     }
+}
+
+/// What a new segment carries over from the old one.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Tail {
+    /// Only messages before this one.
+    pub before: Option<MessageId>,
 }
 
 enum Roll {

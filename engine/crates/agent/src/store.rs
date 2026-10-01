@@ -58,6 +58,24 @@ pub fn discard_message(conn: &Connection, id: MessageId) -> world::Result<()> {
     Ok(())
 }
 
+/// Close a request with a message already in its channel as the reply: the forced close
+/// of a request whose reply was streamed before the turns ran out. Same effects as
+/// `world::task::force_close` without writing a second message.
+pub fn close_task_with(
+    conn: &Connection,
+    task: TaskId,
+    reply: MessageId,
+    cites: &[Citation],
+    now: i64,
+) -> world::Result<()> {
+    conn.execute(
+        "UPDATE task SET status = 'done', cites = ?2, reply = ?3, turns_left = 0 WHERE id = ?1",
+        rusqlite::params![task, serde_json::to_string(cites)?, reply],
+    )?;
+    world::session::close_for_task(conn, task, now)?;
+    Ok(())
+}
+
 /// Input plus output tokens of the latest call on a channel since `since`: how full the
 /// endpoint's context is.
 pub fn last_context_tokens(

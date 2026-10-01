@@ -13,6 +13,15 @@ use std::collections::BTreeMap;
 /// caller; `{user}` is always the user's name (or the corpus's word for "you").
 const DEFAULTS: &[(&str, &str)] = &[
     ("user.you", "you"),
+    ("host.name", "Host"),
+    (
+        "host.quota_exhausted",
+        "The quota for this period is used up until {when}. The archive stays available.",
+    ),
+    (
+        "harness.introduce",
+        "{user} opens the app for the first time. Introduce yourself in a few lines.",
+    ),
     (
         "harness.rules",
         "{user} talks with the people of this world through messages. Each reply is spoken \
@@ -107,7 +116,10 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.error.not_asked", "Only when {user} asks for it."),
     ("harness.error.unavailable", "Nobody suitable is available."),
     ("harness.error.not_found", "Not found: {id}"),
-    ("harness.error.arguments", "Could not read the arguments: {detail}"),
+    (
+        "harness.error.arguments",
+        "Could not read the arguments: {detail}",
+    ),
     ("harness.error.refused", "Refused: {detail}"),
     ("harness.done", "Done."),
     ("harness.asked", "{name} is looking into it."),

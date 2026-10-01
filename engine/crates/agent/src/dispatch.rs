@@ -155,8 +155,12 @@ impl Agent {
                     .persons
                     .unwrap_or_default()
                     .into_iter()
-                    .filter(|p| offer.contains(p) || self.ix().folio().person(p).ok().flatten().is_some())
-                    .filter(|p| !bond::is_disabled(&self.db(), &PersonId::from(p.as_str())).unwrap_or(true))
+                    .filter(|p| {
+                        offer.contains(p) || self.ix().folio().person(p).ok().flatten().is_some()
+                    })
+                    .filter(|p| {
+                        !bond::is_disabled(&self.db(), &PersonId::from(p.as_str())).unwrap_or(true)
+                    })
                     .collect();
                 let mut seen = self.seen(seg)?;
                 let resp = self.retrieve(turn.channel, &turn.speaker, &s.query, persons, &seen)?;
@@ -215,8 +219,10 @@ impl Agent {
                 let task = {
                     let conn = self.db();
                     match turn.task {
-                        Some(t) => Some(world::task::get(&conn, t)?)
-                            .filter(|t| t.assignee.as_ref() == Some(&me) && t.status == world::TaskStatus::Active),
+                        Some(t) => Some(world::task::get(&conn, t)?).filter(|t| {
+                            t.assignee.as_ref() == Some(&me)
+                                && t.status == world::TaskStatus::Active
+                        }),
                         None => None,
                     }
                 };
@@ -226,7 +232,12 @@ impl Agent {
                 self.show_action(turn, ToolAction::Report)?;
                 let mut shown = turn.shown.clone();
                 shown.extend(self.seen(seg)?);
-                let mut cited = r.cites.iter().map(|c| format!("[#{c}]")).collect::<Vec<_>>().join(" ");
+                let mut cited = r
+                    .cites
+                    .iter()
+                    .map(|c| format!("[#{c}]"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 cited.push(' ');
                 cited.push_str(&r.text);
                 let cites = self.citations(&cited, &shown)?;
@@ -242,7 +253,10 @@ impl Agent {
                 );
                 match reported {
                     Ok(rep) => {
-                        let note = rep.note.as_ref().map(|_| world::task::note_rel_path(task.id));
+                        let note = rep
+                            .note
+                            .as_ref()
+                            .map(|_| world::task::note_rel_path(task.id));
                         self.after_report(turn, task.id, rep.message, note)?;
                         Ok(Ok(self.say(names, "harness.done", &[])))
                     }
@@ -346,17 +360,25 @@ impl Agent {
                     },
                 )?;
                 let offer = self.offerable(&self.db())?;
-                let people = self
-                    .ix()
-                    .find_people(&f.topic, Some(&offer), self.config.find_people.k, &[])?;
+                let people = self.ix().find_people(
+                    &f.topic,
+                    Some(&offer),
+                    self.config.find_people.k,
+                    &[],
+                )?;
                 if people.persons.is_empty() {
                     return Ok(Ok(self.say(names, "harness.nothing_found", &[])));
                 }
                 let mut lines = Vec::new();
                 for m in &people.persons {
                     let name = self.display(&m.person)?;
-                    let reason = names.sub(m.reason.text.lines().next().unwrap_or("").trim()).into_owned();
-                    lines.push(format!("- {name} ({}): {reason} [#{}]", m.person, m.reason.id));
+                    let reason = names
+                        .sub(m.reason.text.lines().next().unwrap_or("").trim())
+                        .into_owned();
+                    lines.push(format!(
+                        "- {name} ({}): {reason} [#{}]",
+                        m.person, m.reason.id
+                    ));
                 }
                 Ok(Ok(lines.join("\n")))
             }
@@ -402,7 +424,11 @@ impl Agent {
                 }
             }
             HostCall::CreateGroup(g) => {
-                let members: Vec<PersonId> = g.members.iter().map(|m| PersonId::from(m.as_str())).collect();
+                let members: Vec<PersonId> = g
+                    .members
+                    .iter()
+                    .map(|m| PersonId::from(m.as_str()))
+                    .collect();
                 for m in &members {
                     if self.available(&self.db(), m).is_err() {
                         return Ok(Err(self.refuse(names, "harness.error.unavailable", "")));
@@ -413,12 +439,17 @@ impl Agent {
                     .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
                     .collect::<Result<Vec<_>>>()?;
                 self.show_action(turn, ToolAction::CreateGroup { members: refs })?;
-                match channel::create_group(&self.db(), &members, g.topic.as_deref(), Origin::User) {
+                match channel::create_group(&self.db(), &members, g.topic.as_deref(), Origin::User)
+                {
                     Ok(id) => {
                         self.changed(vec![api::events::WorldChange::Channel {
                             id: view::channel_id(id),
                         }]);
-                        Ok(Ok(self.say(names, "harness.group_created", &[("id", &id.to_string())])))
+                        Ok(Ok(self.say(
+                            names,
+                            "harness.group_created",
+                            &[("id", &id.to_string())],
+                        )))
                     }
                     Err(e) => Ok(Err(self.world_refusal(names, e)?)),
                 }
@@ -444,7 +475,11 @@ impl Agent {
                     }
                     TargetKind::Group => {
                         let Ok(id) = s.target.trim().parse::<i64>().map(ChannelId) else {
-                            return Ok(Err(self.refuse(names, "harness.error.not_found", &s.target)));
+                            return Ok(Err(self.refuse(
+                                names,
+                                "harness.error.not_found",
+                                &s.target,
+                            )));
                         };
                         if let Err(e) = channel::set_mode(&self.db(), id, mode) {
                             return Ok(Err(self.world_refusal(names, e)?));
@@ -459,7 +494,10 @@ impl Agent {
                         mode: s.mode,
                     },
                 )?;
-                self.emit(Event::ModeChanged(api::events::ModeChanged { target, mode: s.mode }));
+                self.emit(Event::ModeChanged(api::events::ModeChanged {
+                    target,
+                    mode: s.mode,
+                }));
                 Ok(Ok(self.say(names, "harness.done", &[])))
             }
             HostCall::Search(s) => {
@@ -493,7 +531,9 @@ impl Agent {
                     return Ok(Err(self.refuse(names, "harness.error.refused", "empty")));
                 }
                 let id = fact::write(&self.db(), &new, now.ms)?.id();
-                self.changed(vec![api::events::WorldChange::Fact { id: view::fact_id(id) }]);
+                self.changed(vec![api::events::WorldChange::Fact {
+                    id: view::fact_id(id),
+                }]);
                 Ok(Ok(format!(
                     "{} [#{}]",
                     self.say(names, "harness.remembered", &[]),
@@ -504,15 +544,30 @@ impl Agent {
                 if !turn.authorized {
                     return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
                 }
-                let raw = f.fact_id.trim().trim_start_matches("[#").trim_end_matches(']');
+                let raw = f
+                    .fact_id
+                    .trim()
+                    .trim_start_matches("[#")
+                    .trim_end_matches(']');
                 let Ok(id) = raw.trim_start_matches('m').parse::<i64>().map(FactId) else {
-                    return Ok(Err(self.refuse(names, "harness.error.not_found", &f.fact_id)));
+                    return Ok(Err(self.refuse(
+                        names,
+                        "harness.error.not_found",
+                        &f.fact_id,
+                    )));
                 };
                 if let Err(e) = fact::retract(&self.db(), id) {
                     return Ok(Err(self.world_refusal(names, e)?));
                 }
-                self.show_action(turn, ToolAction::Forget { fact: view::fact_id(id) })?;
-                self.changed(vec![api::events::WorldChange::Fact { id: view::fact_id(id) }]);
+                self.show_action(
+                    turn,
+                    ToolAction::Forget {
+                        fact: view::fact_id(id),
+                    },
+                )?;
+                self.changed(vec![api::events::WorldChange::Fact {
+                    id: view::fact_id(id),
+                }]);
                 Ok(Ok(self.say(names, "harness.done", &[])))
             }
         }
