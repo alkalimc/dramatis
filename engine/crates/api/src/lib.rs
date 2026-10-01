@@ -13,9 +13,13 @@
 //! model sees ([`tools`]) and the endpoints file ([`endpoints`]).
 
 pub mod commands;
+pub mod corpus;
+pub mod display;
 pub mod endpoints;
 pub mod error;
 pub mod events;
+pub mod home;
+pub mod params;
 pub mod tools;
 pub mod types;
 pub mod views;
