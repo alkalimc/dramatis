@@ -126,11 +126,11 @@ async fn deltas_stream_under_one_message_and_the_final_bytes_are_verbatim() {
     let streamed: String = deltas.iter().map(|d| d.delta.as_str()).collect();
     let added = events
         .iter()
-        .filter_map(|ev| match ev {
+        .rev()
+        .find_map(|ev| match ev {
             agent::Event::MessageAdded(m) => Some(m.message.clone()),
             _ => None,
         })
-        .last()
         .unwrap();
     assert_eq!(added.id, deltas[0].message);
     assert_eq!(added.text, streamed);
