@@ -13,7 +13,6 @@
 use std::collections::HashSet;
 
 use api::events::{MessageAdded, Notification, WorldChange};
-use world::log::Role;
 use world::presence::{Activity, Digest};
 use world::quota::{self, Band, CallKind, Decision};
 use world::seed::{self, Opening, SeedKind, WordsHit};
@@ -27,10 +26,10 @@ use crate::agent::{Agent, Event};
 use crate::assemble::{self, Member};
 use crate::error::{Error, Result, timestamp};
 use crate::persona;
+use crate::request::{Choice, Image, Item};
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
-use crate::wire::{self, Choice};
 
 /// A user message stored and waiting for its replies.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +37,7 @@ pub struct Posted {
     pub channel: ChannelId,
     pub message: MessageId,
     pub text: String,
-    pub image: Option<wire::Image>,
+    pub image: Option<Image>,
     /// The user wrote this turn: the host may change modes and memories in it.
     pub authorized: bool,
 }
@@ -56,12 +55,7 @@ impl Agent {
     // ---- user turns ----
 
     /// Store the user's message and echo it. Nothing is sent to a model yet.
-    pub fn post(
-        &self,
-        channel: ChannelId,
-        text: &str,
-        image: Option<wire::Image>,
-    ) -> Result<Posted> {
+    pub fn post(&self, channel: ChannelId, text: &str, image: Option<Image>) -> Result<Posted> {
         self.post_with(channel, text, image, &crate::store::MessageMeta::default())
     }
 
@@ -80,7 +74,7 @@ impl Agent {
         &self,
         channel: ChannelId,
         text: &str,
-        image: Option<wire::Image>,
+        image: Option<Image>,
         meta: &crate::store::MessageMeta,
     ) -> Result<Posted> {
         if text.trim().is_empty() && image.is_none() {
@@ -138,7 +132,7 @@ impl Agent {
         &self,
         channel: ChannelId,
         text: &str,
-        image: Option<wire::Image>,
+        image: Option<Image>,
     ) -> Result<MessageId> {
         let posted = self.post(channel, text, image)?;
         let id = posted.message;
@@ -371,11 +365,10 @@ impl Agent {
 
     fn log_has_persona(&self, seg: world::SegmentId, names: &Names, name: &str) -> Result<bool> {
         let marker = assemble::persona_marker(&self.ctx(names), name);
-        let items = self.items(seg)?;
-        Ok(items
-            .iter()
-            .flat_map(|i| wire::texts(i))
-            .any(|t| t.lines().any(|l| l == marker)))
+        let log = self.log(seg)?;
+        let has = |t: &str| t.lines().any(|l| l == marker);
+        Ok(log.system.iter().any(|t| has(t))
+            || log.items.iter().filter_map(Item::harness_text).any(has))
     }
 
     async fn group_turn(&self, posted: &Posted) -> Result<()> {
@@ -662,20 +655,22 @@ impl Agent {
         Ok(())
     }
 
-    /// The forced `wrapup` turn on the channel's current segment. Skipped when the model
-    /// cannot be forced to a tool, when the log holds nothing to wrap up, when it was
-    /// written for another wire API, and in the host's own log (it keeps no memories).
-    /// With `summary` (a rollover) the summary for the next segment is asked for.
+    /// The `wrapup` turn on the channel's current segment, forced through `tool_choice`
+    /// where the protocol allows it and the model honours it; where the protocol must
+    /// keep `tool_choice` unchanged, the harness line alone asks for the call, and a
+    /// reply without it counts as no wrap-up. Skipped when the model cannot be forced,
+    /// when the log holds nothing to wrap up, and in the host's own log (it keeps no
+    /// memories). With `summary` (a rollover) the summary for the next segment is asked.
     pub(crate) async fn run_wrapup(&self, ch: ChannelId, summary: bool) -> Result<Option<Summary>> {
         let (role, _) = self.chat()?;
-        if !role.forced_tool() || self.log_kind(&self.db(), ch)? == LogKind::Host {
+        let forced = role.profile.wire_api.may_force_tool();
+        if (forced && !role.forced_tool()) || self.log_kind(&self.db(), ch)? == LogKind::Host {
             return Ok(None);
         }
         let Some(seg) = world::log::current(&self.db(), ch)? else {
             return Ok(None);
         };
-        let empty = world::log::entries(&self.db(), seg.id)?.is_empty();
-        if empty || self.segment_wire(seg.id)? != role.profile.wire_api {
+        if world::log::entries(&self.db(), seg.id)?.is_empty() {
             return Ok(None);
         }
         if !self.decide(CallKind::UserInitiated)?.allowed() {
@@ -694,14 +689,20 @@ impl Agent {
         self.append_user(seg.id, &line, None)?;
         let mut turn = Turn::new(ch, Actor::Person(author.clone()), Shape::Wrapup);
         turn.wrapup = true;
-        let reply = self.call(&mut turn, Choice::Tool("wrapup")).await?;
-        let wire = self.segment_wire(seg.id)?;
-        for call in &reply.calls {
+        let choice = if forced {
+            Choice::Tool("wrapup")
+        } else {
+            Choice::Auto
+        };
+        let reply = self.call(&mut turn, choice).await?;
+        for call in reply.calls() {
             let output = self.dispatch(&mut turn, call).await?;
             self.append(
                 seg.id,
-                Role::Tool,
-                &wire::tool_result(wire, &call.id, &output),
+                &Item::ToolResult {
+                    call_id: call.id.clone(),
+                    output,
+                },
             )?;
         }
         let Some(args) = turn.wrapped else {
@@ -766,7 +767,8 @@ impl Agent {
                 continue;
             };
             let names = self.names_now(&self.db())?;
-            let stale = wire::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
+            let stale =
+                crate::request::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
             if !stale {
                 continue;
             }

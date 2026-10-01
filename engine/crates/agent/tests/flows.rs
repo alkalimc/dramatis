@@ -600,7 +600,7 @@ async fn the_placeholder_becomes_the_users_name_and_a_rename_rolls_every_log() {
         assert_eq!(segs.len(), 2, "channel {c} rolled");
         // Sent bytes are never rewritten.
         assert_eq!(segs[0], old[0]);
-        let shape = agent::wire::Shape::parse(&segs[1].shape).unwrap();
+        let shape = agent::request::Shape::parse(&segs[1].shape).unwrap();
         assert_eq!(shape.user, "Rhea");
         assert!(!body_text(&segs[1].prefix_b).contains("Dr.Doc"));
     }
@@ -873,4 +873,27 @@ async fn a_colleague_never_reads_memories_he_was_not_there_for() {
     assert!(body_text(&segs[1].prefix_c).contains("ask bo about the forge blade"));
     let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
     assert_eq!(shapes, ["direct", "direct", "wrapup", "direct"]);
+}
+
+#[tokio::test]
+async fn a_log_continues_across_a_change_of_wire_api() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("one"), say("two"), say("three")]);
+    e.agent.send(ch, "jasmine tea", None).await.unwrap();
+    // The user points the chat role at another protocol: the log goes on, only the
+    // next call misses the cache, and the call after it extends that one again.
+    e.agent.set_endpoints(endpoints(WireApi::Chat, true, None));
+    e.agent.send(ch, "more", None).await.unwrap();
+    e.agent.send(ch, "and more", None).await.unwrap();
+    assert_eq!(segments(&e.agent, ch).len(), 1);
+    let bodies = e.fake.bodies();
+    assert!(!bodies[1].starts_with(agent::open_prefix(&bodies[0])));
+    assert_prefix_chain(&bodies[1..]);
+    let v = &e.fake.json()[2];
+    let all = items(v).iter().map(Value::to_string).collect::<String>();
+    assert!(
+        all.contains("one") && all.contains("two"),
+        "the whole log is sent"
+    );
 }

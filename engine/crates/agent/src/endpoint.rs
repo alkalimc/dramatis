@@ -224,6 +224,7 @@ impl Transport for Http {
         let events = match target.wire {
             WireApi::Chat => c.chat().create_stream_byot::<_, Value>(raw).await,
             WireApi::Responses => c.responses().create_stream_byot::<_, Value>(raw).await,
+            WireApi::Messages => return Err(Error::Unsupported("the messages wire")),
         }
         .map_err(endpoint)?;
         Ok(events.map(|e| e.map_err(endpoint)).boxed())

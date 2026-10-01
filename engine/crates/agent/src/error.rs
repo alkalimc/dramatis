@@ -41,6 +41,10 @@ pub enum Error {
     #[error("keychain: {0}")]
     Keychain(String),
 
+    /// The configured endpoint speaks a protocol this build cannot render yet.
+    #[error("{0} is not supported by this build")]
+    Unsupported(&'static str),
+
     /// A command or tool argument that cannot be honoured.
     #[error("invalid: {0}")]
     Invalid(String),
@@ -94,6 +98,9 @@ impl From<Error> for ApiError {
                 release_at: timestamp(release_at.unwrap_or(0), 0),
             },
             Error::NoEndpoint => ApiError::NoEndpoint,
+            Error::Unsupported(what) => ApiError::Endpoint {
+                detail: format!("{what} is not supported by this build"),
+            },
             Error::Endpoint { detail } => ApiError::Endpoint { detail },
             Error::Keychain(detail) => ApiError::Keychain { detail },
             Error::World(world::Error::Io(e)) => ApiError::Io {

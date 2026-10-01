@@ -14,10 +14,10 @@ use world::{Actor, ChannelId, FactId, FactKind, Origin, PersonId, bond, channel}
 use crate::agent::{Agent, Event};
 use crate::assemble;
 use crate::error::{Error, Result};
+use crate::request::ToolCall;
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
-use crate::wire::ToolCall;
 
 /// A refused call: its text goes back to the model as the tool's output.
 struct Refusal(String);

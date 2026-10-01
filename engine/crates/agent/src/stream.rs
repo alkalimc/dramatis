@@ -1,11 +1,12 @@
-//! Decoding a streamed reply, for both wire APIs, into text deltas, tool calls and usage.
+//! Decoding a streamed reply, for both OpenAI-style wire APIs, into text deltas, tool
+//! calls and usage.
 
 use api::endpoints::WireApi;
 use serde_json::Value;
 use world::quota::Usage;
 
 use crate::error::{Error, Result};
-use crate::wire::ToolCall;
+use crate::request::{Part, ToolCall};
 
 /// What one decoded event contributes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,12 +15,41 @@ pub enum Piece {
     Nothing,
 }
 
-/// A finished reply.
+/// A finished reply: its parts in the order they were produced, and its usage.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reply {
-    pub text: String,
-    pub calls: Vec<ToolCall>,
+    pub parts: Vec<Part>,
     pub usage: Usage,
+}
+
+impl Reply {
+    /// Every text part, joined.
+    pub fn text(&self) -> String {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn calls(&self) -> Vec<&ToolCall> {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::ToolCall(c) => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn push_text(&mut self, t: &str) {
+        match self.parts.last_mut() {
+            Some(Part::Text { text }) => text.push_str(t),
+            _ => self.parts.push(Part::Text { text: t.to_owned() }),
+        }
+    }
 }
 
 /// Folds stream events into a [`Reply`].
@@ -46,6 +76,7 @@ impl Decoder {
         match self.wire {
             WireApi::Chat => self.push_chat(event),
             WireApi::Responses => self.push_responses(event),
+            WireApi::Messages => Err(Error::Unsupported("the messages wire")),
         }
     }
 
@@ -93,7 +124,7 @@ impl Decoder {
         }
         match delta.get("content").and_then(Value::as_str) {
             Some(t) if !t.is_empty() => {
-                self.reply.text.push_str(t);
+                self.reply.push_text(t);
                 Ok(Piece::Text(t.to_owned()))
             }
             _ => Ok(Piece::Nothing),
@@ -105,7 +136,9 @@ impl Decoder {
         match kind {
             "response.output_text.delta" => {
                 let t = v.get("delta").and_then(Value::as_str).unwrap_or_default();
-                self.reply.text.push_str(t);
+                if !t.is_empty() {
+                    self.reply.push_text(t);
+                }
                 Ok(if t.is_empty() {
                     Piece::Nothing
                 } else {
@@ -116,11 +149,11 @@ impl Decoder {
                 let item = &v["item"];
                 if item["type"] == "function_call" {
                     let s = |k: &str| item[k].as_str().unwrap_or_default().to_owned();
-                    self.reply.calls.push(ToolCall {
+                    self.reply.parts.push(Part::ToolCall(ToolCall {
                         id: s("call_id"),
                         name: s("name"),
                         arguments: s("arguments"),
-                    });
+                    }));
                 }
                 Ok(Piece::Nothing)
             }
@@ -142,11 +175,10 @@ impl Decoder {
     /// The reply, once the stream has ended.
     pub fn finish(mut self) -> Result<Reply> {
         if self.wire == WireApi::Chat {
-            self.reply
-                .calls
-                .extend(self.partial.drain(..).map(|(_, c)| c));
+            let calls = self.partial.drain(..).map(|(_, c)| Part::ToolCall(c));
+            self.reply.parts.extend(calls);
         }
-        if !self.done && self.reply.text.is_empty() && self.reply.calls.is_empty() {
+        if !self.done && self.reply.parts.is_empty() {
             return Err(Error::Endpoint {
                 detail: "the stream ended without a reply".into(),
             });
@@ -244,12 +276,13 @@ mod tests {
             include_str!("../tests/fixtures/chat_tool.sse"),
         )
         .unwrap();
-        assert_eq!(r.text, "Let me check.");
-        assert_eq!(streamed, r.text);
-        assert_eq!(r.calls.len(), 1);
-        assert_eq!(r.calls[0].name, "search");
-        assert_eq!(r.calls[0].arguments, r#"{"query":"tea"}"#);
-        assert_eq!(r.calls[0].id, "call_1");
+        assert_eq!(r.text(), "Let me check.");
+        assert_eq!(streamed, r.text());
+        let calls = r.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "search");
+        assert_eq!(calls[0].arguments, r#"{"query":"tea"}"#);
+        assert_eq!(calls[0].id, "call_1");
         assert_eq!(
             r.usage,
             Usage {
@@ -263,7 +296,7 @@ mod tests {
             include_str!("../tests/fixtures/chat_hit_miss.sse"),
         )
         .unwrap();
-        assert_eq!(r.text, "Hello.");
+        assert_eq!(r.text(), "Hello.");
         assert_eq!(
             r.usage,
             Usage {
@@ -281,7 +314,7 @@ mod tests {
             include_str!("../tests/fixtures/responses_text.sse"),
         )
         .unwrap();
-        assert_eq!(r.text, "Good evening.");
+        assert_eq!(r.text(), "Good evening.");
         assert_eq!(streamed, "Good evening.");
         assert_eq!(
             r.usage,
@@ -296,9 +329,9 @@ mod tests {
             include_str!("../tests/fixtures/responses_tool.sse"),
         )
         .unwrap();
-        assert_eq!(r.calls[0].name, "wrapup");
-        assert_eq!(r.calls[0].id, "call_w");
-        assert!(r.text.is_empty());
+        assert_eq!(r.calls()[0].name, "wrapup");
+        assert_eq!(r.calls()[0].id, "call_w");
+        assert!(r.text().is_empty());
     }
 
     #[test]

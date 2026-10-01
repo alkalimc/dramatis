@@ -105,6 +105,7 @@ fn render(wire: WireApi, reply: &Reply, usage: (u64, u64, u64)) -> String {
     let (input, cached, output) = usage;
     match (wire, reply) {
         (_, Reply::Raw(s)) => s.clone(),
+        (WireApi::Messages, _) => unreachable!("this build renders no messages bodies"),
         (WireApi::Responses, Reply::Fail(d)) => sse(
             &[json!({"type": "response.failed", "response": {"error": {"message": d}}})],
             false,
@@ -319,6 +320,7 @@ pub fn endpoints(wire: WireApi, forced_tool: bool, window: Option<u32>) -> Endpo
     let wire = match wire {
         WireApi::Chat => "chat",
         WireApi::Responses => "responses",
+        WireApi::Messages => "messages",
     };
     let window = window.map_or(String::new(), |w| format!("context_window = {w}\n"));
     Endpoints::from_toml(&format!(

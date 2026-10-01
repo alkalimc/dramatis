@@ -10,7 +10,6 @@
 
 use std::collections::HashSet;
 
-use api::endpoints::WireApi;
 use api::events::{MessageAdded, MessageDelta, QuotaChanged, ToolCalled};
 use api::views::ToolAction;
 use futures::StreamExt;
@@ -26,10 +25,11 @@ use crate::assemble::{self, Ctx, Member};
 use crate::endpoint::ChatRole;
 use crate::error::{Error, Result};
 use crate::persona;
+use crate::request::{self, Choice, Image, Item, Request};
 use crate::store::{self, MessageMeta};
 use crate::stream::{Decoder, Piece, Reply};
 use crate::text::Names;
-use crate::wire::{self, Choice};
+use crate::wire;
 
 /// Whose session a channel's log is: which prefix and which tool list it gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +111,12 @@ impl Agent {
     }
 
     /// The request shape for a log kind under the current chat role.
-    pub(crate) fn shape_for(&self, role: &ChatRole, kind: LogKind, names: &Names) -> wire::Shape {
+    pub(crate) fn shape_for(
+        &self,
+        role: &ChatRole,
+        kind: LogKind,
+        names: &Names,
+    ) -> request::Shape {
         let tools = match kind {
             LogKind::Person => api::tools::shared_tools(&self.corpus.descriptions),
             LogKind::Host => api::tools::host_tools(&self.corpus.descriptions),
@@ -129,11 +134,11 @@ impl Agent {
                 .clone()
                 .or_else(|| role.reasoning.clone()),
         };
-        wire::Shape {
+        request::Shape {
             wire: role.profile.wire_api,
             model: role.model.id.clone(),
             reasoning,
-            tools: api::tools::to_wire(&tools, role.profile.wire_api).to_string(),
+            tools,
             user: names.user().to_owned(),
         }
     }
@@ -304,11 +309,10 @@ impl Agent {
         let kind = self.log_kind(&conn, ch)?;
         let shape = self.shape_for(&role, kind, &names);
         let [a, b, c] = self.prefix(&conn, ch, &names, summary, tail)?;
-        let blocks = [wire::system(&a), wire::system(&b), wire::system(&c)];
         let id = log::open_segment(
             &conn,
             ch,
-            [&blocks[0], &blocks[1], &blocks[2]],
+            [a.as_bytes(), b.as_bytes(), c.as_bytes()],
             &shape.to_json(),
             summary,
             self.now().ms,
@@ -324,20 +328,25 @@ impl Agent {
             return Ok(Some(Roll::Fresh));
         };
         let names = self.names_now(&conn)?;
-        let stored = wire::Shape::parse(&seg.shape);
-        match stored {
-            Some(s) if s.wire != role.profile.wire_api => return Ok(Some(Roll::Incompatible)),
-            Some(s) if s.user != names.user() => return Ok(Some(Roll::Rename)),
-            None => return Ok(Some(Roll::Incompatible)),
-            _ => {}
+        let Some(stored) = request::Shape::parse(&seg.shape) else {
+            return Ok(Some(Roll::Unreadable));
+        };
+        if stored.user != names.user() {
+            return Ok(Some(Roll::Rename));
         }
-        // Text only: an attached image is not material, and its encoding would dwarf it.
         let entries = log::entries(&conn, seg.id)?;
-        let material: usize = entries
+        let Some(items) = entries
             .iter()
-            .filter(|e| e.role != Role::Assistant)
-            .flat_map(|e| wire::texts(&e.bytes))
-            .map(|t| t.len())
+            .map(|e| Item::parse(&e.bytes))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(Some(Roll::Unreadable));
+        };
+        // Text only: an attached image is not material, and its encoding would dwarf it.
+        let material: usize = items
+            .iter()
+            .filter_map(Item::harness_text)
+            .map(str::len)
             .sum();
         let (c, _) = quota::ratios(role.prices(), &self.config.world.cost);
         let roll = &self.config.agent.roll;
@@ -377,9 +386,9 @@ impl Agent {
             Some(Roll::Fresh) => {
                 self.open_segment(ch, None, None)?;
             }
-            Some(Roll::Incompatible) => {
-                // Stored items are in another wire format: nothing more can be appended,
-                // and no wrap-up can run on them either.
+            Some(Roll::Unreadable) => {
+                // Written by another build: nothing more can be appended, and no wrap-up
+                // can run on it either.
                 self.open_segment(ch, None, Some(Tail { before }))?;
             }
             Some(Roll::Rename | Roll::Material | Roll::Window) => {
@@ -397,36 +406,38 @@ impl Agent {
         self.open_segment(ch, summary.as_ref(), Some(Tail { before }))
     }
 
-    /// The items of a segment in body order, and the ids it already carries in full.
-    pub(crate) fn items(&self, seg: SegmentId) -> Result<Vec<Vec<u8>>> {
+    /// A segment's prefix blocks and items, in body order.
+    pub(crate) fn log(&self, seg: SegmentId) -> Result<Log> {
         let conn = self.db();
         let s = segment(&conn, seg)?;
-        let mut out = vec![s.prefix_a, s.prefix_b, s.prefix_c];
-        out.extend(log::entries(&conn, seg)?.into_iter().map(|e| e.bytes));
-        Ok(out)
+        let text = |b: Vec<u8>| String::from_utf8(b).unwrap_or_default();
+        let items = log::entries(&conn, seg)?
+            .iter()
+            .filter_map(|e| Item::parse(&e.bytes))
+            .collect();
+        Ok(Log {
+            system: [text(s.prefix_a), text(s.prefix_b), text(s.prefix_c)],
+            items,
+        })
     }
 
     /// Ids a segment has already shown: every `[#id]` the harness wrote into it.
     pub(crate) fn seen(&self, seg: SegmentId) -> Result<HashSet<String>> {
-        let conn = self.db();
-        let s = segment(&conn, seg)?;
-        let mut out = HashSet::new();
-        let mut scan = |bytes: &[u8]| {
-            for t in wire::texts(bytes) {
-                out.extend(assemble::ids_in(&t));
-            }
-        };
-        scan(&s.prefix_c);
-        for e in log::entries(&conn, seg)? {
-            if e.role != Role::Assistant {
-                scan(&e.bytes);
-            }
+        let log = self.log(seg)?;
+        let mut out: HashSet<String> = assemble::ids_in(&log.system[2]).into_iter().collect();
+        for t in log.items.iter().filter_map(Item::harness_text) {
+            out.extend(assemble::ids_in(t));
         }
         Ok(out)
     }
 
-    pub(crate) fn append(&self, seg: SegmentId, role: Role, bytes: &[u8]) -> Result<()> {
-        log::append(&self.db(), seg, role, bytes, self.now().ms)?;
+    pub(crate) fn append(&self, seg: SegmentId, item: &Item) -> Result<()> {
+        let role = match item {
+            Item::User { .. } => Role::User,
+            Item::Assistant { .. } => Role::Assistant,
+            Item::ToolResult { .. } => Role::Tool,
+        };
+        log::append(&self.db(), seg, role, &item.to_bytes(), self.now().ms)?;
         Ok(())
     }
 
@@ -435,23 +446,21 @@ impl Agent {
         &self,
         seg: SegmentId,
         text: &str,
-        image: Option<&wire::Image>,
+        image: Option<&Image>,
     ) -> Result<()> {
-        let wire = self.segment_wire(seg)?;
-        self.append(seg, Role::User, &wire::user(wire, text, image))
-    }
-
-    pub(crate) fn segment_wire(&self, seg: SegmentId) -> Result<WireApi> {
-        let s = segment(&self.db(), seg)?;
-        Ok(wire::Shape::parse(&s.shape)
-            .map(|s| s.wire)
-            .unwrap_or(WireApi::Chat))
+        self.append(
+            seg,
+            &Item::User {
+                text: text.to_owned(),
+                image: image.cloned(),
+            },
+        )
     }
 
     /// The segment's names: what its bytes call the user.
     pub(crate) fn segment_names(&self, seg: SegmentId) -> Result<Names> {
         let s = segment(&self.db(), seg)?;
-        Ok(match wire::Shape::parse(&s.shape) {
+        Ok(match request::Shape::parse(&s.shape) {
             Some(shape) => Names::fixed(&self.corpus.placeholder, &shape.user),
             None => self.names_now(&self.db())?,
         })
@@ -501,9 +510,14 @@ impl Agent {
         let kind = self.log_kind(&self.db(), turn.channel)?;
         let names = self.segment_names(seg)?;
         let shape = self.shape_for(&role, kind, &names);
-        let items = self.items(seg)?;
-        let refs: Vec<&[u8]> = items.iter().map(Vec::as_slice).collect();
-        let body = wire::body(&shape, &cache_key(seg), &refs, choice);
+        let log = self.log(seg)?;
+        let body = wire::render(&Request {
+            shape: &shape,
+            cache_key: cache_key(seg),
+            system: [&log.system[0], &log.system[1], &log.system[2]],
+            items: &log.items,
+            choice,
+        })?;
         let mut events = self.transport.stream(&target, body.bytes).await?;
         let mut decoder = Decoder::new(shape.wire);
         let mut failure = None;
@@ -549,13 +563,10 @@ impl Agent {
         let now = self.now();
         {
             let conn = self.db();
-            log::append(
-                &conn,
-                seg,
-                Role::Assistant,
-                &wire::assistant(shape.wire, &reply.text, &reply.calls),
-                now.ms,
-            )?;
+            let item = Item::Assistant {
+                parts: reply.parts.clone(),
+            };
+            log::append(&conn, seg, Role::Assistant, &item.to_bytes(), now.ms)?;
             let u = reply.usage;
             self.filled
                 .lock()
@@ -574,6 +585,13 @@ impl Agent {
         }
         self.emit_quota()?;
         Ok(reply)
+    }
+
+    /// Whether the chat endpoint's protocol lets `tool_choice` differ between calls on
+    /// one log. Where it does not, a different choice drops the cached history, so every
+    /// call sends the same one and the harness asks in text instead.
+    pub(crate) fn may_vary_choice(&self) -> Result<bool> {
+        Ok(self.chat()?.0.profile.wire_api.may_force_tool())
     }
 
     pub(crate) fn emit_quota(&self) -> Result<()> {
@@ -643,26 +661,33 @@ impl Agent {
                 world::task::spend_turn(&self.db(), task)?;
             }
             let last = step + 1 == max_steps;
-            let choice = if last && turn.task.is_none() {
+            let choice = if last && turn.task.is_none() && self.may_vary_choice()? {
                 Choice::None
             } else {
                 Choice::Auto
             };
             let reply = self.call(turn, choice).await?;
-            if !reply.text.is_empty() {
+            let text = reply.text();
+            if !text.is_empty() {
                 if !turn.text.is_empty() {
                     turn.text.push('\n');
                 }
-                turn.text.push_str(&reply.text);
+                turn.text.push_str(&text);
             }
-            if reply.calls.is_empty() {
+            let calls = reply.calls();
+            if calls.is_empty() {
                 break;
             }
             let seg = self.current_segment(turn.channel)?;
-            let wire = self.segment_wire(seg)?;
-            for call in &reply.calls {
+            for call in calls {
                 let output = self.dispatch(turn, call).await?;
-                self.append(seg, Role::Tool, &wire::tool_result(wire, &call.id, &output))?;
+                self.append(
+                    seg,
+                    &Item::ToolResult {
+                        call_id: call.id.clone(),
+                        output,
+                    },
+                )?;
             }
             // A colleague pulled in speaks next; the caller resumes after him.
             if turn.closed || turn.joined.is_some() {
@@ -844,6 +869,12 @@ impl Agent {
     }
 }
 
+/// A segment as a request is built from it.
+pub(crate) struct Log {
+    pub system: [String; 3],
+    pub items: Vec<Item>,
+}
+
 /// What a new segment carries over from the old one.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Tail {
@@ -853,7 +884,7 @@ pub(crate) struct Tail {
 
 enum Roll {
     Fresh,
-    Incompatible,
+    Unreadable,
     Rename,
     Material,
     Window,
