@@ -44,6 +44,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.summary", "Earlier in this conversation: {summary}"),
     ("harness.recent", "The last messages:"),
     ("harness.context", "[{date} {time}]"),
+    ("harness.host_offline", "{when}"),
     (
         "harness.context.turns",
         "[{date} {time} · {turns} turns left on this request]",
@@ -98,6 +99,20 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.digest.came_by", "- {name} came by."),
     ("harness.digest.birthday", "- Today is {name}'s birthday."),
+    ("harness.error.no_task", "There is no request to report on."),
+    (
+        "harness.error.wrapup_only",
+        "wrapup is only for closing a conversation.",
+    ),
+    ("harness.error.not_asked", "Only when {user} asks for it."),
+    ("harness.error.unavailable", "Nobody suitable is available."),
+    ("harness.error.not_found", "Not found: {id}"),
+    ("harness.error.arguments", "Could not read the arguments: {detail}"),
+    ("harness.error.refused", "Refused: {detail}"),
+    ("harness.done", "Done."),
+    ("harness.asked", "{name} is looking into it."),
+    ("harness.group_created", "Group {id} created."),
+    ("harness.remembered", "Noted."),
 ];
 
 /// The corpus's wording with the harness fallbacks under it.
@@ -123,14 +138,15 @@ impl Wording {
             .unwrap_or(key)
     }
 
-    /// `get` with `{field}` placeholders filled, `{user}` included.
+    /// `get` with `{field}` placeholders filled, `{user}` included. The template's own
+    /// name placeholders are replaced before the fields go in, so a field (a question the
+    /// user typed) reaches the model exactly as written.
     pub fn fill(&self, key: &str, names: &Names, fields: &[(&str, &str)]) -> String {
-        let mut out = self.get(key).to_owned();
+        let mut out = names.sub(self.get(key)).replace("{user}", names.user());
         for (k, v) in fields {
             out = out.replace(&format!("{{{k}}}"), v);
         }
-        out = out.replace("{user}", names.user());
-        names.sub(&out).into_owned()
+        out
     }
 }
 
@@ -152,6 +168,14 @@ impl Names {
         Self {
             placeholder: placeholder.to_owned(),
             user,
+        }
+    }
+
+    /// A segment's names: what its bytes already say the user is called.
+    pub fn fixed(placeholder: &str, user: &str) -> Self {
+        Self {
+            placeholder: placeholder.to_owned(),
+            user: user.to_owned(),
         }
     }
 

@@ -47,9 +47,19 @@ impl Body {
     }
 }
 
+/// The `tool_choice` of one call: the only part of a body that may differ between calls
+/// on the same log, which is why it is written after every item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Choice<'a> {
+    Auto,
+    /// No tool this time: the model must answer in text.
+    None,
+    Tool(&'a str),
+}
+
 /// The request for one call on a segment. `items` are the stored item bytes, prefix
 /// blocks first; empty ones are skipped.
-pub fn body(shape: &Shape, cache_key: &str, items: &[&[u8]], forced: Option<&str>) -> Body {
+pub fn body(shape: &Shape, cache_key: &str, items: &[&[u8]], choice: Choice<'_>) -> Body {
     let mut out = Vec::with_capacity(4096);
     let s = |v: &str| serde_json::to_string(v).expect("strings serialise");
     out.extend_from_slice(b"{\"model\":");
@@ -89,11 +99,15 @@ pub fn body(shape: &Shape, cache_key: &str, items: &[&[u8]], forced: Option<&str
     }
     let open_len = out.len();
     out.push(b']');
-    if let Some(name) = forced {
-        let choice = match shape.wire {
-            WireApi::Responses => json!({"name": name, "type": "function"}),
-            WireApi::Chat => json!({"function": {"name": name}, "type": "function"}),
-        };
+    let choice = match (choice, shape.wire) {
+        (Choice::Auto, _) => None,
+        (Choice::None, _) => Some(json!("none")),
+        (Choice::Tool(name), WireApi::Responses) => Some(json!({"name": name, "type": "function"})),
+        (Choice::Tool(name), WireApi::Chat) => {
+            Some(json!({"function": {"name": name}, "type": "function"}))
+        }
+    };
+    if let Some(choice) = choice {
         out.extend_from_slice(b",\"tool_choice\":");
         out.extend_from_slice(choice.to_string().as_bytes());
     }
@@ -293,8 +307,8 @@ mod tests {
                 }],
             );
             let t = tool_result(wire, "c1", "found");
-            let b1 = body(&s, "k", &[&a, b"", &u], None);
-            let b2 = body(&s, "k", &[&a, b"", &u, &r, &t], Some("wrapup"));
+            let b1 = body(&s, "k", &[&a, b"", &u], Choice::Auto);
+            let b2 = body(&s, "k", &[&a, b"", &u, &r, &t], Choice::Tool("wrapup"));
             assert!(b2.bytes.starts_with(b1.open()), "{wire:?}");
             let v: Value = serde_json::from_slice(&b2.bytes).unwrap();
             let list = if wire == WireApi::Chat {
@@ -312,10 +326,11 @@ mod tests {
             let texts = texts(&r);
             assert!(texts.iter().any(|t| t.contains("query")));
         }
-        let b = body(&shape(WireApi::Responses), "seg.7", &[], None);
+        let b = body(&shape(WireApi::Responses), "seg.7", &[], Choice::None);
         let v: Value = serde_json::from_slice(&b.bytes).unwrap();
         assert_eq!(v["prompt_cache_key"], "seg.7");
         assert_eq!(v["reasoning"]["effort"], "low");
+        assert_eq!(v["tool_choice"], "none");
         let v: Value =
             serde_json::from_slice(&body(&shape(WireApi::Chat), "x", &[], None).bytes).unwrap();
         assert_eq!(v["reasoning_effort"], "low");

@@ -75,6 +75,20 @@ impl Default for Loop {
     }
 }
 
+/// `opening.*`: what a segment's opening block carries.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Opening {
+    /// Newest memories written into the opening block; older ones stay retrievable.
+    pub memories: u32,
+}
+
+impl Default for Opening {
+    fn default() -> Self {
+        Self { memories: 8 }
+    }
+}
+
 /// Every group this crate reads, as `api` composes them into its one `Params`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -84,6 +98,7 @@ pub struct Params {
     pub reasoning: Reasoning,
     #[serde(rename = "loop")]
     pub turn_loop: Loop,
+    pub opening: Opening,
 }
 
 #[cfg(test)]
