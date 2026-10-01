@@ -151,6 +151,15 @@ pub struct Image {
     pub data_base64: String,
 }
 
+impl From<api::views::ImagePart> for Image {
+    fn from(p: api::views::ImagePart) -> Self {
+        Self {
+            mime: p.mime,
+            data_base64: p.data_base64,
+        }
+    }
+}
+
 fn text_message(role: &str, text: &str) -> Vec<u8> {
     // `serde_json` sorts nothing here: keys are written in this fixed order.
     format!(

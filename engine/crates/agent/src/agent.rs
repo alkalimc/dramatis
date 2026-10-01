@@ -40,7 +40,9 @@ pub enum Event {
     Notification(Notification),
 }
 
-/// Where events go; the app forwards them to the window.
+/// Where events go; the app forwards them to the window. Called with no lock held, so
+/// it may read through the agent's read side ([`Agent::with_world`], [`Agent::history`]);
+/// it must not wait for a flow to finish (flows run one at a time).
 pub trait Sink: Send + Sync {
     fn emit(&self, event: Event);
 }
@@ -121,6 +123,9 @@ pub struct Agent {
     /// The last harness context line appended per segment. Lost on restart, which costs
     /// one repeated line.
     pub(crate) contexts: Mutex<HashMap<SegmentId, String>>,
+    /// Input plus output tokens of the last call per segment: how full the context is.
+    /// Lost on restart, when the segment's bytes are estimated instead.
+    pub(crate) filled: Mutex<HashMap<SegmentId, u64>>,
 }
 
 impl Agent {
@@ -156,6 +161,7 @@ impl Agent {
             clock: parts.clock,
             turns: tokio::sync::Mutex::new(()),
             contexts: Mutex::new(HashMap::new()),
+            filled: Mutex::new(HashMap::new()),
         })
     }
 

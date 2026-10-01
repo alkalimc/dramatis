@@ -177,8 +177,18 @@ impl Agent {
                 let Some((unit, around)) = self.ix().get(&g.id, n)? else {
                     return Ok(Err(self.refuse(names, "harness.error.not_found", &g.id)));
                 };
+                let off = bond::disabled(&self.db())?;
+                let gone = |u: &folio::Unit| {
+                    !u.persons.is_empty()
+                        && u.persons
+                            .iter()
+                            .all(|p| off.iter().any(|d| d.as_str() == p))
+                };
+                if gone(&unit) {
+                    return Ok(Err(self.refuse(names, "harness.error.not_found", &g.id)));
+                }
                 let mut seen = self.seen(seg)?;
-                let mut all = around;
+                let mut all: Vec<folio::Unit> = around.into_iter().filter(|u| !gone(u)).collect();
                 let at = all
                     .iter()
                     .position(|u| u.span_from > unit.span_from)
@@ -205,7 +215,8 @@ impl Agent {
                 if fact::normalize(&new.text).is_empty() {
                     return Ok(Err(self.refuse(names, "harness.error.refused", "empty")));
                 }
-                if let fact::Written::New(id) = fact::write(&self.db(), &new, self.now().ms)? {
+                let written = fact::write(&self.db(), &new, self.now().ms)?;
+                if let fact::Written::New(id) = written {
                     self.changed(vec![api::events::WorldChange::Fact {
                         id: view::fact_id(id),
                     }]);
@@ -238,7 +249,7 @@ impl Agent {
                     .join(" ");
                 cited.push(' ');
                 cited.push_str(&r.text);
-                let cites = self.citations(&cited, &shown)?;
+                let cites = self.citations(turn.channel, &cited, &shown)?;
                 let reported = world::task::report(
                     &self.db(),
                     &me,
@@ -437,8 +448,9 @@ impl Agent {
                     .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
                     .collect::<Result<Vec<_>>>()?;
                 self.show_action(turn, ToolAction::CreateGroup { members: refs })?;
-                match channel::create_group(&self.db(), &members, g.topic.as_deref(), Origin::User)
-                {
+                let created =
+                    channel::create_group(&self.db(), &members, g.topic.as_deref(), Origin::User);
+                match created {
                     Ok(id) => {
                         self.changed(vec![api::events::WorldChange::Channel {
                             id: view::channel_id(id),

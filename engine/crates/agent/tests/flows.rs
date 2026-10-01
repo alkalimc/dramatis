@@ -835,3 +835,42 @@ async fn tick_wraps_up_idle_conversations_and_nothing_else() {
     e.agent.tick().await.unwrap();
     assert_eq!(e.fake.bodies().len(), 2, "wrapped up once");
 }
+
+#[tokio::test]
+async fn a_colleague_never_reads_memories_he_was_not_there_for() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        let new = NewFact::new(
+            Actor::User,
+            Audience::Own(p("ann")),
+            FactKind::Fact,
+            "ann secret jasmine recipe",
+        );
+        fact::write(w, &new, T0).unwrap();
+    });
+    e.fake.push([say("Mm.")]);
+    e.agent.send(ch, "jasmine tea", None).await.unwrap();
+    assert!(
+        log_bytes(&e.agent, ch).contains("secret"),
+        "alone with ann it is hers"
+    );
+    e.fake.push([
+        call("request_join", json!({"person": "bo"})),
+        call("wrapup", json!({"facts": []})),
+        say("Bo: hello."),
+    ]);
+    e.agent
+        .send(ch, "ask bo about the forge blade", None)
+        .await
+        .unwrap();
+    let segs = segments(&e.agent, ch);
+    assert_eq!(segs.len(), 2, "rolled before bo spoke");
+    let bodies = e.fake.bodies();
+    let bo = body_text(bodies.last().unwrap());
+    assert!(bo.contains("You are bo.") && !bo.contains("secret"), "{bo}");
+    assert!(!body_text(&segs[1].prefix_c).contains("secret"));
+    assert!(body_text(&segs[1].prefix_c).contains("ask bo about the forge blade"));
+    let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
+    assert_eq!(shapes, ["direct", "direct", "wrapup", "direct"]);
+}

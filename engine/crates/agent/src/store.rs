@@ -5,7 +5,7 @@
 //! reply is. Until `world::message` offers that, the update is done here, on the same
 //! columns `world::message::append` writes.
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use world::{ChannelId, Citation, MessageId, Shape, TaskId};
@@ -74,24 +74,6 @@ pub fn close_task_with(
     )?;
     world::session::close_for_task(conn, task, now)?;
     Ok(())
-}
-
-/// Input plus output tokens of the latest call on a channel since `since`: how full the
-/// endpoint's context is.
-pub fn last_context_tokens(
-    conn: &Connection,
-    channel: ChannelId,
-    since: i64,
-) -> world::Result<Option<u64>> {
-    Ok(conn
-        .query_row(
-            "SELECT uncached + cached + output FROM meter WHERE channel = ?1 AND at >= ?2
-             ORDER BY at DESC, id DESC LIMIT 1",
-            (channel, since),
-            |r| r.get::<_, i64>(0),
-        )
-        .optional()?
-        .map(|n| n.max(0) as u64))
 }
 
 /// Metered totals of one call shape over a span.

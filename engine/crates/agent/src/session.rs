@@ -345,7 +345,19 @@ impl Agent {
             return Ok(Some(Roll::Material));
         }
         if let Some(window) = role.model.context_window {
-            let used = store::last_context_tokens(&conn, ch, seg.opened_at)?.unwrap_or(0);
+            let known = self
+                .filled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&seg.id)
+                .copied();
+            let used = known.unwrap_or_else(|| {
+                let bytes = seg.prefix_a.len()
+                    + seg.prefix_b.len()
+                    + seg.prefix_c.len()
+                    + entries.iter().map(|e| e.bytes.len()).sum::<usize>();
+                roll.tokens(bytes)
+            });
             if used as f64 >= f64::from(window) * roll.window_margin {
                 return Ok(Some(Roll::Window));
             }
@@ -495,6 +507,7 @@ impl Agent {
         let mut events = self.transport.stream(&target, body.bytes).await?;
         let mut decoder = Decoder::new(shape.wire);
         let mut failure = None;
+        let mut streamed = false;
         while let Some(event) = events.next().await {
             let piece = match event.and_then(|v| decoder.push(&v)) {
                 Ok(p) => p,
@@ -503,9 +516,13 @@ impl Agent {
                     break;
                 }
             };
-            if let Piece::Text(delta) = piece
+            if let Piece::Text(mut delta) = piece
                 && !turn.wrapup
             {
+                // A later step's text joins the earlier one on a new line, as stored.
+                if !std::mem::replace(&mut streamed, true) && !turn.text.is_empty() {
+                    delta.insert(0, '\n');
+                }
                 let id = self.message_for(turn)?;
                 self.emit(Event::MessageDelta(MessageDelta {
                     channel: crate::view::channel_id(turn.channel),
@@ -539,6 +556,11 @@ impl Agent {
                 &wire::assistant(shape.wire, &reply.text, &reply.calls),
                 now.ms,
             )?;
+            let u = reply.usage;
+            self.filled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(seg, u.uncached + u.cached + u.output);
             quota::record_usage(
                 &conn,
                 now.ms,
@@ -677,7 +699,7 @@ impl Agent {
         if let Some(id) = turn.message
             && !turn.text.trim().is_empty()
         {
-            let cites = self.citations(&turn.text, &turn.shown)?;
+            let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
             store::close_task_with(&self.db(), task, id, &cites, now.ms)?;
             turn.closed = true;
             let meta = MessageMeta {
@@ -734,7 +756,7 @@ impl Agent {
                 store::discard_message(&self.db(), x)?;
                 turn.message = None;
             } else {
-                let cites = self.citations(&turn.text, &turn.shown)?;
+                let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
                 let meta = MessageMeta {
                     cites,
                     confidence: turn.level,
@@ -774,12 +796,25 @@ impl Agent {
         Ok(())
     }
 
-    /// Citations for the `[#id]`s in a reply that were shown in this session.
-    pub(crate) fn citations(&self, text: &str, shown: &[String]) -> Result<Vec<world::Citation>> {
+    /// Citations for the `[#id]`s in a reply that were shown in this session: in this
+    /// turn (`shown`) or anywhere in the channel's current log.
+    pub(crate) fn citations(
+        &self,
+        ch: ChannelId,
+        text: &str,
+        shown: &[String],
+    ) -> Result<Vec<world::Citation>> {
+        // Bound first: a guard in a `match` scrutinee would live through the arms.
+        let current = log::current(&self.db(), ch)?;
+        let seen = match current {
+            Some(seg) => self.seen(seg.id)?,
+            None => HashSet::new(),
+        };
         let mut out: Vec<world::Citation> = Vec::new();
         let ix = self.ix();
         for id in assemble::ids_in(text) {
-            if !shown.contains(&id) || out.iter().any(|c| c.chunk_id == id) {
+            let known = shown.contains(&id) || seen.contains(&id);
+            if !known || out.iter().any(|c| c.chunk_id == id) {
                 continue;
             }
             if let Some(u) = ix.folio().unit_by_id(&id)? {
@@ -796,7 +831,7 @@ impl Agent {
         }
         let id = self.message_for(turn)?;
         let meta = MessageMeta {
-            cites: self.citations(&turn.text, &turn.shown)?,
+            cites: self.citations(turn.channel, &turn.text, &turn.shown)?,
             confidence: turn.level,
             ..MessageMeta::default()
         };

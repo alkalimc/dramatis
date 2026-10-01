@@ -298,14 +298,21 @@ impl Agent {
     }
 
     /// A colleague pulled in answers. His persona enters the log as an entry the first
-    /// time he speaks here, so the prefix is never rewritten.
+    /// time he speaks here, so the prefix is never rewritten. If the log already holds a
+    /// memory he may not recall (the owner's, from rooms he was not in), it rolls over
+    /// first: wrap-up on the old segment, then a new one with only shared material. No
+    /// summary is asked for, so nothing private is retold into the new one.
     async fn join_turn(
         &self,
         ch: ChannelId,
         joined: &world::task::Joined,
         shape: Shape,
     ) -> Result<()> {
-        let seg = self.current_segment(ch)?;
+        let mut seg = self.current_segment(ch)?;
+        if self.hides_from(seg, &joined.person)? {
+            self.run_wrapup(ch, false).await?;
+            seg = self.open_segment(ch, None, Some(crate::session::Tail { before: None }))?;
+        }
         let names = self.segment_names(seg)?;
         let name = self.display(joined.person.as_str())?;
         let mut lines = Vec::new();
@@ -344,6 +351,22 @@ impl Agent {
         self.close_open_task(&mut turn)?;
         self.replied(ch, &joined.person)?;
         Ok(())
+    }
+
+    /// Whether a segment shows a memory `person` may not recall.
+    fn hides_from(&self, seg: world::SegmentId, person: &PersonId) -> Result<bool> {
+        let seen = self.seen(seg)?;
+        let conn = self.db();
+        for id in seen {
+            // Memory ids are `m<fact id>`; unit ids are hex hashes and never start so.
+            let Some(n) = id.strip_prefix('m').and_then(|r| r.parse::<i64>().ok()) else {
+                continue;
+            };
+            if !fact::can_see(&conn, person, world::FactId(n))? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn log_has_persona(&self, seg: world::SegmentId, names: &Names, name: &str) -> Result<bool> {
