@@ -15,8 +15,16 @@ fn render() -> String {
     let none = Descriptions::new();
     let (shared, host) = (shared_tools(&none), host_tools(&none));
     let mut all = json!({
-        "shared": { "chat": to_wire(&shared, WireApi::Chat), "responses": to_wire(&shared, WireApi::Responses) },
-        "host": { "chat": to_wire(&host, WireApi::Chat), "responses": to_wire(&host, WireApi::Responses) },
+        "shared": {
+            "chat": to_wire(&shared, WireApi::Chat),
+            "responses": to_wire(&shared, WireApi::Responses),
+            "messages": to_wire(&shared, WireApi::Messages),
+        },
+        "host": {
+            "chat": to_wire(&host, WireApi::Chat),
+            "responses": to_wire(&host, WireApi::Responses),
+            "messages": to_wire(&host, WireApi::Messages),
+        },
     });
     all.sort_all_objects();
     serde_json::to_string_pretty(&all).unwrap() + "\n"

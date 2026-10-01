@@ -1,7 +1,7 @@
 //! Endpoint profiles and roles: the shape of `$DRAMATIS_HOME/endpoints.toml`.
 //!
-//! The user adds **profiles** (an OpenAI-style endpoint) and points each **role** at one
-//! model of one profile. The file holds no secret: a profile's API key lives only in the
+//! The user adds **profiles** (an OpenAI-style or an Anthropic-style endpoint) and points
+//! each **role** at one model of one profile. The file holds no secret: a profile's API key lives only in the
 //! system keychain under service [`KEYCHAIN_SERVICE`], account [`keychain_account`].
 //!
 //! ```toml
@@ -9,6 +9,7 @@
 //! name = "example"                     # unique; also the keychain account suffix
 //! base_url = "https://api.example.com/v1"
 //! wire_api = "responses"               # "chat" (/chat/completions) | "responses" (/responses)
+//!                                      # | "messages" (/messages, Anthropic-style)
 //!
 //! [[profile.model]]                    # zero or more; every key but `id` is optional
 //! id = "model-a"
@@ -17,7 +18,8 @@
 //! cache_min_prefix = 1024              # shortest cacheable prefix, tokens
 //! cache_breakpoints = 0                # 0 = automatic prefix caching, 1..=4 = explicit
 //! price_in = 1.0                       # any currency per any token count: only the
-//! price_in_cached = 0.1                #   ratios cached/in and out/in are used
+//! price_in_cached = 0.1                #   ratios to price_in are used
+//! price_in_cache_write = 1.25          # messages only: writing a cache entry
 //! price_out = 4.0
 //!
 //! [roles]                              # absent = no chat model: the app runs as a library
@@ -58,7 +60,8 @@ pub struct Endpoints {
 #[serde(deny_unknown_fields)]
 pub struct Profile {
     pub name: String,
-    /// OpenAI-style root; `GET {base_url}/models` lists its models.
+    /// API root including the version segment (`…/v1`); `GET {base_url}/models` lists
+    /// its models on every wire.
     pub base_url: String,
     pub wire_api: WireApi,
     #[serde(rename = "model", default)]
@@ -72,6 +75,18 @@ pub enum WireApi {
     Chat,
     /// `POST {base_url}/responses`
     Responses,
+    /// `POST {base_url}/messages`, Anthropic-style: `x-api-key` and `anthropic-version`
+    /// headers, explicit `cache_control` breakpoints, `output_config.effort` for reasoning.
+    Messages,
+}
+
+impl WireApi {
+    /// Whether a forced `tool_choice` may be sent at all. On the Anthropic-style wire it is
+    /// never sent: current models reject it, and a `tool_choice` change drops the cached
+    /// message history, so the wrap-up turn asks for the tool in its text instead.
+    pub fn may_force_tool(self) -> bool {
+        !matches!(self, WireApi::Messages)
+    }
 }
 
 /// What is known about one model on one profile. Unknown fields fall back to parameters
@@ -92,6 +107,9 @@ pub struct Model {
     pub price_in: Option<f64>,
     #[serde(default)]
     pub price_in_cached: Option<f64>,
+    /// Writing a cache entry (Anthropic-style wire); absent: the `cost.w` parameter.
+    #[serde(default)]
+    pub price_in_cache_write: Option<f64>,
     #[serde(default)]
     pub price_out: Option<f64>,
 }
@@ -193,6 +211,12 @@ pub fn presets() -> Vec<Profile> {
             wire_api: WireApi::Chat,
             models: Vec::new(),
         },
+        Profile {
+            name: "anthropic-compatible".into(),
+            base_url: "https://api.anthropic.com/v1".into(),
+            wire_api: WireApi::Messages,
+            models: Vec::new(),
+        },
         // Loopback only: a local server must never be reachable from the network.
         Profile {
             name: "local".into(),
@@ -251,6 +275,36 @@ persona = { profile = "primary", model = "model-a", reasoning = "high" }
     }
 
     #[test]
+    fn parses_an_anthropic_style_profile() {
+        let e = Endpoints::from_toml(
+            r#"
+[[profile]]
+name = "second"
+base_url = "https://llm2.example.invalid/v1"
+wire_api = "messages"
+
+[[profile.model]]
+id = "model-b"
+cache_breakpoints = 3
+price_in = 4.0
+price_in_cached = 0.2
+price_in_cache_write = 5.0
+price_out = 20.0
+
+[roles]
+chat = { profile = "second", model = "model-b" }
+persona = { profile = "second", model = "model-b", reasoning = "high" }
+"#,
+        )
+        .unwrap();
+        let p = &e.profiles[0];
+        assert_eq!(p.wire_api, WireApi::Messages);
+        assert!(!p.wire_api.may_force_tool());
+        assert_eq!(p.models[0].price_in_cache_write, Some(5.0));
+        assert_eq!(Endpoints::from_toml(&e.to_toml().unwrap()).unwrap(), e);
+    }
+
+    #[test]
     fn round_trips() {
         let e = Endpoints::from_toml(MAINTAINER_SHAPE).unwrap();
         let text = e.to_toml().unwrap();
@@ -272,6 +326,7 @@ persona = { profile = "primary", model = "model-a", reasoning = "high" }
                         cache_breakpoints: Some(4),
                         price_in: Some(1.0),
                         price_in_cached: Some(0.25),
+                        price_in_cache_write: Some(1.25),
                         price_out: Some(4.0),
                     });
                     p

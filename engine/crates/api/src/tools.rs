@@ -389,6 +389,11 @@ pub fn to_wire(tools: &[ToolSpec], wire: WireApi) -> Value {
                     "description": t.description,
                     "parameters": t.parameters,
                 }),
+                WireApi::Messages => json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters,
+                }),
             })
             .collect(),
     );

@@ -386,6 +386,8 @@ export type Model = {
 	cache_breakpoints?: number | null,
 	price_in?: number | null,
 	price_in_cached?: number | null,
+	/**  Writing a cache entry (Anthropic-style wire); absent: the `cost.w` parameter. */
+	price_in_cache_write?: number | null,
 	price_out?: number | null,
 };
 
@@ -441,7 +443,10 @@ export type PersonRef = {
 
 export type Profile = {
 	name: string,
-	/**  OpenAI-style root; `GET {base_url}/models` lists its models. */
+	/**
+	 *  API root including the version segment (`…/v1`); `GET {base_url}/models` lists
+	 *  its models on every wire.
+	 */
 	base_url: string,
 	wire_api: WireApi,
 	model?: Model[],
@@ -625,7 +630,12 @@ export type WireApi =
 /**  `POST {base_url}/chat/completions` */
 "chat" | 
 /**  `POST {base_url}/responses` */
-"responses";
+"responses" | 
+/**
+ *  `POST {base_url}/messages`, Anthropic-style: `x-api-key` and `anthropic-version`
+ *  headers, explicit `cache_control` breakpoints, `output_config.effort` for reasoning.
+ */
+"messages";
 
 /**
  *  Runtime phrasing from the corpus manifest, keyed like the UI's i18n keys; a missing
