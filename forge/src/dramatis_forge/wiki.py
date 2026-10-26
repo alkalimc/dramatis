@@ -16,7 +16,7 @@ response plus a warning that is easy to miss.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 import httpx
@@ -213,6 +213,20 @@ class Wiki:
             if norm.get("to") in seen:
                 continue
             yield norm.get("from", "?"), None, None
+
+    def revision_ids(self, titles: Sequence[str]) -> dict[str, int]:
+        """Current revision id of each title that exists (absent titles are left out).
+
+        Cheap beside fetching bodies, and it answers "is what I hold the page's current
+        version" without trusting the change feed, which lists only edits and creations.
+        """
+        out: dict[str, int] = {}
+        for i in range(0, len(titles), TITLES_LIMIT):
+            d = self.get(action="query", prop="info", titles="|".join(titles[i: i + TITLES_LIMIT]))
+            for p in d.get("query", {}).get("pages", []):
+                if not p.get("missing") and p.get("lastrevid"):
+                    out[p["title"]] = int(p["lastrevid"])
+        return out
 
     def redirect_targets(self, titles: list[str]) -> dict[str, str]:
         """alias -> target.

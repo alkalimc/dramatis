@@ -120,6 +120,9 @@ class FakeWiki:
             else:
                 yield t, None, None
 
+    def revision_ids(self, titles):
+        return {t: self.pages[t][1] for t in titles if t in self.pages}
+
     def latest_change_id(self, namespaces):
         return self.rcid
 

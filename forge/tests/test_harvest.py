@@ -91,3 +91,21 @@ def test_page_gone_from_site_is_dropped_with_snapshot(wiki, pack, paths):
     with Archive(paths.archive, readonly=True) as a:
         assert "Bob" not in a.have_pages()
         assert [r["title"] for r in a.removed()] == ["Bob"]
+
+
+def test_an_edit_the_feed_never_listed_is_found_by_the_revision_check(wiki, pack, paths):
+    sync(wiki, pack, paths)
+    wiki.edit("Chapter 1", "Alice: Moved in silently.\n", story=True, log=False)
+    wiki.edit("Chapter 2", "Bob: Listed in the feed.\n", story=True)
+    p, res = sync(wiki, pack, paths)
+    assert p.changed == ["Chapter 1", "Chapter 2"] and p.stale == ["Chapter 1"]
+    assert any("newer on the site" in f.detail for f in p.findings)
+    assert res.delta["changed"] == ["Chapter 1", "Chapter 2"]
+    with Archive(paths.archive) as a:
+        assert a.page("Chapter 1")["wikitext"] == "Alice: Moved in silently.\n"
+
+
+def test_the_revision_check_is_quiet_when_nothing_moved(wiki, pack, paths):
+    sync(wiki, pack, paths)
+    p, _ = sync(wiki, pack, paths)
+    assert p.stale == [] and p.nothing_to_do and p.findings == []
