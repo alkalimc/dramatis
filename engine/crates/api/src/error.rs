@@ -19,6 +19,9 @@ pub enum ApiError {
     /// The target is disabled and so does not exist for this purpose.
     #[error("person {person:?} is disabled")]
     Disabled { person: PersonId },
+    /// The corpus has no persona for this person: nobody can speak as them yet.
+    #[error("person {person:?} has no persona")]
+    NoPersona { person: PersonId },
     /// Quota band three: no new calls until the window releases.
     #[error("quota exhausted until {release_at:?}")]
     QuotaExhausted { release_at: Timestamp },

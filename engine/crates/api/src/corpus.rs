@@ -16,8 +16,8 @@ use crate::views::CorpusState;
 
 /// The host's subject id in the prompts table.
 pub const HOST: &str = "host";
-/// The prompt slot whose presence means a person has a synthesised persona.
-pub const PERSONA_SLOT: &str = "system";
+/// The prompt slots a persona is made of: a person has one only with all of them.
+pub const PERSONA_SLOTS: [&str; 4] = ["system", "tone", "fallback", "capability"];
 /// Built at corpus time: the first-run card, `[{person_id, reason}]`.
 const COLDSTART_SLOT: &str = "coldstart";
 /// Co-appearing people kept per person; screens show fewer, after dropping the disabled.
@@ -46,6 +46,7 @@ pub struct Corpus {
     overrides: HashMap<String, BTreeMap<String, String>>,
     coldstart: Vec<(String, String)>,
     revision_url_pattern: String,
+    avatar_url_pattern: String,
 }
 
 impl std::fmt::Debug for Corpus {
@@ -97,20 +98,27 @@ impl Corpus {
 
         let companions = companions(folio.conn())?;
         let overrides = read_overrides(prompts_dir);
-        let mut personas: HashSet<String> = {
+        let mut slots: HashMap<String, HashSet<String>> = HashMap::new();
+        {
             let mut stmt = folio
                 .conn()
-                .prepare("SELECT DISTINCT subject FROM prompts WHERE slot = ?1")?;
-            let rows = stmt.query_map([PERSONA_SLOT], |r| r.get::<_, String>(0))?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-        personas.extend(
-            overrides
-                .iter()
-                .filter(|(_, slots)| slots.contains_key(PERSONA_SLOT))
-                .map(|(s, _)| s.clone()),
-        );
-        personas.remove(HOST);
+                .prepare("SELECT subject, slot FROM prompts WHERE trim(body) <> ''")?;
+            for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+                let (subject, slot) = row?;
+                slots.entry(subject).or_default().insert(slot);
+            }
+        }
+        for (subject, own) in &overrides {
+            let entry = slots.entry(subject.clone()).or_default();
+            entry.extend(own.iter().filter(|(_, b)| !b.trim().is_empty()).map(|(s, _)| s.clone()));
+        }
+        let personas: HashSet<String> = slots
+            .into_iter()
+            .filter(|(subject, have)| {
+                subject != HOST && PERSONA_SLOTS.iter().all(|s| have.contains(*s))
+            })
+            .map(|(subject, _)| subject)
+            .collect();
 
         let coldstart = folio
             .prompt(HOST, COLDSTART_SLOT)?
@@ -119,16 +127,8 @@ impl Corpus {
             .into_iter()
             .map(|p| (p.person_id, p.reason))
             .collect();
-        let revision_url_pattern = folio
-            .conn()
-            .query_row(
-                "SELECT value FROM manifest WHERE key = 'revision_url_pattern'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
+        let revision_url_pattern = optional_key(folio.conn(), "revision_url_pattern");
+        let avatar_url_pattern = optional_key(folio.conn(), "avatar_url_pattern");
 
         Ok(Self {
             manifest,
@@ -143,6 +143,7 @@ impl Corpus {
             overrides,
             coldstart,
             revision_url_pattern,
+            avatar_url_pattern,
         })
     }
 
@@ -165,6 +166,13 @@ impl Corpus {
     /// Every roster entry, ordered by id.
     pub fn persons(&self) -> &[Person] {
         &self.persons
+    }
+
+    /// Everyone with a persona, by id.
+    pub fn persona_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.personas.iter().cloned().collect();
+        ids.sort();
+        ids
     }
 
     pub fn person(&self, id: &str) -> Option<&Person> {
@@ -211,6 +219,46 @@ impl Corpus {
             .replace("{page}", &page.replace(' ', "_"))
     }
 
+    /// Where a person's avatar lives on the source site, from the optional manifest key
+    /// `avatar_url_pattern` (`{page}` stands for the page title); `None` without one.
+    pub fn avatar_url(&self, page: &str) -> Option<String> {
+        (!self.avatar_url_pattern.is_empty())
+            .then(|| self.avatar_url_pattern.replace("{page}", &page.replace(' ', "_")))
+    }
+
+    /// The first line of a person's profile text, if the corpus has a profile unit for them.
+    pub fn summary(&self, id: &str) -> ApiResult<Option<String>> {
+        let templates: Vec<&str> = self
+            .manifest
+            .template_shapes
+            .iter()
+            .filter(|(_, shape)| shape.as_str() == "profile")
+            .map(|(t, _)| t.as_str())
+            .collect();
+        if templates.is_empty() {
+            return Ok(None);
+        }
+        let marks = vec!["?"; templates.len()].join(",");
+        let sql = format!(
+            "SELECT c.text FROM chunks c JOIN unit_persons u ON u.chunk_id = c.id \
+             WHERE u.person_id = ?1 AND c.template IN ({marks}) ORDER BY c.ord LIMIT 1"
+        );
+        self.with_folio(|f| {
+            let mut args: Vec<&dyn rusqlite::ToSql> = vec![&id];
+            args.extend(templates.iter().map(|t| t as &dyn rusqlite::ToSql));
+            let text: Option<String> = f
+                .conn()
+                .query_row(&sql, args.as_slice(), |r| r.get(0))
+                .ok();
+            Ok(text.and_then(|t| {
+                t.lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .map(str::to_owned)
+            }))
+        })
+    }
+
     pub fn with_folio<R>(&self, f: impl FnOnce(&Folio) -> folio::Result<R>) -> ApiResult<R> {
         let folio = self.folio.lock().unwrap_or_else(|e| e.into_inner());
         f(&folio).map_err(io)
@@ -236,6 +284,16 @@ impl Corpus {
     pub fn warm(&self) {
         let _ = self.with_index(|_| Ok(()));
     }
+}
+
+/// A manifest key holding a JSON string; empty when absent.
+fn optional_key(conn: &rusqlite::Connection, key: &str) -> String {
+    conn.query_row("SELECT value FROM manifest WHERE key = ?1", [key], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+    .unwrap_or_default()
 }
 
 fn io(e: folio::Error) -> ApiError {

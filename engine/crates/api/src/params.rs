@@ -38,9 +38,29 @@ impl Default for Coldstart {
     }
 }
 
+/// `roster.*`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Roster {
+    /// Trust at or above which someone talked to counts as a regular contact.
+    pub close_trust: u8,
+    /// Companions shown on a row or page.
+    pub companions: usize,
+}
+
+impl Default for Roster {
+    fn default() -> Self {
+        Self {
+            close_trust: 110,
+            companions: 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Params {
+    pub roster: Roster,
     pub retrieve: index::params::Retrieve,
     pub find_people: index::params::FindPeople,
     pub media: Media,

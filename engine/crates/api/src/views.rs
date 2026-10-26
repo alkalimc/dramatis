@@ -172,6 +172,9 @@ pub enum RosterBand {
 pub struct RosterRow {
     pub person: PersonRef,
     pub mode: Mode,
+    /// Whether the corpus has a persona for them. Without one they can be read about but
+    /// not talked to, asked, relayed to or put in a group.
+    pub has_persona: bool,
     pub recent: Option<Activity>,
     /// People they often appear with in the corpus.
     pub companions: Vec<PersonRef>,
@@ -184,6 +187,8 @@ pub struct PersonPage {
     pub summary: Option<String>,
     pub trust: u8,
     pub mode: Mode,
+    /// See [`RosterRow::has_persona`].
+    pub has_persona: bool,
     pub last_seen: Option<Timestamp>,
     pub tasks_done: u32,
     pub companions: Vec<PersonRef>,
