@@ -257,7 +257,7 @@ def check_aliases(
             "G4", f"{len(hops)} alias(es) point at another alias, not at its canonical name "
                   "(first: " + ", ".join(f"{a.alias}->{a.target}" for a in hops[:5]) + ")")
     wordy = [a for a in aliases if a.kind == TERM_ALIAS
-             and (len(_RE_CJK.findall(a.alias)) > ALIAS_MAX_CHARS or "。" in a.alias)]
+             and (len(_RE_CJK.findall(a.alias)) > ALIAS_MAX_CHARS or "\u3002" in a.alias)]
     if wordy:
         rep.ledger.add(
             "G4", f"{len(wordy)} glossary rendering(s) read as a sentence, not a name "

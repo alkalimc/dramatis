@@ -400,7 +400,7 @@ def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
         if name == base:
             return ""
         # A form named "<person>(<form>)" is the form's name once the person is taken off.
-        m = re.fullmatch(re.escape(base) + r"\s*[(（](.+)[)）]", name)
+        m = re.fullmatch(re.escape(base) + r"\s*[(\uff08](.+)[)\uff09]", name)
         return sep("form").format(m.group(1) if m else name)
     return tag
 
