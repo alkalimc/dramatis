@@ -380,7 +380,7 @@ def _voice(
     rows.sort(key=lambda r: (person_of.get(r["subject"], r["subject"]),
                              ordinal.get(r["subject"], 0), r["subject"]))
     for r in rows:
-        if r["trigger"] in policy.voice_skip:
+        if r["trigger"] in policy.voice_skip or r["title"] in policy.voice_skip:
             env.skipped["voice"] = env.skipped.get("voice", 0) + 1
             continue
         person = person_of.get(r["subject"], r["subject"])
@@ -414,8 +414,10 @@ def _profile(
     label, sep = policy.label, policy.sep
     memoir = policy.kind("memoir")
     omit = set(policy.card_omit)
+    skip = re.compile("|".join(policy.section_skip)) if policy.section_skip else None
     person_of = archive.person_of()
     forms = archive.persons()
+    kind_of = {f["page"]: f["kind"] for fs in forms.values() for f in fs}
     display = _display_names(archive, pack)
     tag = _form_tag(archive, pack)
 
@@ -445,8 +447,12 @@ def _profile(
 
         for page in held:
             for s in dossier[page]["sections"]:
-                if s.get("text"):
-                    sections.append((page, s.get("title", ""), s["text"]))
+                if not s.get("text"):
+                    continue
+                if skip is not None and skip.search(s.get("title", "")):
+                    env.skipped["profile"] = env.skipped.get("profile", 0) + 1
+                    continue
+                sections.append((page, s.get("title", ""), s["text"]))
             for k, v in dossier[page]["items"].items():
                 if k == memoir:
                     for rec in v:
@@ -476,7 +482,7 @@ def _profile(
                     span_of=f"{person_id}{CARD_SPAN}", span_from=0, span_to=0,
                 )
             for n, page in enumerate(held, start=1):
-                if page == base_page:
+                if page == base_page or kind_of.get(page) in policy.cardless_forms:
                     continue
                 diff = {k: v for k, v in dossier[page]["fields"].items()
                         if k not in omit and base.get(k) != v}

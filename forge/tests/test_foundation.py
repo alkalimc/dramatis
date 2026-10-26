@@ -257,3 +257,37 @@ def test_an_archived_kind_nothing_reads_is_a_high_finding(tmp_path, pack):
         corpus._check_consumers(rep, a, pack)
     assert [f.severity for f in rep.ledger.findings] == ["high"]
     assert "letter" in rep.ledger.findings[0].detail
+
+
+def test_a_form_kind_without_a_card_adds_none(tmp_path, forms_pack):
+    p = replace(forms_pack, chunking=replace(forms_pack.chunking, cardless_forms=("alt",)))
+    with make(tmp_path, p) as a:
+        units = [c for c in chunk.build(a, p) if c.span_of and c.span_of.endswith("#card")]
+    assert [c.header for c in units] == ["[file] Alice · identity card", "[file] Bob · identity card"]
+
+
+def test_a_declared_name_outranks_a_portrait_and_a_skipped_section_makes_no_unit(tmp_path, pack):
+    from dramatis_forge.records import Alias
+    from dramatis_forge.speakers import Speakers
+    ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None)
+    p = replace(pack, identity=ident)
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)]})
+        a.put_page("Ann", "k-ann", 1, "now")
+        a.put_page("Bob", "k-bob", 2, "now")
+        insert(a, [Alias(alias="Annie", target="Ann", kind="redirect")])
+        sp = Speakers(a, p, replace(Params().speaker, portrait_lines=1))
+        # the label is declared to be Ann's, whatever the portrait on screen
+        assert sp.owner("Annie", ["k-bob", "k-bob"]) == "Ann"
+        assert sp.owner("Stranger", ["k-bob", "k-bob"]) == "Bob"
+
+    policy = replace(pack.chunking, section_skip=("^Ratings$",))
+    q = replace(pack, chunking=policy)
+    with Archive(tmp_path / "u.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)]})
+        insert(a, [Dossier(page="Ann", fields={"name": "Ann"}, revid=1, sections=(
+            {"title": "Ratings", "text": "Strength: high"}, {"title": "Life", "text": "Born north."}))])
+        env = chunk.Env.for_build(a, q)
+        texts = [c.text for c in chunk.build(a, q, env=env) if c.template == "profile"]
+    assert "Born north." in texts and "Strength: high" not in texts
+    assert env.skipped == {"profile": 1}

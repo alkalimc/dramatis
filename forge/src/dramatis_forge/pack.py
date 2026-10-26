@@ -536,8 +536,13 @@ class ChunkPolicy:
     #: pattern matches is kept. An empty replacement leaves the slot nameless (the `voice`
     #: label stands in).
     voice_words: tuple[tuple[str, str], ...] = ()
-    #: Trigger keys whose lines make no unit: a slot that carries the work's own name.
+    #: Trigger keys or titles whose lines make no unit: a slot that carries the work's own name.
     voice_skip: tuple[str, ...] = ()
+    #: Titles of dossier sections that are the work's mechanics (stat ratings), not prose
+    #: about the person; they make no unit.
+    section_skip: tuple[str, ...] = ()
+    #: Form kinds that add no identity card of their own: their fields are the mode's.
+    cardless_forms: tuple[str, ...] = ()
     #: The same rewriting for the names of dossier sections and items in a header.
     section_words: tuple[tuple[str, str], ...] = ()
     #: Pages of a lore template whose header names the page by the last segment of its

@@ -447,11 +447,14 @@ def _d_multi_form_persons(src: _Sources, _m: str | None):
 
 
 def _d_aliases(src: _Sources, member: str | None):
-    assert src.archive is not None
+    """Alias entries of one kind (or all) as shipped: the folio's table, which also holds
+    the kinds only the corpus stage can derive; the archive's when there is no folio."""
+    db = src.folio if src.folio is not None else src.archive
+    assert db is not None
     if member:
-        return _count(src.archive.execute(
+        return _count(db.execute(
             "select count(*) from aliases where kind = ?", (member,)).fetchone()[0])
-    return _count(src.archive.execute("select count(*) from aliases").fetchone()[0])
+    return _count(db.execute("select count(*) from aliases").fetchone()[0])
 
 
 def _findings(src: _Sources) -> list[tuple[str, str, str, str | None]]:
@@ -568,7 +571,7 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "forms_by_kind": (("archive",), _d_forms),
     "form_body_links": (("archive",), _d_form_body_links),
     "multi_form_persons": (("archive",), _d_multi_form_persons),
-    "aliases": (("archive",), _d_aliases),
+    "aliases": (("folio",), _d_aliases),
     "guards_high": (("archive",), _d_guards_high),
     "guards_low": (("archive",), _d_guards_low),
     "guards_by_guard": (("archive",), _d_guards_by_guard),

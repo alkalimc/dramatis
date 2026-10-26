@@ -10,11 +10,14 @@ Three signals are used, in this order, and every one is a relation the site writ
 1. **The label is a page title** (or a form's title). It wins over everything: the label is
    what the script says, and a portrait on screen is often another character's (two people
    share the frame, only one speaks).
-2. **The portrait shown for the speaker** names a person's operator page by id. Applied to
+2. **A redirect or a real-name entry** that points at exactly one person: the site says this
+   name is that person's. It outranks the portrait because it is a statement about the
+   name, where a portrait is only who was on screen; where the two disagree the portrait
+   was another character's.
+3. **The portrait shown for the speaker** names a person's operator page by id. Applied to
    the label across the whole corpus when enough lines agree; for a label that is a
    placeholder (a name withheld on purpose) it is applied scene by scene, since the same
    placeholder is a different person each time.
-3. **A redirect or a real-name entry** that points at exactly one person.
 
 Name similarity is never used. Where a page-title label and the portraits disagree, the
 label stands and the disagreement is recorded, so a person can read the cases.
@@ -95,7 +98,7 @@ class Speakers:
         ):
             by_label[r["speaker"]][r["portrait"]] = r["n"]
         for label, keys in by_label.items():
-            if label in self.person_of or label in self.generic:
+            if label in self.person_of or label in self.generic or label in self.alias_person:
                 continue
             people = Counter()
             for key, n in keys.items():
@@ -123,13 +126,14 @@ class Speakers:
         """The person a label stands for in one scene, or None."""
         if label in self.person_of:
             return self.person_of[label]
-        if label in self.label_person:
-            return self.label_person[label]
+        if label not in self.generic:
+            if label in self.alias_person:
+                return self.alias_person[label]
+            if label in self.label_person:
+                return self.label_person[label]
         person, n, total = self._shown(portraits)
         if person is not None and n / total >= self.params.portrait_share:
             return person
-        if label not in self.generic:
-            return self.alias_person.get(label)
         return None
 
     def scene_owners(self, scene: str, rows: list) -> dict[str, str | None]:
