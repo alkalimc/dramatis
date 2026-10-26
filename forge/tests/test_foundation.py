@@ -376,14 +376,15 @@ def test_term_aliases_land_on_the_canonical_name_and_conflicts_are_reported():
 
 def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
     p = replace(forms_pack, chunking=replace(
-        forms_pack.chunking, placeholder_values=("none",), item_min_chars=20,
+        forms_pack.chunking, placeholder_values=("none",), item_min_chars=20, foldable_items=("^tiny$",),
         cardless_forms=("mode",)))
     with Archive(tmp_path / "t.archive") as a:
         a.write_identity({"Alice": [("Alice", "canonical", 0), ("Alice(Winter)", "alt", 1),
                                     ("Alice(Mode)", "mode", 2)]})
         insert(a, [
             Dossier(page="Alice", fields={"name": "Alice", "team": "none", "job": "x"},
-                    items={"first": "A long enough entry that stands alone.", "tiny": "Short."},
+                    items={"first": "A long enough entry that stands alone.", "tiny": "Short.",
+                           "blurb": "Brief."},
                     revid=1),
             Dossier(page="Alice(Winter)", fields={"name": "Alice(Winter)", "team": "none"}, revid=2),
             Dossier(page="Alice(Mode)", fields={"name": "Alice(Mode)"}, revid=3),
@@ -395,7 +396,8 @@ def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
     assert cards["[file] Alice · identity card"] == "name: Alice\njob: x\nother forms: Alice(Winter)"
     assert cards["[file] Alice <Winter> · identity card"] == "name: Alice(Winter)"
     items = [c.text for c in units if c.span_of == "Alice#dossier"]
-    assert items == ["A long enough entry that stands alone.\ntiny: Short."]
+    # only the kind of item the pack names is folded; "blurb" is short and complete alone
+    assert items == ["A long enough entry that stands alone.\ntiny: Short.", "Brief."]
 
 
 def test_lore_runs_follow_the_pages_declared_shape(pack):

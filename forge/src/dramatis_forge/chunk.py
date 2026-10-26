@@ -590,11 +590,13 @@ def _profile(
 def _fold_short(items: list[tuple[str, str, str]], policy: ChunkPolicy) -> list[tuple[str, str, str]]:
     """Items too short to be read alone join the item before them on the same page, each
     under its own name; a unit of a few words is nothing without the entry it belongs to."""
-    if not policy.item_min_chars:
+    if not policy.item_min_chars or not policy.foldable_items:
         return items
+    foldable = re.compile("|".join(policy.foldable_items))
     out: list[tuple[str, str, str]] = []
     for page, title, text in items:
-        if len(text) < policy.item_min_chars and out and out[-1][0] == page:
+        if (len(text) < policy.item_min_chars and foldable.search(title)
+                and out and out[-1][0] == page):
             before = out[-1]
             joined = f"{before[2]}\n{policy.section_name(title)}{policy.sep('label')}{text}"
             out[-1] = (page, before[1], joined)

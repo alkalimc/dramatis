@@ -573,8 +573,11 @@ class ChunkPolicy:
     card_omit: tuple[str, ...] = ()
     #: Card field values that mean "none" and say nothing about the person.
     placeholder_values: tuple[str, ...] = ()
-    #: Dossier items shorter than this join the item before them (0 turns it off).
+    #: Dossier items shorter than this join the item before them (0 turns it off), if their
+    #: title matches one of `foldable_items`: an entry of a kind that is read alongside its
+    #: neighbours. Other short items (a blurb, a token's description) are complete as they are.
     item_min_chars: int = 0
+    foldable_items: tuple[str, ...] = ()
     #: Speaker labels that stand for someone not named yet. They belong to nobody: the
     #: same label is a different person each time, and a portrait only shows who was on screen.
     generic_speakers: tuple[str, ...] = ()
