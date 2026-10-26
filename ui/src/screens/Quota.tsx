@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { QuietHours, QuotaStatus, Settings, Tier, WindowSpan } from "../api";
-import { useT } from "../i18n";
+import { useT, userTitle } from "../i18n";
 import { when } from "../lib/format";
 import { quotaExhaustedLine } from "../lib/quota";
 import { useActions, useApi, useStore } from "../store";
@@ -159,6 +159,7 @@ export function YouPanel({ settings, save }: { settings: Settings; save: (s: Set
         }}
       >
         <NameAndBirthday id={id} name={name} setName={setName} month={month} setMonth={setMonth} day={day} setDay={setDay} />
+        <p className="muted">{t("you.preview", { title: userTitle(t, name) })}</p>
         <p className="row">
           <button type="submit" disabled={!name.trim()}>
             {t("you.save")}
