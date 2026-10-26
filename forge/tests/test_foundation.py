@@ -342,3 +342,26 @@ def test_a_reply_id_no_choice_offers_is_counted_as_unresolved(pack):
     ok = chunk._reply_marker(pack.chunking, choices, "1:x", unresolved, "S")
     bad = chunk._reply_marker(pack.chunking, choices, "1:2", unresolved, "S")
     assert unresolved == ["S"] and "a" in ok and "2" in bad
+
+
+def test_term_aliases_land_on_the_canonical_name_and_conflicts_are_reported():
+    from dramatis_forge.guards import Ledger
+    from dramatis_forge.normalize import check_aliases, term_aliases
+    from dramatis_forge.records import Alias, Term
+    redirects = {"Edge": "Sharp", "Isles": "Isles (region)"}
+    terms = [Term(page="g", term="Edge", translations={"en": "Sharp/Blade"}),
+             Term(page="g", term="Isles", translations={"en": "Isle", "note": "A place. Long."}),
+             Term(page="g", term="Mis", translations={"en": "Mish"})]
+    got = term_aliases(terms, {}, redirects)
+    # the rendering that equals the canonical name says nothing; the target is never an alias
+    assert sorted((a.alias, a.target) for a in got) == [
+        ("A place. Long.", "Isles (region)"), ("Blade", "Sharp"),
+        ("Isle", "Isles (region)"), ("Mish", "Mis")]
+    assert all(a.target not in redirects for a in got)
+    assert ("Sharp", "Sharp") not in {(a.alias, a.target) for a in got}
+    rep = type("R", (), {"ledger": Ledger()})()
+    check_aliases([*got, Alias(alias="Mish", target="Other", kind="realname"),
+                   Alias(alias="x", target="Edge", kind="redirect")], redirects, set(), rep)
+    details = [f.detail for f in rep.ledger.findings]
+    assert any("another alias" in d for d in details)
+    assert any("'Mish'" in d for d in details)
