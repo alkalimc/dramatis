@@ -419,3 +419,25 @@ def test_lore_runs_follow_the_pages_declared_shape(pack):
     assert policy.lore_run("Plain", ("a",), 3) == "Plain"
     assert policy.lore_run("List", ("a",), 3) == "List#3"
     assert policy.lore_run("Story", ("tale", "part 2"), 5) == "Story#tale"
+
+
+def test_a_section_that_restates_the_card_keeps_only_what_the_card_lacks(tmp_path, forms_pack):
+    def restated(title, text, shown):
+        if title != "Basics":
+            return None
+        kept = [ln for ln in text.splitlines()
+                if shown.get(ln.partition(": ")[0]) != ln.partition(": ")[2]]
+        return "\n".join(kept)
+
+    p = replace(forms_pack, chunking=replace(forms_pack.chunking, card_restated=restated))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)]})
+        insert(a, [
+            Dossier(page="Ann", fields={"name": "Ann", "age": "30"},
+                    sections=({"title": "Basics", "text": "name: Ann\nage: 30\nbuilt: May 1"},), revid=1),
+            Dossier(page="Bob", fields={"name": "Bob", "age": "9"},
+                    sections=({"title": "Basics", "text": "name: Bob\nage: 9"},), revid=2),
+        ])
+        units = [c for c in chunk.build(a, p) if c.span_of and c.span_of.endswith("#dossier")]
+    # Ann keeps the one line her card lacks; Bob's section only repeated the card, so no unit
+    assert [(c.persons, c.text) for c in units] == [(("Ann",), "built: May 1")]
