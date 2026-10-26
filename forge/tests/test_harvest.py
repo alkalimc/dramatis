@@ -109,3 +109,28 @@ def test_the_revision_check_is_quiet_when_nothing_moved(wiki, pack, paths):
     sync(wiki, pack, paths)
     p, _ = sync(wiki, pack, paths)
     assert p.stale == [] and p.nothing_to_do and p.findings == []
+
+
+def test_the_discovered_set_is_what_the_last_run_found(wiki, pack, paths):
+    from dataclasses import replace
+
+    from dramatis_forge.pack import Followup, SeedSet
+
+    hook = Followup(of_seed="story", seed="body",
+                    discover=lambda title, text: [f"{title}/body"] if "[body]" in text else [])
+    seeds = (*pack.seeds, SeedSet("body", "Bodies", "followup", discovered=True))
+    q = replace(pack, seeds=seeds, followups=(hook,))
+    wiki.edit("Chapter 1", "[body]\n", story=True, log=False)
+    wiki.edit("Chapter 1/body", "Alice: Hello.\n", log=False)
+    _, res = sync(wiki, q, paths)
+    assert res.followups == {"body": 1} and not res.findings
+    with Archive(paths.archive) as a:
+        assert a.seed("body") == ["Chapter 1/body"]
+
+    # the parent stops referring to its subpage: the page leaves the set and is reported
+    wiki.edit("Chapter 1", "Alice: Inline now.\n", story=True)
+    p, res = sync(wiki, q, paths)
+    with Archive(paths.archive) as a:
+        assert a.seed("body") == []
+    assert [(f.guard, f.severity) for f in res.findings] == [("G1", "low")]
+    assert "Chapter 1/body" in res.findings[0].detail

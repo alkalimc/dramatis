@@ -332,6 +332,14 @@ class Archive:
             "INSERT OR IGNORE INTO seeds(seed,title) VALUES(?,?)", [(seed, t) for t in titles]
         )
 
+    def replace_seed(self, seed: str, titles: Iterable[str]) -> list[str]:
+        """Make `titles` the whole of one seed set; returns the titles that left it."""
+        titles = set(titles)
+        left = sorted(set(self.seed(seed)) - titles)
+        self.db.execute("DELETE FROM seeds WHERE seed=?", (seed,))
+        self.add_seeds(seed, titles)
+        return left
+
     def write_source_rows(self, tables: dict[str, list[dict]]) -> None:
         self.db.execute("DELETE FROM source_rows")
         self.db.executemany(
