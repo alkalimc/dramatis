@@ -517,7 +517,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
             rows: all
               .filter((p) => band_of(p) === band)
               .sort((a, b) => b.trust - a.trust)
-              .map((p) => ({ person: ref(p.id), mode: p.mode, recent: recentOf(p), companions: p.companions.map(ref) })),
+              .map((p) => ({ person: ref(p.id), mode: p.mode, recent: recentOf(p), companions: p.companions.map(ref), has_persona: true })),
           }))
           .filter((g) => g.rows.length > 0),
       };
@@ -536,6 +536,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         companions: p.companions.map(ref),
         voice: p.voice,
         channel: channels.has(`dm:${id}`) ? `dm:${id}` : null,
+        has_persona: true,
       });
     },
     findPeople: (topic) => ok(candidates(topic)),

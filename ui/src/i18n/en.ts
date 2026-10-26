@@ -375,6 +375,7 @@ export const en = {
   "error.disabled": "{name} is disabled.",
   "error.quota_exhausted": "No new calls until {when}.",
   "error.no_endpoint": "No language model endpoint is set up.",
+  "error.no_persona": "{name} is not available to talk to yet.",
   "error.endpoint": "The endpoint answered with an error:",
   "error.keychain": "The keychain refused:",
   "error.io": "A file error occurred:",

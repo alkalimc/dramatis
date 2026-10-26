@@ -66,6 +66,7 @@ const CODES: Record<gen.ApiError["code"], true> = {
   disabled: true,
   quota_exhausted: true,
   no_endpoint: true,
+  no_persona: true,
   endpoint: true,
   keychain: true,
   io: true,
