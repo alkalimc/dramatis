@@ -183,3 +183,36 @@ def test_speakers_resolve_by_page_then_portrait_then_alias(tmp_path, pack):
     assert got == {"Annie": "Ann", "Cyrus": "Cy", "Cyrus II": None, "???": "Bob", "Ann": "Ann"}
     # a label settled by portraits across the corpus is a name for that person
     assert sp.speaker_aliases() == []
+
+
+def test_slot_names_are_reworded_and_interface_words_are_caught(pack):
+    policy = replace(
+        pack.chunking, voice_words=((r"^Touch$", "when touched"), (r"^Squad(\d*)$", r"in a team \1")),
+        header_taboo=("Touch|Squad",), labels={"voice": "voice"}, triggers={"T": "Squad"},
+        section_words=((r"^Elite(\d)$", r"outfit \1"),))
+    assert policy.voice_name("", "Touch") == "when touched"
+    assert policy.voice_name("", "Squad2") == "in a team 2"
+    assert policy.voice_name("T", "") == "in a team"          # the trigger's words are reworded
+    assert policy.voice_name("", "Other") == "Other"
+    assert policy.section_name("Elite0") == "outfit 0"
+    test = chunk.engine_meta_test(policy, [])
+    assert test("voice", "p", "[voice] A · Touch") and not test("voice", "p", "[voice] A · when touched")
+
+
+def test_a_skipped_slot_makes_no_unit_and_is_counted(tmp_path, pack):
+    from dramatis_forge import corpus
+    policy = replace(
+        pack.chunking, voice_skip=("TITLE",),
+        headers={**pack.chunking.headers, "voice": "[voice] {person} · {name}{variant}"},
+        templates=(*pack.chunking.templates,
+                   replace(pack.chunking.templates[0], name="voice", sources=("voice",))))
+    p = replace(pack, chunking=policy)
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)]})
+        insert(a, [Voice(page="Ann/v", subject="Ann", idx=0, text="Name.", trigger="TITLE"),
+                   Voice(page="Ann/v", subject="Ann", idx=1, text="Hi.", title="Hello", seq=1)])
+        env = chunk.Env.for_build(a, p)
+        got = [c for c in chunk.build(a, p, env=env) if c.template == "voice"]
+        rep = corpus.run(a, p, tmp_path / "t.folio", segmenter="bigram")
+    assert [c.text for c in got] == ["Hi."] and env.skipped == {"voice": 1}
+    assert any("made no unit" in f.detail for f in rep.ledger.findings)

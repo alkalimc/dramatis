@@ -189,6 +189,9 @@ def run(
             # A speaker label the portraits settle is a name the story gives that person.
             *((label, person, SPEAKER_ALIAS) for label, person in env.speakers.speaker_aliases()),
         ])
+        for template, n in sorted(env.skipped.items()):
+            rep.ledger.add(
+                "G5", f"{n} {template} record(s) made no unit: the pack's policy skips their slot")
         _check_story_coverage(rep, archive, pack, spans)
         _check_attribution(rep, archive, folio, pack, env, params)
 

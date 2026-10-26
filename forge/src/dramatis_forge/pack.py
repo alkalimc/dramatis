@@ -523,6 +523,19 @@ class ChunkPolicy:
     #: header name: a variant page becomes a named variant, a record filed by a path gets
     #: a plain name when the source gives it no title of its own.
     scene_rewrites: tuple[tuple[str, str], ...] = ()
+    #: `(regex, replacement)` pairs rewriting a voice line's title (or its trigger's words) as
+    #: it appears in a header: the source names its slots in the words of the game's own
+    #: menus, which no one in the fiction says. The first pattern that matches wins; text no
+    #: pattern matches is kept. An empty replacement leaves the slot nameless (the `voice`
+    #: label stands in).
+    voice_words: tuple[tuple[str, str], ...] = ()
+    #: Trigger keys whose lines make no unit: a slot that carries the work's own name.
+    voice_skip: tuple[str, ...] = ()
+    #: The same rewriting for the names of dossier sections and items in a header.
+    section_words: tuple[tuple[str, str], ...] = ()
+    #: Regexes no header may match: words of the work's interface. A match is a failure of
+    #: the rules above, found on the units that shipped.
+    header_taboo: tuple[str, ...] = ()
     #: Identity-card fields left out of the card text: attributes of the work's mechanics
     #: rather than of the person. They stay on the person's facets for display.
     card_omit: tuple[str, ...] = ()
@@ -557,9 +570,21 @@ class ChunkPolicy:
             name = re.sub(pattern, replacement, name)
         return name
 
+    @staticmethod
+    def _reworded(rules: tuple[tuple[str, str], ...], text: str) -> str:
+        for pattern, replacement in rules:
+            if re.search(pattern, text):
+                return re.sub(pattern, replacement, text).strip()
+        return text
+
     def voice_name(self, trigger: str, title: str) -> str:
         """What a header calls a voice line: its title, else its trigger's words."""
-        return title or self.triggers.get(trigger) or self.label("voice")
+        raw = title or self.triggers.get(trigger) or ""
+        return self._reworded(self.voice_words, raw) or self.label("voice")
+
+    def section_name(self, name: str) -> str:
+        """A dossier section or item as a header names it."""
+        return self._reworded(self.section_words, name)
 
     def shaped(self, shape: str) -> tuple[str, ...]:
         """Names of the templates built by one builder."""

@@ -113,8 +113,9 @@ class Env:
 
     params: Params
     speakers: Speakers = field(init=False)
-    #: Scenes whose lines never received a unit span they could be traced to.
     notes: list[str] = field(default_factory=list)
+    #: Records a policy chose not to make units of, by template.
+    skipped: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def for_build(cls, archive: Archive, pack: Pack, params: Params | None = None) -> Env:
@@ -365,6 +366,9 @@ def _voice(
     rows.sort(key=lambda r: (person_of.get(r["subject"], r["subject"]),
                              ordinal.get(r["subject"], 0), r["subject"]))
     for r in rows:
+        if r["trigger"] in policy.voice_skip:
+            env.skipped["voice"] = env.skipped.get("voice", 0) + 1
+            continue
         person = person_of.get(r["subject"], r["subject"])
         # A variant is the same slot recorded again with other words; naming it in the
         # header keeps the two lines from reading as one line said twice.
@@ -476,7 +480,8 @@ def _profile(
 
         for i, (page, title, text) in enumerate(sections + items):
             head = header.format(
-                person=f"{person_id}{tag(page)}", section=f" · {title}" if title else "")
+                person=f"{person_id}{tag(page)}",
+                section=f" · {policy.section_name(title)}" if title else "")
             for part in _split(text, t.max_chars, policy.breaks):
                 yield Chunk(
                     template=t.name, page=page, text=part, header=head,
@@ -486,7 +491,7 @@ def _profile(
                 )
 
     for n, ((key, text), page) in enumerate(sorted(stock_first.items())):
-        head = header.format(person=label("shared"), section=f" · {key}")
+        head = header.format(person=label("shared"), section=f" · {policy.section_name(key)}")
         yield Chunk(
             template=t.name, page=page, text=text, header=head, title=key,
             revid=dossier[page]["revid"], span_of=f"{label('shared')}#stock",
@@ -550,18 +555,22 @@ def archive_triggers(archive: Archive) -> list[str]:
 def engine_meta_test(policy: ChunkPolicy, triggers: list[str]) -> Callable[[str, str, str], bool]:
     """`(template, page, header) -> bool`: does a unit header still show engine metadata?
 
-    Two kinds: a voice trigger key the archive holds, matched as a whole word anywhere
-    in any header, and a dialogue header that names its scene by the full page title
-    where the pack's page-part rule shortens it.
+    Three kinds: a voice trigger key the archive holds, matched as a whole word anywhere
+    in any header; a word of the work's interface the pack lists (`header_taboo`); and a
+    dialogue header that names its scene by the full page title where the pack's page-part
+    rule shortens it.
     """
     keys = sorted(set(triggers), key=len, reverse=True)
     # ASCII word edges: a key glued to text in another script is still the key.
     key_rx = (re.compile(r"(?<![A-Za-z0-9_-])(?:" + "|".join(map(re.escape, keys))
                          + r")(?![A-Za-z0-9_-])") if keys else None)
     dialogue = set(policy.shaped("dialogue"))
+    taboo = re.compile("|".join(policy.header_taboo)) if policy.header_taboo else None
 
     def test(template: str, page: str, header: str) -> bool:
         if key_rx is not None and key_rx.search(header):
+            return True
+        if taboo is not None and taboo.search(header):
             return True
         return (template in dialogue and policy.scene_name(page) != page
                 and page in header)
