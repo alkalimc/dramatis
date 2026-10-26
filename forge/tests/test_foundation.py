@@ -314,7 +314,7 @@ def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_decla
     policy = replace(pack.chunking, generic_speakers=("???",),
                      speaker_as=(("s1", "Bob", "Ann"),))
     p = replace(pack, identity=ident, chunking=policy)
-    rows = [{"speaker": s, "portrait": "k-ann"} for s in ("???", "Bob", "Crowd")]
+    rows = [{"speaker": s, "portrait": "k-ann"} for s in ("???", "Bob", "Bob", "Bob", "Crowd")]
     with Archive(tmp_path / "t.archive") as a:
         a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)]})
         a.put_page("Ann", "k-ann", 1, "now")
@@ -326,6 +326,8 @@ def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_decla
     assert got == {"???": None, "Bob": "Ann", "Crowd": None}
     # the exception is for one scene only
     assert other["Bob"] == "Bob"
+    # a declared exception is already the explanation; the same label elsewhere is a conflict
+    assert list(sp.conflicts) == [("s2", "Bob")]
 
 
 def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, pack):

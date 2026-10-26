@@ -141,6 +141,8 @@ class Plan:
     new_watermark: int = 0
     #: Held pages to re-fetch: edited since the watermark, or every one on `--full`.
     changed: list[str] = field(default_factory=list)
+    #: Of `changed`, the pages only the revision check found (the feed did not list them).
+    stale: list[str] = field(default_factory=list)
     #: Changed titles outside every seed set, ignored without being identified.
     ignored: int = 0
     #: Newly in scope.
@@ -203,6 +205,21 @@ def plan(wiki: Wiki, archive: Archive, pack: Pack, *, full: bool = False,
         p.changed = sorted(t for t in touched & before if t in held)
         p.ignored = len(touched - before)
         say(f"changed titles: {len(touched):,}, in scope: {len(p.changed):,}")
+        # The feed lists edits and creations only: a page moved over a redirect, restored
+        # after deletion or imported changes without appearing in it. Asking the site for the
+        # current revision of every held page closes that hole for a few dozen requests.
+        revids = _held_revids(archive)
+        heldhere = sorted(t for t in before if t in held)
+        say(f"checking {len(heldhere):,} held revisions")
+        now = wiki.revision_ids(heldhere)
+        p.stale = sorted(t for t in heldhere
+                         if t in now and now[t] != revids.get(t) and t not in p.changed)
+        if p.stale:
+            p.changed = sorted({*p.changed, *p.stale})
+            p.findings.append(Finding(
+                "G1", LOW,
+                f"{len(p.stale)} held page(s) were newer on the site than the change feed "
+                f"said (first: {', '.join(p.stale[:3])}); fetched"))
 
     after = set(before)
     if p.full or rescope:

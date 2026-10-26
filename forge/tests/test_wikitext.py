@@ -148,6 +148,14 @@ def test_sections_carry_their_offset_and_headings_resolve_at_any_point(clean):
     assert clean.headings_at(body, 0) == ()
 
 
+def test_headings_are_flattened_like_bodies_on_every_route(clean):
+    body = ("== {{color|red|Hello}} and [[Page|link]] ==\nText under A, long enough to be kept.\n"
+            "=== ''B'' {{cite|x}} ===\nText under B, also kept.\n")
+    sections = clean.split_sections(body, min_chars=5)
+    assert [s["path"] for s in sections] == [("Hello and link",), ("Hello and link", "B")]
+    assert clean.headings_at(body, body.index("Text under B")) == ("Hello and link", "B")
+
+
 HIDDEN_ROW_TABLE = """{|
 ! code !! name
 |-

@@ -460,7 +460,7 @@ class Cleaner:
         stack: list[str] = []
         for i, m in enumerate(marks):
             level = len(m.group(1))
-            title = m.group(2).strip()
+            title = self.heading(m.group(2), warn)
             end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
             stack = stack[: max(level - 2, 0)] + [title]
             if any(s in self.rules.drop_sections for s in stack):
@@ -470,12 +470,16 @@ class Cleaner:
                 out.append({"path": tuple(stack), "text": text, "at": m.start()})
         return out
 
-    @staticmethod
-    def headings_at(body: str, offset: int) -> tuple[str, ...]:
+    def heading(self, raw: str, warn: list[str] | None = None) -> str:
+        """A heading's title as plain text: it goes through the same flattening as a body,
+        since a title can hold a link template as easily as a paragraph can."""
+        return " ".join(self.text(raw, warn).split())
+
+    def headings_at(self, body: str, offset: int) -> tuple[str, ...]:
         """The heading path in force at `offset` of `body`, outermost first."""
         stack: list[str] = []
         for m in RE_SECTION.finditer(body, 0, offset):
-            stack = stack[: max(len(m.group(1)) - 2, 0)] + [m.group(2).strip()]
+            stack = stack[: max(len(m.group(1)) - 2, 0)] + [self.heading(m.group(2))]
         return tuple(stack)
 
     def visible(self, wikitext: str) -> int:
