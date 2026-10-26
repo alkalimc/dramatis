@@ -245,6 +245,18 @@ impl Folio {
             .map_err(Into::into)
     }
 
+    /// Aliases of kind `term_exact`, longest first. These match only as whole words, case
+    /// sensitively; the caller does that, since it needs the query.
+    pub fn exact_aliases(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT alias FROM aliases WHERE kind = 'term_exact' \
+             ORDER BY length(alias) DESC, alias",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
     /// The people an alias names, as roster ids.
     ///
     /// Separate from `resolve_alias` because the two answer different questions. An alias
