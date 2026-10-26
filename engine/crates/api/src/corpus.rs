@@ -47,6 +47,7 @@ pub struct Corpus {
     coldstart: Vec<(String, String)>,
     revision_url_pattern: String,
     avatar_url_pattern: String,
+    embed_model: String,
 }
 
 impl std::fmt::Debug for Corpus {
@@ -129,6 +130,7 @@ impl Corpus {
             .collect();
         let revision_url_pattern = optional_key(folio.conn(), "revision_url_pattern");
         let avatar_url_pattern = optional_key(folio.conn(), "avatar_url_pattern");
+        let embed_model = optional_key(folio.conn(), "embed_model");
 
         Ok(Self {
             manifest,
@@ -144,7 +146,13 @@ impl Corpus {
             coldstart,
             revision_url_pattern,
             avatar_url_pattern,
+            embed_model,
         })
+    }
+
+    /// The encoder that built the corpus's vectors; empty when it has none.
+    pub fn embed_model(&self) -> &str {
+        &self.embed_model
     }
 
     pub fn path(&self) -> &Path {

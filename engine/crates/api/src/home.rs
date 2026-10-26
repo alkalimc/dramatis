@@ -81,6 +81,15 @@ impl Home {
         self.root.join("prompts")
     }
 
+    /// The corpus to open at startup: `DRAMATIS_FOLIO`, else the `.folio` in the home
+    /// directory. `None` means the app must ask the user for a file.
+    pub fn resolve_folio(&self) -> Option<PathBuf> {
+        std::env::var_os(FOLIO_ENV)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| self.folio_in_home())
+    }
+
     /// The `.folio` in the home directory; the newest when there are several.
     pub fn folio_in_home(&self) -> Option<PathBuf> {
         let entries = std::fs::read_dir(&self.root).ok()?;

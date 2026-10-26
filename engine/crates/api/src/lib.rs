@@ -16,6 +16,7 @@ pub mod commands;
 pub mod convert;
 pub mod corpus;
 pub mod display;
+pub mod engine;
 pub mod endpoints;
 pub mod error;
 pub mod events;
@@ -31,6 +32,7 @@ pub mod views;
 use std::sync::Arc;
 
 pub use commands::{Api, COMMANDS, Stub};
+pub use engine::{Engine, Ports};
 pub use error::{ApiError, ApiResult};
 pub use events::EVENTS;
 
