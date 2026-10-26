@@ -389,3 +389,10 @@ def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
     assert cards["[file] Alice <Winter> · identity card"] == "name: Alice(Winter)"
     items = [c.text for c in units if c.span_of == "Alice#dossier"]
     assert items == ["A long enough entry that stands alone.\ntiny: Short."]
+
+
+def test_lore_runs_follow_the_pages_declared_shape(pack):
+    policy = replace(pack.chunking, lore_spans=((r"^List$", 0), (r"^Story$", 1)))
+    assert policy.lore_run("Plain", ("a",), 3) == "Plain"
+    assert policy.lore_run("List", ("a",), 3) == "List#3"
+    assert policy.lore_run("Story", ("tale", "part 2"), 5) == "Story#tale"

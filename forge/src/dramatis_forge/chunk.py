@@ -158,7 +158,8 @@ def _lore(
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=" › ".join(path) or r["page"], revid=r["revid"],
-                span_of=r["page"], span_from=r["seq"], span_to=r["seq"],
+                span_of=policy.lore_run(r["page"], path, r["seq"]),
+                span_from=r["seq"], span_to=r["seq"],
             )
 
 

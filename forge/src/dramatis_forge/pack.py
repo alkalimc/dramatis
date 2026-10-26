@@ -559,6 +559,12 @@ class ChunkPolicy:
     #: Regexes for heading-path segments a header leaves out: letter buckets, bare numbers,
     #: template names. They place an entry on the wiki's page, not in the world.
     lore_path_drop: tuple[str, ...] = ()
+    #: `(page regex, depth)`: how a lore page's records neighbour each other. Records of a
+    #: page are one run by default, so a hit widens to the entries beside it. Pages that are
+    #: lists (entries in alphabetical order, tips) have no such order: depth 0 gives every
+    #: record a run of its own. A page that tells several things in turn gets depth `n`: the
+    #: records sharing their first `n` headings are one run.
+    lore_spans: tuple[tuple[str, int], ...] = ()
     #: Regexes no header may match: words of the work's interface. A match is a failure of
     #: the rules above, found on the units that shipped.
     header_taboo: tuple[str, ...] = ()
@@ -626,6 +632,13 @@ class ChunkPolicy:
             if seg and (not out or out[-1] != seg):
                 out.append(seg)
         return out
+
+    def lore_run(self, page: str, path: tuple[str, ...], seq: int) -> str:
+        """The run a lore record belongs to (the `span_of` of its unit)."""
+        for pattern, depth in self.lore_spans:
+            if re.search(pattern, page):
+                return f"{page}#{seq}" if depth == 0 else f"{page}#{'/'.join(path[:depth])}"
+        return page
 
     def section_name(self, name: str) -> str:
         """A dossier section or item as a header names it."""
