@@ -363,4 +363,19 @@ mod tests {
             paired_bootstrap(&a, &b, 1000)
         );
     }
+
+    #[test]
+    fn exact_term_queries_report_apart_from_term_queries() {
+        let q = query(&[("a", 1)], &[]);
+        let mut term = score(&q, &["a".into()], 6);
+        term.family = "term".into();
+        let mut exact = score(&q, &["x".into()], 6);
+        exact.family = "term_exact".into();
+        let per_family = by_family(&[term, exact]);
+        assert_eq!(
+            per_family.keys().collect::<Vec<_>>(),
+            ["term", "term_exact"]
+        );
+        assert!(per_family["term"].ndcg > per_family["term_exact"].ndcg);
+    }
 }

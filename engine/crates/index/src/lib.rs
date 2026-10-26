@@ -215,6 +215,8 @@ pub enum How {
     Unique,
     /// The alias names several, and the rest of the query named one of them.
     Qualified,
+    /// A short exact-match alias stood as a whole word inside a longer query.
+    Word,
 }
 
 /// The alias names several things and nothing in the query said which. A reportable
@@ -755,7 +757,24 @@ impl Index {
             [only] => (trimmed.to_string(), only.clone(), How::Unique),
             [] => match self.qualified(trimmed)? {
                 Some((alias, target)) => (alias, target, How::Qualified),
-                None => return Ok(unchanged()),
+                None => match self.whole_word(trimmed)? {
+                    None => return Ok(unchanged()),
+                    Some((alias, targets)) => match &targets[..] {
+                        [only] => (alias, only.clone(), How::Word),
+                        several => {
+                            let (_, _, query, filters) = unchanged();
+                            return Ok((
+                                None,
+                                Some(Ambiguity {
+                                    alias,
+                                    candidates: several.to_vec(),
+                                }),
+                                query,
+                                filters,
+                            ));
+                        }
+                    },
+                },
             },
             several => {
                 let (_, _, query, filters) = unchanged();
@@ -775,7 +794,7 @@ impl Index {
             // A qualified hit names one target out of several, so the person is that
             // target when it is on the roster, not the alias's whole candidate set.
             How::Qualified => self.folio.person(&target)?.map(|p| p.person_id),
-            How::Unique => match &self.folio.persons_for_alias(&alias)?[..] {
+            How::Unique | How::Word => match &self.folio.persons_for_alias(&alias)?[..] {
                 [only] => Some(only.clone()),
                 _ => None,
             },
@@ -799,6 +818,30 @@ impl Index {
             format!("{trimmed} {target}"),
             effective,
         ))
+    }
+
+    /// A short exact-match alias occurring as a whole word in a longer query, with the
+    /// things it names.
+    ///
+    /// Such aliases are common words in another script (a name that is also an English
+    /// word or syllable), so a plain substring test would fire inside ordinary questions.
+    /// Hence the word-boundary and case rules of [`contains_whole_word`]. When two different
+    /// ones occur the query does not say which was meant, so none is applied.
+    fn whole_word(&self, query: &str) -> Result<Option<(String, Vec<String>)>> {
+        let mut found = None;
+        for alias in self.folio.exact_aliases()? {
+            if contains_whole_word(query, &alias) {
+                if found.is_some() {
+                    return Ok(None);
+                }
+                found = Some(alias);
+            }
+        }
+        let Some(alias) = found else {
+            return Ok(None);
+        };
+        let targets = self.folio.resolve_alias(&alias)?;
+        Ok(Some((alias, targets)))
     }
 
     /// An ambiguous alias whose query also names one of its declared candidates.
@@ -886,4 +929,19 @@ impl Index {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
     }
+}
+
+/// Whether `needle` occurs in `haystack` with no ASCII letter or digit directly on either
+/// side. Case-sensitive and byte-exact: the needle is not folded or stripped. Characters
+/// of other scripts and punctuation count as boundaries.
+fn contains_whole_word(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    haystack.match_indices(needle).any(|(at, hit)| {
+        let before = haystack[..at].chars().next_back();
+        let after = haystack[at + hit.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_alphanumeric())
+            && !after.is_some_and(|c| c.is_ascii_alphanumeric())
+    })
 }
