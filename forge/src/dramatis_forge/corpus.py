@@ -195,6 +195,12 @@ def run(
                 "G5", f"{n} {template} record(s) made no unit: the pack's policy skips their slot")
         _check_consumers(rep, archive, pack)
         _check_story_coverage(rep, archive, pack, spans)
+        if env.unresolved_branches:
+            scenes = sorted(set(env.unresolved_branches))
+            rep.ledger.add(
+                "G5", f"{len(env.unresolved_branches)} branch marker(s) in {len(scenes)} "
+                      "scene(s) cannot name the reply they follow and show a bare id "
+                      f"(first: {', '.join(scenes[:5])})", high=True)
         _check_attribution(rep, archive, folio, pack, env, params)
 
         stats_rows = []
@@ -267,6 +273,7 @@ def run(
             "owners_missing": len(rep.owners_missing), "owner_scenes": rep.scenes_with_owner,
             "markup_residue": sum(rep.markup_residue.values()),
             "skipped": sum(env.skipped.values()),
+            "unresolved_branches": len(env.unresolved_branches),
         })
         folio.set_meta("form_copies", {cid: list(dict.fromkeys(pages))
                                        for cid, pages in sorted(copies.items())})
@@ -684,6 +691,15 @@ def _check_attribution(
                       "one person have no unit attributed to that person: "
                       + ", ".join(rep.owners_missing[:8]),
                 high=ratio > params.speaker.owner_missing_max)
+
+    for scene, label, person in env.speakers.stale_declared:
+        rep.ledger.add(
+            "G4", f"declared speaker exception ({label!r} as {person!r}) names a person on no "
+                  "roster page; it has no effect", page=scene)
+    for label in env.speakers.placeholders_resolved():
+        rep.ledger.add(
+            "G4", f"label {label!r} is a placeholder but a page, redirect or portrait count "
+                  "names a person for it; it should belong to nobody")
 
     for c in sorted(env.speakers.conflicts.values(), key=lambda c: (c.scene, c.label)):
         rep.ledger.add(

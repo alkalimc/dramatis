@@ -367,6 +367,10 @@ class IdentityRules:
     #: None. The story reader derives the same key from each script's portrait names, so a
     #: speaker label that is not a page title can still be traced to a person.
     portrait_key: Callable[[str], str | None] | None = None
+    #: A looser form of a portrait key (the key with its less reliable part dropped), used
+    #: only for labels that are not page titles when the exact key matches no page: a script
+    #: and a page can spell the same portrait id differently.
+    portrait_loose: Callable[[str], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -479,6 +483,9 @@ class ChunkTemplate:
     #: Absorb a trailing stub shorter than `target // 2` into the previous unit,
     #: rather than emitting a fragment that embeds as noise.
     absorb_tail: bool = True
+    #: Sequence templates only: a unit ends before a scene change only once it holds this
+    #: many characters as well as half its records; six short lines are not a scene.
+    cut_min_chars: int = 0
     shape: str = ""
 
     @property
@@ -558,9 +565,12 @@ class ChunkPolicy:
     #: Identity-card fields left out of the card text: attributes of the work's mechanics
     #: rather than of the person. They stay on the person's facets for display.
     card_omit: tuple[str, ...] = ()
-    #: Speaker labels that stand for someone not named yet. They are attributed scene by
-    #: scene from portraits only; a redirect or a corpus-wide count would say nothing.
+    #: Speaker labels that stand for someone not named yet. They belong to nobody: the
+    #: same label is a different person each time, and a portrait only shows who was on screen.
     generic_speakers: tuple[str, ...] = ()
+    #: `(scene, label, person page)` exceptions to "a page-title label is that page's
+    #: person": a declared disguise. Each entry is a decision about one scene.
+    speaker_as: tuple[tuple[str, str, str], ...] = ()
     #: Regex over a scene id with a named group `owner` for scenes that belong to one
     #: person (a record of their own); the owner missing from their own scene is a failure
     #: of attribution, not a fact about the story. Empty disables the check.

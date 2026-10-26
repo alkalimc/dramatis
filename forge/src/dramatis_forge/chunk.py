@@ -116,6 +116,9 @@ class Env:
     notes: list[str] = field(default_factory=list)
     #: Records a policy chose not to make units of, by template.
     skipped: dict[str, int] = field(default_factory=dict)
+    #: Scenes whose branch markers could not name the option they answer (a reply id that
+    #: no choice offers): the marker would show the source's bare id.
+    unresolved_branches: list[str] = field(default_factory=list)
 
     @classmethod
     def for_build(cls, archive: Archive, pack: Pack, params: Params | None = None) -> Env:
@@ -170,31 +173,35 @@ class Row(NamedTuple):
     branch: str | None = None
 
 
-def _turn_aligned(rendered: list[Row], target: int, cap: int, absorb: bool) -> list[list[Row]]:
+def _turn_aligned(
+    rendered: list[Row], target: int, cap: int, absorb: bool, cut_chars: int = 0
+) -> list[list[Row]]:
     """Group a scene's rows into non-overlapping units that break between turns.
 
     Aim for `target` rows, then keep extending — up to `cap` — until the speaker
     changes. Cutting a speaker off mid-thought is the failure that actually damages a
     dialogue unit, and a fixed window guarantees it at every boundary; this makes it
     rare at the cost of slightly variable unit length. A unit that is at least half full
-    also ends before a row the script marks as a change of scene: a new place is a better
-    seam than a new speaker.
+    (in records, and in characters when `cut_chars` is set) also ends before a row the
+    script marks as a change of scene: a new place is a better seam than a new speaker.
     """
     half = max(target // 2, 1)
     out: list[list[Row]] = []
     cur: list[Row] = []
+    size = 0
     for i, row in enumerate(rendered):
         cur.append(row)
+        size += len(row.text)
         nxt = rendered[i + 1] if i + 1 < len(rendered) else None
         if nxt is None:
             break
         if len(cur) >= target:
             if nxt.speaker != row.speaker or len(cur) >= cap:
                 out.append(cur)
-                cur = []
-        elif len(cur) >= half and nxt.cut:
+                cur, size = [], 0
+        elif len(cur) >= half and size >= cut_chars and nxt.cut:
             out.append(cur)
-            cur = []
+            cur, size = [], 0
     if cur:
         # A stub tail embeds as noise, so fold it back — but not past the cap, or a long
         # monologue produces one oversized unit precisely where the cap exists to prevent
@@ -212,9 +219,8 @@ def _turn_aligned(rendered: list[Row], target: int, cap: int, absorb: bool) -> l
     return out
 
 
-def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
-                refs: list[str]) -> str:
-    """The marker for a stretch that follows some replies of a choice."""
+def reply_options(choice: tuple[list[str], list[str]] | None, refs: list[str]) -> list[str]:
+    """The options of a choice that the reply ids `refs` stand for."""
     options, values = choice if choice else ([], [])
     picked: list[str] = []
     for ref in refs:
@@ -226,20 +232,30 @@ def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
             continue
         if 0 <= i < len(options):
             picked.append(options[i])
+    return picked
+
+
+def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
+                refs: list[str]) -> str:
+    """The marker for a stretch that follows some replies of a choice."""
+    picked = reply_options(choice, refs)
     inner = " / ".join(picked) if picked else policy.sep("list").join(refs)
     return policy.mark(f"{policy.label('branch')}{policy.sep('quote').format(inner)}")
 
 
 def _reply_marker(
     policy: ChunkPolicy, choices: dict[int, tuple[list[str], list[str], str | None]],
-    branch: str | None,
+    branch: str | None, unresolved: list[str] | None = None, scene: str = "",
 ) -> str:
     """The line that opens a stretch following some replies, or closes one (`branch` None)."""
     if branch is None:
         return policy.mark(policy.label("merge"))
     at, _, refs = branch.partition(":")
     choice = choices.get(int(at))
-    return reply_text(policy, (choice[0], choice[1]) if choice else None, refs.split(";"))
+    pair = (choice[0], choice[1]) if choice else None
+    if unresolved is not None and not reply_options(pair, refs.split(";")):
+        unresolved.append(scene)
+    return reply_text(policy, pair, refs.split(";"))
 
 
 def _dialogue(
@@ -299,7 +315,7 @@ def _dialogue(
                 False, branch)
         rendered = [by_seq[k] for k in sorted(by_seq)]
 
-        for group in _turn_aligned(rendered, target, cap, t.absorb_tail):
+        for group in _turn_aligned(rendered, target, cap, t.absorb_tail, t.cut_min_chars):
             uniq: list[str] = []
             for row in group:
                 if row.speaker and row.speaker not in uniq:
@@ -315,7 +331,8 @@ def _dialogue(
             parts, here = [], None
             for row in group:
                 if row.branch != here:
-                    parts.append(_reply_marker(policy, choices, row.branch))
+                    parts.append(_reply_marker(
+                        policy, choices, row.branch, env.unresolved_branches, scene["id"]))
                     here = row.branch
                 parts.append(row.text)
             body = "\n".join(parts)

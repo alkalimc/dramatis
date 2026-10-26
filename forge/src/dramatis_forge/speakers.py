@@ -15,9 +15,13 @@ Three signals are used, in this order, and every one is a relation the site writ
    name, where a portrait is only who was on screen; where the two disagree the portrait
    was another character's.
 3. **The portrait shown for the speaker** names a person's operator page by id. Applied to
-   the label across the whole corpus when enough lines agree; for a label that is a
-   placeholder (a name withheld on purpose) it is applied scene by scene, since the same
-   placeholder is a different person each time.
+   the label across the whole corpus when enough lines agree. A label that is a
+   placeholder (a name withheld on purpose) is nobody's: the same placeholder is a
+   different person each time, and a scene's most-shown portrait is as often the person
+   being spoken to. Any other label the three signals leave open stays open.
+
+A pack may also declare an exception for one scene and label (a disguise the script uses
+for a known person); it is checked first and nothing else overrides it.
 
 Name similarity is never used. Where a page-title label and the portraits disagree, the
 label stands and the disagreement is recorded, so a person can read the cases.
@@ -52,6 +56,13 @@ class Speakers:
     person_of: dict[str, str] = field(init=False, default_factory=dict)
     #: portrait key -> person, for keys that name exactly one person's page.
     portrait_person: dict[str, str] = field(init=False, default_factory=dict)
+    #: loose portrait key -> person, for the looser key (see `IdentityRules.portrait_loose`)
+    #: that names exactly one person; a fallback for labels that are not page titles.
+    loose_person: dict[str, str] = field(init=False, default_factory=dict)
+    #: (scene, label) -> person, from the pack's declared exceptions.
+    declared: dict[tuple[str, str], str] = field(init=False, default_factory=dict)
+    #: Declared exceptions whose person is on no roster page (the pack went stale).
+    stale_declared: list[tuple[str, str, str]] = field(init=False, default_factory=list)
     #: label -> person, for labels that are not page titles and whose own portraits agree.
     label_person: dict[str, str] = field(init=False, default_factory=dict)
     #: label -> person, from redirects and real names that name one person only.
@@ -62,6 +73,7 @@ class Speakers:
         self.person_of = self.archive.person_of()
         self.generic = frozenset(self.pack.chunking.generic_speakers)
         self._portraits()
+        self._declared()
         self._aliases()
         self._labels()
 
@@ -78,6 +90,29 @@ class Speakers:
             if key:
                 seen[key].add(person)
         self.portrait_person = {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
+        loose_of = self.pack.identity.portrait_loose
+        if loose_of is not None:
+            loose: dict[str, set[str]] = defaultdict(set)
+            for key, people in seen.items():
+                if (lk := loose_of(key)) is not None:
+                    loose[lk] |= people
+            self.loose_person = {k: next(iter(v)) for k, v in loose.items() if len(v) == 1}
+
+    def _declared(self) -> None:
+        for scene, label, person in self.pack.chunking.speaker_as:
+            resolved = self.person_of.get(person)
+            if resolved is None:
+                self.stale_declared.append((scene, label, person))
+            else:
+                self.declared[(scene, label)] = resolved
+
+    def _portrait_person(self, key: str) -> str | None:
+        """The person a portrait key shows, by the exact key or else by the loose one."""
+        if key in self.portrait_person:
+            return self.portrait_person[key]
+        loose_of = self.pack.identity.portrait_loose
+        lk = loose_of(key) if loose_of is not None else None
+        return self.loose_person.get(lk) if lk is not None else None
 
     def _aliases(self) -> None:
         roster = set(self.person_of.values())
@@ -102,8 +137,8 @@ class Speakers:
                 continue
             people = Counter()
             for key, n in keys.items():
-                if key in self.portrait_person:
-                    people[self.portrait_person[key]] += n
+                if (who := self._portrait_person(key)) is not None:
+                    people[who] += n
             total = sum(keys.values())
             if total < self.params.portrait_lines or not people:
                 continue
@@ -122,19 +157,19 @@ class Speakers:
         person, n = votes.most_common(1)[0]
         return person, n, len(keys)
 
-    def owner(self, label: str, portraits: list[str | None]) -> str | None:
-        """The person a label stands for in one scene, or None."""
+    def owner(self, label: str, scene: str = "") -> str | None:
+        """The person a label stands for in one scene, or None.
+
+        A declared exception comes first: a page-title label that is really a disguise is
+        exactly what an exception is for.
+        """
+        if (scene, label) in self.declared:
+            return self.declared[(scene, label)]
         if label in self.person_of:
             return self.person_of[label]
-        if label not in self.generic:
-            if label in self.alias_person:
-                return self.alias_person[label]
-            if label in self.label_person:
-                return self.label_person[label]
-        person, n, total = self._shown(portraits)
-        if person is not None and n / total >= self.params.portrait_share:
-            return person
-        return None
+        if label in self.generic:
+            return None
+        return self.alias_person.get(label) or self.label_person.get(label)
 
     def scene_owners(self, scene: str, rows: list) -> dict[str, str | None]:
         """Label -> person for every speaker of one scene (`rows` carry `speaker`, `portrait`)."""
@@ -144,7 +179,7 @@ class Speakers:
                 by_label[r["speaker"]].append(r["portrait"])
         out: dict[str, str | None] = {}
         for label, portraits in by_label.items():
-            out[label] = self.owner(label, portraits)
+            out[label] = self.owner(label, scene)
             own = self.person_of.get(label)
             if own is not None:
                 shown, n, total = self._shown(portraits)
@@ -180,3 +215,8 @@ class Speakers:
         return sorted((label, person) for label, person in self.label_person.items()
                       if self.alias_person.get(label) != person)
 
+
+    def placeholders_resolved(self) -> list[str]:
+        """Placeholder labels that some table nevertheless names a person for."""
+        return sorted(l for l in self.generic
+                      if l in self.person_of or l in self.alias_person or l in self.label_person)
