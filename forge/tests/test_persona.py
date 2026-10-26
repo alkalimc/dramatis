@@ -500,6 +500,57 @@ def test_call_errors_leave_rows_alone_and_exit_nonzero(toy, paths, endpoints_fil
     assert ("Alice", "system") in rows(paths)
 
 
+def message_of(output: dict) -> dict:
+    """An Anthropic-style reply carrying `output` as the structured answer."""
+    return {"id": "msg_1", "type": "message", "role": "assistant", "model": "model-a",
+            "stop_reason": "end_turn", "stop_sequence": None,
+            "content": [{"type": "thinking", "thinking": "Considering.", "signature": "sig=="},
+                        {"type": "text", "text": json.dumps(output)}],
+            "usage": {"input_tokens": 100, "cache_read_input_tokens": 50,
+                      "cache_creation_input_tokens": 10, "output_tokens": 300}}
+
+
+def test_messages_wire_run_and_request_shape(toy, paths, endpoints_file):
+    ep = FakeEndpoint(message_of(output_of("responses_ok.json")))
+    result = run(toy, paths, endpoints_file, ep, wire="messages", only=["Alice"])
+    outcome = result.report.outcomes[0]
+    assert outcome.status == WRITTEN
+    assert outcome.usage.as_dict() == {"input": 160, "cached": 50, "output": 300, "reasoning": 0}
+    req = ep.requests[0]
+    assert str(req.url) == "https://llm.example.invalid/v1/messages"
+    assert req.headers["x-api-key"] == KEY and "authorization" not in req.headers
+    body = ep.bodies[0]
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"]["effort"] == "high"
+    assert body["output_config"]["format"]["type"] == "json_schema"
+    assert body["messages"][0]["role"] == "user" and PLACEHOLDER in body["system"]
+    assert ("Alice", "system") in rows(paths)
+
+
+def test_messages_wire_refusal_is_final(toy, paths, endpoints_file):
+    refusal = {**message_of({}), "stop_reason": "refusal"}
+    ep = FakeEndpoint(refusal)
+    rep = run(toy, paths, endpoints_file, ep, wire="messages", only=["Alice"]).report
+    assert rep.outcomes[0].status == "error" and "refused" in rep.outcomes[0].reasons[0]
+    assert len(ep.requests) == 1
+
+
+def test_messages_probe_records_the_sdk_arguments(toy, paths, endpoints_file):
+    ep = FakeEndpoint(message_of(output_of("responses_ok.json")))
+    run(toy, paths, endpoints_file, ep, wire="messages", probe=True)
+    raw = json.loads(next((paths.pack_dir / "persona" / "probe").glob("Alice-*.json")).read_text())
+    assert raw["request"]["path"] == "messages"
+    assert raw["request"]["body"]["thinking"] == {"type": "adaptive"}
+    assert KEY not in json.dumps(raw)
+
+
+def test_endpoints_accept_messages_and_cache_write_price():
+    e = Endpoints.from_toml(ENDPOINTS.format(wire="messages").replace(
+        "forced_tool = true", "forced_tool = false\nprice_in_cache_write = 1.25"))
+    assert e.profiles[0].wire_api == "messages"
+    assert e.profiles[0].models[0].price_in_cache_write == 1.25
+
+
 def test_probe_writes_readable_files(toy, paths, endpoints_file):
     ep = FakeEndpoint(recorded("chat_ok.json"))
     result = run(toy, paths, endpoints_file, ep, wire="chat", probe=True)
