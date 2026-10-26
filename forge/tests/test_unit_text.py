@@ -107,7 +107,7 @@ def test_term_targets_follow_person_names():
 
 def test_short_foreign_terms_are_marked_exact():
     rows = [("Ben", "x", "term"), ("Dr.", "y", "term"), ("Long Name", "z", "term"),
-            ("短", "w", "term"), ("ドク", "u", "term"), ("Ace", "v", "redirect")]
+            ("\u0416\u0436", "w", "term"), ("\u3042\u3044", "u", "term"), ("Ace", "v", "redirect")]
     out = normalize.mark_exact_terms(rows, 4)
     assert [k for _, _, k in out] == ["term_exact", "term_exact", "term", "term", "term", "redirect"]
     assert normalize.mark_exact_terms(rows, 0) == rows
