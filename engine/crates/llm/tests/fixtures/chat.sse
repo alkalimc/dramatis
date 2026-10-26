@@ -1,0 +1,14 @@
+data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Check"}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"ing."}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"search","arguments":"{\"query\":"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"harbour\"}"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":90,"prompt_tokens_details":{"cached_tokens":800},"completion_tokens_details":{"reasoning_tokens":40}}}
+
+data: [DONE]
+
