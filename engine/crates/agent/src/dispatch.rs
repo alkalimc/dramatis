@@ -14,7 +14,6 @@ use world::{Actor, ChannelId, FactId, FactKind, Origin, PersonId, bond, channel}
 use crate::agent::{Agent, Event};
 use crate::assemble;
 use crate::error::{Error, Result};
-use crate::request::ToolCall;
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
@@ -26,16 +25,16 @@ type Outcome = std::result::Result<String, Refusal>;
 
 impl Agent {
     /// Run one tool call and return what the model reads back.
-    pub(crate) async fn dispatch(&self, turn: &mut Turn, call: &ToolCall) -> Result<String> {
+    pub(crate) async fn dispatch(&self, turn: &mut Turn, name: &str, arguments: &str) -> Result<String> {
         let seg = self.current_segment(turn.channel)?;
         let names = self.segment_names(seg)?;
         let kind = self.log_kind(&self.db(), turn.channel)?;
         let out = match kind {
-            LogKind::Person => match SharedCall::parse(&call.name, &call.arguments) {
+            LogKind::Person => match SharedCall::parse(name, arguments) {
                 Ok(c) => self.shared(turn, c, &names, seg)?,
                 Err(e) => Err(self.refuse(&names, "harness.error.arguments", &e.to_string())),
             },
-            LogKind::Host => match HostCall::parse(&call.name, &call.arguments) {
+            LogKind::Host => match HostCall::parse(name, arguments) {
                 Ok(c) => self.host(turn, c, &names, seg)?,
                 Err(e) => Err(self.refuse(&names, "harness.error.arguments", &e.to_string())),
             },

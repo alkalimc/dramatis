@@ -19,13 +19,9 @@ pub mod persona;
 pub mod request;
 mod session;
 pub mod store;
-pub mod stream;
 pub mod text;
 pub mod view;
-pub mod wire;
 
 pub use agent::{Agent, Clock, Config, Event, NoSink, Parts, Sink, SystemClock};
 pub use error::{Error, Result};
 pub use flows::{Posted, PresenceOutcome};
-pub use session::open_prefix;
-pub use wire::render;

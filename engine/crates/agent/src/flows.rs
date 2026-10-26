@@ -26,7 +26,8 @@ use crate::agent::{Agent, Event};
 use crate::assemble::{self, Member};
 use crate::error::{Error, Result, timestamp};
 use crate::persona;
-use crate::request::{Choice, Image, Item};
+use crate::request::{self, Image};
+use llm::ToolChoice;
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
@@ -56,16 +57,16 @@ impl Agent {
 
     /// Store the user's message and echo it. Nothing is sent to a model yet.
     pub fn post(&self, channel: ChannelId, text: &str, image: Option<Image>) -> Result<Posted> {
-        self.post_with(channel, text, image, &crate::store::MessageMeta::default())
+        self.post_with(channel, text, image, &api::meta::MessageMeta::default())
     }
 
     /// Pass a quoted excerpt to someone: it is posted in his direct channel as the
     /// user's message, marked as a retelling. Run [`Agent::respond`] on the result.
     pub fn relay(&self, excerpt: &str, to: &PersonId) -> Result<Posted> {
         let ch = self.open_direct(to)?;
-        let meta = crate::store::MessageMeta {
+        let meta = api::meta::MessageMeta {
             relayed: true,
-            ..crate::store::MessageMeta::default()
+            ..api::meta::MessageMeta::default()
         };
         self.post_with(ch, excerpt, None, &meta)
     }
@@ -75,7 +76,7 @@ impl Agent {
         channel: ChannelId,
         text: &str,
         image: Option<Image>,
-        meta: &crate::store::MessageMeta,
+        meta: &api::meta::MessageMeta,
     ) -> Result<Posted> {
         if text.trim().is_empty() && image.is_none() {
             return Err(Error::Invalid("empty message".into()));
@@ -368,7 +369,7 @@ impl Agent {
         let log = self.log(seg)?;
         let has = |t: &str| t.lines().any(|l| l == marker);
         Ok(log.system.iter().any(|t| has(t))
-            || log.items.iter().filter_map(Item::harness_text).any(has))
+            || log.items.iter().flat_map(request::harness_texts).any(has))
     }
 
     async fn group_turn(&self, posted: &Posted) -> Result<()> {
@@ -690,20 +691,18 @@ impl Agent {
         let mut turn = Turn::new(ch, Actor::Person(author.clone()), Shape::Wrapup);
         turn.wrapup = true;
         let choice = if forced {
-            Choice::Tool("wrapup")
+            ToolChoice::Tool("wrapup".into())
         } else {
-            Choice::Auto
+            ToolChoice::Auto
         };
         let reply = self.call(&mut turn, choice).await?;
-        for call in reply.calls() {
-            let output = self.dispatch(&mut turn, call).await?;
-            self.append(
-                seg.id,
-                &Item::ToolResult {
-                    call_id: call.id.clone(),
-                    output,
-                },
-            )?;
+        let mut results = Vec::new();
+        for (id, name, args) in reply.tool_calls() {
+            let output = self.dispatch(&mut turn, name, args).await?;
+            results.push(request::tool_result_part(id, output));
+        }
+        if !results.is_empty() {
+            self.append(seg.id, &request::tool_results(results))?;
         }
         let Some(args) = turn.wrapped else {
             return Ok(None);
@@ -768,7 +767,7 @@ impl Agent {
             };
             let names = self.names_now(&self.db())?;
             let stale =
-                crate::request::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
+                request::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
             if !stale {
                 continue;
             }

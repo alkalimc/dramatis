@@ -1,53 +1,11 @@
 //! Endpoint access: which model a role points at, where its key comes from, and the
-//! transport that sends a prepared body and returns its event stream.
-//!
-//! Bodies are built byte for byte from the session log ([`crate::wire`]), so the HTTP
-//! client only carries them: `async-openai`'s bring-your-own-types calls post a raw JSON
-//! value and parse the SSE stream, and nothing re-serialises the request on the way.
+//! [`llm::Endpoint`] a call goes to.
 
-use std::fmt;
-use std::sync::Arc;
-
-use api::endpoints::{Endpoints, KEYCHAIN_SERVICE, Model, Profile, WireApi, keychain_account};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use async_trait::async_trait;
-use futures::StreamExt;
-use futures::stream::BoxStream;
-use serde_json::Value;
-use serde_json::value::RawValue;
+use api::endpoints::{Endpoints, Model, Profile, WireApi};
+use llm::{Caps, Endpoint, Protocol, Secret};
 use world::quota::Prices;
 
 use crate::error::{Error, Result};
-
-/// A key held only as long as a request needs it. Never printed.
-#[derive(Clone)]
-pub struct Secret(String);
-
-impl Secret {
-    pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
-    }
-
-    fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Secret(..)")
-    }
-}
-
-/// Where a call goes.
-#[derive(Debug, Clone)]
-pub struct Target {
-    pub base_url: String,
-    pub wire: WireApi,
-    /// `None` for an endpoint that takes no key (a local server).
-    pub key: Option<Secret>,
-}
 
 /// The chat role, resolved: profile, model and what is known about the model.
 #[derive(Debug, Clone, PartialEq)]
@@ -105,50 +63,24 @@ impl ChatRole {
             _ => None,
         }
     }
+
+    /// Price of writing a cache entry relative to the plain input price, where both
+    /// are configured.
+    pub fn cache_write_ratio(&self) -> Option<f64> {
+        match (self.model.price_in, self.model.price_in_cache_write) {
+            (Some(input), Some(write)) if input > 0.0 && write >= 0.0 => Some(write / input),
+            _ => None,
+        }
+    }
 }
 
-/// Where profile keys are read from.
+/// Where profile keys come from when they are not in the system keychain: tests, and
+/// endpoints without a key.
 pub trait Keys: Send + Sync {
     fn get(&self, profile: &str) -> Result<Option<Secret>>;
 }
 
-/// The system keychain: service `dramatis`, account `profile.<name>`.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Keychain;
-
-fn entry(profile: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(profile))
-        .map_err(|e| Error::Keychain(e.to_string()))
-}
-
-impl Keychain {
-    /// Store a profile's key. It is never read back out of this crate except into a
-    /// request header.
-    pub fn set(profile: &str, key: &str) -> Result<()> {
-        entry(profile)?
-            .set_password(key)
-            .map_err(|e| Error::Keychain(e.to_string()))
-    }
-
-    pub fn delete(profile: &str) -> Result<()> {
-        match entry(profile)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(Error::Keychain(e.to_string())),
-        }
-    }
-}
-
-impl Keys for Keychain {
-    fn get(&self, profile: &str) -> Result<Option<Secret>> {
-        match entry(profile)?.get_password() {
-            Ok(k) => Ok(Some(Secret(k))),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(Error::Keychain(e.to_string())),
-        }
-    }
-}
-
-/// Keys held in memory: tests, and endpoints without a key.
+/// Keys held in memory.
 #[derive(Debug, Default, Clone)]
 pub struct StaticKeys(pub Vec<(String, Secret)>);
 
@@ -162,117 +94,68 @@ impl Keys for StaticKeys {
     }
 }
 
-pub type Events = BoxStream<'static, Result<Value>>;
-
-/// Sends one prepared body and yields the decoded SSE `data` payloads.
-#[async_trait]
-pub trait Transport: Send + Sync {
-    async fn stream(&self, target: &Target, body: Vec<u8>) -> Result<Events>;
-    /// `GET {base_url}/models`: model ids.
-    async fn models(&self, target: &Target) -> Result<Vec<String>>;
-}
-
-/// HTTP through `async-openai`. The client of the last target is kept, so consecutive
-/// calls reuse its connection (TLS setup is a visible share of the first token's wait).
-#[derive(Default)]
-pub struct Http {
-    last: std::sync::Mutex<Option<(String, String, Client<OpenAIConfig>)>>,
-}
-
-impl fmt::Debug for Http {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Http")
+pub fn protocol(wire: WireApi) -> Protocol {
+    match wire {
+        WireApi::Chat => Protocol::OpenAiChat,
+        WireApi::Responses => Protocol::OpenAiResponses,
+        WireApi::Messages => Protocol::AnthropicMessages,
     }
 }
 
-impl Http {
-    fn client(&self, target: &Target) -> Client<OpenAIConfig> {
-        let base = target.base_url.trim_end_matches('/').to_owned();
-        let key = target.key.as_ref().map(Secret::expose).unwrap_or("");
-        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((b, k, c)) = last.as_ref()
-            && *b == base
-            && k == key
-        {
-            return c.clone();
-        }
-        // Organisation and project headers would come from the environment otherwise:
-        // they mean nothing to other providers. Without a key an empty one is sent,
-        // which local servers ignore.
-        let config = OpenAIConfig::new()
-            .with_api_base(base.clone())
-            .with_api_key(key)
-            .with_org_id("")
-            .with_project_id("");
-        let c = Client::with_config(config);
-        *last = Some((base, key.to_owned(), c.clone()));
-        c
-    }
-}
-
-fn endpoint(e: async_openai::error::OpenAIError) -> Error {
-    Error::Endpoint {
-        detail: e.to_string(),
-    }
-}
-
-#[async_trait]
-impl Transport for Http {
-    async fn stream(&self, target: &Target, body: Vec<u8>) -> Result<Events> {
-        let raw: Box<RawValue> = serde_json::from_slice(&body)?;
-        let c = self.client(target);
-        let events = match target.wire {
-            WireApi::Chat => c.chat().create_stream_byot::<_, Value>(raw).await,
-            WireApi::Responses => c.responses().create_stream_byot::<_, Value>(raw).await,
-            WireApi::Messages => return Err(Error::Unsupported("the messages wire")),
-        }
-        .map_err(endpoint)?;
-        Ok(events.map(|e| e.map_err(endpoint)).boxed())
-    }
-
-    async fn models(&self, target: &Target) -> Result<Vec<String>> {
-        let list: Value = self
-            .client(target)
-            .models()
-            .list_byot()
-            .await
-            .map_err(endpoint)?;
-        Ok(list["data"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|m| m["id"].as_str().map(str::to_owned))
-            .collect())
-    }
-}
-
-/// The target of a profile, with its key from `keys`.
-pub fn target(profile: &Profile, keys: &dyn Keys) -> Result<Target> {
-    Ok(Target {
+/// The endpoint of a profile and model. `key` is the profile's, if it has one.
+pub fn endpoint(profile: &Profile, model: &Model, key: Option<Secret>) -> Endpoint {
+    Endpoint {
+        protocol: protocol(profile.wire_api),
         base_url: profile.base_url.clone(),
-        wire: profile.wire_api,
-        key: keys.get(&profile.name)?,
-    })
+        model: model.id.clone(),
+        key: key.unwrap_or_default(),
+        caps: Caps {
+            forced_tool: model.forced_tool == Some(true),
+            cache_breakpoints: model.cache_breakpoints,
+            context_window: model.context_window,
+            cache_min_prefix: model.cache_min_prefix,
+        },
+    }
 }
 
-pub type SharedTransport = Arc<dyn Transport>;
+/// The profile's key from `keys`, or from the system keychain when there are none.
+pub fn key(keys: Option<&dyn Keys>, profile: &str) -> Result<Option<Secret>> {
+    match keys {
+        Some(k) => k.get(profile),
+        None => Ok(llm::keychain::get(profile)?),
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn secrets_do_not_print_and_roles_resolve() {
-        assert_eq!(format!("{:?}", Secret::new("sk-123")), "Secret(..)");
+    fn roles_resolve_and_endpoints_carry_what_is_known() {
         let e = Endpoints::from_toml(
-            "[[profile]]\nname='p'\nbase_url='http://127.0.0.1:1/v1'\nwire_api='responses'\n\
-             [[profile.model]]\nid='m'\nforced_tool=true\nprice_in=1.0\nprice_in_cached=0.1\nprice_out=4.0\n\
+            "[[profile]]\nname='p'\nbase_url='http://127.0.0.1:1/v1'\nwire_api='messages'\n\
+             [[profile.model]]\nid='m'\nforced_tool=true\ncontext_window=1000\ncache_min_prefix=512\n\
+             cache_breakpoints=2\nprice_in=1.0\nprice_in_cached=0.1\nprice_in_cache_write=1.5\nprice_out=4.0\n\
              [roles]\nchat={profile='p', model='m'}\n",
         )
         .unwrap();
         let r = ChatRole::resolve(&e).unwrap();
         assert!(r.forced_tool());
         assert_eq!(r.prices().unwrap().cached_input, 0.1);
+        assert_eq!(r.cache_write_ratio(), Some(1.5));
+        let ep = endpoint(&r.profile, &r.model, Some(Secret::new("sk-123")));
+        assert_eq!(ep.protocol, Protocol::AnthropicMessages);
+        assert_eq!(ep.model, "m");
+        assert_eq!(
+            ep.caps,
+            Caps {
+                forced_tool: true,
+                cache_breakpoints: Some(2),
+                context_window: Some(1000),
+                cache_min_prefix: Some(512),
+            }
+        );
+        assert!(!format!("{ep:?}").contains("sk-123"));
         let unlisted = Endpoints::from_toml(
             "[[profile]]\nname='p'\nbase_url='x'\nwire_api='chat'\n[roles]\nchat={profile='p', model='typed'}\n",
         )
@@ -280,12 +163,13 @@ mod tests {
         let r = ChatRole::resolve(&unlisted).unwrap();
         assert!(!r.forced_tool());
         assert_eq!(r.model.id, "typed");
+        assert_eq!(r.cache_write_ratio(), None);
         assert!(matches!(
             ChatRole::resolve(&Endpoints::default()),
             Err(Error::NoEndpoint)
         ));
         let keys = StaticKeys(vec![("p".into(), Secret::new("k"))]);
-        let t = target(&unlisted.profiles[0], &keys).unwrap();
-        assert!(format!("{t:?}").contains("Secret(..)"));
+        assert!(key(Some(&keys), "p").unwrap().is_some());
+        assert!(key(Some(&keys), "q").unwrap().is_none());
     }
 }

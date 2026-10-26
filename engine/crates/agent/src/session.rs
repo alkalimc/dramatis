@@ -10,9 +10,11 @@
 
 use std::collections::HashSet;
 
+use api::meta::MessageMeta;
 use api::events::{MessageAdded, MessageDelta, QuotaChanged, ToolCalled};
 use api::views::ToolAction;
 use futures::StreamExt;
+use llm::{Event as LlmEvent, Message, Response, ToolChoice};
 use world::log::{self, Role};
 use world::quota;
 use world::wrapup::Summary;
@@ -24,12 +26,11 @@ use crate::agent::{Agent, Event};
 use crate::assemble::{self, Ctx, Member};
 use crate::endpoint::ChatRole;
 use crate::error::{Error, Result};
+use crate::meter;
 use crate::persona;
-use crate::request::{self, Choice, Image, Item, Request};
-use crate::store::{self, MessageMeta};
-use crate::stream::{Decoder, Piece, Reply};
+use crate::request::{self, Call, Image};
+use crate::store;
 use crate::text::Names;
-use crate::wire;
 
 /// Whose session a channel's log is: which prefix and which tool list it gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,15 +91,6 @@ impl Turn {
 
 fn cache_key(segment: SegmentId) -> String {
     format!("dramatis-{segment}")
-}
-
-/// The part of a body the next body on the same log starts with: everything before the
-/// closing bracket of the item list. The tail never contains one.
-pub fn open_prefix(body: &[u8]) -> &[u8] {
-    match body.iter().rposition(|b| *b == b']') {
-        Some(i) => &body[..i],
-        None => body,
-    }
 }
 
 impl Agent {
@@ -337,7 +329,7 @@ impl Agent {
         let entries = log::entries(&conn, seg.id)?;
         let Some(items) = entries
             .iter()
-            .map(|e| Item::parse(&e.bytes))
+            .map(|e| request::parse(&e.bytes))
             .collect::<Option<Vec<_>>>()
         else {
             return Ok(Some(Roll::Unreadable));
@@ -345,7 +337,7 @@ impl Agent {
         // Text only: an attached image is not material, and its encoding would dwarf it.
         let material: usize = items
             .iter()
-            .filter_map(Item::harness_text)
+            .flat_map(request::harness_texts)
             .map(str::len)
             .sum();
         let (c, _) = quota::ratios(role.prices(), &self.config.world.cost);
@@ -413,7 +405,7 @@ impl Agent {
         let text = |b: Vec<u8>| String::from_utf8(b).unwrap_or_default();
         let items = log::entries(&conn, seg)?
             .iter()
-            .filter_map(|e| Item::parse(&e.bytes))
+            .filter_map(|e| request::parse(&e.bytes))
             .collect();
         Ok(Log {
             system: [text(s.prefix_a), text(s.prefix_b), text(s.prefix_c)],
@@ -425,19 +417,20 @@ impl Agent {
     pub(crate) fn seen(&self, seg: SegmentId) -> Result<HashSet<String>> {
         let log = self.log(seg)?;
         let mut out: HashSet<String> = assemble::ids_in(&log.system[2]).into_iter().collect();
-        for t in log.items.iter().filter_map(Item::harness_text) {
+        for t in log.items.iter().flat_map(request::harness_texts) {
             out.extend(assemble::ids_in(t));
         }
         Ok(out)
     }
 
-    pub(crate) fn append(&self, seg: SegmentId, item: &Item) -> Result<()> {
-        let role = match item {
-            Item::User { .. } => Role::User,
-            Item::Assistant { .. } => Role::Assistant,
-            Item::ToolResult { .. } => Role::Tool,
-        };
-        log::append(&self.db(), seg, role, &item.to_bytes(), self.now().ms)?;
+    pub(crate) fn append(&self, seg: SegmentId, item: &Message) -> Result<()> {
+        log::append(
+            &self.db(),
+            seg,
+            log_role(item.role),
+            &request::to_bytes(item),
+            self.now().ms,
+        )?;
         Ok(())
     }
 
@@ -448,13 +441,7 @@ impl Agent {
         text: &str,
         image: Option<&Image>,
     ) -> Result<()> {
-        self.append(
-            seg,
-            &Item::User {
-                text: text.to_owned(),
-                image: image.cloned(),
-            },
-        )
+        self.append(seg, &request::user(text, image))
     }
 
     /// The segment's names: what its bytes call the user.
@@ -502,8 +489,8 @@ impl Agent {
 
     /// One model call on the channel's current segment, streamed. The reply is appended
     /// verbatim and its usage metered before anything else happens.
-    pub(crate) async fn call(&self, turn: &mut Turn, choice: Choice<'_>) -> Result<Reply> {
-        let (role, target) = self.chat()?;
+    pub(crate) async fn call(&self, turn: &mut Turn, choice: ToolChoice) -> Result<Response> {
+        let (role, ep) = self.chat()?;
         let seg = log::current(&self.db(), turn.channel)?
             .ok_or_else(|| Error::Invalid(format!("channel {} has no log", turn.channel)))?
             .id;
@@ -511,45 +498,47 @@ impl Agent {
         let names = self.segment_names(seg)?;
         let shape = self.shape_for(&role, kind, &names);
         let log = self.log(seg)?;
-        let body = wire::render(&Request {
-            shape: &shape,
-            cache_key: cache_key(seg),
-            system: [&log.system[0], &log.system[1], &log.system[2]],
-            items: &log.items,
-            choice,
-        })?;
-        let mut events = self.transport.stream(&target, body.bytes).await?;
-        let mut decoder = Decoder::new(shape.wire);
+        let req = request::build(
+            &Call {
+                shape: &shape,
+                cache_key: cache_key(seg),
+                system: [&log.system[0], &log.system[1], &log.system[2]],
+                messages: &log.items,
+                choice,
+            },
+            &ep,
+        )?;
+        let mut events = self.llm.stream(&ep, &req).await?;
+        let mut done = None;
         let mut failure = None;
         let mut streamed = false;
         while let Some(event) = events.next().await {
-            let piece = match event.and_then(|v| decoder.push(&v)) {
-                Ok(p) => p,
+            match event {
+                Ok(LlmEvent::TextDelta(mut delta)) if !turn.wrapup => {
+                    // A later step's text joins the earlier one on a new line, as stored.
+                    if !std::mem::replace(&mut streamed, true) && !turn.text.is_empty() {
+                        delta.insert(0, '\n');
+                    }
+                    let id = self.message_for(turn)?;
+                    self.emit(Event::MessageDelta(MessageDelta {
+                        channel: crate::view::channel_id(turn.channel),
+                        message: crate::view::message_id(id),
+                        author: crate::view::author(&turn.speaker),
+                        delta,
+                    }));
+                }
+                Ok(LlmEvent::Done(r)) => done = Some(r),
+                Ok(_) => {}
                 Err(e) => {
-                    failure = Some(e);
+                    failure = Some(Error::from(e));
                     break;
                 }
-            };
-            if let Piece::Text(mut delta) = piece
-                && !turn.wrapup
-            {
-                // A later step's text joins the earlier one on a new line, as stored.
-                if !std::mem::replace(&mut streamed, true) && !turn.text.is_empty() {
-                    delta.insert(0, '\n');
-                }
-                let id = self.message_for(turn)?;
-                self.emit(Event::MessageDelta(MessageDelta {
-                    channel: crate::view::channel_id(turn.channel),
-                    message: crate::view::message_id(id),
-                    author: crate::view::author(&turn.speaker),
-                    delta,
-                }));
             }
         }
         drop(events);
-        let reply = match failure.map_or_else(|| decoder.finish(), Err) {
-            Ok(r) => r,
-            Err(e) => {
+        let reply = match (failure, done) {
+            (None, Some(r)) => r,
+            (failure, _) => {
                 // Nothing reached the log; a message row with no text yet goes too.
                 if let Some(id) = turn.message
                     && turn.text.is_empty()
@@ -557,30 +546,41 @@ impl Agent {
                     store::discard_message(&self.db(), id)?;
                     turn.message = None;
                 }
-                return Err(e);
+                return Err(failure.unwrap_or_else(|| Error::Endpoint {
+                    detail: "the reply ended before it was complete".into(),
+                }));
             }
         };
         let now = self.now();
         {
             let conn = self.db();
-            let item = Item::Assistant {
-                parts: reply.parts.clone(),
-            };
-            log::append(&conn, seg, Role::Assistant, &item.to_bytes(), now.ms)?;
+            let item = Message::assistant(reply.parts.clone());
+            log::append(
+                &conn,
+                seg,
+                Role::Assistant,
+                &request::to_bytes(&item),
+                now.ms,
+            )?;
             let u = reply.usage;
             self.filled
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(seg, u.uncached + u.cached + u.output);
-            quota::record_usage(
+                .insert(
+                    seg,
+                    u.uncached_in + u.cached_in + u.cache_write_in + u.output,
+                );
+            meter::record(
                 &conn,
                 now.ms,
                 turn.shape,
                 Some(turn.channel),
                 &shape.model,
-                reply.usage,
+                u,
                 role.prices(),
+                role.cache_write_ratio(),
                 &self.config.world.cost,
+                &self.config.agent.cost,
             )?;
         }
         self.emit_quota()?;
@@ -662,9 +662,9 @@ impl Agent {
             }
             let last = step + 1 == max_steps;
             let choice = if last && turn.task.is_none() && self.may_vary_choice()? {
-                Choice::None
+                ToolChoice::None
             } else {
-                Choice::Auto
+                ToolChoice::Auto
             };
             let reply = self.call(turn, choice).await?;
             let text = reply.text();
@@ -674,21 +674,17 @@ impl Agent {
                 }
                 turn.text.push_str(&text);
             }
-            let calls = reply.calls();
+            let calls: Vec<_> = reply.tool_calls().collect();
             if calls.is_empty() {
                 break;
             }
             let seg = self.current_segment(turn.channel)?;
-            for call in calls {
-                let output = self.dispatch(turn, call).await?;
-                self.append(
-                    seg,
-                    &Item::ToolResult {
-                        call_id: call.id.clone(),
-                        output,
-                    },
-                )?;
+            let mut results = Vec::with_capacity(calls.len());
+            for (id, name, args) in calls {
+                let output = self.dispatch(turn, name, args).await?;
+                results.push(request::tool_result_part(id, output));
             }
+            self.append(seg, &request::tool_results(results))?;
             // A colleague pulled in speaks next; the caller resumes after him.
             if turn.closed || turn.joined.is_some() {
                 break;
@@ -872,7 +868,15 @@ impl Agent {
 /// A segment as a request is built from it.
 pub(crate) struct Log {
     pub system: [String; 3],
-    pub items: Vec<Item>,
+    pub items: Vec<Message>,
+}
+
+fn log_role(role: llm::Role) -> Role {
+    match role {
+        llm::Role::User => Role::User,
+        llm::Role::Assistant => Role::Assistant,
+        llm::Role::Tool => Role::Tool,
+    }
 }
 
 /// What a new segment carries over from the old one.
