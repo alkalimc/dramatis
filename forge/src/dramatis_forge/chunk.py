@@ -220,8 +220,12 @@ def _turn_aligned(
     return out
 
 
-def reply_options(choice: tuple[list[str], list[str]] | None, refs: list[str]) -> list[str]:
-    """The options of a choice that the reply ids `refs` stand for."""
+def reply_options(
+    choice: tuple[list[str], list[str]] | None, refs: list[str],
+    others: list[tuple[list[str], list[str]]] = (),
+) -> list[str]:
+    """The options the reply ids `refs` stand for: read against `choice`, and an id it does
+    not offer against `others` (the scene's other choices) when exactly one of them does."""
     options, values = choice if choice else ([], [])
     picked: list[str] = []
     for ref in refs:
@@ -230,16 +234,21 @@ def reply_options(choice: tuple[list[str], list[str]] | None, refs: list[str]) -
         elif not values and ref.isdigit():
             i = int(ref) - 1
         else:
-            continue
+            offering = [(o, v) for o, v in others if ref in v]
+            if len(offering) != 1:
+                continue
+            options_here, values_here = offering[0]
+            i, options = values_here.index(ref), options_here
         if 0 <= i < len(options):
             picked.append(options[i])
+        options = choice[0] if choice else []
     return picked
 
 
 def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
-                refs: list[str]) -> str:
+                refs: list[str], others: list[tuple[list[str], list[str]]] = ()) -> str:
     """The marker for a stretch that follows some replies of a choice."""
-    picked = reply_options(choice, refs)
+    picked = reply_options(choice, refs, others)
     inner = " / ".join(picked) if picked else policy.sep("list").join(refs)
     return policy.mark(f"{policy.label('branch')}{policy.sep('quote').format(inner)}")
 
@@ -254,9 +263,11 @@ def _reply_marker(
     at, _, refs = branch.partition(":")
     choice = choices.get(int(at))
     pair = (choice[0], choice[1]) if choice else None
-    if unresolved is not None and not reply_options(pair, refs.split(";")):
+    rest = [(c[0], c[1]) for k, c in choices.items() if k != int(at)]
+    if unresolved is not None and len(reply_options(pair, refs.split(";"), rest)) < len(
+            refs.split(";")):
         unresolved.append(scene)
-    return reply_text(policy, pair, refs.split(";"))
+    return reply_text(policy, pair, refs.split(";"), rest)
 
 
 def _dialogue(

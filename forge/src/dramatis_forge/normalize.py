@@ -131,7 +131,13 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
     buckets.setdefault("alias", []).extend(_site_aliases(archive, pack, roster, rep))
     buckets["alias"].extend(term_aliases(
         buckets.get("term", ()), roster.of_page, archive.redirects()))
-    check_aliases(buckets["alias"], archive.redirects(), set(roster.of_page.values()), rep)
+    # Whatever relation produced an alias, its target is the canonical name.
+    redirects = archive.redirects()
+    buckets["alias"] = [
+        replace(a, target=_canonical(a.target, roster.of_page, redirects))
+        for a in buckets["alias"]]
+    buckets["alias"] = [a for a in buckets["alias"] if a.alias != a.target]
+    check_aliases(buckets["alias"], redirects, set(roster.of_page.values()), rep)
 
     # ---- store, reconciling produced against stored ----
     for kind in ORDER:
@@ -228,8 +234,10 @@ def _canonical(name: str, to_person: Mapping[str, str], redirects: Mapping[str, 
     return to_person.get(name, name)
 
 
-#: A rendering longer than this, or one that is a sentence, is a gloss and not a name.
+#: A rendering with more characters of the corpus language than this, or with a sentence
+#: stop, is a gloss and not a name. (A long name in another script is still a name.)
 ALIAS_MAX_CHARS = 25
+_RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 
 def check_aliases(
@@ -249,7 +257,7 @@ def check_aliases(
             "G4", f"{len(hops)} alias(es) point at another alias, not at its canonical name "
                   "(first: " + ", ".join(f"{a.alias}->{a.target}" for a in hops[:5]) + ")")
     wordy = [a for a in aliases if a.kind == TERM_ALIAS
-             and (len(a.alias) > ALIAS_MAX_CHARS or "。" in a.alias)]
+             and (len(_RE_CJK.findall(a.alias)) > ALIAS_MAX_CHARS or "。" in a.alias)]
     if wordy:
         rep.ledger.add(
             "G4", f"{len(wordy)} glossary rendering(s) read as a sentence, not a name "
