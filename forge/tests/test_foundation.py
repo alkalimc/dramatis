@@ -234,6 +234,11 @@ def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
         a.write_seeds({"people": ["P1", "P2", "P3", "P4"]})
         for title, text in (("P1", "x" * 10), ("P2", "y" * 50), ("P3", "z" * 40), ("P4", "w" * 20)):
             a.put_page(title, text, 1, "now")
+        a.put_page("P5", "v" * 5, 1, "now")
+        a.write_seeds({"people": ["P1", "P2", "P3", "P4", "P5"]})
+        # P5 produced nothing: it is not drawn into the layers of pages that did
+        from dramatis_forge.records import Lore
+        insert(a, [Lore(page=t, path=("x",), text="body", revid=1) for t in ("P1", "P2", "P3", "P4")])
         a.commit()
         sel = samples.select(a, p)
     picked = {route: set(titles) for route, titles in sel.routes.items() if "people" in route}
@@ -241,6 +246,8 @@ def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
     # each class is read through its first and its largest page, and nothing else
     assert {r.rsplit(" · ", 1)[1]: ts for r, ts in layer.items()} == {
         "long": {"P2"}, "short": {"P1", "P4"}}
+    assert {r.rsplit(" · ", 1)[1]: ts for r, ts in picked.items()
+            if r.endswith("excluded")} == {"excluded": {"P5"}}
 
 
 def test_every_rendering_of_a_term_is_an_alias_for_it():
