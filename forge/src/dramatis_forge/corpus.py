@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,6 +55,14 @@ class CorpusReport:
     engine_meta_headers: int = 0
     #: Voice trigger keys the pack gives no words for.
     unnamed_triggers: list[str] = field(default_factory=list)
+    #: Units whose text still carries wiki markup or a comment fragment, by example.
+    markup_residue: dict[str, int] = field(default_factory=dict)
+
+
+#: Markup that must never survive into a unit: comment fragments, template and link braces,
+#: break tags, character references. A comment closer on its own is how a hidden section
+#: leaks, which is why this is checked on what shipped rather than trusted from the parsers.
+RE_RESIDUE = re.compile(r"<!--|-->|\{\{|\}\}|\[\[|\]\]|<ref\b|<br\b|&[a-z]+;|&#\d+;", re.I)
 
 
 def _repeats_a_segment(header: str) -> bool:
@@ -140,6 +149,8 @@ def run(
             # as unusable when the header is exactly what makes it usable.
             sizes.setdefault(chunk.template, []).append(len(chunk.embed_text))
             bodies.setdefault(chunk.template, []).append(chunk.chars)
+            for hit in RE_RESIDUE.findall(chunk.embed_text):
+                rep.markup_residue[hit.lower()] = rep.markup_residue.get(hit.lower(), 0) + 1
             if _repeats_a_segment(chunk.header):
                 rep.repeated_header_segments += 1
             if engine_meta(chunk.template, chunk.page, chunk.header):
@@ -524,6 +535,11 @@ def _check(
         rep.ledger.add(
             "G5", f"{rep.engine_meta_headers} unit header(s) carry a voice trigger key or a "
                   "scene's page-part suffix", high=True)
+    if rep.markup_residue:
+        rep.ledger.add(
+            "G5", "unit text carries wiki markup: "
+                  + ", ".join(f"{k!r} x{n}" for k, n in sorted(rep.markup_residue.items())),
+            high=True)
     if rep.unnamed_triggers:
         rep.ledger.add(
             "G5", "voice trigger key(s) the pack gives no words for: "

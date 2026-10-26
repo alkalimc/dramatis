@@ -98,3 +98,14 @@ def test_a_text_every_person_shares_is_stored_once_and_owned_by_nobody(tmp_path,
     coat = [c for c in units if c.text == "A plain coat."]
     assert len(coat) == 1 and coat[0].persons == ()
     assert any(c.text == "Own words." and c.persons == ("Alice",) for c in units)
+
+
+def test_markup_left_in_a_unit_is_a_high_finding(tmp_path, pack):
+    from dramatis_forge import corpus
+    from dramatis_forge.records import Lore
+    with Archive(tmp_path / "t.archive") as a:
+        insert(a, [Lore(page="P", path=("S",), text="Fine words. --> hidden tail", revid=1)])
+        rep = corpus.run(a, pack, tmp_path / "t.folio", segmenter="bigram")
+    assert rep.markup_residue == {"-->": 1}
+    assert any(f.guard == "G5" and f.severity == "high" and "markup" in f.detail
+               for f in rep.ledger.findings)

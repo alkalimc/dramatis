@@ -74,7 +74,13 @@ def strip_tables(s: str) -> str:
 
 
 def iter_tables(wikitext: str) -> Iterator[str]:
-    """Yield each top-level wikitable's source, tracking nesting."""
+    """Yield each top-level wikitable's source, tracking nesting.
+
+    Comments go first. Editors hide rows and sections by commenting them out, and the
+    closer of such a comment often shares a line with the next live row (`-->|-`): splitting
+    on row markers before removing it glues the live row onto the dead one.
+    """
+    wikitext = strip_comments(wikitext)
     depth = 0
     start = 0
     i = 0
@@ -115,6 +121,7 @@ def table_rows(table: str) -> list[list[str]]:
     discards header cells cannot see it.
     """
     rows: list[list[str]] = []
+    table = strip_comments(table)
     for chunk in re.split(r"^\|-.*$", table, flags=re.M)[1:]:
         cells: list[str] = []
         for line in chunk.splitlines():
@@ -141,7 +148,7 @@ def find_header(table: str, *needles: str) -> tuple[list[str], int] | None:
     the expected column names finds the header *and* tells the caller where the
     data starts, which is the same question asked twice.
     """
-    segs = re.split(r"^\|-.*$", table, flags=re.M)
+    segs = re.split(r"^\|-.*$", strip_comments(table), flags=re.M)
     for i, seg in enumerate(segs):
         cells: list[str] = []
         for line in seg.splitlines():
@@ -202,7 +209,7 @@ def table_grid(table: str) -> list[list[Cell]]:
     """
     grid: list[list[Cell]] = []
     carry: dict[int, tuple[Cell, int]] = {}  # column -> (cell, rows still to fill)
-    for segment in re.split(r"^\|-.*$", table, flags=re.M):
+    for segment in re.split(r"^\|-.*$", strip_comments(table), flags=re.M):
         cells = _row_cells(segment)
         if not cells:
             continue
@@ -250,6 +257,7 @@ def tabs(wikitext: str, css_class: str) -> dict[str, str]:
     """Named tab panes `<div id="name" class="css_class">…</div>` on a page."""
     if not css_class:
         return {}
+    wikitext = strip_comments(wikitext)
     pattern = re.compile(
         rf'<div id="([^"]+)" class="{re.escape(css_class)}">(.*?)</div>', re.S)
     return {m.group(1): m.group(2) for m in pattern.finditer(wikitext)}
@@ -258,6 +266,7 @@ def tabs(wikitext: str, css_class: str) -> dict[str, str]:
 def top_sections(wikitext: str) -> dict[str, str]:
     """`== Heading ==` → body, top level only."""
     out: dict[str, str] = {}
+    wikitext = strip_comments(wikitext)
     marks = list(RE_TOP_SECTION.finditer(wikitext))
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(wikitext)
@@ -408,8 +417,10 @@ class Cleaner:
     ) -> list[dict]:
         """Split prose into sections keyed by their heading path.
 
-        Each section also carries `at`, its offset in `body`, so a caller merging these
-        with records read another way can put everything back in source order.
+        Each section also carries `at`, its offset in `body` once comments are removed
+        (`strip_comments`), so a caller merging these with records read another way can put
+        everything back in source order; such a caller strips comments from `body` first and
+        uses that text throughout. A commented-out heading is not a heading.
 
         The heading stack is kept so a leaf entry carries its ancestry: an entry
         under "human races" means something different from the same words under
@@ -417,6 +428,7 @@ class Cleaner:
         that will be retrieved for the wrong query.
         """
         out: list[dict] = []
+        body = strip_comments(body)
         marks = list(RE_SECTION.finditer(body))
         if not marks:
             text = self.text(body, warn)
