@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use agent::endpoint::{Http, Keychain};
 use agent::{Agent, Config, Parts};
 use api::endpoints::Endpoints;
 use api::error::{ApiError, ApiResult};
@@ -26,6 +25,7 @@ pub struct Bridge {
     params: Params,
     agent_params: agent::params::Params,
     endpoints: Mutex<Endpoints>,
+    llm: llm::Llm,
     sink: Arc<dyn agent::Sink>,
     clock: Arc<dyn agent::Clock>,
     agent: OnceCell<Arc<Agent>>,
@@ -49,6 +49,7 @@ impl Bridge {
         corpus: PathBuf,
         params: Params,
         endpoints: Endpoints,
+        llm: llm::Llm,
         sink: Arc<dyn agent::Sink>,
         clock: Arc<dyn agent::Clock>,
     ) -> Arc<Self> {
@@ -58,6 +59,7 @@ impl Bridge {
             corpus,
             params,
             endpoints: Mutex::new(endpoints),
+            llm,
             sink,
             clock,
             agent: OnceCell::new(),
@@ -102,8 +104,8 @@ impl Bridge {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone(),
-            keys: Arc::new(Keychain),
-            transport: Arc::new(Http::default()),
+            keys: None,
+            llm: self.llm.clone(),
             sink: self.sink.clone(),
             clock: self.clock.clone(),
         })

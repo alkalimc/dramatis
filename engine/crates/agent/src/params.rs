@@ -89,6 +89,21 @@ impl Default for Opening {
     }
 }
 
+/// `cost.*` beyond what `world` reads (`cost.c`, `cost.o`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Cost {
+    /// Price of writing a cache entry / uncached input price, for a model whose price
+    /// list has no cache-write price. Only the messages wire charges for writes.
+    pub w: f64,
+}
+
+impl Default for Cost {
+    fn default() -> Self {
+        Self { w: 1.25 }
+    }
+}
+
 /// Every group this crate reads, as `api` composes them into its one `Params`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -99,6 +114,7 @@ pub struct Params {
     #[serde(rename = "loop")]
     pub turn_loop: Loop,
     pub opening: Opening,
+    pub cost: Cost,
 }
 
 #[cfg(test)]
@@ -113,6 +129,7 @@ mod tests {
         assert_eq!(p.roll.tail, Roll::default().tail);
         assert_eq!(p.turn_loop.max_steps, 2);
         assert_eq!(p.interject.min_confidence, None);
+        assert_eq!(p.cost.w, 1.25);
         assert_eq!(Roll::default().threshold(0.25), 2400.0);
         assert_eq!(Roll::default().threshold(0.0), f64::INFINITY);
     }

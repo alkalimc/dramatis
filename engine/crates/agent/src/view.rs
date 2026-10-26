@@ -8,7 +8,6 @@ use world::quota::{self, Band, Span};
 use world::{Actor, ChannelId, FactId, MessageId, PersonId, Shape, TaskId, Tier};
 
 use crate::error::{Result, timestamp};
-use crate::store;
 
 pub fn channel_id(c: ChannelId) -> t::ChannelId {
     t::ChannelId(c.0.to_string())
@@ -85,7 +84,7 @@ pub fn message(
     offset_min: i32,
     office: &std::path::Path,
 ) -> v::Message {
-    let meta = store::meta_of(m.attachment.as_ref());
+    let meta = api::meta::MessageMeta::of(m.attachment.as_ref());
     let actions: Vec<ToolAction> = m
         .tool_calls
         .as_ref()

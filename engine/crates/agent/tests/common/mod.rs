@@ -5,15 +5,20 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use agent::endpoint::{Events, StaticKeys, Target, Transport};
+use agent::endpoint::StaticKeys;
 use agent::{Agent, Clock, Config, Event, Parts, Sink};
 use api::endpoints::{Endpoints, WireApi};
 use async_trait::async_trait;
 use folio::fixture::{Builder, TempFolio, UnitSpec};
 use futures::StreamExt;
+use llm::transport::{HttpRequest, HttpResponse, StreamResponse};
+use llm::{Llm, Retry, Transport};
 use serde_json::{Value, json};
 use world::clock::Now;
 use world::{ChannelId, World};
+
+/// The three protocols every prefix test runs on.
+pub const WIRES: [WireApi; 3] = [WireApi::Chat, WireApi::Responses, WireApi::Messages];
 
 /// One scripted reply.
 #[derive(Debug, Clone)]
@@ -33,13 +38,16 @@ pub fn call(name: &str, args: Value) -> Reply {
     Reply::Call(name.into(), args)
 }
 
-/// Records every body and answers from the script. Usage is simulated the way a prefix
-/// cache behaves: the bytes a body shares with the previous one under the same cache
-/// key count as cached input, four bytes to a token.
+/// Records every body and answers from the script, in the protocol the request was
+/// rendered for. Usage is simulated the way a prefix cache behaves: the bytes a body
+/// shares with the previous one under the same cache key count as cached input, four
+/// bytes to a token.
 #[derive(Default)]
 pub struct Fake {
     script: Mutex<VecDeque<Reply>>,
     pub bodies: Mutex<Vec<Vec<u8>>>,
+    /// Calls so far, to number the signatures of reasoning blocks.
+    n: AtomicI64,
 }
 
 pub fn tokens(bytes: usize) -> u64 {
@@ -101,27 +109,97 @@ pub fn sse(events: &[Value], done: bool) -> String {
     s
 }
 
-fn render(wire: WireApi, reply: &Reply, usage: (u64, u64, u64)) -> String {
+fn halves(t: &str) -> [&str; 2] {
+    let mid = t
+        .char_indices()
+        .nth(t.chars().count() / 2)
+        .map_or(0, |(i, _)| i);
+    [&t[..mid], &t[mid..]]
+}
+
+fn render(wire: WireApi, reply: &Reply, usage: (u64, u64, u64), n: i64) -> String {
     let (input, cached, output) = usage;
     match (wire, reply) {
         (_, Reply::Raw(s)) => s.clone(),
-        (WireApi::Messages, _) => unreachable!("this build renders no messages bodies"),
+        (WireApi::Messages, Reply::Fail(d)) => sse(
+            &[json!({"type": "error", "error": {"type": "overloaded_error", "message": d}})],
+            false,
+        ),
         (WireApi::Responses, Reply::Fail(d)) => sse(
             &[json!({"type": "response.failed", "response": {"error": {"message": d}}})],
             false,
         ),
         (WireApi::Chat, Reply::Fail(d)) => sse(&[json!({"error": {"message": d}})], false),
+        (WireApi::Messages, r) => {
+            // Thinking comes first and carries a signature; the cache is written for what
+            // the prefix has not read.
+            let fresh = 3.min(input - cached);
+            let written = input - cached - fresh;
+            let mut ev = vec![
+                json!({"type": "message_start", "message": {"id": "msg", "role": "assistant",
+                    "content": [], "usage": {"input_tokens": fresh,
+                    "cache_read_input_tokens": cached, "cache_creation_input_tokens": written,
+                    "output_tokens": 1}}}),
+                json!({"type": "content_block_start", "index": 0,
+                    "content_block": {"type": "thinking", "thinking": ""}}),
+                json!({"type": "content_block_delta", "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "hm"}}),
+                json!({"type": "content_block_delta", "index": 0,
+                    "delta": {"type": "signature_delta", "signature": format!("sig-{n}")}}),
+                json!({"type": "content_block_stop", "index": 0}),
+            ];
+            let stop = match r {
+                Reply::Say(t) => {
+                    ev.push(json!({"type": "content_block_start", "index": 1,
+                        "content_block": {"type": "text", "text": ""}}));
+                    for part in halves(t) {
+                        ev.push(json!({"type": "content_block_delta", "index": 1,
+                            "delta": {"type": "text_delta", "text": part}}));
+                    }
+                    ev.push(json!({"type": "content_block_stop", "index": 1}));
+                    "end_turn"
+                }
+                Reply::Call(name, args) => {
+                    let args = args.to_string();
+                    let [a, b] = halves(&args);
+                    ev.push(json!({"type": "content_block_start", "index": 1,
+                        "content_block": {"type": "tool_use", "id": format!("call_{name}"),
+                                          "name": name, "input": {}}}));
+                    for part in [a, b] {
+                        ev.push(json!({"type": "content_block_delta", "index": 1,
+                            "delta": {"type": "input_json_delta", "partial_json": part}}));
+                    }
+                    ev.push(json!({"type": "content_block_stop", "index": 1}));
+                    "tool_use"
+                }
+                _ => unreachable!(),
+            };
+            ev.push(
+                json!({"type": "message_delta", "delta": {"stop_reason": stop},
+                "usage": {"output_tokens": output}}),
+            );
+            ev.push(json!({"type": "message_stop"}));
+            let mut s = String::new();
+            for e in &ev {
+                s.push_str(&format!(
+                    "event: {}\ndata: {e}\n\n",
+                    e["type"].as_str().unwrap()
+                ));
+            }
+            s
+        }
         (WireApi::Responses, r) => {
-            let mut ev = Vec::new();
+            let mut ev = vec![json!({"type": "response.output_item.done", "item":
+                {"type": "reasoning", "id": format!("rs_{n}"), "summary": [],
+                 "encrypted_content": format!("enc-{n}")}})];
             match r {
                 Reply::Say(t) => {
-                    let mid = t
-                        .char_indices()
-                        .nth(t.chars().count() / 2)
-                        .map_or(0, |(i, _)| i);
-                    for part in [&t[..mid], &t[mid..]] {
+                    for part in halves(t) {
                         ev.push(json!({"type": "response.output_text.delta", "delta": part}));
                     }
+                    ev.push(json!({"type": "response.output_item.done", "item":
+                        {"type": "message", "role": "assistant",
+                         "content": [{"type": "output_text", "text": t}]}}));
                 }
                 Reply::Call(name, args) => ev.push(json!({
                     "type": "response.output_item.done",
@@ -141,11 +219,7 @@ fn render(wire: WireApi, reply: &Reply, usage: (u64, u64, u64)) -> String {
             let chunk = |delta: Value| json!({"choices": [{"index": 0, "delta": delta}]});
             match r {
                 Reply::Say(t) => {
-                    let mid = t
-                        .char_indices()
-                        .nth(t.chars().count() / 2)
-                        .map_or(0, |(i, _)| i);
-                    for part in [&t[..mid], &t[mid..]] {
+                    for part in halves(t) {
                         ev.push(chunk(json!({"content": part})));
                     }
                 }
@@ -168,7 +242,30 @@ fn render(wire: WireApi, reply: &Reply, usage: (u64, u64, u64)) -> String {
 
 #[async_trait]
 impl Transport for Fake {
-    async fn stream(&self, target: &Target, body: Vec<u8>) -> agent::Result<Events> {
+    async fn send(&self, req: HttpRequest) -> llm::Result<HttpResponse> {
+        assert!(
+            req.url.ends_with("/models"),
+            "only the model list is a plain call"
+        );
+        Ok(HttpResponse {
+            status: 200,
+            body: json!({"data": [{"id": "model-a"}]})
+                .to_string()
+                .into_bytes(),
+        })
+    }
+
+    async fn open(&self, req: HttpRequest) -> llm::Result<StreamResponse> {
+        let wire = if req.url.ends_with("/chat/completions") {
+            WireApi::Chat
+        } else if req.url.ends_with("/responses") {
+            WireApi::Responses
+        } else {
+            assert!(req.url.ends_with("/messages"), "{}", req.url);
+            WireApi::Messages
+        };
+        // The key goes in a header, never in the body.
+        assert!(!String::from_utf8_lossy(&req.body).contains("sk-test"));
         let reply = self
             .script
             .lock()
@@ -180,18 +277,17 @@ impl Transport for Fake {
             Reply::Call(_, a) => a.to_string().len(),
             _ => 0,
         };
-        let usage = self.usage(&body, out);
-        self.bodies.lock().unwrap().push(body);
-        let text = render(target.wire, &reply, usage);
-        let events: Vec<agent::Result<Value>> = agent::stream::sse_data(&text)
-            .into_iter()
-            .map(|d| Ok(serde_json::from_str(&d).unwrap()))
-            .collect();
-        Ok(futures::stream::iter(events).boxed())
-    }
-
-    async fn models(&self, _: &Target) -> agent::Result<Vec<String>> {
-        Ok(vec!["model-a".into()])
+        let usage = self.usage(&req.body, out);
+        self.bodies.lock().unwrap().push(req.body);
+        let n = self.n.fetch_add(1, Ordering::SeqCst);
+        let text = render(wire, &reply, usage, n);
+        // Cut mid-event, to exercise events split across chunks.
+        let chunks: Vec<llm::Result<Vec<u8>>> =
+            text.as_bytes().chunks(97).map(|c| Ok(c.to_vec())).collect();
+        Ok(StreamResponse {
+            status: 200,
+            chunks: futures::stream::iter(chunks).boxed(),
+        })
     }
 }
 
@@ -391,8 +487,11 @@ pub fn env_with(endpoints: Endpoints, tune: impl FnOnce(&mut Config)) -> Env {
         index,
         config,
         endpoints,
-        keys: Arc::new(StaticKeys::default()),
-        transport: fake.clone(),
+        keys: Some(Arc::new(StaticKeys(vec![(
+            "p".into(),
+            llm::Secret::new("sk-test"),
+        )]))),
+        llm: Llm::new(fake.clone(), Retry::none()),
         sink: sink.clone(),
         clock: clock.clone(),
     })
@@ -415,21 +514,51 @@ pub fn p(s: &str) -> world::PersonId {
     world::PersonId::from(s)
 }
 
-/// Every consecutive pair of bodies on the same log: the later starts with the earlier
-/// minus its tail.
+/// The list a body carries its turns in.
+pub fn list(v: &Value) -> &Vec<Value> {
+    v.get("input")
+        .or_else(|| v.get("messages"))
+        .and_then(Value::as_array)
+        .unwrap()
+}
+
+/// A body without its turns and without `tool_choice`: what must not change between two
+/// calls on one log.
+pub fn head(v: &Value) -> Value {
+    let mut h = v.clone();
+    let o = h.as_object_mut().unwrap();
+    o.remove("input");
+    o.remove("messages");
+    o.remove("tool_choice");
+    h
+}
+
+/// Every consecutive pair of rendered requests on the same log: the later has the same
+/// head, and its turns start with all of the earlier one's. Rendering keeps keys sorted,
+/// so this is the cached prefix the endpoint sees, compared as the bytes of each turn too.
 pub fn assert_prefix_chain(bodies: &[Vec<u8>]) {
     assert!(!bodies.is_empty());
-    for (i, pair) in bodies.windows(2).enumerate() {
-        let open = agent::open_prefix(&pair[0]);
-        assert!(
-            pair[1].starts_with(open),
-            "body {} does not extend body {}:\n{}\n---\n{}",
-            i + 1,
-            i,
-            String::from_utf8_lossy(open),
-            String::from_utf8_lossy(&pair[1])
+    let json: Vec<Value> = bodies
+        .iter()
+        .map(|b| serde_json::from_slice(b).unwrap())
+        .collect();
+    for (i, pair) in json.windows(2).enumerate() {
+        assert_eq!(
+            head(&pair[0]),
+            head(&pair[1]),
+            "body {} changed the head",
+            i + 1
         );
-        assert!(pair[1].len() > open.len());
+        let (a, b) = (list(&pair[0]), list(&pair[1]));
+        assert!(b.len() > a.len(), "body {} adds nothing", i + 1);
+        for (j, (x, y)) in a.iter().zip(b).enumerate() {
+            assert_eq!(
+                x.to_string(),
+                y.to_string(),
+                "body {} rewrote turn {j} of body {i}",
+                i + 1
+            );
+        }
     }
 }
 

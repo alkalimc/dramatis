@@ -4,10 +4,57 @@
 //! register's `cost.turn.*` estimates are in, so the two can be compared directly.
 
 use rusqlite::Connection;
-use world::Shape;
-use world::quota::{self, Span};
+use world::quota::{self, Prices, Span};
+use world::{ChannelId, Shape};
 
+use crate::params::Cost;
 use crate::store;
+
+/// Record one call. The points are `world`'s formula plus a third term for tokens written
+/// to a cache, `w` times the plain input price each; `world` has no such term yet, so the
+/// meter row is inserted here. The written tokens are counted as uncached input, which
+/// they are as far as the cache-hit share goes.
+///
+/// `write_ratio` is the model's configured cache-write price over its input price; absent,
+/// the `cost.w` parameter stands in.
+#[allow(clippy::too_many_arguments)]
+pub fn record(
+    conn: &Connection,
+    at: i64,
+    shape: Shape,
+    channel: Option<ChannelId>,
+    model: &str,
+    usage: llm::Usage,
+    prices: Option<Prices>,
+    write_ratio: Option<f64>,
+    cost: &world::params::Cost,
+    agent_cost: &Cost,
+) -> world::Result<f64> {
+    let base = quota::Usage {
+        uncached: usage.uncached_in,
+        cached: usage.cached_in,
+        output: usage.output,
+    };
+    let w = write_ratio.unwrap_or(agent_cost.w);
+    let points = quota::points(base, prices, cost) + w * usage.cache_write_in as f64;
+    let n =
+        |v: u64| i64::try_from(v).map_err(|_| world::Error::Invalid("token count overflow".into()));
+    conn.execute(
+        "INSERT INTO meter(at, shape, channel, model, uncached, cached, output, points)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            at,
+            shape,
+            channel,
+            model,
+            n(usage.uncached_in.saturating_add(usage.cache_write_in))?,
+            n(usage.cached_in)?,
+            n(usage.output)?,
+            points
+        ],
+    )?;
+    Ok(points)
+}
 
 /// The report key of a call shape.
 pub fn key(shape: Shape) -> &'static str {

@@ -22,7 +22,7 @@ use index::Index;
 use world::clock::Now;
 use world::{SegmentId, World};
 
-use crate::endpoint::{ChatRole, Keys, SharedTransport, Target};
+use crate::endpoint::{self, ChatRole, Keys};
 use crate::error::{Error, Result};
 use crate::params;
 use crate::persona::{self, HostLayers, Personas};
@@ -91,8 +91,9 @@ pub struct Parts {
     pub index: Index,
     pub config: Config,
     pub endpoints: Endpoints,
-    pub keys: Arc<dyn Keys>,
-    pub transport: SharedTransport,
+    /// Where profile keys come from; `None`: the system keychain.
+    pub keys: Option<Arc<dyn Keys>>,
+    pub llm: llm::Llm,
     pub sink: Arc<dyn Sink>,
     pub clock: Arc<dyn Clock>,
 }
@@ -109,14 +110,19 @@ pub(crate) struct Corpus {
     pub descriptions: Descriptions,
 }
 
+/// The model a listing call names: any, since `GET /models` takes none.
+fn llm_model(p: &api::endpoints::Profile) -> api::endpoints::Model {
+    p.models.first().cloned().unwrap_or_default()
+}
+
 pub struct Agent {
     pub(crate) world: Mutex<World>,
     pub(crate) index: Mutex<Index>,
     pub(crate) corpus: Corpus,
     pub(crate) config: Config,
     pub(crate) endpoints: Mutex<Endpoints>,
-    pub(crate) keys: Arc<dyn Keys>,
-    pub(crate) transport: SharedTransport,
+    pub(crate) keys: Option<Arc<dyn Keys>>,
+    pub(crate) llm: llm::Llm,
     pub(crate) sink: Arc<dyn Sink>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) turns: tokio::sync::Mutex<()>,
@@ -156,7 +162,7 @@ impl Agent {
             config: parts.config,
             endpoints: Mutex::new(parts.endpoints),
             keys: parts.keys,
-            transport: parts.transport,
+            llm: parts.llm,
             sink: parts.sink,
             clock: parts.clock,
             turns: tokio::sync::Mutex::new(()),
@@ -253,11 +259,12 @@ impl Agent {
             .clone()
     }
 
-    pub(crate) fn chat(&self) -> Result<(ChatRole, Target)> {
+    pub(crate) fn chat(&self) -> Result<(ChatRole, llm::Endpoint)> {
         let endpoints = self.endpoints();
         let role = ChatRole::resolve(&endpoints)?;
-        let target = crate::endpoint::target(&role.profile, self.keys.as_ref())?;
-        Ok((role, target))
+        let key = endpoint::key(self.keys.as_deref(), &role.profile.name)?;
+        let ep = endpoint::endpoint(&role.profile, &role.model, key);
+        Ok((role, ep))
     }
 
     /// `GET {base_url}/models` for a profile.
@@ -267,8 +274,9 @@ impl Agent {
             .profile(profile)
             .ok_or_else(|| Error::Invalid(format!("no profile `{profile}`")))?
             .clone();
-        let target = crate::endpoint::target(&p, self.keys.as_ref())?;
-        self.transport.models(&target).await
+        let key = endpoint::key(self.keys.as_deref(), &p.name)?;
+        let ep = endpoint::endpoint(&p, &llm_model(&p), key);
+        Ok(self.llm.models(&ep).await?)
     }
 
     /// Display name of a person, the id when the roster lacks him.

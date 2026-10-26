@@ -5,33 +5,10 @@
 //! reply is. Until `world::message` offers that, the update is done here, on the same
 //! columns `world::message::append` writes.
 
+use api::meta::MessageMeta;
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use world::{ChannelId, Citation, MessageId, Shape, TaskId};
-
-/// What `message.attachment` holds for a message the agent wrote. The UI's view of a
-/// message reads it through [`crate::view::message`].
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MessageMeta {
-    /// The passages the reply cites, in order.
-    pub cites: Vec<Citation>,
-    /// How sure retrieval was about the material this reply had.
-    pub confidence: Option<index::Level>,
-    /// The request this message answers.
-    pub task: Option<TaskId>,
-    /// A retelling of something said elsewhere.
-    pub relayed: bool,
-    /// The request's note, relative to the office directory.
-    pub note: Option<String>,
-}
-
-impl MessageMeta {
-    pub fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
-}
 
 /// Complete a message: its final text, its tool actions and its meta.
 pub fn complete_message(
@@ -118,11 +95,4 @@ pub fn channels_with_segments(conn: &Connection) -> world::Result<Vec<ChannelId>
     )?;
     let rows = stmt.query_map([], |r| r.get(0))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-/// Read the meta a message carries, if any.
-pub fn meta_of(attachment: Option<&Value>) -> MessageMeta {
-    attachment
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default()
 }

@@ -45,12 +45,31 @@ pub enum Error {
     #[error("{0} is not supported by this build")]
     Unsupported(&'static str),
 
+    /// A forced tool choice on an endpoint that must not get one. The caller asks for the
+    /// tool in its text and keeps `auto`.
+    #[error("a forced tool choice is not allowed on this endpoint")]
+    ForcedToolNotAllowed,
+
     /// A command or tool argument that cannot be honoured.
     #[error("invalid: {0}")]
     Invalid(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<llm::Error> for Error {
+    fn from(e: llm::Error) -> Self {
+        match e {
+            llm::Error::Keychain(d) => Error::Keychain(d),
+            llm::Error::Unsupported(what) => Error::Unsupported(what),
+            llm::Error::ForcedToolNotAllowed => Error::ForcedToolNotAllowed,
+            // The endpoint's own text, as before.
+            other => Error::Endpoint {
+                detail: other.to_string(),
+            },
+        }
+    }
+}
 
 /// RFC 3339 with the user's offset, as every timestamp crosses the seam.
 pub fn timestamp(ms: i64, offset_min: i32) -> Timestamp {
@@ -102,6 +121,9 @@ impl From<Error> for ApiError {
                 detail: format!("{what} is not supported by this build"),
             },
             Error::Endpoint { detail } => ApiError::Endpoint { detail },
+            Error::ForcedToolNotAllowed => ApiError::Endpoint {
+                detail: "a forced tool choice is not allowed on this endpoint".into(),
+            },
             Error::Keychain(detail) => ApiError::Keychain { detail },
             Error::World(world::Error::Io(e)) => ApiError::Io {
                 detail: e.to_string(),
@@ -122,6 +144,20 @@ mod tests {
         assert_eq!(timestamp(0, 0).0, "1970-01-01T00:00:00+00:00");
         assert_eq!(timestamp(0, 480).0, "1970-01-01T08:00:00+08:00");
         assert_eq!(timestamp(0, -90).0, "1969-12-31T22:30:00-01:30");
+    }
+
+    #[test]
+    fn llm_errors_keep_their_text() {
+        let e: Error = llm::Error::Http {
+            status: 429,
+            message: "slow down".into(),
+        }
+        .into();
+        assert!(matches!(&e, Error::Endpoint { detail } if detail == "HTTP 429: slow down"));
+        assert!(matches!(
+            Error::from(llm::Error::ForcedToolNotAllowed),
+            Error::ForcedToolNotAllowed
+        ));
     }
 
     #[test]

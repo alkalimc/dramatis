@@ -28,21 +28,13 @@ fn meter(agent: &agent::Agent) -> Vec<(String, i64, i64, i64)> {
     )
 }
 
-fn items(v: &Value) -> &Vec<Value> {
-    v.get("input")
-        .or_else(|| v.get("messages"))
-        .and_then(Value::as_array)
-        .unwrap()
-}
-
-/// The head of a body: everything but the item list and the tail.
-fn head(v: &Value) -> Value {
-    let mut h = v.clone();
-    let o = h.as_object_mut().unwrap();
-    o.remove("input");
-    o.remove("messages");
-    o.remove("tool_choice");
-    h
+/// The tool the request forces, if it forces one.
+fn forced_tool(v: &Value) -> Option<&str> {
+    let c = &v["tool_choice"];
+    if c["type"] != "function" {
+        return None;
+    }
+    c["function"]["name"].as_str().or(c["name"].as_str())
 }
 
 fn body_text(b: &[u8]) -> String {
@@ -54,8 +46,8 @@ fn direct(e: &Env, who: &str) -> ChannelId {
 }
 
 #[tokio::test]
-async fn direct_turns_extend_one_prefix_on_both_wire_apis() {
-    for wire in [WireApi::Responses, WireApi::Chat] {
+async fn direct_turns_extend_one_prefix_on_every_protocol() {
+    for wire in WIRES {
         let e = env(wire);
         let ch = direct(&e, "ann");
         e.fake.push([
@@ -86,6 +78,32 @@ async fn direct_turns_extend_one_prefix_on_both_wire_apis() {
                 json[0]["prompt_cache_key"],
                 format!("dramatis-{}", seg[0].id)
             );
+        }
+        // The reasoning the model produced is replayed with its tool call, in that turn.
+        match wire {
+            WireApi::Messages => {
+                let turn = &list(&json[1])[1];
+                assert_eq!(turn["role"], "assistant");
+                assert_eq!(turn["content"][0]["type"], "thinking");
+                assert_eq!(turn["content"][0]["signature"], "sig-0");
+                assert_eq!(turn["content"][1]["type"], "tool_use");
+                assert_eq!(list(&json[1])[2]["content"][0]["type"], "tool_result");
+                // Blocks A and B end cached prefixes; C and the tail ride the moving one.
+                let system = json[0]["system"].as_array().unwrap();
+                assert_eq!(system.len(), 3);
+                assert!(system[0].get("cache_control").is_some());
+                assert!(system[1].get("cache_control").is_some());
+                assert!(system[2].get("cache_control").is_none());
+                assert!(json[0].get("cache_control").is_some());
+            }
+            WireApi::Responses => {
+                let all = list(&json[1])
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<String>();
+                assert!(all.contains("enc-0"), "the reasoning item goes back");
+            }
+            WireApi::Chat => {}
         }
         // The shared tool list, not the host's.
         let tools = json[0]["tools"].to_string();
@@ -174,7 +192,7 @@ async fn material_is_deduplicated_and_low_confidence_sends_none() {
 
     e.agent.send(ch, "zebra quantum", None).await.unwrap();
     let v = &e.fake.json()[2];
-    let entry = items(v).last().unwrap().to_string();
+    let entry = list(v).last().unwrap().to_string();
     assert!(entry.contains("The archive has nothing on this."));
     assert!(entry.contains("request_join"));
     assert!(!entry.contains("[#"));
@@ -182,7 +200,13 @@ async fn material_is_deduplicated_and_low_confidence_sends_none() {
 
 #[tokio::test]
 async fn a_request_runs_on_the_direct_log_and_ends_with_its_report() {
-    let e = env(WireApi::Responses);
+    for wire in WIRES {
+        a_request_runs(wire).await;
+    }
+}
+
+async fn a_request_runs(wire: WireApi) {
+    let e = env(wire);
     let ch = direct(&e, "ann");
     e.fake.push([say("Hello.")]);
     e.agent.send(ch, "hi", None).await.unwrap();
@@ -217,13 +241,26 @@ async fn a_request_runs_on_the_direct_log_and_ends_with_its_report() {
     assert_eq!(reply.text, "Cooler water [#u2].");
     assert_eq!(reply.task.as_ref().unwrap().0, asked.task.0.to_string());
     // The request's harness turn carries the remaining turns.
-    let ask_entry = items(&e.fake.json()[1]).last().unwrap().to_string();
+    let ask_entry = list(&e.fake.json()[1]).last().unwrap().to_string();
     assert!(ask_entry.contains("look into this") && ask_entry.contains("turns left"));
     let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
     assert_eq!(shapes, ["direct", "ask", "ask", "wrapup"]);
-    // The wrap-up was forced, after every item.
+    // The wrap-up was forced, after every item, where the protocol allows it; on the
+    // messages protocol the choice stays `auto` and the turn asks in words.
     let last = &e.fake.json()[3];
-    assert_eq!(last["tool_choice"]["name"], "wrapup");
+    if wire == WireApi::Messages {
+        assert_eq!(forced_tool(last), None);
+        assert_eq!(last["tool_choice"]["type"], "auto");
+        assert!(
+            list(last)
+                .last()
+                .unwrap()
+                .to_string()
+                .contains("Call wrapup")
+        );
+    } else {
+        assert_eq!(forced_tool(last), Some("wrapup"));
+    }
     let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
     assert_eq!(facts.len(), 1);
     assert_eq!(facts[0].audience, Audience::Participants(ch));
@@ -249,7 +286,7 @@ async fn a_request_that_runs_out_of_turns_is_closed_with_what_was_said() {
     assert_eq!(msgs.len(), 1, "one reply, no second message");
     assert_eq!(msgs[0].text, "I only know it needs cooler water.");
     // One turn: the harness said it must report now.
-    let entry = items(&e.fake.json()[0]).last().unwrap().to_string();
+    let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
     assert!(entry.contains("last turn on this request"));
 }
 
@@ -284,8 +321,47 @@ async fn wrapup_is_skipped_without_a_forced_tool() {
 }
 
 #[tokio::test]
+async fn on_the_messages_protocol_the_wrapup_is_asked_in_words() {
+    // `tool_choice` stays `auto` whatever the model can do; a reply without the call is no
+    // wrap-up, exactly as for a model that cannot be forced.
+    let e = env_with(endpoints(WireApi::Messages, false, None), |_| {});
+    let ch = direct(&e, "ann");
+    e.fake.push([say("hi"), say("Nothing to add.")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    assert_prefix_chain(&e.fake.bodies());
+    let v = &e.fake.json()[1];
+    assert_eq!(v["tool_choice"]["type"], "auto");
+    assert!(list(v).last().unwrap().to_string().contains("Call wrapup"));
+    assert!(
+        e.agent
+            .with_world(|w| fact::all(w, false).unwrap())
+            .is_empty()
+    );
+    e.fake.push([
+        say("again"),
+        call(
+            "wrapup",
+            json!({"facts": [{"kind": "fact", "text": "Likes tea"}]}),
+        ),
+    ]);
+    e.agent.send(ch, "more", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    assert_eq!(
+        e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn wrapup_closes_the_conversation_on_its_own_log() {
-    let e = env(WireApi::Chat);
+    for wire in WIRES {
+        wrapup_closes(wire).await;
+    }
+}
+
+async fn wrapup_closes(wire: WireApi) {
+    let e = env(wire);
     let ch = direct(&e, "ann");
     e.fake.push([
         say("See you tomorrow at nine."),
@@ -304,7 +380,10 @@ async fn wrapup_closes_the_conversation_on_its_own_log() {
     let bodies = e.fake.bodies();
     assert_prefix_chain(&bodies);
     let v = &e.fake.json()[1];
-    assert_eq!(v["tool_choice"]["function"]["name"], "wrapup");
+    assert_eq!(
+        forced_tool(v),
+        (wire != WireApi::Messages).then_some("wrapup")
+    );
     assert_eq!(head(v), head(&e.fake.json()[0]));
     let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
     assert_eq!(facts.len(), 3);
@@ -321,9 +400,13 @@ async fn wrapup_closes_the_conversation_on_its_own_log() {
 
 #[tokio::test]
 async fn material_past_the_threshold_rolls_over_after_a_wrapup() {
-    let e = env_with(endpoints(WireApi::Responses, true, None), |c| {
-        c.agent.roll.k = 10.0
-    });
+    for wire in WIRES {
+        rolls_over(wire).await;
+    }
+}
+
+async fn rolls_over(wire: WireApi) {
+    let e = env_with(endpoints(wire, true, None), |c| c.agent.roll.k = 10.0);
     let ch = direct(&e, "ann");
     e.fake.push([
         say("Cooler water."),
@@ -357,15 +440,19 @@ async fn material_past_the_threshold_rolls_over_after_a_wrapup() {
         "the new turn is appended, not carried"
     );
     let json = e.fake.json();
-    assert_eq!(
-        json[1]["prompt_cache_key"],
-        format!("dramatis-{}", segs[0].id)
-    );
-    assert_eq!(
-        json[2]["prompt_cache_key"],
-        format!("dramatis-{}", segs[1].id)
-    );
-    assert_eq!(items(&json[2]).len(), 4, "A, B, C, the new turn");
+    if wire == WireApi::Responses {
+        assert_eq!(
+            json[1]["prompt_cache_key"],
+            format!("dramatis-{}", segs[0].id)
+        );
+        assert_eq!(
+            json[2]["prompt_cache_key"],
+            format!("dramatis-{}", segs[1].id)
+        );
+    }
+    // A, B, C, the new turn; the messages protocol keeps the blocks apart.
+    let blocks = if wire == WireApi::Messages { 0 } else { 3 };
+    assert_eq!(list(&json[2]).len(), blocks + 1);
     let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
     assert_eq!(shapes, ["direct", "wrapup", "direct"]);
 }
@@ -386,7 +473,13 @@ async fn a_context_near_the_window_rolls_over() {
 
 #[tokio::test]
 async fn groups_share_one_log_address_one_person_and_interject_at_most_once() {
-    let e = env(WireApi::Responses);
+    for wire in WIRES {
+        group_log(wire).await;
+    }
+}
+
+async fn group_log(wire: WireApi) {
+    let e = env(wire);
     let g = e
         .agent
         .create_group(&[p("ann"), p("bo")], Some("smithing"))
@@ -399,7 +492,7 @@ async fn groups_share_one_log_address_one_person_and_interject_at_most_once() {
         .await
         .unwrap();
     assert_eq!(e.fake.bodies().len(), 1);
-    let first = items(&e.fake.json()[0]).last().unwrap().to_string();
+    let first = list(&e.fake.json()[0]).last().unwrap().to_string();
     assert!(first.contains("bo answers."), "{first}");
 
     // Enabled group with enabled members: one interjection, never two.
@@ -415,12 +508,12 @@ async fn groups_share_one_log_address_one_person_and_interject_at_most_once() {
         .unwrap();
     let json = e.fake.json();
     assert_eq!(json.len(), 3);
-    let named = items(&json[1]).last().unwrap().to_string();
+    let named = list(&json[1]).last().unwrap().to_string();
     assert!(
         named.contains("ann answers."),
         "named person first: {named}"
     );
-    let inter = items(&json[2]).last().unwrap().to_string();
+    let inter = list(&json[2]).last().unwrap().to_string();
     assert!(inter.contains("bo may add one line."), "{inter}");
     assert_prefix_chain(&e.fake.bodies());
     // Both personas in one prefix.
@@ -445,7 +538,7 @@ async fn a_colleague_pulled_in_joins_the_log_as_an_entry() {
         .unwrap();
     assert_prefix_chain(&e.fake.bodies());
     let json = e.fake.json();
-    let joined = items(&json[1]).last().unwrap().to_string();
+    let joined = list(&json[1]).last().unwrap().to_string();
     assert!(joined.contains("You are bo.") && joined.contains("bo joins the conversation."));
     let segs = segments(&e.agent, ch);
     assert!(
@@ -458,7 +551,13 @@ async fn a_colleague_pulled_in_joins_the_log_as_an_entry() {
 
 #[tokio::test]
 async fn the_host_has_its_own_log_tools_and_authorised_actions() {
-    let e = env(WireApi::Responses);
+    for wire in WIRES {
+        host_log(wire).await;
+    }
+}
+
+async fn host_log(wire: WireApi) {
+    let e = env(wire);
     // First open: the host introduces itself; a tool call it attempts is refused.
     e.fake.push([call(
         "set_mode",
@@ -472,7 +571,11 @@ async fn the_host_has_its_own_log_tools_and_authorised_actions() {
     );
     let host = e.agent.with_world(|w| channel::host(w).unwrap());
     assert!(log_bytes(&e.agent, host).contains("Only when Doc asks for it."));
-    assert_eq!(e.fake.json()[0]["tool_choice"], "none");
+    // The last step offers no tool where the protocol lets the choice vary.
+    match wire {
+        WireApi::Messages => assert_eq!(e.fake.json()[0]["tool_choice"]["type"], "auto"),
+        _ => assert_eq!(e.fake.json()[0]["tool_choice"], "none"),
+    }
 
     // The user's own turn may.
     e.fake.push([
@@ -502,7 +605,7 @@ async fn the_host_has_its_own_log_tools_and_authorised_actions() {
     for v in &json {
         assert_eq!(head(v), head(&json[0]));
     }
-    let digest = items(&json[3]).last().unwrap().to_string();
+    let digest = list(&json[3]).last().unwrap().to_string();
     assert!(digest.contains("Today is ann's birthday."), "{digest}");
     let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
     assert_eq!(shapes, ["host", "host", "host", "host"]);
@@ -670,6 +773,47 @@ async fn usage_is_metered_per_shape_with_cache_hits_and_quota() {
 }
 
 #[tokio::test]
+async fn cache_writes_on_the_messages_protocol_cost_a_third_term() {
+    // The fake reports 3 fresh input tokens and the rest of what the prefix has not read
+    // as written to the cache. `cost.w` prices a write when the model has no price.
+    for (w, priced) in [(1.25, false), (2.0, true)] {
+        let mut ep = endpoints(WireApi::Messages, true, None);
+        if priced {
+            let m = &mut ep.profiles[0].models[0];
+            (
+                m.price_in,
+                m.price_in_cached,
+                m.price_in_cache_write,
+                m.price_out,
+            ) = (Some(2.0), Some(0.5), Some(4.0), Some(8.0));
+        }
+        let e = env_with(ep, |_| {});
+        let ch = direct(&e, "ann");
+        e.fake.push([say("one"), say("two")]);
+        e.agent.send(ch, "jasmine tea", None).await.unwrap();
+        e.agent.send(ch, "more", None).await.unwrap();
+        let m = meter(&e.agent);
+        let points: Vec<f64> = e.agent.with_world(|w| {
+            let mut s = w.prepare("SELECT points FROM meter ORDER BY id").unwrap();
+            s.query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        });
+        let (uncached, cached, output) = (m[1].1 as f64, m[1].2 as f64, m[1].3 as f64);
+        let written = uncached - 3.0;
+        assert!(written > 0.0 && cached > 0.0, "{m:?}");
+        // Ratios: c and o from the prices when there are any (0.25, 4 either way).
+        let expect = 3.0 + w * written + 0.25 * cached + 4.0 * output;
+        assert!(
+            (points[1] - expect).abs() < 1e-9,
+            "{} vs {expect}",
+            points[1]
+        );
+    }
+}
+
+#[tokio::test]
 async fn an_exhausted_window_stops_calls_with_the_hosts_fixed_line() {
     let e = env_with(endpoints(WireApi::Responses, true, None), |c| {
         c.world.quota.window_5h.middle = 10.0;
@@ -732,7 +876,7 @@ async fn nobody_without_a_persona_is_ever_given_a_session() {
         .send(g, "cy, the tower over the river?", None)
         .await
         .unwrap();
-    let entry = items(&e.fake.json()[0]).last().unwrap().to_string();
+    let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
     assert!(entry.contains("ann answers."), "{entry}");
     assert!(!body_text(&segments(&e.agent, g)[0].prefix_b).contains("You are cy."));
     // Not a colleague to pull in, not someone the host can find or ask.
@@ -769,7 +913,7 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
     assert!(out.host_spoke);
     let (who, ch) = out.opened.unwrap();
     assert_eq!(who, p("ann"));
-    let entry = items(&e.fake.json()[1]).last().unwrap().to_string();
+    let entry = list(&e.fake.json()[1]).last().unwrap().to_string();
     assert!(entry.contains("ann speaks first.") && entry.contains("Doc's birthday"));
     let msgs = e.agent.history(ch, None, 5).unwrap();
     assert_eq!(msgs[0].text, "Happy birthday, Dr.Doc.");
@@ -888,10 +1032,19 @@ async fn a_log_continues_across_a_change_of_wire_api() {
     e.agent.send(ch, "and more", None).await.unwrap();
     assert_eq!(segments(&e.agent, ch).len(), 1);
     let bodies = e.fake.bodies();
-    assert!(!bodies[1].starts_with(agent::open_prefix(&bodies[0])));
+    let (first, second) = (e.fake.json()[0].clone(), e.fake.json()[1].clone());
+    assert_ne!(
+        head(&first),
+        head(&second),
+        "another protocol, another body"
+    );
+    assert!(
+        !e.fake.json()[1].to_string().contains("enc-0"),
+        "the old protocol's reasoning item is not sent to the new one"
+    );
     assert_prefix_chain(&bodies[1..]);
     let v = &e.fake.json()[2];
-    let all = items(v).iter().map(Value::to_string).collect::<String>();
+    let all = list(v).iter().map(Value::to_string).collect::<String>();
     assert!(
         all.contains("one") && all.contains("two"),
         "the whole log is sent"
@@ -915,7 +1068,7 @@ async fn a_due_commitment_opens_on_its_own_log_even_for_a_frozen_person() {
     e.fake.push([say("It is noon, Dr.Doc. Tea?")]);
     let opened = e.agent.on_event().await.unwrap();
     assert_eq!(opened, Some((p("ann"), ch)));
-    let entry = items(&e.fake.json()[0]).last().unwrap().to_string();
+    let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
     assert!(
         entry.contains("A promise is due: Tea together at noon"),
         "{entry}"
