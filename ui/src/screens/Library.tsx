@@ -1,7 +1,8 @@
 import { useId, useState } from "react";
-import type { SearchResults } from "../api";
+import { settle, type Failure, type SearchResults } from "../api";
 import { useT } from "../i18n";
-import { useActions, useApi, useDispatch, useStore } from "../store";
+import { useApi, useDispatch, useStore } from "../store";
+import { InlineError } from "../ui/ErrorBar";
 import { RosterList } from "./Roster";
 
 /**
@@ -38,15 +39,19 @@ export function Library() {
 function CorpusSearch() {
   const t = useT();
   const api = useApi();
-  const { attempt } = useActions();
   const id = useId();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<Failure | null>(null);
 
   const run = async () => {
-    if (!q.trim()) return;
-    const r = await attempt(api.commands.searchCorpus(q.trim(), []));
-    if (r) setResults(r);
+    if (!q.trim() || busy) return;
+    setBusy(true);
+    const r = await settle(api.commands.searchCorpus(q.trim(), []));
+    setBusy(false);
+    setFailed(r.ok ? null : r.error);
+    if (r.ok) setResults(r.data);
   };
 
   return (
@@ -64,8 +69,16 @@ function CorpusSearch() {
           {t("library.search")}
         </label>
         <input id={id} type="search" value={q} placeholder={t("library.search.placeholder")} onChange={(e) => setQ(e.target.value)} />
-        <button type="submit">{t("library.search.submit")}</button>
+        <button type="submit" disabled={busy} aria-busy={busy}>
+          {t("library.search.submit")}
+        </button>
       </form>
+      {busy && (
+        <p className="muted" role="status">
+          {t("library.searching")}
+        </p>
+      )}
+      {failed && <InlineError error={failed} onRetry={() => void run()} />}
       {results && (
         <div className="results" aria-live="polite">
           {results.understood_as && <p className="muted small">{t("library.understood", { name: results.understood_as })}</p>}

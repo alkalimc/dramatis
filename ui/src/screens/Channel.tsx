@@ -2,6 +2,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Reac
 import type { ChannelId, ImagePart, Message } from "../api";
 import { useT } from "../i18n";
 import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
+import { quotaExhaustedLine } from "../lib/quota";
+import { InlineError } from "../ui/ErrorBar";
 import { ModeSwitch } from "../ui/ModeSwitch";
 import { ActionLines, MessageView, StreamView } from "./Message";
 
@@ -22,6 +24,11 @@ export function ChannelView({ channel, header, after }: { channel: ChannelId; he
   const streams = useStreams(channel);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const historyError = useStore((s) => s.loadErrors[`history:${channel}`]);
+  const waiting = useStore((s) => Boolean(s.awaiting[channel]));
+  const isHost = useStore((s) => s.hostChannel === channel);
+  const quota = useStore((s) => s.quota);
+  const exhausted = isHost ? quotaExhaustedLine(quota, t) : null;
 
   useEffect(() => {
     void actions.loadHistory(channel);
@@ -31,7 +38,7 @@ export function ChannelView({ channel, header, after }: { channel: ChannelId; he
   useLayoutEffect(() => {
     const el = log.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [messages, streams]);
+  }, [messages, streams, waiting]);
 
   const onScroll = () => {
     const el = log.current;
@@ -57,6 +64,13 @@ export function ChannelView({ channel, header, after }: { channel: ChannelId; he
         {streams.map(([id, st]) => (
           <PendingActions key={id} id={id} stream={st} />
         ))}
+        {waiting && streams.length === 0 && (
+          <p className="muted awaiting" role="status">
+            {t("message.awaiting")}
+          </p>
+        )}
+        {exhausted && <p className="host-line">{exhausted}</p>}
+        {historyError && <InlineError error={historyError} onRetry={() => void actions.loadHistory(channel)} />}
       </div>
       <Composer channel={channel} />
     </section>
@@ -104,6 +118,8 @@ export function Composer({ channel }: { channel: ChannelId }) {
     if (ok !== undefined) {
       setText("");
       setImage(null);
+      // Replies arrive as events; until the first one, say so.
+      dispatch({ type: "awaiting", channel, on: true });
     }
   };
 
@@ -163,7 +179,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
         <button type="button" className="ghost" onClick={() => dispatch({ type: "groupDialog", open: true })}>
           ⊕ {t("composer.group")}
         </button>
-        <button type="submit" disabled={busy || (!text.trim() && !image)}>
+        <button type="submit" disabled={busy || (!text.trim() && !image)} aria-busy={busy}>
           {t("composer.send")}
         </button>
       </div>

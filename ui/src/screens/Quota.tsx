@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import type { QuietHours, QuotaStatus, Settings, Tier, WindowSpan } from "../api";
 import { useT } from "../i18n";
 import { when } from "../lib/format";
+import { quotaExhaustedLine } from "../lib/quota";
 import { useActions, useApi, useStore } from "../store";
 
 export const TIERS: Tier[] = ["low", "middle", "high", "extra_high", "max", "ultra"];
@@ -13,6 +14,7 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
   const index = TIERS.indexOf(quota.tier);
   const windowName = (span: WindowSpan | null) => t(`quota.window.${span ?? "five_hours"}`);
   const binding = quota.windows.find((w) => w.span === quota.binding);
+  const exhaustedLine = quotaExhaustedLine(quota, t);
   const total = quota.spent.reduce((n, s) => n + (s.points ?? 0), 0);
 
   return (
@@ -61,6 +63,7 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
           <p className={`band band-${quota.band}`} data-band={quota.band}>
             {t(`quota.band.${quota.band}`, { window: windowName(quota.binding) })}
           </p>
+          {exhaustedLine && <p className="host-line">{exhaustedLine}</p>}
           {quota.band !== "open" && binding?.release_at && <p className="muted">{t("quota.release", { when: when(binding.release_at) })}</p>}
         </>
       )}

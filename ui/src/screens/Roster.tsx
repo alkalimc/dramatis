@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import type { Candidate, RosterGroup } from "../api";
 import { useT } from "../i18n";
 import { activityText } from "../lib/format";
+import { hasPersona } from "../lib/persona";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
 import { ModeSwitch, modeHintKey } from "../ui/ModeSwitch";
@@ -113,20 +114,27 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
   const actions = useActions();
   const dispatch = useDispatch();
   const off = row.mode === "disabled";
+  const ready = hasPersona(row);
+  const note = useId();
   return (
-    <li className={`roster-row${off ? " off" : ""}`}>
+    <li className={`roster-row${off ? " off" : ""}${ready ? "" : " unavailable"}`}>
       <Avatar person={row.person} />
       <div className="who">
         <button type="button" className="link name" onClick={() => dispatch({ type: "drawer", drawer: { kind: "person", id: row.person.id } })}>
           {row.person.name}
         </button>
-        {row.recent && <span className="muted">{activityText(row.recent, t)}</span>}
+        {!ready && (
+          <span className="muted small" id={note}>
+            {t("person.unavailable")}
+          </span>
+        )}
+        {ready && row.recent && <span className="muted">{activityText(row.recent, t)}</span>}
         {row.companions.length > 0 && (
           <span className="muted small">{t("roster.companions", { names: row.companions.map((c) => c.name).join(" · ") })}</span>
         )}
       </div>
       {!off && (
-        <button type="button" className="ghost" onClick={() => actions.openDirect(row.person.id)}>
+        <button type="button" className="ghost" disabled={!ready} aria-describedby={ready ? undefined : note} onClick={() => actions.openDirect(row.person.id)}>
           {t("person.talk")}
         </button>
       )}

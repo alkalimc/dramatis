@@ -5,6 +5,7 @@ import { authorName, when } from "../lib/format";
 import { speechOnly } from "../lib/scene";
 import { useQuery } from "../lib/useQuery";
 import { useActions, useApi, useDispatch, useStore } from "../store";
+import { InlineError } from "../ui/ErrorBar";
 import { CitationList } from "./Citation";
 
 /** Every request, pinned questions (case files) first. */
@@ -14,7 +15,7 @@ export function CasesDrawer() {
   const actions = useActions();
   const dispatch = useDispatch();
   const version = useStore((s) => s.worldVersion);
-  const { data: tasks, reload } = useQuery(() => api.commands.tasks(), [api, version]);
+  const { data: tasks, error, reload } = useQuery(() => api.commands.tasks(), [api, version]);
   const id = useId();
   const [q, setQ] = useState("");
 
@@ -48,6 +49,7 @@ export function CasesDrawer() {
         <input id={id} value={q} placeholder={t("cases.open.placeholder")} onChange={(e) => setQ(e.target.value)} />
         <button type="submit">{t("cases.open.submit")}</button>
       </form>
+      {error && <InlineError error={error} onRetry={reload} />}
       {tasks && roots.length === 0 && <p className="muted">{t("cases.empty")}</p>}
       {pinned.length > 0 && (
         <section>
@@ -114,12 +116,22 @@ export function CaseDrawer({ id }: { id: TaskId }) {
   const user = useStore((s) => s.settings?.user_name ?? null);
   const version = useStore((s) => s.worldVersion);
   const marker = useStore((s) => s.wording.scene_marker);
-  const { data: cf, reload } = useQuery(() => api.commands.caseFile(id), [api, id, version]);
+  const { data: cf, error, reload } = useQuery(() => api.commands.caseFile(id), [api, id, version]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const cid = useId();
 
-  if (!cf) return <p className="muted drawer-body">{t("app.loading")}</p>;
+  if (!cf) {
+    return error ? (
+      <div className="drawer-body">
+        <InlineError error={error} onRetry={reload} />
+      </div>
+    ) : (
+      <p className="muted drawer-body" role="status">
+        {t("app.loading")}
+      </p>
+    );
+  }
 
   const save = async () => {
     if (!draft.trim()) return;

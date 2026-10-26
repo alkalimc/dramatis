@@ -2,9 +2,11 @@ import { useEffect, useId, useState } from "react";
 import type { PersonId } from "../api";
 import { useT } from "../i18n";
 import { when } from "../lib/format";
+import { hasPersona } from "../lib/persona";
 import { useQuery } from "../lib/useQuery";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
+import { InlineError } from "../ui/ErrorBar";
 import { ModeSwitch } from "../ui/ModeSwitch";
 
 /** One person: a single trust number, companions, mode, and a voice when read-aloud exists. */
@@ -15,10 +17,21 @@ export function PersonDrawer({ id }: { id: PersonId }) {
   const dispatch = useDispatch();
   const version = useStore((s) => s.peopleVersion);
   const tts = useStore((s) => Boolean(s.endpoints?.roles?.tts));
-  const { data: page } = useQuery(() => api.commands.personPage(id), [api, id, version]);
+  const { data: page, error, reload } = useQuery(() => api.commands.personPage(id), [api, id, version]);
 
-  if (!page) return <p className="muted drawer-body">{t("app.loading")}</p>;
+  if (!page) {
+    return error ? (
+      <div className="drawer-body">
+        <InlineError error={error} onRetry={reload} />
+      </div>
+    ) : (
+      <p className="muted drawer-body" role="status">
+        {t("app.loading")}
+      </p>
+    );
+  }
   const off = page.mode === "disabled";
+  const ready = hasPersona(page);
 
   return (
     <div className="drawer-body person-page">
@@ -45,12 +58,24 @@ export function PersonDrawer({ id }: { id: PersonId }) {
         {t("person.tasks", { count: page.tasks_done })}
       </p>
       {page.companions.length > 0 && <p>{t("roster.companions", { names: page.companions.map((c) => c.name).join(" · ") })}</p>}
+      {error && <InlineError error={error} onRetry={reload} />}
+      {!ready && (
+        <p className="muted unavailable" id="unavailable-note">
+          <strong>{t("person.unavailable")}</strong> {t("person.unavailable.hint")}
+        </p>
+      )}
       {!off && (
         <p className="row">
-          <button type="button" onClick={() => actions.openDirect(id)}>
+          <button type="button" disabled={!ready} aria-describedby={ready ? undefined : "unavailable-note"} onClick={() => actions.openDirect(id)}>
             {t("person.talk")}
           </button>
-          <button type="button" className="ghost" onClick={() => dispatch({ type: "ask", draft: { person: id } })}>
+          <button
+            type="button"
+            className="ghost"
+            disabled={!ready}
+            aria-describedby={ready ? undefined : "unavailable-note"}
+            onClick={() => dispatch({ type: "ask", draft: { person: id } })}
+          >
             {t("person.ask")}
           </button>
         </p>
