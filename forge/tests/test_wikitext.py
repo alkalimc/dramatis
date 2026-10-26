@@ -146,3 +146,37 @@ def test_sections_carry_their_offset_and_headings_resolve_at_any_point(clean):
     assert [s["at"] for s in sections] == [0, body.index("=== B")]
     assert clean.headings_at(body, body.index("Text under B")) == ("A", "B")
     assert clean.headings_at(body, 0) == ()
+
+
+HIDDEN_ROW_TABLE = """{|
+! code !! name
+|-
+| Ann || Anne Smith
+<!--|-
+| Bo || (unknown)
+-->|-
+| Cy || Cyrus Hale
+|}"""
+
+
+def test_a_comment_closing_on_a_row_marker_does_not_glue_rows():
+    """The closer of a hidden row often shares a line with the next live row's marker."""
+    from dramatis_forge.wikitext import iter_tables, table_grid, table_rows
+    [table] = list(iter_tables(HIDDEN_ROW_TABLE))
+    assert table_rows(table) == [["Ann", "Anne Smith"], ["Cy", "Cyrus Hale"]]
+    rows = [[c.text for c in row] for row in table_grid(table)]
+    assert rows == [["code", "name"], ["Ann", "Anne Smith"], ["Cy", "Cyrus Hale"]]
+
+
+def test_a_commented_out_heading_is_not_a_section(clean):
+    body = "intro text that is long enough to keep\n== Shown ==\nvisible words that are long enough\n<!-- == Hidden ==\nsecret words that readers never see on the page -->\n"
+    paths = [s["path"] for s in clean.split_sections(body)]
+    assert ("Hidden",) not in paths and ("Shown",) in paths
+    from dramatis_forge.wikitext import top_sections
+    assert list(top_sections("== A ==\nx\n<!-- == B ==\ny -->")) == ["A"]
+
+
+def test_list_markers_are_layout_and_definitions_fold_into_their_term():
+    cleaner = Cleaner(InlineRules(qualifier_sep=": ", list_sep=" | "))
+    got = cleaner.text("Boss\n:Tall\nCrew\n:Ann\n:Bob\n* plain item\n** nested\n# numbered")
+    assert got == "Boss: Tall\nCrew: Ann | Bob\nplain item\nnested\nnumbered"

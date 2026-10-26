@@ -114,6 +114,9 @@ def select(archive: Archive, pack: Pack) -> Selection:
 
     route_of: dict[str, str] = {}
     members: dict[str, list[str]] = {}
+    layouts = {s.key: s.layout for s in pack.seeds if s.layout is not None}
+    stratified: set[str] = set()
+    layered: set[str] = set()
     for seed in pack.fetch_seeds:
         for title in archive.seed(seed):  # sorted by title
             route = pack.route_for(seed, title)
@@ -122,11 +125,22 @@ def select(archive: Archive, pack: Pack) -> Selection:
             label = f"{seed} · {route.label or seed}"
             route_of.setdefault(title, label)
             members.setdefault(label, []).append(title)
+            if seed in layouts:
+                row = archive.page(title)
+                klass = layouts[seed](title, (row["wikitext"] or "") if row else "")
+                layered.add(label)
+                layer = f"{label} · {klass}"
+                members.setdefault(layer, []).append(title)
+                stratified.add(layer)
 
     for label, titles in sorted(members.items()):
-        sel.add(label, titles[0], "first")
-        sel.add(label, max(titles, key=lambda t: (sizes.get(t, 0), t)), "largest")
-        sel.add(label, min(titles, key=lambda t: (sizes.get(t, 0), t)), "smallest")
+        if label not in layered:  # the layout classes below stand in for the set's own
+            sel.add(label, titles[0], "first")
+            sel.add(label, max(titles, key=lambda t: (sizes.get(t, 0), t)), "largest")
+        if label in stratified:
+            continue  # a layout class is read through its first and largest page
+        if label not in layered:
+            sel.add(label, min(titles, key=lambda t: (sizes.get(t, 0), t)), "smallest")
         busiest = max(titles, key=lambda t: (records.get(t, 0), t))
         if records.get(busiest):
             sel.add(label, busiest, "most_records")

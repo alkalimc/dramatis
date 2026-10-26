@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -102,6 +102,10 @@ class SeedSet:
     #: advance. `scope` neither queries nor clears these sets, so re-scoping does not
     #: forget what fetching found.
     discovered: bool = False
+    #: `(title, wikitext) -> class name` for a set whose pages come in layouts so unlike that
+    #: one set's boundaries say little: the reading sample takes each class's own first and
+    #: largest page instead of the set's.
+    layout: Callable[[str, str], str] | None = None
 
     def __post_init__(self) -> None:
         if self.enumerate is None and self.fixed is None and not self.discovered:
@@ -300,8 +304,11 @@ class InlineRules:
     tab_class: str = ""
     #: Heading path given to prose that precedes the first heading.
     lead_section: str = "lead"
-    #: Joins a content template's qualifier to its body.
+    #: Joins a content template's qualifier to its body; also joins a definition-list term
+    #: to its definition.
     qualifier_sep: str = ": "
+    #: Joins the several definitions of one term of a definition list.
+    list_sep: str = ", "
     #: Regular-expression character class of the corpus language's letters, for
     #: measuring yield (`Cleaner.visible`). Empty counts every letter, which on a page
     #: carrying other languages or file names measures the wrong thing.
@@ -311,6 +318,16 @@ class InlineRules:
 # --------------------------------------------------------------------------- #
 # Identity
 # --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class IdentityEvidence:
+    """Facts about the corpus a pack may weigh when deciding which pages leave the roster."""
+
+    #: Speaker label -> number of lines spoken under it.
+    spoken: Mapping[str, int] = field(default_factory=dict)
+    #: Redirect alias -> target page.
+    redirects: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -339,6 +356,17 @@ class IdentityRules:
     #: convention, and the field naming it is written in the site's language. Falling
     #: back to the page title is always correct, just sometimes less specific.
     display_facet: str = ""
+    #: Roster pages that are not people in their own right (a game-mode copy of a character,
+    #: a placeholder class) and leave the roster after resolution, with every form that
+    #: resolved to them. `(pages, roster titles, evidence) -> titles`. A page the story
+    #: gives lines to is a person even when the site files it as a mode copy, which is why
+    #: the evidence is passed in rather than judged from the page alone.
+    excluded: Callable[
+        [Mapping[str, str], frozenset[str], IdentityEvidence], Collection[str]] | None = None
+    #: Wikitext of a roster page -> the key its portrait id carries in story scripts, or
+    #: None. The story reader derives the same key from each script's portrait names, so a
+    #: speaker label that is not a page title can still be traced to a person.
+    portrait_key: Callable[[str], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -498,6 +526,48 @@ class ChunkPolicy:
     #: pages (a "before battle" or "after battle" page). Dropped from the header only:
     #: the page, citation and span keep the full title.
     page_part: str = ""
+    #: `(regex, replacement)` pairs applied to a scene's page title after `page_part` for its
+    #: header name: a variant page becomes a named variant, a record filed by a path gets
+    #: a plain name when the source gives it no title of its own.
+    scene_rewrites: tuple[tuple[str, str], ...] = ()
+    #: `(regex, replacement)` pairs rewriting a voice line's title (or its trigger's words) as
+    #: it appears in a header: the source names its slots in the words of the game's own
+    #: menus, which no one in the fiction says. The first pattern that matches wins; text no
+    #: pattern matches is kept. An empty replacement leaves the slot nameless (the `voice`
+    #: label stands in).
+    voice_words: tuple[tuple[str, str], ...] = ()
+    #: Trigger keys or titles whose lines make no unit: a slot that carries the work's own name.
+    voice_skip: tuple[str, ...] = ()
+    #: Titles of dossier sections that are the work's mechanics (stat ratings), not prose
+    #: about the person; they make no unit.
+    section_skip: tuple[str, ...] = ()
+    #: Form kinds that add no identity card of their own: their fields are the mode's.
+    cardless_forms: tuple[str, ...] = ()
+    #: The same rewriting for the names of dossier sections and items in a header.
+    section_words: tuple[tuple[str, str], ...] = ()
+    #: Pages of a lore template whose header names the page by the last segment of its
+    #: title, as `(regex, replacement)` pairs: the first that matches rewrites the title.
+    #: What the wiki calls the page (a namespace, a section of the site) is not a topic.
+    lore_pages: tuple[tuple[str, str], ...] = ()
+    #: Regexes for heading-path segments a header leaves out: letter buckets, bare numbers,
+    #: template names. They place an entry on the wiki's page, not in the world.
+    lore_path_drop: tuple[str, ...] = ()
+    #: Regexes no header may match: words of the work's interface. A match is a failure of
+    #: the rules above, found on the units that shipped.
+    header_taboo: tuple[str, ...] = ()
+    #: Identity-card fields left out of the card text: attributes of the work's mechanics
+    #: rather than of the person. They stay on the person's facets for display.
+    card_omit: tuple[str, ...] = ()
+    #: Speaker labels that stand for someone not named yet. They are attributed scene by
+    #: scene from portraits only; a redirect or a corpus-wide count would say nothing.
+    generic_speakers: tuple[str, ...] = ()
+    #: Regex over a scene id with a named group `owner` for scenes that belong to one
+    #: person (a record of their own); the owner missing from their own scene is a failure
+    #: of attribution, not a fact about the story. Empty disables the check.
+    owner_scene: str = ""
+    #: A dossier item whose identical text appears on at least this many persons is a
+    #: stock text of the work, not theirs: stored once, owned by nobody. 0 turns it off.
+    shared_min: int = 0
 
     def label(self, key: str) -> str:
         return self.labels.get(key) or LABELS[key]
@@ -514,11 +584,38 @@ class ChunkPolicy:
 
     def scene_name(self, page: str) -> str:
         """A scene's page title as a header shows it, without its page-part suffix."""
-        return re.sub(self.page_part, "", page).strip() or page if self.page_part else page
+        name = re.sub(self.page_part, "", page).strip() or page if self.page_part else page
+        for pattern, replacement in self.scene_rewrites:
+            name = re.sub(pattern, replacement, name)
+        return name
+
+    @staticmethod
+    def _reworded(rules: tuple[tuple[str, str], ...], text: str) -> str:
+        for pattern, replacement in rules:
+            if re.search(pattern, text):
+                return re.sub(pattern, replacement, text).strip()
+        return text
 
     def voice_name(self, trigger: str, title: str) -> str:
         """What a header calls a voice line: its title, else its trigger's words."""
-        return title or self.triggers.get(trigger) or self.label("voice")
+        raw = title or self.triggers.get(trigger) or ""
+        return self._reworded(self.voice_words, raw) or self.label("voice")
+
+    def lore_crumbs(self, page: str, path: tuple[str, ...]) -> list[str]:
+        """A lore unit's header parts: its topic, then the headings below it, in-world only."""
+        top = self._reworded(self.lore_pages, page)
+        drop = re.compile("|".join(self.lore_path_drop)) if self.lore_path_drop else None
+        out = [top] if top else []
+        for seg in path:
+            if drop is not None and drop.search(seg):
+                continue
+            if seg and (not out or out[-1] != seg):
+                out.append(seg)
+        return out
+
+    def section_name(self, name: str) -> str:
+        """A dossier section or item as a header names it."""
+        return self._reworded(self.section_words, name)
 
     def shaped(self, shape: str) -> tuple[str, ...]:
         """Names of the templates built by one builder."""
@@ -537,6 +634,9 @@ LABELS: Mapping[str, str] = {
     "card": "identity card",     # the merged-fields unit of a person's dossier
     "other_forms": "other forms",  # label for the list of a person's other pages
     "source": "source",          # provenance line appended to a lore unit
+    "shared": "shared",          # header owner of a stock text that belongs to no one
+    "branch": "if the player chose",  # opens a stretch that follows one reply of a choice
+    "merge": "story continues",       # closes it: the lines after are on every path
 }
 
 #: Fallbacks for `ChunkPolicy.kinds`. A pack whose parsers use different strings must
@@ -553,6 +653,8 @@ SEPARATORS: Mapping[str, str] = {
     "label": ": ",     # between a label (speaker, field name) and its text
     "list": ", ",      # between items of an inline list
     "mark": "[{}] ",   # around an inline marker word; `{}` is the word
+    "form": " ({})",   # a person's name followed by the name of one of their forms
+    "quote": '"{}"',   # quotes around a reply the player could choose
 }
 
 

@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from ..archive import Archive
+from ..chunk import reply_text
 from ..pack import Pack
 from ..text import table_head
 
@@ -79,11 +80,13 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
         sid = scene["id"]
         out["scene"] = dict(scene)
         out["lines"] = [dict(r) for r in db.execute(
-            "SELECT seq,speaker,text,kind FROM lines WHERE scene=? ORDER BY seq", (sid,))]
+            "SELECT seq,speaker,text,kind,branch FROM lines WHERE scene=? ORDER BY seq",
+            (sid,))]
         out["choices"] = [
-            {"seq": r["seq"], "options": json.loads(r["options"])}
+            {"seq": r["seq"], "options": json.loads(r["options"]),
+             "values": json.loads(r["vals"]), "branch": r["branch"]}
             for r in db.execute(
-                "SELECT seq,options FROM choices WHERE scene=? ORDER BY seq", (sid,))
+                "SELECT seq,options,vals,branch FROM choices WHERE scene=? ORDER BY seq", (sid,))
         ]
 
     dossier = db.execute("SELECT * FROM dossiers WHERE page=?", (title,)).fetchone()
@@ -200,8 +203,28 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
             "", say("inspect.body"), "",
         ]
         speech, caption = policy.kind("speech"), policy.kind("subtitle")
-        by_seq = {c["seq"]: c for c in rec["choices"]}
-        for ln in rec["lines"]:
+        # One sequence by position, as the unit builder reads it: a choice that follows
+        # another choice has no line before it to hang from.
+        items = sorted([*({"at": ln["seq"], "line": ln} for ln in rec["lines"]),
+                        *({"at": c["seq"], "choice": c} for c in rec["choices"])],
+                       key=lambda i: i["at"])
+        choices = {c["seq"]: c for c in rec["choices"]}
+        here = None
+        for item in items:
+            branch = (item.get("line") or item["choice"]).get("branch")
+            if branch != here:
+                if branch is None:
+                    L += [f"_{policy.mark(policy.label('merge'))}_", ""]
+                else:
+                    at, _, refs = branch.partition(":")
+                    c = choices.get(int(at))
+                    L += [f"_{reply_text(policy, (c['options'], c['values']) if c else None, refs.split(';'))}_", ""]
+                here = branch
+            if "choice" in item:
+                L += [say("inspect.choice", mark=policy.mark(policy.label("options")),
+                          options=" / ".join(item["choice"]["options"])), ""]
+                continue
+            ln = item["line"]
             if ln["speaker"] or ln["kind"] == speech:
                 L.append(f"**{ln['speaker']}**{lsep}{ln['text']}")
             elif ln["kind"] == caption:
@@ -209,9 +232,6 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
             else:
                 L.append(f"> {ln['text']}")
             L.append("")
-            if ln["seq"] + 1 in by_seq:
-                L += [say("inspect.choice", mark=policy.mark(policy.label("options")),
-                          options=" / ".join(by_seq[ln["seq"] + 1]["options"])), ""]
 
     if "dossier" in rec:
         d = rec["dossier"]
