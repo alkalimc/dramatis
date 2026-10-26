@@ -193,7 +193,7 @@ def run(
             *((label, person, SPEAKER_ALIAS) for label, person in env.speakers.speaker_aliases()),
         ]
         alias_rows = mark_exact_terms(
-            settle_term_targets(alias_rows, set(env.speakers.person_of.values())),
+            settle_term_targets(alias_rows),
             params.alias.whole_word_max)
         _check_alias_chains(rep, alias_rows, set(env.speakers.person_of.values()))
         folio.write_aliases(alias_rows)

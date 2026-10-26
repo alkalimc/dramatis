@@ -43,7 +43,7 @@ class Scope:
 
 @dataclass(frozen=True)
 class Alias:
-    #: A foreign-script term rendering with at most this many characters is matched as a
+    #: A term rendering in Latin script with at most this many characters is matched as a
     #: whole word, case-sensitively (0 turns it off): short common words would otherwise
     #: fire inside ordinary text.
     whole_word_max: int = 4

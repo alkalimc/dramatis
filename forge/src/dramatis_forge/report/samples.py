@@ -23,7 +23,6 @@ lists every sampled page with why it was chosen and links to its three files
 from __future__ import annotations
 
 import re
-import shutil
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -278,11 +277,25 @@ def _row(pack: Pack, title: str, why: str, written: list[Path], outdir: Path) ->
     return f"| {title} | {why.replace('|', '/')} | {files} |"
 
 
+def _prune(outdir: Path, kept: set[Path]) -> None:
+    """Remove every file under `outdir` that is not in `kept`, and the directories left empty."""
+    for path in sorted(outdir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_dir():
+            if not any(path.iterdir()):
+                path.rmdir()
+        elif path not in kept:
+            path.unlink()
+
+
 def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, int]:
-    """Clear `outdir`, dump every selected page, and write `INDEX.md`."""
-    if outdir.exists():
-        shutil.rmtree(outdir)
-    outdir.mkdir(parents=True)
+    """Dump every selected page and write `INDEX.md`, leaving nothing of an earlier run.
+
+    Files are overwritten in place and what this run did not write is removed afterwards,
+    rather than deleting the whole tree first: a synced folder that sees a directory vanish
+    and reappear under the same name keeps both, as an empty "name 2".
+    """
+    outdir.mkdir(parents=True, exist_ok=True)
+    kept: set[Path] = set()
     say = pack.say
     last = _last(archive)
     sel = select(archive, pack)
@@ -306,6 +319,7 @@ def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, int]:
                                if snap is not None else [])
                 else:
                     written = inspect_mod.dump(archive, pack, title, outdir / CHANGES)
+                kept.update(written)
                 lines.append(_row(pack, title, say(f"samples.why.{kind}"), written, outdir))
         lines.append("")
 
@@ -315,10 +329,13 @@ def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, int]:
         lines += [say("samples.route", route=route), "", *table_head(say("samples.head"))]
         for title, reasons in sorted(sel.routes[route].items()):
             why = "; ".join(say(f"samples.why.{key}", **fields) for key, fields in reasons)
-            lines.append(_row(pack, title, why, inspect_mod.dump(archive, pack, title, folder),
-                              outdir))
+            written = inspect_mod.dump(archive, pack, title, folder)
+            kept.update(written)
+            lines.append(_row(pack, title, why, written, outdir))
         lines.append("")
 
     index = outdir / "INDEX.md"
     index.write_text("\n".join(lines), encoding="utf-8")
+    kept.add(index)
+    _prune(outdir, kept)
     return index, sel.count + changes

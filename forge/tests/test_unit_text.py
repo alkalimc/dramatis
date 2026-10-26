@@ -94,21 +94,22 @@ def test_term_targets_follow_person_names():
     persons = {"P", "P2"}
     rows = [("Alias", "RealName", "term"), ("RealName", "P", "realname"),
             ("Two", "Nick", "term"), ("Nick", "P", "speaker"), ("Nick", "P2", "speaker"),
-            ("Ben", "Q", "term")]
-    out = normalize.settle_term_targets(rows, persons, ("realname",))
+            ("Ben", "Q", "term"), ("Long", "Short", "term"), ("Short", "Gloss", "term"),
+            ("Alt", "Plain", "term"), ("Plain", "Elsewhere", "realname")]
+    out = normalize.settle_term_targets(rows)
     assert ("Alias", "P", "term") in out
-    # A speaker label is not followed unless asked for, and an ambiguous one never is.
+    # A name with two possible meanings is not followed.
     assert ("Two", "Nick", "term") in out
-    both = normalize.settle_term_targets(rows, persons)
-    assert ("Two", "Nick", "term") in both
+    assert ("Long", "Gloss", "term") in out
+    assert ("Alt", "Elsewhere", "term") in out
     assert normalize.alias_chains(out, persons) == [("Two", "Nick", "term")]
 
 
 def test_short_foreign_terms_are_marked_exact():
     rows = [("Ben", "x", "term"), ("Dr.", "y", "term"), ("Long Name", "z", "term"),
-            ("短", "w", "term"), ("Ace", "v", "redirect")]
+            ("短", "w", "term"), ("ドク", "u", "term"), ("Ace", "v", "redirect")]
     out = normalize.mark_exact_terms(rows, 4)
-    assert [k for _, _, k in out] == ["term_exact", "term_exact", "term", "term", "redirect"]
+    assert [k for _, _, k in out] == ["term_exact", "term_exact", "term", "term", "term", "redirect"]
     assert normalize.mark_exact_terms(rows, 0) == rows
 
 

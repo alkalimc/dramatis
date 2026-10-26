@@ -137,9 +137,8 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
         replace(a, target=_canonical(a.target, roster.of_page, redirects))
         for a in buckets["alias"]]
     buckets["alias"] = [a for a in buckets["alias"] if a.alias != a.target]
-    persons = set(roster.of_page.values())
     buckets["alias"] = [Alias(*row) for row in settle_term_targets(
-        [a.row() for a in buckets["alias"]], persons, ("realname",))]
+        [a.row() for a in buckets["alias"]], ("realname", TERM_ALIAS))]
     check_aliases(buckets["alias"], redirects, set(roster.of_page.values()), rep)
 
     # ---- store, reconciling produced against stored ----
@@ -243,36 +242,45 @@ PERSON_NAME_KINDS = ("realname", "speaker")
 #: Alias kind for a short foreign term rendering that must match as a whole word, with the
 #: case it is written in. Same target semantics as `TERM_ALIAS`; the engine reads the kind.
 TERM_EXACT_ALIAS = "term_exact"
-_RE_CJK_ANY = re.compile(r"[\u3400-\u9fff]")
+#: Latin script, with its extensions and punctuation: the writings that run into words.
+_RE_LATIN = re.compile(r"[\u0000-\u024f]+")
 
 
 def settle_term_targets(
-    rows: list[tuple[str, str, str]], persons: set[str], via: tuple[str, ...] = PERSON_NAME_KINDS,
+    rows: list[tuple[str, str, str]], via: tuple[str, ...] = (*PERSON_NAME_KINDS, TERM_ALIAS),
 ) -> list[tuple[str, str, str]]:
-    """Point term renderings that name another alias (a real name, a speaker label) at the
-    person that alias names, when the alias names exactly one. `rows` are (alias, target,
-    kind); a rendering never ends on an alias when the chain can be followed to a person."""
-    names: dict[str, set[str]] = {}
+    """Follow a term rendering that names another alias to where that alias ends.
+
+    `rows` are (alias, target, kind). A rendering whose target is itself an alias of a kind
+    in `via` (a real name, a speaker label, another term) takes that alias's target, when
+    the alias names exactly one; the chain is followed to its end. Whether the end is a
+    roster person or a character without a page, it is what the site says the name means.
+    """
+    ends: dict[str, set[str]] = {}
     for alias, target, kind in rows:
-        if kind in via and target in persons:
-            names.setdefault(alias, set()).add(target)
+        if kind in via:
+            ends.setdefault(alias, set()).add(target)
+    resolved: dict[str, str] = {k: next(iter(v)) for k, v in ends.items() if len(v) == 1}
     out = []
     for alias, target, kind in rows:
-        found = names.get(target)
-        if kind in (TERM_ALIAS, TERM_EXACT_ALIAS) and target not in persons and found and len(found) == 1:
-            target = next(iter(found))
+        if kind in (TERM_ALIAS, TERM_EXACT_ALIAS):
+            seen = {alias}
+            while target in resolved and target not in seen:
+                seen.add(target)
+                target = resolved[target]
         if alias != target:
             out.append((alias, target, kind))
     return out
 
 
 def mark_exact_terms(rows: list[tuple[str, str, str]], max_chars: int) -> list[tuple[str, str, str]]:
-    """Term renderings of at most `max_chars` characters with no CJK character (a short
-    foreign word: `Ben`, `Dr.`, `Ace`) become `term_exact` (0 turns the rule off)."""
+    """Term renderings of at most `max_chars` characters written in Latin script (a short
+    foreign word: `Ben`, `Dr.`, `Ace`) become `term_exact` (0 turns the rule off). Other
+    scripts are not marked: they have no word boundary to run into."""
     if max_chars <= 0:
         return rows
     return [(a, t, TERM_EXACT_ALIAS if k == TERM_ALIAS and len(a) <= max_chars
-             and not _RE_CJK_ANY.search(a) else k) for a, t, k in rows]
+             and _RE_LATIN.fullmatch(a) else k) for a, t, k in rows]
 
 
 def alias_chains(rows: list[tuple[str, str, str]], persons: set[str]) -> list[tuple[str, str, str]]:
