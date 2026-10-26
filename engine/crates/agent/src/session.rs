@@ -10,8 +10,8 @@
 
 use std::collections::HashSet;
 
-use api::meta::MessageMeta;
 use api::events::{MessageAdded, MessageDelta, QuotaChanged, ToolCalled};
+use api::meta::MessageMeta;
 use api::views::ToolAction;
 use futures::StreamExt;
 use llm::{Event as LlmEvent, Message, Response, ToolChoice};

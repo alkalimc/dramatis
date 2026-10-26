@@ -37,7 +37,8 @@ pub fn record(
     };
     let w = write_ratio.unwrap_or(agent_cost.w);
     let points = quota::points(base, prices, cost) + w * usage.cache_write_in as f64;
-    let n = |v: u64| i64::try_from(v).map_err(|_| world::Error::Invalid("token count overflow".into()));
+    let n =
+        |v: u64| i64::try_from(v).map_err(|_| world::Error::Invalid("token count overflow".into()));
     conn.execute(
         "INSERT INTO meter(at, shape, channel, model, uncached, cached, output, points)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",

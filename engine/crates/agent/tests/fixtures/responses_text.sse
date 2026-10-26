@@ -16,6 +16,9 @@ data: {"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_1"
 event: response.output_text.done
 data: {"type":"response.output_text.done","sequence_number":5,"item_id":"msg_1","output_index":1,"content_index":0,"text":"Good evening."}
 
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":6,"output_index":1,"item":{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Good evening."}]}}
+
 event: response.completed
 data: {"type":"response.completed","sequence_number":6,"response":{"id":"resp_1","object":"response","status":"completed","model":"model-a","usage":{"input_tokens":9160,"input_tokens_details":{"cached_tokens":8960},"output_tokens":57,"output_tokens_details":{"reasoning_tokens":21},"total_tokens":9217}}}
 

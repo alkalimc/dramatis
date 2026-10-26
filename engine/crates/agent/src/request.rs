@@ -255,6 +255,40 @@ pub struct Call<'a> {
     pub choice: ToolChoice,
 }
 
+/// Whether a native block belongs to a protocol: only the one that produced it can take
+/// it back.
+fn native_fits(protocol: Protocol, block: &Value) -> bool {
+    let kind = block
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match protocol {
+        Protocol::AnthropicMessages => matches!(kind, "thinking" | "redacted_thinking"),
+        Protocol::OpenAiResponses => kind == "reasoning",
+        _ => false,
+    }
+}
+
+/// The log as one protocol can take it. A log goes on across a change of endpoint; the
+/// native blocks of the old protocol are left out of what is sent, and stay in the log.
+fn for_protocol(messages: &[Message], protocol: Protocol) -> Vec<Message> {
+    messages
+        .iter()
+        .filter_map(|m| {
+            let parts: Vec<Part> = m
+                .parts
+                .iter()
+                .filter(|p| !matches!(p, Part::Native(v) if !native_fits(protocol, v)))
+                .cloned()
+                .collect();
+            (!parts.is_empty()).then_some(Message {
+                role: m.role,
+                parts,
+            })
+        })
+        .collect()
+}
+
 /// The protocol-neutral request. Blocks A and B end cacheable prefixes (the host's log has
 /// no B); C and the growing tail are left to the protocol's own moving breakpoint. When
 /// the endpoint allows fewer explicit breakpoints than that, the later block keeps its
@@ -284,7 +318,7 @@ pub fn build(call: &Call<'_>, ep: &Endpoint) -> Result<Request> {
     system.reverse();
     Ok(Request {
         system,
-        messages: call.messages.to_vec(),
+        messages: for_protocol(call.messages, ep.protocol),
         tools: call
             .shape
             .tools
@@ -360,7 +394,10 @@ mod tests {
         }
         let back = parse(&to_bytes(&msgs[1])).unwrap();
         assert_eq!(back.parts[0], Part::Native(raw), "native block kept as is");
-        assert_eq!(harness_texts(&msgs[0]).collect::<Vec<_>>(), ["hi \"there\""]);
+        assert_eq!(
+            harness_texts(&msgs[0]).collect::<Vec<_>>(),
+            ["hi \"there\""]
+        );
         assert_eq!(harness_texts(&msgs[1]).count(), 0);
         assert_eq!(harness_texts(&msgs[2]).collect::<Vec<_>>(), ["found"]);
         assert!(parse(b"{\"item\":\"user\",\"text\":\"old\"}").is_none());

@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use agent::endpoint::{Http, Keychain};
 use agent::{Agent, Config, NoSink, Parts, SystemClock};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -33,8 +32,8 @@ async fn two_turns_and_a_wrapup_hit_the_cache() {
             ..Config::default()
         },
         endpoints,
-        keys: Arc::new(Keychain),
-        transport: Arc::new(Http::default()),
+        keys: None,
+        llm: llm::Llm::http().unwrap(),
         sink: Arc::new(NoSink),
         clock: Arc::new(SystemClock { offset_min: 0 }),
     })

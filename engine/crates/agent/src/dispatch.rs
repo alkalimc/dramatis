@@ -25,7 +25,12 @@ type Outcome = std::result::Result<String, Refusal>;
 
 impl Agent {
     /// Run one tool call and return what the model reads back.
-    pub(crate) async fn dispatch(&self, turn: &mut Turn, name: &str, arguments: &str) -> Result<String> {
+    pub(crate) async fn dispatch(
+        &self,
+        turn: &mut Turn,
+        name: &str,
+        arguments: &str,
+    ) -> Result<String> {
         let seg = self.current_segment(turn.channel)?;
         let names = self.segment_names(seg)?;
         let kind = self.log_kind(&self.db(), turn.channel)?;

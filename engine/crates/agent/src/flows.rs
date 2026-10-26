@@ -27,10 +27,10 @@ use crate::assemble::{self, Member};
 use crate::error::{Error, Result, timestamp};
 use crate::persona;
 use crate::request::{self, Image};
-use llm::ToolChoice;
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
+use llm::ToolChoice;
 
 /// A user message stored and waiting for its replies.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -766,8 +766,7 @@ impl Agent {
                 continue;
             };
             let names = self.names_now(&self.db())?;
-            let stale =
-                request::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
+            let stale = request::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
             if !stale {
                 continue;
             }
