@@ -3,11 +3,14 @@
 // same signatures. Screens import from here only, never from `api.gen` directly.
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import * as gen from "../api.gen";
-import { createMock } from "./mock";
+import { createMock, type MockOptions } from "./mock";
 
 export type * from "../api.gen";
 
 export type Commands = typeof gen.commands;
+
+/** What every generated command returns. */
+export type Result<T> = Promise<{ status: "ok"; data: T } | { status: "error"; error: gen.ApiError }>;
 
 /** The part of a generated event the UI uses; the mock implements just this. */
 export interface EventSource<T> {
@@ -33,29 +36,55 @@ export interface Api {
   mock: boolean;
 }
 
+/** The generated bindings, as the webview sees them. */
+export function tauriApi(): Api {
+  return { commands: gen.commands, events: gen.events, mediaUrl: (p) => convertFileSrc(p), mock: false };
+}
+
+export function mockApi(params: URLSearchParams, opts?: MockOptions): Api {
+  return { ...createMock(params, opts), mediaUrl: (p) => p, mock: true };
+}
+
 function inTauri(): boolean {
   return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || isTauri());
 }
 
-function pick(): Api {
-  if (inTauri()) {
-    return { commands: gen.commands, events: gen.events, mediaUrl: (p) => convertFileSrc(p), mock: false };
+export const api: Api = inTauri() ? tauriApi() : mockApi(new URLSearchParams(typeof location === "undefined" ? "" : location.search));
+
+/**
+ * A failed call: the engine's `ApiError`, or anything else the IPC layer threw (a command
+ * the engine does not register, a broken bridge), kept as text.
+ */
+export type Failure = gen.ApiError | { code: "unknown"; detail: string };
+
+// Every engine error code. A record, so a code added on the engine side fails to compile
+// here until the UI has a key for it.
+const CODES: Record<gen.ApiError["code"], true> = {
+  not_implemented: true,
+  not_found: true,
+  invalid: true,
+  disabled: true,
+  quota_exhausted: true,
+  no_endpoint: true,
+  endpoint: true,
+  keychain: true,
+  io: true,
+};
+
+export function asFailure(e: unknown): Failure {
+  if (typeof e === "object" && e !== null && "code" in e && typeof e.code === "string" && e.code in CODES) {
+    return e as gen.ApiError;
   }
-  const params = typeof location === "undefined" ? "" : location.search;
-  return { ...createMock(new URLSearchParams(params)), mediaUrl: (p) => p, mock: true };
+  const detail = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+  return { code: "unknown", detail: detail ?? "" };
 }
 
-export const api: Api = pick();
-
-/** Unwrap a command result or throw its `ApiError` (screens catch and show it). */
-export async function call<T>(p: Promise<{ status: "ok"; data: T } | { status: "error"; error: gen.ApiError }>): Promise<T> {
-  const r = await p;
-  if (r.status === "error") throw new ApiFailure(r.error);
-  return r.data;
-}
-
-export class ApiFailure extends Error {
-  constructor(readonly error: gen.ApiError) {
-    super(error.code);
+/** Await a command without ever throwing: its data, or why it failed. */
+export async function settle<T>(p: Result<T>): Promise<{ ok: true; data: T } | { ok: false; error: Failure }> {
+  try {
+    const r = await p;
+    return r.status === "ok" ? { ok: true, data: r.data } : { ok: false, error: asFailure(r.error) };
+  } catch (e) {
+    return { ok: false, error: asFailure(e) };
   }
 }

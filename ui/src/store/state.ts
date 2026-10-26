@@ -1,5 +1,4 @@
 import type {
-  ApiError,
   AppStatus,
   Author,
   Candidate,
@@ -8,6 +7,7 @@ import type {
   Clock,
   Digest,
   EndpointsView,
+  Failure,
   Message,
   MessageAdded,
   MessageDelta,
@@ -48,6 +48,25 @@ export interface Stream {
   text: string;
 }
 
+/**
+ * Everything the store loads from the engine, each with its own load state and error, so
+ * the screen that shows it can say what failed and offer to retry. `events` is the live
+ * subscription; `history:<channel>` one channel's log.
+ */
+export type LoadKey =
+  | "status"
+  | "wording"
+  | "settings"
+  | "endpoints"
+  | "digest"
+  | "coldstart"
+  | "roster"
+  | "quota"
+  | "channels"
+  | "host"
+  | "events"
+  | `history:${ChannelId}`;
+
 export interface State {
   status: AppStatus | null;
   wording: Wording;
@@ -68,20 +87,22 @@ export interface State {
   streams: Record<MessageId, Stream>;
   /** Tool calls announced for a message not stored yet (streaming or pending). */
   pendingActions: Record<MessageId, ToolAction[]>;
+  /** Channels where the user has spoken and nothing has come back yet. */
+  awaiting: Record<ChannelId, true>;
   /** Every person name seen in any payload, for labelling authors. */
   names: Record<PersonId, string>;
   /** Bumped on each `WorldChanged`: screens holding fetched facts or tasks refetch. */
   worldVersion: number;
   /** Bumped on roster or mode changes: person pages refetch. */
   peopleVersion: number;
+  loading: Partial<Record<LoadKey, true>>;
+  loadErrors: Partial<Record<LoadKey, Failure>>;
   /** The channel in the main pane; `null` = home (host channel, or the library). */
   channel: ChannelId | null;
   drawer: Drawer | null;
   ask: AskDraft | null;
   groupDialog: boolean;
   libraryNoticeDismissed: boolean;
-  /** Last error to announce; shown in a live region. */
-  error: ApiError | null;
 }
 
 export const emptyWording: Wording = { entries: {}, scene_marker: { open: "*", close: "*" } };
@@ -104,15 +125,17 @@ export function initialState(): State {
     historyDone: {},
     streams: {},
     pendingActions: {},
+    awaiting: {},
     names: {},
     worldVersion: 0,
     peopleVersion: 0,
+    loading: {},
+    loadErrors: {},
     channel: null,
     drawer: null,
     ask: null,
     groupDialog: false,
     libraryNoticeDismissed: false,
-    error: null,
   };
 }
 
@@ -137,9 +160,11 @@ export type Action =
   | { type: "modeChanged"; event: ModeChanged }
   | { type: "worldChanged"; event: WorldChanged }
   | { type: "rosterChanged" }
+  | { type: "awaiting"; channel: ChannelId; on: boolean }
+  | { type: "loading"; key: LoadKey }
+  | { type: "loaded"; key: LoadKey; error: Failure | null }
   | { type: "open"; channel: ChannelId | null }
   | { type: "drawer"; drawer: Drawer | null }
   | { type: "ask"; draft: AskDraft | null }
   | { type: "groupDialog"; open: boolean }
-  | { type: "dismissLibraryNotice" }
-  | { type: "error"; error: ApiError | null };
+  | { type: "dismissLibraryNotice" };

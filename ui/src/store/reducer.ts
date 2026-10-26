@@ -48,10 +48,15 @@ function upsert(list: Message[] | undefined, m: Message): Message[] {
   return out;
 }
 
-function omit<V>(rec: Record<string, V>, key: string): Record<string, V> {
+function omit<R extends Partial<Record<string, unknown>>>(rec: R, key: string): R {
   if (!(key in rec)) return rec;
   const { [key]: _drop, ...rest } = rec;
-  return rest;
+  return rest as R;
+}
+
+/** Something came back in this channel: the user is no longer waiting on it. */
+function answered(s: State, channel: string): State["awaiting"] {
+  return omit(s.awaiting, channel);
 }
 
 export function reduce(s: State, a: Action): State {
@@ -104,6 +109,7 @@ export function reduce(s: State, a: Action): State {
           ...s.streams,
           [e.message]: { channel: e.channel, author: e.author, text: (prev?.text ?? "") + e.delta },
         },
+        awaiting: answered(s, e.channel),
       };
     }
     case "messageAdded": {
@@ -115,6 +121,8 @@ export function reduce(s: State, a: Action): State {
         messages: { ...s.messages, [m.channel]: upsert(s.messages[m.channel], m) },
         streams: omit(s.streams, m.id),
         pendingActions: omit(s.pendingActions, m.id),
+        // The user's own turn echoed back is not an answer.
+        awaiting: m.author.kind === "user" ? s.awaiting : answered(s, m.channel),
       };
     }
     case "toolCalled": {
@@ -126,9 +134,14 @@ export function reduce(s: State, a: Action): State {
         const next = { ...m, actions: [...m.actions, e.action] };
         return { ...s, messages: { ...s.messages, [e.channel]: list.map((x, j) => (j === i ? next : x)) } };
       }
+      // A reply that acts before it writes: show its action lines at once, under a
+      // stream with no text yet.
+      const stream = s.streams[e.message] ?? { channel: e.channel, author: e.author, text: "" };
       return {
         ...s,
         pendingActions: { ...s.pendingActions, [e.message]: [...(s.pendingActions[e.message] ?? []), e.action] },
+        streams: s.streams[e.message] ? s.streams : { ...s.streams, [e.message]: stream },
+        awaiting: answered(s, e.channel),
       };
     }
     case "modeChanged": {
@@ -147,6 +160,16 @@ export function reduce(s: State, a: Action): State {
       return { ...s, worldVersion: s.worldVersion + 1 };
     case "rosterChanged":
       return { ...s, peopleVersion: s.peopleVersion + 1 };
+    case "awaiting":
+      return { ...s, awaiting: a.on ? { ...s.awaiting, [a.channel]: true } : answered(s, a.channel) };
+    case "loading":
+      return { ...s, loading: { ...s.loading, [a.key]: true } };
+    case "loaded":
+      return {
+        ...s,
+        loading: omit(s.loading, a.key),
+        loadErrors: a.error ? { ...s.loadErrors, [a.key]: a.error } : omit(s.loadErrors, a.key),
+      };
     case "open":
       return { ...s, channel: a.channel, drawer: null };
     case "drawer":
@@ -157,7 +180,5 @@ export function reduce(s: State, a: Action): State {
       return { ...s, groupDialog: a.open };
     case "dismissLibraryNotice":
       return { ...s, libraryNoticeDismissed: true };
-    case "error":
-      return { ...s, error: a.error };
   }
 }

@@ -1,12 +1,20 @@
 // Every string the UI shows, keyed flat and dotted. Neutral English defaults; the corpus
 // manifest's `wording` overrides any key at runtime (see `translate`). `{name}` fields are
-// filled by the caller. Keep all keys in this one file.
+// filled by the caller; `{host}`, `{org}`, `{person}` and `{people}` work in every
+// template (see `makeT`). Keep all keys in this one file.
 export const en = {
-  // ---- names ----
+  // ---- names (the corpus namespace: never rename these) ----
   "host.name": "Host",
+  "host.role": "Assistant",
   "user.title": "{name}",
   "user.you": "You",
+  "person.noun": "person",
+  "person.noun_plural": "people",
+  "org.name": "the team",
   "person.unknown": "Someone",
+
+  // ---- the host's fixed lines, shown without a model call ----
+  "host.quota_exhausted": "The quota for now is used up. It frees up at {when}; until then the archive and search work as usual.",
 
   // ---- app ----
   "app.loading": "Loading",
@@ -15,6 +23,9 @@ export const en = {
   "app.corpus.requirement": "This corpus needs a feature this app lacks ({requirement}). Please update the app.",
   "app.corpus.encoder": "The local search model differs from the one this corpus was built with. Search still works; results may differ.",
   "app.mock": "Demo data",
+  "app.retry": "Try again",
+  "app.dismiss": "Dismiss",
+  "app.wording.failed": "The corpus wording could not be loaded, so default text is shown.",
 
   // ---- header and navigation ----
   "nav.label": "Drawers",
@@ -61,6 +72,7 @@ export const en = {
   "message.playing": "Playing",
   "message.actions": "Actions for this message",
   "message.streaming": "writing",
+  "message.awaiting": "Waiting for a reply",
   "action.line": "{name} ▸ {action}",
   "action.search": "looking up \"{query}\"",
   "action.get_chunk": "reading a passage",
@@ -143,7 +155,7 @@ export const en = {
 
   // ---- roster and person page ----
   "roster.title": "Roster",
-  "roster.counts": "All {total} · enabled {enabled}",
+  "roster.counts": "All {total} {people} · enabled {enabled}",
   "roster.find": "Find someone by topic",
   "roster.find.placeholder": "What do you need help with?",
   "roster.find.submit": "Find",
@@ -153,7 +165,7 @@ export const en = {
   "roster.band.disabled": "Disabled ({count})",
   "roster.companions": "Often with {names}",
   "roster.modes": "Modes",
-  "roster.empty": "The roster is empty.",
+  "roster.empty": "No {people} on the roster yet.",
   "roster.new_group": "New group",
   "person.trust": "Trust {trust}",
   "person.last_seen": "Last talked {when}",
@@ -166,6 +178,8 @@ export const en = {
   "person.voice.default": "Endpoint default",
   "person.voice.custom": "Or a voice id",
   "person.voice.save": "Save voice",
+  "person.unavailable": "Not available yet",
+  "person.unavailable.hint": "The archive holds too little of their own words for them to speak yet.",
 
   // ---- case files ----
   "cases.title": "Requests",
@@ -242,6 +256,7 @@ export const en = {
   "quota.band.quiet": "They won't speak up on their own for now (near the {window} limit).",
   "quota.band.exhausted": "No new calls until the {window} window frees up.",
   "quota.release": "Frees up at {when}",
+  "quota.release.unknown": "a later time",
   "quota.ultra": "No windows. The daily limits on speaking up still apply.",
   "quota.spent": "Where it went",
   "quota.spent.empty": "Nothing spent yet.",
@@ -264,6 +279,7 @@ export const en = {
   "you.day": "Day",
   "you.save": "Save",
   "you.saved": "Saved",
+  "you.preview": "They will call you {title}.",
 
   // ---- endpoints ----
   "endpoints.title": "Endpoints",
@@ -281,7 +297,7 @@ export const en = {
   "endpoints.key.missing": "No key stored",
   "endpoints.key.save": "Store key",
   "endpoints.remove": "Remove",
-  "endpoints.empty": "No endpoints yet. Add one to let people talk.",
+  "endpoints.empty": "No endpoints yet. Add one to let the {people} here talk.",
   "endpoints.preset": "Start from",
   "endpoints.preset.name": "Name",
   "endpoints.preset.url": "Base URL",
@@ -289,6 +305,36 @@ export const en = {
   "endpoints.preset.next": "Next",
   "endpoints.preset.cancel": "Cancel",
   "endpoints.preset.done": "Done",
+  "endpoints.wire.option": "{wire} ({hint})",
+  "endpoints.wire.chat": "chat",
+  "endpoints.wire.chat.hint": "OpenAI-style, /chat/completions",
+  "endpoints.wire.responses": "responses",
+  "endpoints.wire.responses.hint": "OpenAI-style, /responses",
+  "endpoints.wire.messages": "messages",
+  "endpoints.wire.messages.hint": "Anthropic-style, /messages",
+  "endpoints.edit": "Edit",
+  "endpoints.edit.label": "Edit {name}",
+  "endpoints.edit.save": "Save",
+  "endpoints.edit.cancel": "Cancel",
+  "endpoints.models": "Models",
+  "endpoints.models.empty": "No models yet. Fetch them from the endpoint or add one by name.",
+  "endpoints.model.id": "Model id",
+  "endpoints.model.add": "Add model",
+  "endpoints.model.remove": "Remove {id}",
+  "endpoints.model.untitled": "New model",
+  "endpoints.model.details": "Limits and prices",
+  "endpoints.model.forced_tool": "Forced tool choice",
+  "endpoints.model.forced_tool.unknown": "Unknown",
+  "endpoints.model.forced_tool.yes": "Supported",
+  "endpoints.model.forced_tool.no": "Not supported",
+  "endpoints.model.context_window": "Context window (tokens)",
+  "endpoints.model.cache_min_prefix": "Shortest cacheable prefix (tokens)",
+  "endpoints.model.cache_breakpoints": "Cache breakpoints (0 = automatic, up to 4)",
+  "endpoints.model.price_in": "Input price",
+  "endpoints.model.price_in_cached": "Cached input price",
+  "endpoints.model.price_in_cache_write": "Cache write price",
+  "endpoints.model.price_out": "Output price",
+  "endpoints.model.prices.hint": "Any currency per any number of tokens: only the ratios to the input price are used. Empty fields use the defaults.",
   "endpoints.roles": "Roles",
   "endpoints.role.chat": "Chat",
   "endpoints.role.tts": "Read aloud",
@@ -310,9 +356,10 @@ export const en = {
   "library.search.submit": "Search",
   "library.understood": "Searched for: {name}",
   "library.results.empty": "Nothing found.",
+  "library.searching": "Searching",
 
   // ---- first open ----
-  "first.title": "Welcome",
+  "first.title": "Welcome to {org}",
   "first.name": "What should they call you?",
   "first.birthday": "Birthday (optional, you can skip this)",
   "first.submit": "Continue",
@@ -321,7 +368,7 @@ export const en = {
   "coldstart.roster": "Anyone on the roster can be reached directly.",
   "coldstart.go_roster": "Go to roster",
 
-  // ---- errors ----
+  // ---- errors: one per `ApiError` code, plus anything the bridge itself threw ----
   "error.not_implemented": "Not available yet.",
   "error.not_found": "Not found.",
   "error.invalid": "Please check {field}.",
@@ -331,6 +378,7 @@ export const en = {
   "error.endpoint": "The endpoint answered with an error:",
   "error.keychain": "The keychain refused:",
   "error.io": "A file error occurred:",
+  "error.unknown": "Something went wrong:",
 } as const;
 
 export type Key = keyof typeof en;
