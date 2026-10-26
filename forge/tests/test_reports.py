@@ -64,7 +64,8 @@ def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):
     assert count >= 3
 
 
-def test_samples_start_from_an_empty_directory(built, pack, paths):
+def test_samples_leave_nothing_of_an_earlier_run(built, pack, paths):
+    (paths.samples / "Empty 2").mkdir(parents=True, exist_ok=True)
     stale = [paths.samples / "changes" / "Gone.1-source.wikitext", paths.samples / "old.md"]
     for path in stale:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +73,7 @@ def test_samples_start_from_an_empty_directory(built, pack, paths):
     with Archive(built.archive, readonly=True) as a:
         samples.write(a, pack, paths.samples)
     assert not any(p.exists() for p in stale)
+    assert not (paths.samples / "Empty 2").exists()
     assert (paths.samples / "INDEX.md").exists()
 
 

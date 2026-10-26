@@ -137,6 +137,8 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
         replace(a, target=_canonical(a.target, roster.of_page, redirects))
         for a in buckets["alias"]]
     buckets["alias"] = [a for a in buckets["alias"] if a.alias != a.target]
+    buckets["alias"] = [Alias(*row) for row in settle_term_targets(
+        [a.row() for a in buckets["alias"]], ("realname", TERM_ALIAS))]
     check_aliases(buckets["alias"], redirects, set(roster.of_page.values()), rep)
 
     # ---- store, reconciling produced against stored ----
@@ -234,6 +236,59 @@ def _canonical(name: str, to_person: Mapping[str, str], redirects: Mapping[str, 
     return to_person.get(name, name)
 
 
+#: Alias kinds whose target is a person by construction (a name the site or the story gives
+#: that person). A term rendering that points at one of these names points at the person.
+PERSON_NAME_KINDS = ("realname", "speaker")
+#: Alias kind for a short foreign term rendering that must match as a whole word, with the
+#: case it is written in. Same target semantics as `TERM_ALIAS`; the engine reads the kind.
+TERM_EXACT_ALIAS = "term_exact"
+#: Latin script, with its extensions and punctuation: the writings that run into words.
+_RE_LATIN = re.compile(r"[\u0000-\u024f]+")
+
+
+def settle_term_targets(
+    rows: list[tuple[str, str, str]], via: tuple[str, ...] = (*PERSON_NAME_KINDS, TERM_ALIAS),
+) -> list[tuple[str, str, str]]:
+    """Follow a term rendering that names another alias to where that alias ends.
+
+    `rows` are (alias, target, kind). A rendering whose target is itself an alias of a kind
+    in `via` (a real name, a speaker label, another term) takes that alias's target, when
+    the alias names exactly one; the chain is followed to its end. Whether the end is a
+    roster person or a character without a page, it is what the site says the name means.
+    """
+    ends: dict[str, set[str]] = {}
+    for alias, target, kind in rows:
+        if kind in via:
+            ends.setdefault(alias, set()).add(target)
+    resolved: dict[str, str] = {k: next(iter(v)) for k, v in ends.items() if len(v) == 1}
+    out = []
+    for alias, target, kind in rows:
+        if kind in (TERM_ALIAS, TERM_EXACT_ALIAS):
+            seen = {alias}
+            while target in resolved and target not in seen:
+                seen.add(target)
+                target = resolved[target]
+        if alias != target:
+            out.append((alias, target, kind))
+    return out
+
+
+def mark_exact_terms(rows: list[tuple[str, str, str]], max_chars: int) -> list[tuple[str, str, str]]:
+    """Term renderings of at most `max_chars` characters written in Latin script (a short
+    foreign word: `Ben`, `Dr.`, `Ace`) become `term_exact` (0 turns the rule off). Other
+    scripts are not marked: they have no word boundary to run into."""
+    if max_chars <= 0:
+        return rows
+    return [(a, t, TERM_EXACT_ALIAS if k == TERM_ALIAS and len(a) <= max_chars
+             and _RE_LATIN.fullmatch(a) else k) for a, t, k in rows]
+
+
+def alias_chains(rows: list[tuple[str, str, str]], persons: set[str]) -> list[tuple[str, str, str]]:
+    """Rows whose target is itself an alias and not a person: a hop too many."""
+    names = {a for a, _, _ in rows}
+    return [r for r in rows if r[1] in names and r[1] not in persons]
+
+
 #: A rendering with more characters of the corpus language than this, or with a sentence
 #: stop, is a gloss and not a name. (A long name in another script is still a name.)
 ALIAS_MAX_CHARS = 25
@@ -245,13 +300,14 @@ def check_aliases(
 ) -> None:
     """G4: the alias table must not disagree with itself.
 
-    * a target that is itself a redirect is a hop too many (`persons` are exempt: a person
-      is the end of the chain by definition);
+    * a target that is itself an alias of any kind is a hop too many (`persons` are exempt:
+      a person is the end of the chain by definition);
     * a term rendering that is a sentence is a note taken for a spelling;
     * a term rendering that another relation (redirect, real name, disambiguation) sends
       elsewhere is a real conflict, left for a person to read.
     """
-    hops = [a for a in aliases if a.target in redirects and a.target not in persons]
+    names = {a.alias for a in aliases} | set(redirects)
+    hops = [a for a in aliases if a.target in names and a.target not in persons]
     if hops:
         rep.ledger.add(
             "G4", f"{len(hops)} alias(es) point at another alias, not at its canonical name "
