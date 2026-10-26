@@ -25,11 +25,14 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from .records import sig
 from .pack import ChunkPolicy, ChunkTemplate, Pack
+from .params import Params
 from .archive import Archive
+from .speakers import Speakers
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,12 +107,31 @@ def _split(text: str, limit: int, breaks: tuple[str, ...]) -> list[str]:
     return [p for p in out if p]
 
 
+@dataclass
+class Env:
+    """What a builder may use besides the archive and the pack."""
+
+    params: Params
+    speakers: Speakers = field(init=False)
+    #: Scenes whose lines never received a unit span they could be traced to.
+    notes: list[str] = field(default_factory=list)
+
+    @classmethod
+    def for_build(cls, archive: Archive, pack: Pack, params: Params | None = None) -> Env:
+        params = params or Params()
+        env = cls(params)
+        env.speakers = Speakers(archive, pack, params.speaker)
+        return env
+
+
 # --------------------------------------------------------------------------- #
 # builders
 # --------------------------------------------------------------------------- #
 
 
-def _lore(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
+def _lore(
+    archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
+) -> Iterator[Chunk]:
     for r in archive.db.execute("SELECT page,path,text,revid FROM lore ORDER BY page,seq"):
         path = json.loads(r["path"])
         breadcrumb = " › ".join(path)
@@ -122,24 +144,40 @@ def _lore(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterat
             )
 
 
-def _turn_aligned(
-    rendered: list[tuple[int, str | None, str]], target: int, cap: int, absorb: bool
-) -> list[list[tuple[int, str | None, str]]]:
-    """Group a scene's lines into non-overlapping units that break between turns.
+class Row(NamedTuple):
+    seq: int
+    #: Who speaks, as the script writes it; None for narration, captions and choices.
+    speaker: str | None
+    text: str
+    #: A good place to start a new unit: the scene changes just before this row.
+    cut: bool = False
+    #: The reply of an earlier choice this row follows (see `Line.branch`).
+    branch: str | None = None
 
-    Aim for `target` records, then keep extending — up to `cap` — until the speaker
+
+def _turn_aligned(rendered: list[Row], target: int, cap: int, absorb: bool) -> list[list[Row]]:
+    """Group a scene's rows into non-overlapping units that break between turns.
+
+    Aim for `target` rows, then keep extending — up to `cap` — until the speaker
     changes. Cutting a speaker off mid-thought is the failure that actually damages a
     dialogue unit, and a fixed window guarantees it at every boundary; this makes it
-    rare at the cost of slightly variable unit length.
+    rare at the cost of slightly variable unit length. A unit that is at least half full
+    also ends before a row the script marks as a change of scene: a new place is a better
+    seam than a new speaker.
     """
-    out: list[list[tuple[int, str | None, str]]] = []
-    cur: list[tuple[int, str | None, str]] = []
+    half = max(target // 2, 1)
+    out: list[list[Row]] = []
+    cur: list[Row] = []
     for i, row in enumerate(rendered):
         cur.append(row)
-        if len(cur) < target:
-            continue
         nxt = rendered[i + 1] if i + 1 < len(rendered) else None
-        if nxt is None or nxt[1] != row[1] or len(cur) >= cap:
+        if nxt is None:
+            break
+        if len(cur) >= target:
+            if nxt.speaker != row.speaker or len(cur) >= cap:
+                out.append(cur)
+                cur = []
+        elif len(cur) >= half and nxt.cut:
             out.append(cur)
             cur = []
     if cur:
@@ -159,12 +197,46 @@ def _turn_aligned(
     return out
 
 
-def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
+def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
+                refs: list[str]) -> str:
+    """The marker for a stretch that follows some replies of a choice."""
+    options, values = choice if choice else ([], [])
+    picked: list[str] = []
+    for ref in refs:
+        if ref in values:
+            i = values.index(ref)
+        elif not values and ref.isdigit():
+            i = int(ref) - 1
+        else:
+            continue
+        if 0 <= i < len(options):
+            picked.append(options[i])
+    inner = " / ".join(picked) if picked else policy.sep("list").join(refs)
+    return policy.mark(f"{policy.label('branch')}{policy.sep('quote').format(inner)}")
+
+
+def _reply_marker(
+    policy: ChunkPolicy, choices: dict[int, tuple[list[str], list[str], str | None]],
+    branch: str | None,
+) -> str:
+    """The line that opens a stretch following some replies, or closes one (`branch` None)."""
+    if branch is None:
+        return policy.mark(policy.label("merge"))
+    at, _, refs = branch.partition(":")
+    choice = choices.get(int(at))
+    return reply_text(policy, (choice[0], choice[1]) if choice else None, refs.split(";"))
+
+
+def _dialogue(
+    archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
+) -> Iterator[Chunk]:
     """One unit per stretch of a scene, non-overlapping, broken between speaker turns.
 
-    Choices are merged into the line sequence rather than kept apart: a branch is part
-    of the conversation, and a unit that silently skips it reads as if the reply came
-    from nowhere.
+    Lines and choices are merged into one sequence by position: a branch is part of the
+    conversation, and a unit that silently skips it reads as if the reply came from
+    nowhere. Replies that follow different options of a choice are mutually exclusive, so
+    the stretch that follows each is introduced by the option it answers; read without
+    that, two alternative answers look like one conversation.
 
     Units do not overlap. Adjacent context is recoverable at query time from
     `(span_of, span_from)`, which is both cheaper and more faithful than baking half a
@@ -172,59 +244,74 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
     """
     policy = pack.chunking
     label, sep = policy.label, policy.sep
-    person_of = archive.person_of()
     subtitle_kind = policy.kind("subtitle")
     target = t.target or 12
     cap = t.max_span or (target + 6)
+    speakers = env.speakers
     scenes = list(archive.db.execute(
-        "SELECT id,category,grp,revid FROM scenes ORDER BY id"))
-    choices_by_scene: dict[str, dict[int, list[str]]] = {}
-    for r in archive.db.execute("SELECT scene,seq,options FROM choices"):
-        choices_by_scene.setdefault(r["scene"], {})[r["seq"]] = json.loads(r["options"])
+        "SELECT id,category,grp,revid,title FROM scenes ORDER BY id"))
+    choices_by_scene: dict[str, dict[int, tuple[list[str], list[str], str | None]]] = {}
+    for r in archive.db.execute("SELECT scene,seq,options,vals,branch FROM choices"):
+        choices_by_scene.setdefault(r["scene"], {})[r["seq"]] = (
+            json.loads(r["options"]), json.loads(r["vals"]), r["branch"])
 
     for scene in scenes:
         rows = list(archive.db.execute(
-            "SELECT seq,speaker,text,kind FROM lines WHERE scene=? ORDER BY seq",
-            (scene["id"],)))
-        if not rows:
-            continue
+            "SELECT seq,speaker,text,kind,portrait,branch,brk FROM lines WHERE scene=? "
+            "ORDER BY seq", (scene["id"],)))
         choices = choices_by_scene.get(scene["id"], {})
-        rendered: list[tuple[int, str | None, str]] = []
+        if not rows and not choices:
+            continue
+        owners = speakers.scene_owners(scene["id"], rows)
+        by_seq: dict[int, Row] = {}
         for r in rows:
             if r["speaker"]:
-                rendered.append((r["seq"], r["speaker"], f"{r['speaker']}{sep('label')}{r['text']}"))
+                first, *rest = r["text"].split("\n")
+                # A line break inside one speaker's words is still that speaker talking.
+                text = "\n".join(f"{r['speaker']}{sep('label')}{x}" for x in (first, *rest))
+                by_seq[r["seq"]] = Row(r["seq"], r["speaker"], text, bool(r["brk"]), r["branch"])
             elif r["kind"] == subtitle_kind:
-                rendered.append((r["seq"], None, f"{policy.mark(label('subtitle'))}{r['text']}"))
+                by_seq[r["seq"]] = Row(
+                    r["seq"], None, f"{policy.mark(label('subtitle'))}{r['text']}",
+                    bool(r["brk"]), r["branch"])
             else:
-                rendered.append((r["seq"], None, r["text"]))
-            if r["seq"] + 1 in choices:
-                opts = " / ".join(choices[r["seq"] + 1])
-                # Options the player could pick, not words anyone said: labelled as
-                # such, so a reader never takes an unchosen reply for one that happened.
-                rendered.append((r["seq"] + 1, None, f"{policy.mark(label('options'))}{opts}"))
+                by_seq[r["seq"]] = Row(r["seq"], None, r["text"], bool(r["brk"]), r["branch"])
+        for seq, (options, _values, branch) in choices.items():
+            # Options the player could pick, not words anyone said: labelled as such, so a
+            # reader never takes an unchosen reply for one that happened.
+            by_seq[seq] = Row(
+                seq, None, f"{policy.mark(label('options'))}{' / '.join(options)}",
+                False, branch)
+        rendered = [by_seq[k] for k in sorted(by_seq)]
 
         for group in _turn_aligned(rendered, target, cap, t.absorb_tail):
             uniq: list[str] = []
-            for _seq, speaker, _ in group:
-                if speaker and speaker not in uniq:
-                    uniq.append(speaker)
+            for row in group:
+                if row.speaker and row.speaker not in uniq:
+                    uniq.append(row.speaker)
             # Every speaker, not only the four the header names: attribution is what
             # person-filtered retrieval reads, so dropping names here drops material.
-            owners = tuple(dict.fromkeys(person_of.get(s, s) for s in uniq))
+            persons = tuple(dict.fromkeys(owners[s] for s in uniq if owners.get(s)))
             head = header.format(
                 group=scene["grp"] or scene["category"] or label("story"),
-                scene=policy.scene_name(scene["id"]),
+                scene=scene["title"] or policy.scene_name(scene["id"]),
                 speakers=f" · {sep('list').join(uniq[:4])}" if uniq else "",
             )
-            body = "\n".join(text for _seq, _s, text in group)
+            parts, here = [], None
+            for row in group:
+                if row.branch != here:
+                    parts.append(_reply_marker(policy, choices, row.branch))
+                    here = row.branch
+                parts.append(row.text)
+            body = "\n".join(parts)
             # An over-long unit still splits on characters, but it keeps one span:
             # the parts are the same stretch of conversation, so a reader widening
             # from any of them should get the same neighbours.
             for part in _split(body, t.max_chars, pack.chunking.breaks):
                 yield Chunk(
                     template=t.name, page=scene["id"], text=part, header=head,
-                    title=scene["id"], persons=owners, revid=scene["revid"],
-                    span_of=scene["id"], span_from=group[0][0], span_to=group[-1][0],
+                    title=scene["id"], persons=persons, revid=scene["revid"],
+                    span_of=scene["id"], span_from=group[0].seq, span_to=group[-1].seq,
                 )
 
 
@@ -259,7 +346,9 @@ def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
     return tag
 
 
-def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
+def _voice(
+    archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
+) -> Iterator[Chunk]:
     policy = pack.chunking
     person_of = archive.person_of()
     tag = _form_tag(archive, pack)
@@ -292,7 +381,9 @@ def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Itera
         )
 
 
-def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
+def _profile(
+    archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
+) -> Iterator[Chunk]:
     """One identity card per person, then one unit per dossier section.
 
     Cards are assembled per *person*, not per page, so a second form does not produce
@@ -423,7 +514,9 @@ def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Ite
         )
 
 
-def _letter(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
+def _letter(
+    archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
+) -> Iterator[Chunk]:
     label = pack.chunking.label
     person_of = archive.person_of()
     revids = {row["title"]: row["revid"]
@@ -484,8 +577,11 @@ BUILDERS = {
 }
 
 
-def build(archive: Archive, pack: Pack, *, only: str | None = None) -> Iterator[Chunk]:
+def build(
+    archive: Archive, pack: Pack, *, only: str | None = None, env: Env | None = None
+) -> Iterator[Chunk]:
     """Every unit the pack's policy defines, template by template."""
+    env = env or Env.for_build(archive, pack)
     for template in pack.chunking.templates:
         if only and template.name != only:
             continue
@@ -497,4 +593,4 @@ def build(archive: Archive, pack: Pack, *, only: str | None = None) -> Iterator[
                 "construct"
             )
         header = pack.chunking.headers.get(template.name, "")
-        yield from builder(archive, pack, template, header)
+        yield from builder(archive, pack, template, header, env)

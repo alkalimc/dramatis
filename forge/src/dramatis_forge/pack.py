@@ -519,9 +519,20 @@ class ChunkPolicy:
     #: pages (a "before battle" or "after battle" page). Dropped from the header only:
     #: the page, citation and span keep the full title.
     page_part: str = ""
+    #: `(regex, replacement)` pairs applied to a scene's page title after `page_part` for its
+    #: header name: a variant page becomes a named variant, a record filed by a path gets
+    #: a plain name when the source gives it no title of its own.
+    scene_rewrites: tuple[tuple[str, str], ...] = ()
     #: Identity-card fields left out of the card text: attributes of the work's mechanics
     #: rather than of the person. They stay on the person's facets for display.
     card_omit: tuple[str, ...] = ()
+    #: Speaker labels that stand for someone not named yet. They are attributed scene by
+    #: scene from portraits only; a redirect or a corpus-wide count would say nothing.
+    generic_speakers: tuple[str, ...] = ()
+    #: Regex over a scene id with a named group `owner` for scenes that belong to one
+    #: person (a record of their own); the owner missing from their own scene is a failure
+    #: of attribution, not a fact about the story. Empty disables the check.
+    owner_scene: str = ""
     #: A dossier item whose identical text appears on at least this many persons is a
     #: stock text of the work, not theirs: stored once, owned by nobody. 0 turns it off.
     shared_min: int = 0
@@ -541,7 +552,10 @@ class ChunkPolicy:
 
     def scene_name(self, page: str) -> str:
         """A scene's page title as a header shows it, without its page-part suffix."""
-        return re.sub(self.page_part, "", page).strip() or page if self.page_part else page
+        name = re.sub(self.page_part, "", page).strip() or page if self.page_part else page
+        for pattern, replacement in self.scene_rewrites:
+            name = re.sub(pattern, replacement, name)
+        return name
 
     def voice_name(self, trigger: str, title: str) -> str:
         """What a header calls a voice line: its title, else its trigger's words."""
@@ -565,6 +579,8 @@ LABELS: Mapping[str, str] = {
     "other_forms": "other forms",  # label for the list of a person's other pages
     "source": "source",          # provenance line appended to a lore unit
     "shared": "shared",          # header owner of a stock text that belongs to no one
+    "branch": "if the player chose",  # opens a stretch that follows one reply of a choice
+    "merge": "story continues",       # closes it: the lines after are on every path
 }
 
 #: Fallbacks for `ChunkPolicy.kinds`. A pack whose parsers use different strings must
@@ -582,6 +598,7 @@ SEPARATORS: Mapping[str, str] = {
     "list": ", ",      # between items of an inline list
     "mark": "[{}] ",   # around an inline marker word; `{}` is the word
     "form": " ({})",   # a person's name followed by the name of one of their forms
+    "quote": '"{}"',   # quotes around a reply the player could choose
 }
 
 

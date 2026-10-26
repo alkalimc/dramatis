@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS scenes (
     grp         TEXT,
     source_ref  TEXT,
     revid       INTEGER,
-    source_page TEXT                 -- the page the body was read from
+    source_page TEXT,                -- the page the body was read from
+    title       TEXT NOT NULL DEFAULT ''   -- the story's own name, if the page path is not it
 );
 CREATE TABLE IF NOT EXISTS lines (
     scene   TEXT NOT NULL,
@@ -87,12 +88,17 @@ CREATE TABLE IF NOT EXISTS lines (
     speaker TEXT,
     text    TEXT NOT NULL,
     kind    TEXT NOT NULL,
+    portrait TEXT,                   -- the speaker's portrait key, where the script shows one
+    branch  TEXT,                    -- the reply of a choice this line follows, if any
+    brk     INTEGER NOT NULL DEFAULT 0,   -- the script changes scene before this line
     PRIMARY KEY (scene, seq)
 );
 CREATE TABLE IF NOT EXISTS choices (
     scene   TEXT NOT NULL,
     seq     INTEGER NOT NULL,
     options TEXT NOT NULL,
+    vals    TEXT NOT NULL DEFAULT '[]',    -- JSON: the source's value for each option
+    branch  TEXT,
     PRIMARY KEY (scene, seq)
 );
 CREATE TABLE IF NOT EXISTS dossiers (

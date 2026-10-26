@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import __version__, segment
 from .archive import Archive
-from .chunk import CARD_SPAN, archive_triggers, engine_meta_test
+from .chunk import CARD_SPAN, Env, archive_triggers, engine_meta_test
 from .chunk import build as build_chunks
 from .config import RunInfo
 from .folio import FOLIO_FORMAT_VERSION, Folio
@@ -57,6 +57,14 @@ class CorpusReport:
     unnamed_triggers: list[str] = field(default_factory=list)
     #: Units whose text still carries wiki markup or a comment fragment, by example.
     markup_residue: dict[str, int] = field(default_factory=dict)
+    #: Story records (lines, choices) that no unit's span holds, and places where two
+    #: neighbouring units of a scene do not meet or do overlap.
+    records_uncovered: int = 0
+    span_gaps: int = 0
+    #: Roster people no dialogue unit is attributed to; memoir scenes missing their owner.
+    people_without_lines: list[str] = field(default_factory=list)
+    owners_missing: list[str] = field(default_factory=list)
+    scenes_with_owner: int = 0
 
 
 #: Markup that must never survive into a unit: comment fragments, template and link braces,
@@ -120,9 +128,10 @@ def run(
     first_copy: dict[tuple, tuple[str, str]] = {}
     copies: dict[str, list[str]] = {}
     ord_ = 0
+    env = Env.for_build(archive, pack, params)
 
     with Folio.create(folio_path) as folio:
-        for chunk in build_chunks(archive, pack):
+        for chunk in build_chunks(archive, pack, env=env):
             if chunk.id in seen:
                 # Identical text at an identical span. Real, and harmless once it is
                 # counted rather than silently written twice into the vector store.
@@ -172,12 +181,16 @@ def run(
             folio.add_unit_persons(owners)
         rep.chunks = ord_
 
-        _write_roster(archive, folio, pack, params)
+        _write_roster(archive, folio, pack, params, env)
         _write_relations(archive, folio, pack)
         folio.write_aliases([
-            (r["alias"], r["target"], r["kind"])
-            for r in archive.db.execute("SELECT alias,target,kind FROM aliases")
+            *((r["alias"], r["target"], r["kind"])
+              for r in archive.db.execute("SELECT alias,target,kind FROM aliases")),
+            # A speaker label the portraits settle is a name the story gives that person.
+            *((label, person, SPEAKER_ALIAS) for label, person in env.speakers.speaker_aliases()),
         ])
+        _check_story_coverage(rep, archive, pack, spans)
+        _check_attribution(rep, archive, folio, pack, env, params)
 
         stats_rows = []
         for template, embed in sorted(sizes.items()):
@@ -275,7 +288,13 @@ def _person_sources(archive: Archive) -> dict[str, PersonSource]:
     return out
 
 
-def _material(archive: Archive, folio: Folio, dialogue: tuple[str, ...]) -> dict[str, int]:
+#: Alias kind for a speaker label that portraits, not a site page, tie to one person.
+SPEAKER_ALIAS = "speaker"
+
+
+def _material(
+    archive: Archive, folio: Folio, dialogue: tuple[str, ...], env: Env
+) -> dict[str, int]:
     """Characters of source material that are a person's own, over every template.
 
     Non-dialogue units attributed to a person are wholly theirs (their voice lines, their
@@ -290,17 +309,14 @@ def _material(archive: Archive, folio: Folio, dialogue: tuple[str, ...]) -> dict
         "GROUP BY u.person_id", (*dialogue, f"%{CARD_SPAN}"),
     ):
         material[person_id] = int(chars or 0)
-    person_of = archive.person_of()
-    for speaker, chars in archive.db.execute(
-        "SELECT speaker, SUM(LENGTH(text)) FROM lines WHERE speaker IS NOT NULL GROUP BY speaker"
-    ):
-        person_id = person_of.get(speaker)
-        if person_id is not None:
-            material[person_id] = material.get(person_id, 0) + int(chars or 0)
+    for person_id, chars in env.speakers.own_chars().items():
+        material[person_id] = material.get(person_id, 0) + chars
     return material
 
 
-def _write_roster(archive: Archive, folio: Folio, pack: Pack, params: Params) -> None:
+def _write_roster(
+    archive: Archive, folio: Folio, pack: Pack, params: Params, env: Env
+) -> None:
     """One row per person, their topical terms, and the host's first-run recommendations.
 
     `persona_confidence` is defined beside its column in `folio.SCHEMA`; `_material`
@@ -308,7 +324,7 @@ def _write_roster(archive: Archive, folio: Folio, pack: Pack, params: Params) ->
     """
     sources = _person_sources(archive)
     forms = archive.persons()
-    material = _material(archive, folio, pack.chunking.shaped("dialogue"))
+    material = _material(archive, folio, pack.chunking.shaped("dialogue"), env)
     present = sorted(m for p in sources if (m := material.get(p, 0)) > 0)
     median = present[len(present) // 2] if present else 0
     display_key = pack.identity.display_facet
@@ -544,6 +560,97 @@ def _check(
         rep.ledger.add(
             "G5", "voice trigger key(s) the pack gives no words for: "
                   + ", ".join(rep.unnamed_triggers))
+
+
+def _check_story_coverage(
+    rep: CorpusReport, archive: Archive, pack: Pack,
+    spans: dict[str, dict[str, list[tuple[int, int]]]],
+) -> None:
+    """G5: every line and choice sits in exactly one unit, and a scene's units meet.
+
+    Positional redundancy only sees records counted twice; a record that never reached a
+    unit is invisible to it, which is how a whole class of branch options vanished while
+    every count looked healthy.
+    """
+    held: dict[str, set[int]] = {}
+    for template in pack.chunking.shaped("dialogue"):
+        for scene, ranges in spans.get(template, {}).items():
+            held.setdefault(scene, set())
+            for lo, hi in set(ranges):
+                held[scene].update(range(lo, hi + 1))
+    wanted: dict[str, list[int]] = {}
+    for table in ("lines", "choices"):
+        for r in archive.db.execute(f"SELECT scene,seq FROM {table}"):
+            wanted.setdefault(r["scene"], []).append(r["seq"])
+    lost = 0
+    where: list[str] = []
+    for scene, seqs in wanted.items():
+        missing = [q for q in seqs if q not in held.get(scene, ())]
+        if missing:
+            lost += len(missing)
+            where.append(scene)
+    gaps = 0
+    for template in pack.chunking.shaped("dialogue"):
+        for ranges in spans.get(template, {}).values():
+            ordered = sorted(set(ranges))
+            for (_, hi), (lo, _) in zip(ordered, ordered[1:], strict=False):
+                if lo != hi + 1:
+                    gaps += 1
+    rep.records_uncovered, rep.span_gaps = lost, gaps
+    if lost:
+        rep.ledger.add(
+            "G5", f"{lost} story record(s) in {len(where)} scene(s) are in no unit "
+                  f"(first: {', '.join(sorted(where)[:5])})", high=True)
+    if gaps:
+        rep.ledger.add(
+            "G5", f"{gaps} place(s) where neighbouring units of a scene do not meet or "
+                  "overlap — widening a hit there skips or repeats text", high=True)
+
+
+def _check_attribution(
+    rep: CorpusReport, archive: Archive, folio: Folio, pack: Pack, env: Env, params: Params
+) -> None:
+    """G4: the attribution has failed quietly when a person has no lines at all or is
+    missing from a scene that is about them."""
+    dialogue = pack.chunking.shaped("dialogue")
+    marks = ",".join("?" * len(dialogue))
+    rep.people_without_lines = [r[0] for r in folio.db.execute(
+        "SELECT person_id FROM persons p WHERE NOT EXISTS (SELECT 1 FROM unit_persons u "
+        f"JOIN chunks c ON c.id = u.chunk_id WHERE u.person_id = p.person_id "
+        f"AND c.template IN ({marks})) ORDER BY person_id", dialogue)]
+    if rep.people_without_lines:
+        shown = ", ".join(rep.people_without_lines[:30])
+        more = len(rep.people_without_lines) - 30
+        rep.ledger.add(
+            "G4", f"{len(rep.people_without_lines)} roster person(s) appear in no dialogue "
+                  f"unit: {shown}" + (f" and {more} more" if more > 0 else ""))
+
+    if pack.chunking.owner_scene:
+        owner_rx = re.compile(pack.chunking.owner_scene)
+        person_of = archive.person_of()
+        attributed = {(r[0], r[1]) for r in folio.db.execute(
+            "SELECT c.span_of, u.person_id FROM unit_persons u JOIN chunks c "
+            f"ON c.id = u.chunk_id WHERE c.template IN ({marks})", dialogue)}
+        for r in archive.db.execute("SELECT id FROM scenes ORDER BY id"):
+            m = owner_rx.match(r["id"])
+            owner = person_of.get(m.group("owner")) if m else None
+            if owner is None:
+                continue
+            rep.scenes_with_owner += 1
+            if (r["id"], owner) not in attributed:
+                rep.owners_missing.append(r["id"])
+        if rep.owners_missing:
+            ratio = len(rep.owners_missing) / max(rep.scenes_with_owner, 1)
+            rep.ledger.add(
+                "G4", f"{len(rep.owners_missing)} of {rep.scenes_with_owner} scene(s) about "
+                      "one person have no unit attributed to that person: "
+                      + ", ".join(rep.owners_missing[:8]),
+                high=ratio > params.speaker.owner_missing_max)
+
+    for c in sorted(env.speakers.conflicts.values(), key=lambda c: (c.scene, c.label)):
+        rep.ledger.add(
+            "G4", f"label {c.label!r} is a person's page name but all {c.lines} lines show "
+                  f"{c.shown}'s portrait; the label stands ({c.person})", page=c.scene)
 
 
 #: Manifest keys that describe when and where a build ran rather than what it contains.

@@ -11,6 +11,7 @@ from dramatis_forge.archive import Archive
 from dramatis_forge.guards import LOW
 from dramatis_forge.identity import resolve
 from dramatis_forge.pack import IdentityEvidence
+from dramatis_forge.params import Params
 from dramatis_forge.records import Dossier, Voice
 
 
@@ -109,3 +110,76 @@ def test_markup_left_in_a_unit_is_a_high_finding(tmp_path, pack):
     assert rep.markup_residue == {"-->": 1}
     assert any(f.guard == "G5" and f.severity == "high" and "markup" in f.detail
                for f in rep.ledger.findings)
+
+
+# ---- dialogue rendering and attribution ----
+
+def test_a_unit_that_is_half_full_ends_before_a_change_of_scene():
+    rows = [chunk.Row(i, "A", f"A: {i}", cut=(i == 3)) for i in range(8)]
+    groups = chunk._turn_aligned(rows, target=6, cap=8, absorb=False)
+    assert [[r.seq for r in g] for g in groups] == [[0, 1, 2], [3, 4, 5, 6, 7]]
+    # not when the unit is nearly empty: a stub embeds as noise
+    early = [chunk.Row(i, "A", f"A: {i}", cut=(i == 1)) for i in range(8)]
+    assert [len(g) for g in chunk._turn_aligned(early, target=6, cap=8, absorb=False)] == [8]
+
+
+def test_choices_and_lines_are_one_sequence_and_replies_are_introduced(tmp_path, pack):
+    from dramatis_forge.records import Choice, Line, Scene
+    policy = replace(pack.chunking, separators={"mark": "[{}]", "quote": "<{}>"},
+                     labels={"options": "reply", "branch": "if", "merge": "all"})
+    big = replace(pack.chunking.templates[1], target=12, max_span=18)
+    p = replace(pack, chunking=replace(policy, templates=(
+        pack.chunking.templates[0], big, pack.chunking.templates[2])))
+    with Archive(tmp_path / "t.archive") as a:
+        insert(a, [
+            Scene(page="S"),
+            Choice(scene="S", seq=1, options=("x",), values=("1",)),
+            Choice(scene="S", seq=2, options=("p", "q"), values=("1", "2")),
+            Line(scene="S", seq=3, speaker="Ann", text="to p", branch="2:1"),
+            Line(scene="S", seq=4, speaker="Ann", text="to q", branch="2:2"),
+            Line(scene="S", seq=5, speaker="Ann", text="after"),
+        ])
+        [unit] = [c for c in chunk.build(a, p) if c.template == "dialogue"]
+    assert unit.text.splitlines() == [
+        "[reply]x", "[reply]p / q", "[if<p>]", "Ann: to p", "[if<q>]", "Ann: to q",
+        "[all]", "Ann: after"]
+    assert (unit.span_from, unit.span_to) == (1, 5)
+
+
+def test_a_unit_that_starts_inside_a_reply_still_says_which(tmp_path, pack):
+    from dramatis_forge.records import Choice, Line, Scene
+    policy = replace(pack.chunking, separators={"mark": "[{}]", "quote": "<{}>"},
+                     labels={"branch": "if"})
+    template = replace(pack.chunking.templates[1], target=2, max_span=2)
+    p = replace(pack, chunking=replace(policy, templates=(
+        pack.chunking.templates[0], template, pack.chunking.templates[2])))
+    with Archive(tmp_path / "t.archive") as a:
+        insert(a, [Scene(page="S"), Choice(scene="S", seq=1, options=("p", "q"), values=("1", "2"))]
+               + [Line(scene="S", seq=i, speaker=f"S{i}", text=f"l{i}", branch="1:1")
+                  for i in range(2, 6)])
+        units = [c for c in chunk.build(a, p) if c.template == "dialogue"]
+    assert len(units) >= 2
+    assert all("[if<p>]" in u.text for u in units)
+
+
+def test_speakers_resolve_by_page_then_portrait_then_alias(tmp_path, pack):
+    from dramatis_forge.records import Alias
+    from dramatis_forge.speakers import Speakers
+    ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None)
+    p = replace(pack, identity=ident, chunking=replace(pack.chunking, generic_speakers=("???",)))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)],
+                          "Cy": [("Cy", "canonical", 0)]})
+        a.put_page("Ann", "k-ann", 1, "now")
+        a.put_page("Bob", "k-bob", 2, "now")
+        a.put_page("Cy", "k-cy", 3, "now")
+        insert(a, [Alias(alias="Cyrus", target="Cy", kind="redirect"),
+                   Alias(alias="Cyrus II", target="Cy", kind="disambig")])
+        sp = Speakers(a, p, replace(Params().speaker, portrait_lines=2))
+        rows = [{"speaker": "Annie", "portrait": "k-ann"}, {"speaker": "Annie", "portrait": "k-ann"},
+                {"speaker": "Cyrus", "portrait": None}, {"speaker": "Cyrus II", "portrait": None},
+                {"speaker": "???", "portrait": "k-bob"}, {"speaker": "Ann", "portrait": "k-bob"}]
+        got = sp.scene_owners("S", rows)
+    assert got == {"Annie": "Ann", "Cyrus": "Cy", "Cyrus II": None, "???": "Bob", "Ann": "Ann"}
+    # a label settled by portraits across the corpus is a name for that person
+    assert sp.speaker_aliases() == []

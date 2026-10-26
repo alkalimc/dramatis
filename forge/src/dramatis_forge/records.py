@@ -93,7 +93,7 @@ class Scene(Record):
     KIND: ClassVar[str] = "scene"
     TABLE: ClassVar[str] = "scenes"
     COLUMNS: ClassVar[tuple[str, ...]] = (
-        "id", "category", "grp", "source_ref", "revid", "source_page")
+        "id", "category", "grp", "source_ref", "revid", "source_page", "title")
 
     page: str
     category: str = ""
@@ -104,10 +104,13 @@ class Scene(Record):
     #: body transcluded from a subpage is stored once, under the scene, and this says
     #: where it was read. `revid` is that page's revision.
     source_page: str = ""
+    #: The story's own name where the page path is not one (an operator's record is filed
+    #: under the operator and a number; the source names it separately). Headers prefer it.
+    title: str = ""
 
     def row(self) -> tuple[Any, ...]:
         return (self.page, self.category, self.group, self.source_ref, self.revid,
-                self.source_page or self.page)
+                self.source_page or self.page, self.title)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,16 +122,27 @@ class Line(Record):
 
     KIND: ClassVar[str] = "line"
     TABLE: ClassVar[str] = "lines"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("scene", "seq", "speaker", "text", "kind")
+    COLUMNS: ClassVar[tuple[str, ...]] = (
+        "scene", "seq", "speaker", "text", "kind", "portrait", "branch", "brk")
 
     scene: str
     seq: int
     text: str
     kind: str = "speech"
     speaker: str | None = None
+    #: The key of the portrait shown for the speaker when the line was spoken, as the
+    #: pack's identity rules name portraits (`IdentityRules.portrait_key`); None when the
+    #: script shows no portrait of a person the pack can identify.
+    portrait: str | None = None
+    #: Which reply of the closest preceding choice this line follows: `<choice seq>:<values>`
+    #: with the values joined by `;`. None for the common path.
+    branch: str | None = None
+    #: The script changes scene (new background, a cut to black) just before this line.
+    brk: bool = False
 
     def row(self) -> tuple[Any, ...]:
-        return (self.scene, self.seq, self.speaker, self.text, self.kind)
+        return (self.scene, self.seq, self.speaker, self.text, self.kind, self.portrait,
+                self.branch, int(self.brk))
 
     @property
     def chars(self) -> int:
@@ -148,14 +162,20 @@ class Choice(Record):
 
     KIND: ClassVar[str] = "choice"
     TABLE: ClassVar[str] = "choices"
-    COLUMNS: ClassVar[tuple[str, ...]] = ("scene", "seq", "options")
+    COLUMNS: ClassVar[tuple[str, ...]] = ("scene", "seq", "options", "vals", "branch")
 
     scene: str
     seq: int
     options: tuple[str, ...] = ()
+    #: The source's value for each option, in order: what a later branch refers to. Empty
+    #: means the options are numbered from 1.
+    values: tuple[str, ...] = ()
+    #: The branch this choice sits in, if it is itself a reply to an earlier one.
+    branch: str | None = None
 
     def row(self) -> tuple[Any, ...]:
-        return (self.scene, self.seq, _j(list(self.options)))
+        return (self.scene, self.seq, _j(list(self.options)), _j(list(self.values)),
+                self.branch)
 
     @property
     def chars(self) -> int:

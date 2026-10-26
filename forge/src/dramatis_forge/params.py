@@ -21,8 +21,22 @@ class Coldstart:
 
 
 @dataclass(frozen=True)
+class Speaker:
+    #: Lines a speaker label needs, across the whole corpus, before its portraits settle
+    #: who it is for every scene.
+    portrait_lines: int = 10
+    #: Share of those lines (or of one scene's, where the corpus-wide count is too thin) that
+    #: must show one person's portrait.
+    portrait_share: float = 0.6
+    #: Share of a roster scene's owners allowed to be missing from their own memoir scenes
+    #: before the identity guard turns from a note into a failure.
+    owner_missing_max: float = 0.05
+
+
+@dataclass(frozen=True)
 class Params:
     coldstart: Coldstart = field(default_factory=Coldstart)
+    speaker: Speaker = field(default_factory=Speaker)
 
     @classmethod
     def load(cls, path: Path | None) -> Params:
