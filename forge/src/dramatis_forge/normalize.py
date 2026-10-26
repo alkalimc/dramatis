@@ -13,6 +13,7 @@ they end up inside whichever parser happened to need them first.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 from . import baseline as baseline_mod
@@ -128,7 +129,15 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
 
     # ---- aliases from the site's own naming relations ----
     buckets.setdefault("alias", []).extend(_site_aliases(archive, pack, roster, rep))
-    buckets["alias"].extend(term_aliases(buckets.get("term", ()), roster.of_page))
+    buckets["alias"].extend(term_aliases(
+        buckets.get("term", ()), roster.of_page, archive.redirects()))
+    # Whatever relation produced an alias, its target is the canonical name.
+    redirects = archive.redirects()
+    buckets["alias"] = [
+        replace(a, target=_canonical(a.target, roster.of_page, redirects))
+        for a in buckets["alias"]]
+    buckets["alias"] = [a for a in buckets["alias"] if a.alias != a.target]
+    check_aliases(buckets["alias"], redirects, set(roster.of_page.values()), rep)
 
     # ---- store, reconciling produced against stored ----
     for kind in ORDER:
@@ -191,22 +200,77 @@ TERM_ALIAS = "term"
 _RE_RENDERINGS = re.compile(r"[/\n]")
 
 
-def term_aliases(terms, to_person: dict[str, str]) -> list[Alias]:
+def term_aliases(
+    terms, to_person: dict[str, str], redirects: Mapping[str, str] | None = None
+) -> list[Alias]:
     """Every rendering of a glossary term is a name for it.
 
     A glossary says which foreign spelling means which native term; as an alias table it
     lets a query in one spelling reach text written in another. The terms themselves are
     not units: a row of translations is a lookup, not something anyone says.
+
+    The target is the term's canonical name: through the roster, then through redirects, so
+    an alias never points at another alias (the page the term redirects to is what the
+    rendering names). A rendering that comes out as its own target says nothing and is dropped.
     """
+    redirects = redirects or {}
     out: dict[tuple[str, str], Alias] = {}
     for term in terms:
-        target = to_person.get(term.term, term.term)
+        target = _canonical(term.term, to_person, redirects)
         for value in term.translations.values():
             for form in _RE_RENDERINGS.split(value):
                 form = form.strip()
-                if form and form != term.term:
+                if form and form != term.term and form != target:
                     out.setdefault((form, target), Alias(alias=form, target=target, kind=TERM_ALIAS))
     return list(out.values())
+
+
+def _canonical(name: str, to_person: Mapping[str, str], redirects: Mapping[str, str]) -> str:
+    """A name's canonical target: roster person if it is one, else the end of its redirects."""
+    seen = {name}
+    while name not in to_person and name in redirects and redirects[name] not in seen:
+        name = redirects[name]
+        seen.add(name)
+    return to_person.get(name, name)
+
+
+#: A rendering with more characters of the corpus language than this, or with a sentence
+#: stop, is a gloss and not a name. (A long name in another script is still a name.)
+ALIAS_MAX_CHARS = 25
+_RE_CJK = re.compile(r"[\u4e00-\u9fff]")
+
+
+def check_aliases(
+    aliases: list[Alias], redirects: Mapping[str, str], persons: set[str], rep: Report
+) -> None:
+    """G4: the alias table must not disagree with itself.
+
+    * a target that is itself a redirect is a hop too many (`persons` are exempt: a person
+      is the end of the chain by definition);
+    * a term rendering that is a sentence is a note taken for a spelling;
+    * a term rendering that another relation (redirect, real name, disambiguation) sends
+      elsewhere is a real conflict, left for a person to read.
+    """
+    hops = [a for a in aliases if a.target in redirects and a.target not in persons]
+    if hops:
+        rep.ledger.add(
+            "G4", f"{len(hops)} alias(es) point at another alias, not at its canonical name "
+                  "(first: " + ", ".join(f"{a.alias}->{a.target}" for a in hops[:5]) + ")")
+    wordy = [a for a in aliases if a.kind == TERM_ALIAS
+             and (len(_RE_CJK.findall(a.alias)) > ALIAS_MAX_CHARS or "\u3002" in a.alias)]
+    if wordy:
+        rep.ledger.add(
+            "G4", f"{len(wordy)} glossary rendering(s) read as a sentence, not a name "
+                  "(first: " + ", ".join(a.alias[:20] for a in wordy[:5]) + ")")
+    other: dict[str, set[str]] = {}
+    for a in aliases:
+        if a.kind != TERM_ALIAS:
+            other.setdefault(a.alias, set()).add(a.target)
+    for a in aliases:
+        if a.kind == TERM_ALIAS and a.alias in other and a.target not in other[a.alias]:
+            rep.ledger.add(
+                "G4", f"glossary rendering {a.alias!r} names {a.target!r}; the site's own "
+                      f"relations send it to {', '.join(sorted(other[a.alias]))}")
 
 
 def _site_aliases(
@@ -232,7 +296,7 @@ def _site_aliases(
     redirects = archive.redirects()
     dropped = 0
     for alias, target in sorted(redirects.items()):
-        resolved = to_person.get(target, target)
+        resolved = _canonical(target, to_person, redirects)
         if resolved in in_scope or resolved in to_person:
             out.append(Alias(alias=alias, target=resolved, kind="redirect"))
         else:

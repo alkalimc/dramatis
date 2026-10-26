@@ -98,6 +98,10 @@ def _records_per_page(archive: Archive) -> tuple[Counter, dict[str, set[str]]]:
     return total, kinds
 
 
+#: The layer of a set's pages that produced no record.
+EXCLUDED_LAYER = "excluded"
+
+
 def select(archive: Archive, pack: Pack) -> Selection:
     """The boundary and coverage samples. Deterministic for a given archive state."""
     sel = Selection()
@@ -117,6 +121,8 @@ def select(archive: Archive, pack: Pack) -> Selection:
     layouts = {s.key: s.layout for s in pack.seeds if s.layout is not None}
     stratified: set[str] = set()
     layered: set[str] = set()
+    #: layer of left-out pages -> reason -> first page with it: one sample per reason.
+    why_excluded: dict[str, dict[str, str]] = {}
     for seed in pack.fetch_seeds:
         for title in archive.seed(seed):  # sorted by title
             route = pack.route_for(seed, title)
@@ -126,12 +132,19 @@ def select(archive: Archive, pack: Pack) -> Selection:
             route_of.setdefault(title, label)
             members.setdefault(label, []).append(title)
             if seed in layouts:
+                # Layers are drawn from pages that produced something; a layer of pages the
+                # pack leaves out would show nothing but the exclusion.
                 row = archive.page(title)
-                klass = layouts[seed](title, (row["wikitext"] or "") if row else "")
+                klass = (layouts[seed](title, (row["wikitext"] or "") if row else "")
+                         if records.get(title) else EXCLUDED_LAYER)
                 layered.add(label)
                 layer = f"{label} · {klass}"
                 members.setdefault(layer, []).append(title)
                 stratified.add(layer)
+                if klass == EXCLUDED_LAYER:
+                    reason = next((d for g, d in findings.get(title, [])
+                                   if g == "G3" and not d.startswith(YIELD_DETAIL)), "")
+                    why_excluded.setdefault(layer, {}).setdefault(reason, title)
 
     for label, titles in sorted(members.items()):
         if label not in layered:  # the layout classes below stand in for the set's own
@@ -157,6 +170,10 @@ def select(archive: Archive, pack: Pack) -> Selection:
             if reason is not None:
                 sel.add(label, t, "empty", reason=reason)
                 break
+
+    for layer, reasons in sorted(why_excluded.items()):
+        for reason, title in sorted(reasons.items()):
+            sel.add(layer, title, "empty", reason=reason or "no record")
 
     for kind, pages in sorted(by_kind.items()):
         first = min((p for p in pages if p in route_of), default=None)

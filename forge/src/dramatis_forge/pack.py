@@ -367,6 +367,10 @@ class IdentityRules:
     #: None. The story reader derives the same key from each script's portrait names, so a
     #: speaker label that is not a page title can still be traced to a person.
     portrait_key: Callable[[str], str | None] | None = None
+    #: A looser form of a portrait key (the key with its less reliable part dropped), used
+    #: only for labels that are not page titles when the exact key matches no page: a script
+    #: and a page can spell the same portrait id differently.
+    portrait_loose: Callable[[str], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -479,6 +483,9 @@ class ChunkTemplate:
     #: Absorb a trailing stub shorter than `target // 2` into the previous unit,
     #: rather than emitting a fragment that embeds as noise.
     absorb_tail: bool = True
+    #: Sequence templates only: a unit ends before a scene change only once it holds this
+    #: many characters as well as half its records; six short lines are not a scene.
+    cut_min_chars: int = 0
     shape: str = ""
 
     @property
@@ -552,15 +559,31 @@ class ChunkPolicy:
     #: Regexes for heading-path segments a header leaves out: letter buckets, bare numbers,
     #: template names. They place an entry on the wiki's page, not in the world.
     lore_path_drop: tuple[str, ...] = ()
+    #: `(page regex, depth)`: how a lore page's records neighbour each other. Records of a
+    #: page are one run by default, so a hit widens to the entries beside it. Pages that are
+    #: lists (entries in alphabetical order, tips) have no such order: depth 0 gives every
+    #: record a run of its own. A page that tells several things in turn gets depth `n`: the
+    #: records sharing their first `n` headings are one run.
+    lore_spans: tuple[tuple[str, int], ...] = ()
     #: Regexes no header may match: words of the work's interface. A match is a failure of
     #: the rules above, found on the units that shipped.
     header_taboo: tuple[str, ...] = ()
     #: Identity-card fields left out of the card text: attributes of the work's mechanics
     #: rather than of the person. They stay on the person's facets for display.
     card_omit: tuple[str, ...] = ()
-    #: Speaker labels that stand for someone not named yet. They are attributed scene by
-    #: scene from portraits only; a redirect or a corpus-wide count would say nothing.
+    #: Card field values that mean "none" and say nothing about the person.
+    placeholder_values: tuple[str, ...] = ()
+    #: Dossier items shorter than this join the item before them (0 turns it off), if their
+    #: title matches one of `foldable_items`: an entry of a kind that is read alongside its
+    #: neighbours. Other short items (a blurb, a token's description) are complete as they are.
+    item_min_chars: int = 0
+    foldable_items: tuple[str, ...] = ()
+    #: Speaker labels that stand for someone not named yet. They belong to nobody: the
+    #: same label is a different person each time, and a portrait only shows who was on screen.
     generic_speakers: tuple[str, ...] = ()
+    #: `(scene, label, person page)` exceptions to "a page-title label is that page's
+    #: person": a declared disguise. Each entry is a decision about one scene.
+    speaker_as: tuple[tuple[str, str, str], ...] = ()
     #: Regex over a scene id with a named group `owner` for scenes that belong to one
     #: person (a record of their own); the owner missing from their own scene is a failure
     #: of attribution, not a fact about the story. Empty disables the check.
@@ -612,6 +635,13 @@ class ChunkPolicy:
             if seg and (not out or out[-1] != seg):
                 out.append(seg)
         return out
+
+    def lore_run(self, page: str, path: tuple[str, ...], seq: int) -> str:
+        """The run a lore record belongs to (the `span_of` of its unit)."""
+        for pattern, depth in self.lore_spans:
+            if re.search(pattern, page):
+                return f"{page}#{seq}" if depth == 0 else f"{page}#{'/'.join(path[:depth])}"
+        return page
 
     def section_name(self, name: str) -> str:
         """A dossier section or item as a header names it."""

@@ -12,7 +12,7 @@ from dramatis_forge.guards import LOW
 from dramatis_forge.identity import resolve
 from dramatis_forge.pack import IdentityEvidence
 from dramatis_forge.params import Params
-from dramatis_forge.records import Dossier, Voice
+from dramatis_forge.records import Dossier, Line, Voice
 
 
 def test_pages_the_pack_excludes_leave_the_roster_with_their_forms(pack):
@@ -121,6 +121,11 @@ def test_a_unit_that_is_half_full_ends_before_a_change_of_scene():
     # not when the unit is nearly empty: a stub embeds as noise
     early = [chunk.Row(i, "A", f"A: {i}", cut=(i == 1)) for i in range(8)]
     assert [len(g) for g in chunk._turn_aligned(early, target=6, cap=8, absorb=False)] == [8]
+    # nor when it is half full of records but short of characters
+    assert [len(g) for g in chunk._turn_aligned(
+        rows, target=6, cap=8, absorb=False, cut_chars=40)] == [8]
+    assert [len(g) for g in chunk._turn_aligned(
+        rows, target=6, cap=8, absorb=False, cut_chars=12)] == [3, 5]
 
 
 def test_choices_and_lines_are_one_sequence_and_replies_are_introduced(tmp_path, pack):
@@ -174,15 +179,17 @@ def test_speakers_resolve_by_page_then_portrait_then_alias(tmp_path, pack):
         a.put_page("Bob", "k-bob", 2, "now")
         a.put_page("Cy", "k-cy", 3, "now")
         insert(a, [Alias(alias="Cyrus", target="Cy", kind="redirect"),
-                   Alias(alias="Cyrus II", target="Cy", kind="disambig")])
+                   Alias(alias="Cyrus II", target="Cy", kind="disambig"),
+                   Line(scene="S", seq=1, speaker="Annie", text="a", portrait="k-ann"),
+                   Line(scene="S", seq=2, speaker="Annie", text="b", portrait="k-ann")])
         sp = Speakers(a, p, replace(Params().speaker, portrait_lines=2))
         rows = [{"speaker": "Annie", "portrait": "k-ann"}, {"speaker": "Annie", "portrait": "k-ann"},
                 {"speaker": "Cyrus", "portrait": None}, {"speaker": "Cyrus II", "portrait": None},
                 {"speaker": "???", "portrait": "k-bob"}, {"speaker": "Ann", "portrait": "k-bob"}]
         got = sp.scene_owners("S", rows)
-    assert got == {"Annie": "Ann", "Cyrus": "Cy", "Cyrus II": None, "???": "Bob", "Ann": "Ann"}
+    assert got == {"Annie": "Ann", "Cyrus": "Cy", "Cyrus II": None, "???": None, "Ann": "Ann"}
     # a label settled by portraits across the corpus is a name for that person
-    assert sp.speaker_aliases() == []
+    assert sp.speaker_aliases() == [("Annie", "Ann")]
 
 
 def test_slot_names_are_reworded_and_interface_words_are_caught(pack):
@@ -227,6 +234,11 @@ def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
         a.write_seeds({"people": ["P1", "P2", "P3", "P4"]})
         for title, text in (("P1", "x" * 10), ("P2", "y" * 50), ("P3", "z" * 40), ("P4", "w" * 20)):
             a.put_page(title, text, 1, "now")
+        a.put_page("P5", "v" * 5, 1, "now")
+        a.write_seeds({"people": ["P1", "P2", "P3", "P4", "P5"]})
+        # P5 produced nothing: it is not drawn into the layers of pages that did
+        from dramatis_forge.records import Lore
+        insert(a, [Lore(page=t, path=("x",), text="body", revid=1) for t in ("P1", "P2", "P3", "P4")])
         a.commit()
         sel = samples.select(a, p)
     picked = {route: set(titles) for route, titles in sel.routes.items() if "people" in route}
@@ -234,6 +246,8 @@ def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
     # each class is read through its first and its largest page, and nothing else
     assert {r.rsplit(" · ", 1)[1]: ts for r, ts in layer.items()} == {
         "long": {"P2"}, "short": {"P1", "P4"}}
+    assert {r.rsplit(" · ", 1)[1]: ts for r, ts in picked.items()
+            if r.endswith("excluded")} == {"excluded": {"P5"}}
 
 
 def test_every_rendering_of_a_term_is_an_alias_for_it():
@@ -278,8 +292,9 @@ def test_a_declared_name_outranks_a_portrait_and_a_skipped_section_makes_no_unit
         insert(a, [Alias(alias="Annie", target="Ann", kind="redirect")])
         sp = Speakers(a, p, replace(Params().speaker, portrait_lines=1))
         # the label is declared to be Ann's, whatever the portrait on screen
-        assert sp.owner("Annie", ["k-bob", "k-bob"]) == "Ann"
-        assert sp.owner("Stranger", ["k-bob", "k-bob"]) == "Bob"
+        assert sp.owner("Annie", "s") == "Ann"
+        # an unresolved label stays open, whatever the portraits in its scene show
+        assert sp.owner("Stranger", "s") is None
 
     policy = replace(pack.chunking, section_skip=("^Ratings$",))
     q = replace(pack, chunking=policy)
@@ -291,3 +306,102 @@ def test_a_declared_name_outranks_a_portrait_and_a_skipped_section_makes_no_unit
         texts = [c.text for c in chunk.build(a, q, env=env) if c.template == "profile"]
     assert "Born north." in texts and "Strength: high" not in texts
     assert env.skipped == {"profile": 1}
+
+
+def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_declared(tmp_path, pack):
+    from dramatis_forge.speakers import Speakers
+    ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None)
+    policy = replace(pack.chunking, generic_speakers=("???",),
+                     speaker_as=(("s1", "Bob", "Ann"),))
+    p = replace(pack, identity=ident, chunking=policy)
+    rows = [{"speaker": s, "portrait": "k-ann"} for s in ("???", "Bob", "Crowd")]
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)]})
+        a.put_page("Ann", "k-ann", 1, "now")
+        a.commit()
+        sp = Speakers(a, p, Params().speaker)
+        got = sp.scene_owners("s1", rows)
+        other = sp.scene_owners("s2", rows)
+    # a placeholder and an unknown label are nobody's even when one portrait fills the scene
+    assert got == {"???": None, "Bob": "Ann", "Crowd": None}
+    # the exception is for one scene only
+    assert other["Bob"] == "Bob"
+
+
+def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, pack):
+    from dramatis_forge.speakers import Speakers
+    ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None,
+                    portrait_loose=lambda k: k.split("_")[0])
+    p = replace(pack, identity=ident)
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)]})
+        a.put_page("Ann", "7_ann", 1, "now")
+        a.commit()
+        sp = Speakers(a, p, replace(Params().speaker, portrait_lines=1))
+    assert sp.loose_person == {"7": "Ann"}
+    assert sp._portrait_person("7_other") == "Ann"
+    assert sp._portrait_person("8_other") is None
+
+
+def test_a_reply_id_no_choice_offers_is_counted_as_unresolved(pack):
+    unresolved: list[str] = []
+    choices = {1: (["a", "b"], ["x", "y"], None)}
+    ok = chunk._reply_marker(pack.chunking, choices, "1:x", unresolved, "S")
+    bad = chunk._reply_marker(pack.chunking, choices, "1:2", unresolved, "S")
+    assert unresolved == ["S"] and "a" in ok and "2" in bad
+
+
+def test_term_aliases_land_on_the_canonical_name_and_conflicts_are_reported():
+    from dramatis_forge.guards import Ledger
+    from dramatis_forge.normalize import check_aliases, term_aliases
+    from dramatis_forge.records import Alias, Term
+    redirects = {"Edge": "Sharp", "Isles": "Isles (region)"}
+    terms = [Term(page="g", term="Edge", translations={"en": "Sharp/Blade"}),
+             Term(page="g", term="Isles", translations={"en": "Isle", "note": "A place. Long."}),
+             Term(page="g", term="Mis", translations={"en": "Mish"})]
+    got = term_aliases(terms, {}, redirects)
+    # the rendering that equals the canonical name says nothing; the target is never an alias
+    assert sorted((a.alias, a.target) for a in got) == [
+        ("A place. Long.", "Isles (region)"), ("Blade", "Sharp"),
+        ("Isle", "Isles (region)"), ("Mish", "Mis")]
+    assert all(a.target not in redirects for a in got)
+    assert ("Sharp", "Sharp") not in {(a.alias, a.target) for a in got}
+    rep = type("R", (), {"ledger": Ledger()})()
+    check_aliases([*got, Alias(alias="Mish", target="Other", kind="realname"),
+                   Alias(alias="x", target="Edge", kind="redirect")], redirects, set(), rep)
+    details = [f.detail for f in rep.ledger.findings]
+    assert any("another alias" in d for d in details)
+    assert any("'Mish'" in d for d in details)
+
+
+def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
+    p = replace(forms_pack, chunking=replace(
+        forms_pack.chunking, placeholder_values=("none",), item_min_chars=20, foldable_items=("^tiny$",),
+        cardless_forms=("mode",)))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Alice": [("Alice", "canonical", 0), ("Alice(Winter)", "alt", 1),
+                                    ("Alice(Mode)", "mode", 2)]})
+        insert(a, [
+            Dossier(page="Alice", fields={"name": "Alice", "team": "none", "job": "x"},
+                    items={"first": "A long enough entry that stands alone.", "tiny": "Short.",
+                           "blurb": "Brief."},
+                    revid=1),
+            Dossier(page="Alice(Winter)", fields={"name": "Alice(Winter)", "team": "none"}, revid=2),
+            Dossier(page="Alice(Mode)", fields={"name": "Alice(Mode)"}, revid=3),
+        ])
+        units = list(chunk.build(a, p))
+    cards = {c.header: c.text for c in units if c.span_of and c.span_of.endswith("#card")}
+    # the person is not repeated inside the form's name, "none" is not a field, a mode copy is
+    # not listed among the other forms
+    assert cards["[file] Alice · identity card"] == "name: Alice\njob: x\nother forms: Alice(Winter)"
+    assert cards["[file] Alice <Winter> · identity card"] == "name: Alice(Winter)"
+    items = [c.text for c in units if c.span_of == "Alice#dossier"]
+    # only the kind of item the pack names is folded; "blurb" is short and complete alone
+    assert items == ["A long enough entry that stands alone.\ntiny: Short.", "Brief."]
+
+
+def test_lore_runs_follow_the_pages_declared_shape(pack):
+    policy = replace(pack.chunking, lore_spans=((r"^List$", 0), (r"^Story$", 1)))
+    assert policy.lore_run("Plain", ("a",), 3) == "Plain"
+    assert policy.lore_run("List", ("a",), 3) == "List#3"
+    assert policy.lore_run("Story", ("tale", "part 2"), 5) == "Story#tale"

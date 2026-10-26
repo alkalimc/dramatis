@@ -116,6 +116,9 @@ class Env:
     notes: list[str] = field(default_factory=list)
     #: Records a policy chose not to make units of, by template.
     skipped: dict[str, int] = field(default_factory=dict)
+    #: Scenes whose branch markers could not name the option they answer (a reply id that
+    #: no choice offers): the marker would show the source's bare id.
+    unresolved_branches: list[str] = field(default_factory=list)
 
     @classmethod
     def for_build(cls, archive: Archive, pack: Pack, params: Params | None = None) -> Env:
@@ -155,7 +158,8 @@ def _lore(
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=" › ".join(path) or r["page"], revid=r["revid"],
-                span_of=r["page"], span_from=r["seq"], span_to=r["seq"],
+                span_of=policy.lore_run(r["page"], path, r["seq"]),
+                span_from=r["seq"], span_to=r["seq"],
             )
 
 
@@ -170,31 +174,35 @@ class Row(NamedTuple):
     branch: str | None = None
 
 
-def _turn_aligned(rendered: list[Row], target: int, cap: int, absorb: bool) -> list[list[Row]]:
+def _turn_aligned(
+    rendered: list[Row], target: int, cap: int, absorb: bool, cut_chars: int = 0
+) -> list[list[Row]]:
     """Group a scene's rows into non-overlapping units that break between turns.
 
     Aim for `target` rows, then keep extending — up to `cap` — until the speaker
     changes. Cutting a speaker off mid-thought is the failure that actually damages a
     dialogue unit, and a fixed window guarantees it at every boundary; this makes it
     rare at the cost of slightly variable unit length. A unit that is at least half full
-    also ends before a row the script marks as a change of scene: a new place is a better
-    seam than a new speaker.
+    (in records, and in characters when `cut_chars` is set) also ends before a row the
+    script marks as a change of scene: a new place is a better seam than a new speaker.
     """
     half = max(target // 2, 1)
     out: list[list[Row]] = []
     cur: list[Row] = []
+    size = 0
     for i, row in enumerate(rendered):
         cur.append(row)
+        size += len(row.text)
         nxt = rendered[i + 1] if i + 1 < len(rendered) else None
         if nxt is None:
             break
         if len(cur) >= target:
             if nxt.speaker != row.speaker or len(cur) >= cap:
                 out.append(cur)
-                cur = []
-        elif len(cur) >= half and nxt.cut:
+                cur, size = [], 0
+        elif len(cur) >= half and size >= cut_chars and nxt.cut:
             out.append(cur)
-            cur = []
+            cur, size = [], 0
     if cur:
         # A stub tail embeds as noise, so fold it back — but not past the cap, or a long
         # monologue produces one oversized unit precisely where the cap exists to prevent
@@ -212,34 +220,53 @@ def _turn_aligned(rendered: list[Row], target: int, cap: int, absorb: bool) -> l
     return out
 
 
-def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
-                refs: list[str]) -> str:
-    """The marker for a stretch that follows some replies of a choice."""
-    options, values = choice if choice else ([], [])
+def reply_options(
+    choice: tuple[list[str], list[str]] | None, refs: list[str],
+    after: list[tuple[list[str], list[str]]] = (),
+) -> list[str]:
+    """The options the reply ids `refs` stand for: read against `choice`, and an id it does
+    not offer against `after` (the scene's later choices, nearest first)."""
+    own_options, own_values = choice if choice else ([], [])
     picked: list[str] = []
     for ref in refs:
-        if ref in values:
-            i = values.index(ref)
-        elif not values and ref.isdigit():
+        options, i = own_options, -1
+        if ref in own_values:
+            i = own_values.index(ref)
+        elif not own_values and ref.isdigit():
             i = int(ref) - 1
         else:
-            continue
+            for options_here, values_here in after:
+                if ref in values_here:
+                    options, i = options_here, values_here.index(ref)
+                    break
         if 0 <= i < len(options):
             picked.append(options[i])
+    return picked
+
+
+def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
+                refs: list[str], after: list[tuple[list[str], list[str]]] = ()) -> str:
+    """The marker for a stretch that follows some replies of a choice."""
+    picked = reply_options(choice, refs, after)
     inner = " / ".join(picked) if picked else policy.sep("list").join(refs)
     return policy.mark(f"{policy.label('branch')}{policy.sep('quote').format(inner)}")
 
 
 def _reply_marker(
     policy: ChunkPolicy, choices: dict[int, tuple[list[str], list[str], str | None]],
-    branch: str | None,
+    branch: str | None, unresolved: list[str] | None = None, scene: str = "",
 ) -> str:
     """The line that opens a stretch following some replies, or closes one (`branch` None)."""
     if branch is None:
         return policy.mark(policy.label("merge"))
     at, _, refs = branch.partition(":")
     choice = choices.get(int(at))
-    return reply_text(policy, (choice[0], choice[1]) if choice else None, refs.split(";"))
+    pair = (choice[0], choice[1]) if choice else None
+    rest = [(c[0], c[1]) for k, c in sorted(choices.items()) if k > int(at)]
+    if unresolved is not None and len(reply_options(pair, refs.split(";"), rest)) < len(
+            refs.split(";")):
+        unresolved.append(scene)
+    return reply_text(policy, pair, refs.split(";"), rest)
 
 
 def _dialogue(
@@ -299,7 +326,7 @@ def _dialogue(
                 False, branch)
         rendered = [by_seq[k] for k in sorted(by_seq)]
 
-        for group in _turn_aligned(rendered, target, cap, t.absorb_tail):
+        for group in _turn_aligned(rendered, target, cap, t.absorb_tail, t.cut_min_chars):
             uniq: list[str] = []
             for row in group:
                 if row.speaker and row.speaker not in uniq:
@@ -315,7 +342,8 @@ def _dialogue(
             parts, here = [], None
             for row in group:
                 if row.branch != here:
-                    parts.append(_reply_marker(policy, choices, row.branch))
+                    parts.append(_reply_marker(
+                        policy, choices, row.branch, env.unresolved_branches, scene["id"]))
                     here = row.branch
                 parts.append(row.text)
             body = "\n".join(parts)
@@ -342,6 +370,17 @@ def _display_names(archive: Archive, pack: Pack) -> dict[str, str]:
     return out
 
 
+def _person_name(archive: Archive, pack: Pack) -> Callable[[str], str]:
+    """Person id -> the name a header shows: the display name when the id is only that name
+    with a suffix (a page titled for the mode it is filed under)."""
+    display = _display_names(archive, pack)
+
+    def name(person_id: str) -> str:
+        shown = display.get(person_id)
+        return shown if shown and shown != person_id and person_id.startswith(shown) else person_id
+    return name
+
+
 def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
     """Page -> the text that tells a person's forms apart in a header ("" for the person).
 
@@ -357,7 +396,11 @@ def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
         if person is None or page == person:
             return ""
         name, base = display.get(page, page), display.get(person, person)
-        return sep("form").format(name) if name != base else ""
+        if name == base:
+            return ""
+        # A form named "<person>(<form>)" is the form's name once the person is taken off.
+        m = re.fullmatch(re.escape(base) + r"\s*[(\uff08](.+)[)\uff09]", name)
+        return sep("form").format(m.group(1) if m else name)
     return tag
 
 
@@ -367,6 +410,7 @@ def _voice(
     policy = pack.chunking
     person_of = archive.person_of()
     tag = _form_tag(archive, pack)
+    named = _person_name(archive, pack)
     # Voice records name their source page; the revision lives with the fetched page.
     # Attribution has to reach every unit, so it is looked up rather than left null.
     revids = {row["title"]: row["revid"]
@@ -388,7 +432,7 @@ def _voice(
         # header keeps the two lines from reading as one line said twice.
         name = policy.voice_name(r["trigger"] or "", r["title"] or "")
         head = header.format(
-            person=f"{person}{tag(r['subject'])}", name=name,
+            person=f"{named(person)}{tag(r['subject'])}", name=name,
             variant=f" · {r['variant']}" if r["variant"] else "",
         )
         yield Chunk(
@@ -420,6 +464,8 @@ def _profile(
     kind_of = {f["page"]: f["kind"] for fs in forms.values() for f in fs}
     display = _display_names(archive, pack)
     tag = _form_tag(archive, pack)
+    named = _person_name(archive, pack)
+    placeholders = set(policy.placeholder_values)
 
     dossier: dict[str, dict] = {}
     for row in archive.db.execute("SELECT page,fields,sections,items,revid FROM dossiers"):
@@ -466,15 +512,17 @@ def _profile(
 
         base_page = next((p for p in held if dossier[p]["fields"]), None)
         if base_page is not None:
-            base = {k: v for k, v in dossier[base_page]["fields"].items() if k not in omit}
+            base = {k: v for k, v in dossier[base_page]["fields"].items()
+                    if k not in omit and v not in placeholders}
             if base:
                 body = "\n".join(f"{k}{sep('label')}{v}" for k, v in base.items())
                 others = list(dict.fromkeys(
                     display.get(p, p) for p in pages
-                    if p != base_page and display.get(p, p) != display.get(base_page, base_page)))
+                    if p != base_page and kind_of.get(p) not in policy.cardless_forms
+                    and display.get(p, p) != display.get(base_page, base_page)))
                 if others:
                     body += f"\n{label('other_forms')}{sep('label')}" + sep("list").join(others)
-                head = header.format(person=person_id, section=f" · {label('card')}")
+                head = header.format(person=named(person_id), section=f" · {label('card')}")
                 yield Chunk(
                     template=t.name, page=person_id, text=body, header=head,
                     title=f"{person_id} {label('card')}", persons=(person_id,),
@@ -485,11 +533,11 @@ def _profile(
                 if page == base_page or kind_of.get(page) in policy.cardless_forms:
                     continue
                 diff = {k: v for k, v in dossier[page]["fields"].items()
-                        if k not in omit and base.get(k) != v}
+                        if k not in omit and v not in placeholders and base.get(k) != v}
                 if not diff:
                     continue
                 head = header.format(
-                    person=f"{person_id}{tag(page)}", section=f" · {label('card')}")
+                    person=f"{named(person_id)}{tag(page)}", section=f" · {label('card')}")
                 yield Chunk(
                     template=t.name, page=page,
                     text="\n".join(f"{k}{sep('label')}{v}" for k, v in diff.items()),
@@ -498,9 +546,9 @@ def _profile(
                     span_of=f"{person_id}{CARD_SPAN}", span_from=n, span_to=n,
                 )
 
-        for i, (page, title, text) in enumerate(sections + items):
+        for i, (page, title, text) in enumerate(sections + _fold_short(items, policy)):
             head = header.format(
-                person=f"{person_id}{tag(page)}",
+                person=f"{named(person_id)}{tag(page)}",
                 section=f" · {policy.section_name(title)}" if title else "")
             for part in _split(text, t.max_chars, policy.breaks):
                 yield Chunk(
@@ -537,6 +585,24 @@ def _profile(
             revid=ref_revids.get(r["page"]),
             span_of=f"{r['name']}#ref", span_from=0, span_to=0,
         )
+
+
+def _fold_short(items: list[tuple[str, str, str]], policy: ChunkPolicy) -> list[tuple[str, str, str]]:
+    """Items too short to be read alone join the item before them on the same page, each
+    under its own name; a unit of a few words is nothing without the entry it belongs to."""
+    if not policy.item_min_chars or not policy.foldable_items:
+        return items
+    foldable = re.compile("|".join(policy.foldable_items))
+    out: list[tuple[str, str, str]] = []
+    for page, title, text in items:
+        if (len(text) < policy.item_min_chars and foldable.search(title)
+                and out and out[-1][0] == page):
+            before = out[-1]
+            joined = f"{before[2]}\n{policy.section_name(title)}{policy.sep('label')}{text}"
+            out[-1] = (page, before[1], joined)
+        else:
+            out.append((page, title, text))
+    return out
 
 
 def _letter(
