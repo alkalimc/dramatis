@@ -365,3 +365,27 @@ def test_term_aliases_land_on_the_canonical_name_and_conflicts_are_reported():
     details = [f.detail for f in rep.ledger.findings]
     assert any("another alias" in d for d in details)
     assert any("'Mish'" in d for d in details)
+
+
+def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
+    p = replace(forms_pack, chunking=replace(
+        forms_pack.chunking, placeholder_values=("none",), item_min_chars=20,
+        cardless_forms=("mode",)))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Alice": [("Alice", "canonical", 0), ("Alice(Winter)", "alt", 1),
+                                    ("Alice(Mode)", "mode", 2)]})
+        insert(a, [
+            Dossier(page="Alice", fields={"name": "Alice", "team": "none", "job": "x"},
+                    items={"first": "A long enough entry that stands alone.", "tiny": "Short."},
+                    revid=1),
+            Dossier(page="Alice(Winter)", fields={"name": "Alice(Winter)", "team": "none"}, revid=2),
+            Dossier(page="Alice(Mode)", fields={"name": "Alice(Mode)"}, revid=3),
+        ])
+        units = list(chunk.build(a, p))
+    cards = {c.header: c.text for c in units if c.span_of and c.span_of.endswith("#card")}
+    # the person is not repeated inside the form's name, "none" is not a field, a mode copy is
+    # not listed among the other forms
+    assert cards["[file] Alice · identity card"] == "name: Alice\njob: x\nother forms: Alice(Winter)"
+    assert cards["[file] Alice <Winter> · identity card"] == "name: Alice(Winter)"
+    items = [c.text for c in units if c.span_of == "Alice#dossier"]
+    assert items == ["A long enough entry that stands alone.\ntiny: Short."]

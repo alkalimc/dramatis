@@ -565,6 +565,10 @@ class ChunkPolicy:
     #: Identity-card fields left out of the card text: attributes of the work's mechanics
     #: rather than of the person. They stay on the person's facets for display.
     card_omit: tuple[str, ...] = ()
+    #: Card field values that mean "none" and say nothing about the person.
+    placeholder_values: tuple[str, ...] = ()
+    #: Dossier items shorter than this join the item before them (0 turns it off).
+    item_min_chars: int = 0
     #: Speaker labels that stand for someone not named yet. They belong to nobody: the
     #: same label is a different person each time, and a portrait only shows who was on screen.
     generic_speakers: tuple[str, ...] = ()

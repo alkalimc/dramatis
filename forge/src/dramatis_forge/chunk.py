@@ -359,6 +359,17 @@ def _display_names(archive: Archive, pack: Pack) -> dict[str, str]:
     return out
 
 
+def _person_name(archive: Archive, pack: Pack) -> Callable[[str], str]:
+    """Person id -> the name a header shows: the display name when the id is only that name
+    with a suffix (a page titled for the mode it is filed under)."""
+    display = _display_names(archive, pack)
+
+    def name(person_id: str) -> str:
+        shown = display.get(person_id)
+        return shown if shown and shown != person_id and person_id.startswith(shown) else person_id
+    return name
+
+
 def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
     """Page -> the text that tells a person's forms apart in a header ("" for the person).
 
@@ -374,7 +385,11 @@ def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
         if person is None or page == person:
             return ""
         name, base = display.get(page, page), display.get(person, person)
-        return sep("form").format(name) if name != base else ""
+        if name == base:
+            return ""
+        # A form named "<person>(<form>)" is the form's name once the person is taken off.
+        m = re.fullmatch(re.escape(base) + r"\s*[(（](.+)[)）]", name)
+        return sep("form").format(m.group(1) if m else name)
     return tag
 
 
@@ -384,6 +399,7 @@ def _voice(
     policy = pack.chunking
     person_of = archive.person_of()
     tag = _form_tag(archive, pack)
+    named = _person_name(archive, pack)
     # Voice records name their source page; the revision lives with the fetched page.
     # Attribution has to reach every unit, so it is looked up rather than left null.
     revids = {row["title"]: row["revid"]
@@ -405,7 +421,7 @@ def _voice(
         # header keeps the two lines from reading as one line said twice.
         name = policy.voice_name(r["trigger"] or "", r["title"] or "")
         head = header.format(
-            person=f"{person}{tag(r['subject'])}", name=name,
+            person=f"{named(person)}{tag(r['subject'])}", name=name,
             variant=f" · {r['variant']}" if r["variant"] else "",
         )
         yield Chunk(
@@ -437,6 +453,8 @@ def _profile(
     kind_of = {f["page"]: f["kind"] for fs in forms.values() for f in fs}
     display = _display_names(archive, pack)
     tag = _form_tag(archive, pack)
+    named = _person_name(archive, pack)
+    placeholders = set(policy.placeholder_values)
 
     dossier: dict[str, dict] = {}
     for row in archive.db.execute("SELECT page,fields,sections,items,revid FROM dossiers"):
@@ -483,15 +501,17 @@ def _profile(
 
         base_page = next((p for p in held if dossier[p]["fields"]), None)
         if base_page is not None:
-            base = {k: v for k, v in dossier[base_page]["fields"].items() if k not in omit}
+            base = {k: v for k, v in dossier[base_page]["fields"].items()
+                    if k not in omit and v not in placeholders}
             if base:
                 body = "\n".join(f"{k}{sep('label')}{v}" for k, v in base.items())
                 others = list(dict.fromkeys(
                     display.get(p, p) for p in pages
-                    if p != base_page and display.get(p, p) != display.get(base_page, base_page)))
+                    if p != base_page and kind_of.get(p) not in policy.cardless_forms
+                    and display.get(p, p) != display.get(base_page, base_page)))
                 if others:
                     body += f"\n{label('other_forms')}{sep('label')}" + sep("list").join(others)
-                head = header.format(person=person_id, section=f" · {label('card')}")
+                head = header.format(person=named(person_id), section=f" · {label('card')}")
                 yield Chunk(
                     template=t.name, page=person_id, text=body, header=head,
                     title=f"{person_id} {label('card')}", persons=(person_id,),
@@ -502,11 +522,11 @@ def _profile(
                 if page == base_page or kind_of.get(page) in policy.cardless_forms:
                     continue
                 diff = {k: v for k, v in dossier[page]["fields"].items()
-                        if k not in omit and base.get(k) != v}
+                        if k not in omit and v not in placeholders and base.get(k) != v}
                 if not diff:
                     continue
                 head = header.format(
-                    person=f"{person_id}{tag(page)}", section=f" · {label('card')}")
+                    person=f"{named(person_id)}{tag(page)}", section=f" · {label('card')}")
                 yield Chunk(
                     template=t.name, page=page,
                     text="\n".join(f"{k}{sep('label')}{v}" for k, v in diff.items()),
@@ -515,9 +535,9 @@ def _profile(
                     span_of=f"{person_id}{CARD_SPAN}", span_from=n, span_to=n,
                 )
 
-        for i, (page, title, text) in enumerate(sections + items):
+        for i, (page, title, text) in enumerate(sections + _fold_short(items, policy)):
             head = header.format(
-                person=f"{person_id}{tag(page)}",
+                person=f"{named(person_id)}{tag(page)}",
                 section=f" · {policy.section_name(title)}" if title else "")
             for part in _split(text, t.max_chars, policy.breaks):
                 yield Chunk(
@@ -554,6 +574,22 @@ def _profile(
             revid=ref_revids.get(r["page"]),
             span_of=f"{r['name']}#ref", span_from=0, span_to=0,
         )
+
+
+def _fold_short(items: list[tuple[str, str, str]], policy: ChunkPolicy) -> list[tuple[str, str, str]]:
+    """Items too short to be read alone join the item before them on the same page, each
+    under its own name; a unit of a few words is nothing without the entry it belongs to."""
+    if not policy.item_min_chars:
+        return items
+    out: list[tuple[str, str, str]] = []
+    for page, title, text in items:
+        if len(text) < policy.item_min_chars and out and out[-1][0] == page:
+            before = out[-1]
+            joined = f"{before[2]}\n{policy.section_name(title)}{policy.sep('label')}{text}"
+            out[-1] = (page, before[1], joined)
+        else:
+            out.append((page, title, text))
+    return out
 
 
 def _letter(
