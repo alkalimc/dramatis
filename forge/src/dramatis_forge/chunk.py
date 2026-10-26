@@ -222,33 +222,32 @@ def _turn_aligned(
 
 def reply_options(
     choice: tuple[list[str], list[str]] | None, refs: list[str],
-    others: list[tuple[list[str], list[str]]] = (),
+    after: list[tuple[list[str], list[str]]] = (),
 ) -> list[str]:
     """The options the reply ids `refs` stand for: read against `choice`, and an id it does
-    not offer against `others` (the scene's other choices) when exactly one of them does."""
-    options, values = choice if choice else ([], [])
+    not offer against `after` (the scene's later choices, nearest first)."""
+    own_options, own_values = choice if choice else ([], [])
     picked: list[str] = []
     for ref in refs:
-        if ref in values:
-            i = values.index(ref)
-        elif not values and ref.isdigit():
+        options, i = own_options, -1
+        if ref in own_values:
+            i = own_values.index(ref)
+        elif not own_values and ref.isdigit():
             i = int(ref) - 1
         else:
-            offering = [(o, v) for o, v in others if ref in v]
-            if len(offering) != 1:
-                continue
-            options_here, values_here = offering[0]
-            i, options = values_here.index(ref), options_here
+            for options_here, values_here in after:
+                if ref in values_here:
+                    options, i = options_here, values_here.index(ref)
+                    break
         if 0 <= i < len(options):
             picked.append(options[i])
-        options = choice[0] if choice else []
     return picked
 
 
 def reply_text(policy: ChunkPolicy, choice: tuple[list[str], list[str]] | None,
-                refs: list[str], others: list[tuple[list[str], list[str]]] = ()) -> str:
+                refs: list[str], after: list[tuple[list[str], list[str]]] = ()) -> str:
     """The marker for a stretch that follows some replies of a choice."""
-    picked = reply_options(choice, refs, others)
+    picked = reply_options(choice, refs, after)
     inner = " / ".join(picked) if picked else policy.sep("list").join(refs)
     return policy.mark(f"{policy.label('branch')}{policy.sep('quote').format(inner)}")
 
@@ -263,7 +262,7 @@ def _reply_marker(
     at, _, refs = branch.partition(":")
     choice = choices.get(int(at))
     pair = (choice[0], choice[1]) if choice else None
-    rest = [(c[0], c[1]) for k, c in choices.items() if k != int(at)]
+    rest = [(c[0], c[1]) for k, c in sorted(choices.items()) if k > int(at)]
     if unresolved is not None and len(reply_options(pair, refs.split(";"), rest)) < len(
             refs.split(";")):
         unresolved.append(scene)
