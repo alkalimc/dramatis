@@ -5,14 +5,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use agent::endpoint::{Http, Keychain as AgentKeys, Transport};
-use api::endpoints::{KEYCHAIN_SERVICE, Profile, keychain_account};
+use api::endpoints::{Model, Profile};
 use api::error::{ApiError, ApiResult};
 use api::home::Home;
 use api::params::Params;
 use api::port::{self, KeyStore, LlmPort, LocalClock, NetPort, Speech};
 use api::{Engine, Ports};
 use async_trait::async_trait;
+use llm::transport::{HttpRequest, Method};
+use llm::{Retry, Transport};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
@@ -31,74 +32,117 @@ const PROBE: Duration = Duration::from_millis(1500);
 /// The system keychain, under the same service and accounts the agent reads.
 struct Keys;
 
-fn entry(profile: &str) -> ApiResult<keyring::Entry> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(profile)).map_err(keychain)
-}
-
-fn keychain(e: keyring::Error) -> ApiError {
-    ApiError::Keychain {
-        detail: e.to_string(),
+fn failed(e: llm::Error) -> ApiError {
+    match e {
+        llm::Error::Keychain(detail) => ApiError::Keychain { detail },
+        other => ApiError::Endpoint {
+            detail: other.to_string(),
+        },
     }
 }
 
 impl KeyStore for Keys {
     fn set(&self, profile: &str, key: &str) -> ApiResult<()> {
-        entry(profile)?.set_password(key).map_err(keychain)
+        llm::keychain::set(profile, key).map_err(failed)
     }
 
     fn has(&self, profile: &str) -> bool {
-        entry(profile).is_ok_and(|e| e.get_password().is_ok())
+        llm::keychain::get(profile).is_ok_and(|k| k.is_some())
     }
 
     fn delete(&self, profile: &str) -> ApiResult<()> {
-        match entry(profile)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(keychain(e)),
-        }
+        llm::keychain::delete(profile).map_err(failed)
     }
 
     fn rename(&self, from: &str, to: &str) -> ApiResult<()> {
-        match entry(from)?.get_password() {
-            Ok(key) => {
-                self.set(to, &key)?;
+        match llm::keychain::get(from).map_err(failed)? {
+            Some(key) => {
+                self.set(to, key.expose())?;
                 self.delete(from)
             }
-            Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(keychain(e)),
+            None => Ok(()),
         }
     }
 }
 
-/// `GET /models` through the agent's transport. Read-aloud (`voices`, `speech`) waits for
-/// the shared client crate: until it lands they answer "not implemented".
-struct Llm {
-    http: Http,
+/// The voice asked for when a person has none set.
+const DEFAULT_VOICE: &str = "alloy";
+
+/// The calls that are not a session, through the shared client.
+struct Models(llm::Llm);
+
+impl Models {
+    /// The endpoint of a profile with the named model (none for a listing).
+    fn endpoint(profile: &Profile, model: &str) -> ApiResult<llm::Endpoint> {
+        let key = llm::keychain::get(&profile.name).map_err(failed)?;
+        let model = Model {
+            id: model.to_owned(),
+            ..Model::default()
+        };
+        Ok(agent::endpoint::endpoint(profile, &model, key))
+    }
 }
 
 #[async_trait]
-impl LlmPort for Llm {
+impl LlmPort for Models {
     async fn models(&self, profile: &Profile) -> ApiResult<Vec<String>> {
-        let target = agent::endpoint::target(profile, &AgentKeys)?;
-        Ok(self.http.models(&target).await?)
+        self.0
+            .models(&Self::endpoint(profile, "")?)
+            .await
+            .map_err(failed)
     }
 
+    /// The client lists no voices: the person's own choice (or the default) is what is sent.
     async fn voices(&self, _: &Profile, _: &str) -> ApiResult<Vec<String>> {
-        Err(ApiError::NotImplemented)
+        Ok(Vec::new())
     }
 
-    async fn speech(&self, _: &Profile, _: &str, _: Option<&str>, _: &str) -> ApiResult<Speech> {
-        Err(ApiError::NotImplemented)
+    async fn speech(
+        &self,
+        profile: &Profile,
+        model: &str,
+        voice: Option<&str>,
+        text: &str,
+    ) -> ApiResult<Speech> {
+        let bytes = self
+            .0
+            .speech(
+                &Self::endpoint(profile, model)?,
+                text,
+                voice.unwrap_or(DEFAULT_VOICE),
+            )
+            .await
+            .map_err(failed)?;
+        Ok(Speech {
+            bytes,
+            ext: "mp3".into(),
+        })
     }
 }
 
 /// Reachability is a TCP connect to the endpoint's host: nothing is sent. Plain fetches
-/// (avatars) wait for the shared client crate and answer "no network" until then.
-struct Net;
+/// (avatars) go through the shared client.
+struct Net(Arc<dyn Transport>);
 
 #[async_trait]
 impl NetPort for Net {
-    async fn get(&self, _: &str) -> Result<Option<Vec<u8>>, String> {
-        Err("no http client wired".into())
+    async fn get(&self, url: &str) -> Result<Option<Vec<u8>>, String> {
+        let reply = self
+            .0
+            .send(HttpRequest {
+                method: Method::Get,
+                url: url.to_owned(),
+                headers: Vec::new(),
+                body: Vec::new(),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        match reply.status {
+            200..=299 => Ok(Some(reply.body)),
+            // The site answered without the file.
+            400..=499 => Ok(None),
+            status => Err(format!("HTTP {status}")),
+        }
     }
 
     async fn reachable(&self, base_url: &str) -> bool {
@@ -223,12 +267,12 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
         app: app.clone(),
         engine: Mutex::new(Weak::new()),
     });
+    let http: Arc<dyn Transport> = Arc::new(llm::Http::new().map_err(failed)?);
+    let client = llm::Llm::new(http.clone(), Retry::default());
     let mut ports = Ports {
-        llm: Arc::new(Llm {
-            http: Http::default(),
-        }),
+        llm: Arc::new(Models(client.clone())),
         keys: Arc::new(Keys),
-        net: Arc::new(Net),
+        net: Arc::new(Net(http)),
         sink: sink.clone(),
         ..Ports::default()
     };
@@ -238,6 +282,7 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
             path.clone(),
             params.clone(),
             api::endpoints::Endpoints::default(),
+            client,
             sink.clone(),
             Arc::new(Local),
         )
@@ -370,4 +415,55 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use llm::{Canned, MemoryTransport};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn plain_fetches_map_the_status() {
+        let t = Arc::new(MemoryTransport::new([
+            Ok(Canned::ok(b"png")),
+            Ok(Canned::status(404, "")),
+            Ok(Canned::status(503, "")),
+        ]));
+        let net = Net(t.clone());
+        assert_eq!(net.get("http://x/a.png").await, Ok(Some(b"png".to_vec())));
+        assert_eq!(net.get("http://x/b.png").await, Ok(None));
+        assert_eq!(net.get("http://x/c.png").await, Err("HTTP 503".into()));
+        assert_eq!(t.sent()[0].url, "http://x/a.png");
+        assert_eq!(t.sent()[0].method, Method::Get);
+    }
+
+    #[tokio::test]
+    async fn the_model_list_and_speech_go_through_the_client() {
+        let t = Arc::new(MemoryTransport::new([
+            Ok(Canned::ok(br#"{"data":[{"id":"m1"},{"id":"m2"}]}"#)),
+            Ok(Canned::ok(b"audio")),
+            Ok(Canned::status(401, br#"{"error":{"message":"bad key"}}"#)),
+        ]));
+        let port = Models(llm::Llm::new(t.clone(), Retry::none()));
+        let profile = |wire| Profile {
+            name: "no-such-profile-in-the-keychain".into(),
+            base_url: "http://x/v1".into(),
+            wire_api: wire,
+            models: Vec::new(),
+        };
+        let chat = profile(api::endpoints::WireApi::Chat);
+        assert_eq!(port.models(&chat).await.unwrap(), ["m1", "m2"]);
+        let speech = port.speech(&chat, "tts", Some("v"), "hello").await.unwrap();
+        assert_eq!(speech.bytes, b"audio");
+        let body = String::from_utf8(t.sent()[1].body.clone()).unwrap();
+        assert!(body.contains(r#""voice":"v""#) && body.contains(r#""input":"hello""#));
+        let err = port.models(&chat).await.unwrap_err();
+        assert!(matches!(err, ApiError::Endpoint { detail } if detail == "HTTP 401: bad key"));
+        // No request is made for speech on the messages protocol.
+        let messages = profile(api::endpoints::WireApi::Messages);
+        let err = port.speech(&messages, "m", None, "hi").await.unwrap_err();
+        assert!(matches!(err, ApiError::Endpoint { detail } if detail.contains("not supported")));
+        assert_eq!(t.sent().len(), 3);
+    }
 }

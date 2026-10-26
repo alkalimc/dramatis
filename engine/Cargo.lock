@@ -1008,7 +1008,7 @@ dependencies = [
  "async-trait",
  "folio",
  "index",
- "keyring",
+ "llm",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

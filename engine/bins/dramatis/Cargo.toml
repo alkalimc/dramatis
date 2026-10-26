@@ -18,6 +18,7 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 api = { path = "../../crates/api", features = ["tauri"] }
 agent = { path = "../../crates/agent" }
+llm = { path = "../../crates/llm" }
 folio = { path = "../../crates/folio" }
 index = { path = "../../crates/index" }
 world = { path = "../../crates/world" }
@@ -27,8 +28,6 @@ tauri-plugin-notification = "=2.4.0"
 tauri-plugin-dialog = "=2.7.3"
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "sync", "time", "macros", "net"] }
 toml.workspace = true
-# The same keychain entries the agent reads: service `dramatis`, account `profile.<name>`.
-keyring = { version = "=3.6.3", features = ["apple-native"] }
 
 [dev-dependencies]
 folio = { path = "../../crates/folio", features = ["fixture"] }
