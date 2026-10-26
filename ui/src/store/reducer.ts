@@ -180,5 +180,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, groupDialog: a.open };
     case "dismissLibraryNotice":
       return { ...s, libraryNoticeDismissed: true };
+    case "error":
+      return { ...s, error: a.error };
   }
 }

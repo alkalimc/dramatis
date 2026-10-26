@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { api as defaultApi, type Api } from "./api";
 import { useT } from "./i18n";
 import { createActions, createStore, Provider, subscribe, useActions, useApi, useDispatch, useStore, type Drawer, type Store } from "./store";
-import { ErrorBar } from "./ui/ErrorBar";
+import { ErrorBar, InlineError } from "./ui/ErrorBar";
 import { AskCard } from "./screens/Ask";
 import { CaseDrawer, CasesDrawer } from "./screens/Cases";
 import { FirstOpen } from "./screens/FirstOpen";
@@ -45,9 +45,22 @@ function Shell() {
   const ask = useStore((s) => s.ask);
   const group = useStore((s) => s.groupDialog);
   const drawer = useStore((s) => s.drawer);
+  const statusError = useStore((s) => s.loadErrors.status);
+  const wordingError = useStore((s) => s.loadErrors.wording);
+  const actions = useActions();
   usePresence();
 
-  if (!status) return <p className="loading">{t("app.loading")}</p>;
+  if (!status) {
+    return statusError ? (
+      <main className="refused">
+        <InlineError error={statusError} onRetry={() => void actions.boot()} />
+      </main>
+    ) : (
+      <p className="loading" role="status">
+        {t("app.loading")}
+      </p>
+    );
+  }
   const corpus = status.corpus;
   if (corpus.state === "missing" || corpus.state === "unsupported_version" || corpus.state === "missing_requirement") {
     return (
@@ -67,6 +80,7 @@ function Shell() {
   return (
     <div className="app">
       <Header />
+      {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
       {corpus.encoder_mismatch && <p className="banner">{t("app.corpus.encoder")}</p>}
       <div className="body">
         <Main />
@@ -130,6 +144,7 @@ function Header() {
           {t("host.name")}
         </button>
       </h1>
+      <p className="role">{t("host.role")}</p>
       {mock && <span className="tag">{t("app.mock")}</span>}
       {clock && (
         <p className="clock" aria-label={t("clock.label")}>

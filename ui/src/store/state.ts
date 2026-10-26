@@ -103,6 +103,8 @@ export interface State {
   ask: AskDraft | null;
   groupDialog: boolean;
   libraryNoticeDismissed: boolean;
+  /** Last failed action (not a load), announced in a live region. */
+  error: Failure | null;
 }
 
 export const emptyWording: Wording = { entries: {}, scene_marker: { open: "*", close: "*" } };
@@ -136,6 +138,7 @@ export function initialState(): State {
     ask: null,
     groupDialog: false,
     libraryNoticeDismissed: false,
+    error: null,
   };
 }
 
@@ -167,4 +170,5 @@ export type Action =
   | { type: "drawer"; drawer: Drawer | null }
   | { type: "ask"; draft: AskDraft | null }
   | { type: "groupDialog"; open: boolean }
-  | { type: "dismissLibraryNotice" };
+  | { type: "dismissLibraryNotice" }
+  | { type: "error"; error: Failure | null };
