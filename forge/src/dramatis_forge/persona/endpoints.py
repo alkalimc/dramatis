@@ -19,7 +19,7 @@ from typing import Any
 
 KEYCHAIN_SERVICE = "dramatis"
 ENV_HOME = "DRAMATIS_HOME"
-WIRE_APIS = ("chat", "responses")
+WIRE_APIS = ("chat", "responses", "messages")
 
 
 class EndpointsError(Exception):
@@ -52,6 +52,7 @@ class Model:
     cache_breakpoints: int | None = None
     price_in: float | None = None
     price_in_cached: float | None = None
+    price_in_cache_write: float | None = None
     price_out: float | None = None
 
 
@@ -169,6 +170,7 @@ def _profile(raw: Any) -> Profile:
             cache_breakpoints=_opt(m, "cache_breakpoints", int, where),
             price_in=_opt(m, "price_in", (int, float), where),
             price_in_cached=_opt(m, "price_in_cached", (int, float), where),
+            price_in_cache_write=_opt(m, "price_in_cache_write", (int, float), where),
             price_out=_opt(m, "price_out", (int, float), where),
         ))
     return Profile(name=name, base_url=_need(raw, "base_url", str, where), wire_api=wire,

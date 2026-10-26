@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from dramatis_forge.folio import Folio
+from llm_support import sse_of
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "persona"
 PLACEHOLDER = "<reader>"
@@ -85,6 +86,10 @@ class FakeEndpoint:
         if callable(reply):
             reply = reply(json.loads(request.content))
         status, body = reply if isinstance(reply, tuple) else (200, reply)
+        if status == 200 and json.loads(request.content).get("stream"):
+            # An Anthropic-style call with a large output budget is streamed.
+            return httpx.Response(200, text=sse_of(body),
+                                  headers={"content-type": "text/event-stream"})
         return httpx.Response(status, json=body)
 
     @property
