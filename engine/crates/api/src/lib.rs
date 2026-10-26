@@ -16,8 +16,8 @@ pub mod commands;
 pub mod convert;
 pub mod corpus;
 pub mod display;
-pub mod engine;
 pub mod endpoints;
+pub mod engine;
 pub mod error;
 pub mod events;
 pub mod home;
@@ -29,20 +29,30 @@ pub mod tools;
 pub mod types;
 pub mod views;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 pub use commands::{Api, COMMANDS, Stub};
 pub use engine::{Engine, Ports};
 pub use error::{ApiError, ApiResult};
 pub use events::EVENTS;
 
-/// The implementation the app manages as Tauri state; every command forwards to it.
+/// The implementation the app manages as Tauri state; every command forwards to it. It
+/// can be replaced while the app runs (a different corpus was opened); commands already
+/// in flight finish against the one they started with.
 #[derive(Clone)]
-pub struct Handle(pub Arc<dyn Api>);
+pub struct Handle(Arc<RwLock<Arc<dyn Api>>>);
 
 impl Handle {
     pub fn new(api: impl Api) -> Self {
-        Self(Arc::new(api))
+        Self(Arc::new(RwLock::new(Arc::new(api))))
+    }
+
+    pub fn replace(&self, api: Arc<dyn Api>) {
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = api;
+    }
+
+    pub fn current(&self) -> Arc<dyn Api> {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -65,4 +75,27 @@ pub fn export_bindings(path: &std::path::Path) -> Result<(), specta_typescript::
         ),
         path,
     )
+}
+
+/// Deliver one engine event to the window as its typed Tauri event.
+#[cfg(feature = "tauri")]
+pub fn emit<H: tauri::Emitter<tauri::Wry> + tauri::Manager<tauri::Wry>>(
+    app: &H,
+    event: port::Event,
+) {
+    use port::Event::*;
+    use tauri_specta::Event as _;
+    let sent = match event {
+        MessageDelta(e) => e.emit(app),
+        MessageAdded(e) => e.emit(app),
+        ToolCalled(e) => e.emit(app),
+        WorldChanged(e) => e.emit(app),
+        ModeChanged(e) => e.emit(app),
+        RosterChanged(e) => e.emit(app),
+        QuotaChanged(e) => e.emit(app),
+        Notification(e) => e.emit(app),
+    };
+    if let Err(e) = sent {
+        eprintln!("dramatis: could not deliver an event: {e}");
+    }
 }

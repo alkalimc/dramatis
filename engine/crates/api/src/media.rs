@@ -35,7 +35,21 @@ pub fn image_ext(bytes: &[u8]) -> Option<&'static str> {
         [0x89, b'P', b'N', b'G', ..] => Some("png"),
         [0xFF, 0xD8, 0xFF, ..] => Some("jpg"),
         [b'G', b'I', b'F', b'8', ..] => Some("gif"),
-        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("webp"),
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => Some("webp"),
         _ => None,
     }
 }

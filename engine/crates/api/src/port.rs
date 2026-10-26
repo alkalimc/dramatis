@@ -22,8 +22,8 @@ use world::clock::Now;
 use crate::endpoints::{Endpoints, Profile};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{
-    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, RosterChanged,
-    ToolCalled, WorldChanged,
+    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, RosterChanged, ToolCalled,
+    WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId, TaskId};
 use crate::views::ImagePart;

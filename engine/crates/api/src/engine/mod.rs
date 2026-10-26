@@ -138,6 +138,11 @@ impl Engine {
         self.corpus.clone()
     }
 
+    /// Whether a chat role is configured: the app is in full form only with one.
+    pub fn chat_configured(&self) -> bool {
+        self.has_chat()
+    }
+
     /// Build the retrieval index now (it takes longer than the first screen may).
     pub fn warm(&self) {
         if let Some(c) = &self.corpus {
@@ -247,8 +252,7 @@ impl Engine {
                 person: person.clone(),
             });
         }
-        world::bond::ensure_available(&self.w(), &convert::world_person(person))
-            .map_err(world_err)
+        world::bond::ensure_available(&self.w(), &convert::world_person(person)).map_err(world_err)
     }
 
     // ---- app ----
@@ -259,7 +263,11 @@ impl Engine {
             && self.ports.agent.wired()
             && self.online.load(Ordering::Relaxed);
         AppStatus {
-            form: if full { AppForm::Full } else { AppForm::Library },
+            form: if full {
+                AppForm::Full
+            } else {
+                AppForm::Library
+            },
             corpus: self.state.clone(),
             needs_setup: world::settings::user_name(&self.w())
                 .ok()
@@ -301,14 +309,18 @@ impl Engine {
         let now = self.now();
         let w = self.w();
         let tier = world::settings::intensity(&w).map_err(world_err)?;
-        let status = world::quota::status(&w, tier, now.ms, &self.params.world.quota)
-            .map_err(world_err)?;
+        let status =
+            world::quota::status(&w, tier, now.ms, &self.params.world.quota).map_err(world_err)?;
         convert::quota_status(&w, &status, now).map_err(world_err)
     }
 
     fn set_tier_impl(&self, tier: Tier) -> ApiResult<()> {
-        world::settings::set(&self.w(), world::settings::INTENSITY, &convert::world_tier(tier))
-            .map_err(world_err)?;
+        world::settings::set(
+            &self.w(),
+            world::settings::INTENSITY,
+            &convert::world_tier(tier),
+        )
+        .map_err(world_err)?;
         let status = self.quota_view()?;
         self.emit(Event::QuotaChanged(QuotaChanged { status }));
         Ok(())
@@ -352,8 +364,8 @@ impl Engine {
         }
         let renamed = {
             let w = self.w();
-            let renamed = world::settings::set_user_name(&w, s.user_name.as_deref())
-                .map_err(world_err)?;
+            let renamed =
+                world::settings::set_user_name(&w, s.user_name.as_deref()).map_err(world_err)?;
             match birthday {
                 Some(d) => world::settings::set(&w, world::settings::USER_BIRTHDAY, &d),
                 None => world::settings::unset(&w, world::settings::USER_BIRTHDAY),

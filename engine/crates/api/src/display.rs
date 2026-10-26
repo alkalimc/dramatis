@@ -57,7 +57,10 @@ mod tests {
         assert_eq!(unnamed.show("Dr.<U>"), "Dr.Doctor");
         assert_eq!(Namer::new("<U>", Some("  "), None).show("<U>"), "you");
         // No placeholder declared: text passes through, even text that looks like one.
-        assert_eq!(Namer::new("", Some("Ada"), None).show("<U> and <>"), "<U> and <>");
+        assert_eq!(
+            Namer::new("", Some("Ada"), None).show("<U> and <>"),
+            "<U> and <>"
+        );
         assert_eq!(named.show_opt(None), None);
     }
 }

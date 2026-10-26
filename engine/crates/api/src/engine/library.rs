@@ -25,7 +25,11 @@ impl Engine {
         }
     }
 
-    pub(crate) fn search_impl(&self, query: &str, persons: &[PersonId]) -> ApiResult<SearchResults> {
+    pub(crate) fn search_impl(
+        &self,
+        query: &str,
+        persons: &[PersonId],
+    ) -> ApiResult<SearchResults> {
         let c = self.corpus()?;
         if query.trim().is_empty() {
             return Ok(SearchResults {

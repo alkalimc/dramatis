@@ -67,7 +67,7 @@ macro_rules! commands {
                 #[tauri::command]
                 #[specta::specta]
                 async fn $name(api: tauri::State<'_, Handle>, $($arg: $ty),*) -> ApiResult<$ret> {
-                    api.0.$name($($arg),*).await
+                    api.current().$name($($arg),*).await
                 }
             )*
 

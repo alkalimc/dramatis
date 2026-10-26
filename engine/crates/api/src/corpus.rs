@@ -104,14 +104,20 @@ impl Corpus {
             let mut stmt = folio
                 .conn()
                 .prepare("SELECT subject, slot FROM prompts WHERE trim(body) <> ''")?;
-            for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            for row in
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            {
                 let (subject, slot) = row?;
                 slots.entry(subject).or_default().insert(slot);
             }
         }
         for (subject, own) in &overrides {
             let entry = slots.entry(subject.clone()).or_default();
-            entry.extend(own.iter().filter(|(_, b)| !b.trim().is_empty()).map(|(s, _)| s.clone()));
+            entry.extend(
+                own.iter()
+                    .filter(|(_, b)| !b.trim().is_empty())
+                    .map(|(s, _)| s.clone()),
+            );
         }
         let personas: HashSet<String> = slots
             .into_iter()
@@ -230,8 +236,10 @@ impl Corpus {
     /// Where a person's avatar lives on the source site, from the optional manifest key
     /// `avatar_url_pattern` (`{page}` stands for the page title); `None` without one.
     pub fn avatar_url(&self, page: &str) -> Option<String> {
-        (!self.avatar_url_pattern.is_empty())
-            .then(|| self.avatar_url_pattern.replace("{page}", &page.replace(' ', "_")))
+        (!self.avatar_url_pattern.is_empty()).then(|| {
+            self.avatar_url_pattern
+                .replace("{page}", &page.replace(' ', "_"))
+        })
     }
 
     /// The first line of a person's profile text, if the corpus has a profile unit for them.
@@ -254,10 +262,7 @@ impl Corpus {
         self.with_folio(|f| {
             let mut args: Vec<&dyn rusqlite::ToSql> = vec![&id];
             args.extend(templates.iter().map(|t| t as &dyn rusqlite::ToSql));
-            let text: Option<String> = f
-                .conn()
-                .query_row(&sql, args.as_slice(), |r| r.get(0))
-                .ok();
+            let text: Option<String> = f.conn().query_row(&sql, args.as_slice(), |r| r.get(0)).ok();
             Ok(text.and_then(|t| {
                 t.lines()
                     .map(str::trim)
@@ -350,9 +355,7 @@ fn read_overrides(dir: &Path) -> HashMap<String, BTreeMap<String, String>> {
     };
     let mut out = HashMap::new();
     for path in entries.filter_map(Result::ok).map(|e| e.path()) {
-        let yaml = path
-            .extension()
-            .is_some_and(|x| x == "yaml" || x == "yml");
+        let yaml = path.extension().is_some_and(|x| x == "yaml" || x == "yml");
         let Some(subject) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
@@ -366,7 +369,10 @@ fn read_overrides(dir: &Path) -> HashMap<String, BTreeMap<String, String>> {
             Some(slots) => {
                 out.insert(subject.to_owned(), slots);
             }
-            None => eprintln!("dramatis: ignoring unreadable prompt override {}", path.display()),
+            None => eprintln!(
+                "dramatis: ignoring unreadable prompt override {}",
+                path.display()
+            ),
         }
     }
     out

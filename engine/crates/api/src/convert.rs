@@ -272,7 +272,10 @@ mod tests {
 
     #[test]
     fn ids_round_trip_and_garbage_is_not_found() {
-        assert_eq!(world_channel(&channel_id(world::ChannelId(7))), Ok(world::ChannelId(7)));
+        assert_eq!(
+            world_channel(&channel_id(world::ChannelId(7))),
+            Ok(world::ChannelId(7))
+        );
         assert_eq!(world_task(&t::TaskId::from("x")), Err(ApiError::NotFound));
     }
 }

@@ -59,7 +59,9 @@ impl Engine {
         let mut trail = Vec::new();
         for child in task::children(&w, id).map_err(world_err)? {
             let reply = match child.reply {
-                Some(m) => Some(self.message_view(&message::get(&w, m).map_err(world_err)?, offset)),
+                Some(m) => {
+                    Some(self.message_view(&message::get(&w, m).map_err(world_err)?, offset))
+                }
                 None => None,
             };
             trail.push(TrailEntry {

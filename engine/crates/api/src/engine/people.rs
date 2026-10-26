@@ -216,10 +216,8 @@ impl Engine {
         let offset = self.now().offset_min;
         let w = self.w();
         let b = bond::user_bond(&w, &wp).map_err(world_err)?;
-        let off: HashSet<world::PersonId> = bond::disabled(&w)
-            .map_err(world_err)?
-            .into_iter()
-            .collect();
+        let off: HashSet<world::PersonId> =
+            bond::disabled(&w).map_err(world_err)?.into_iter().collect();
         Ok(PersonPage {
             person: self.person_ref(&p.id),
             summary,

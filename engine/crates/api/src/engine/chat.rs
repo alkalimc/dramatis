@@ -108,8 +108,8 @@ impl Engine {
         let offset = self.now().offset_min;
         let w = self.w();
         channel::get(&w, ch).map_err(world_err)?;
-        let rows = message::history(&w, ch, before, limit.clamp(1, HISTORY_MAX))
-            .map_err(world_err)?;
+        let rows =
+            message::history(&w, ch, before, limit.clamp(1, HISTORY_MAX)).map_err(world_err)?;
         Ok(rows.iter().map(|m| self.message_view(m, offset)).collect())
     }
 
@@ -263,12 +263,7 @@ impl Engine {
                 field: "message".into(),
             });
         }
-        let stem = media::stem(&[
-            &profile.name,
-            &model,
-            voice.as_deref().unwrap_or(""),
-            &text,
-        ]);
+        let stem = media::stem(&[&profile.name, &model, voice.as_deref().unwrap_or(""), &text]);
         let file = |p: std::path::PathBuf| MediaFile {
             path: p.to_string_lossy().into_owned(),
         };
@@ -314,7 +309,10 @@ mod tests {
 
     #[test]
     fn scene_spans_are_not_read() {
-        assert_eq!(spoken("*waves* Hello. *sits* Well.", "*", "*"), " Hello.  Well.");
+        assert_eq!(
+            spoken("*waves* Hello. *sits* Well.", "*", "*"),
+            " Hello.  Well."
+        );
         assert_eq!(spoken("Hi *unclosed", "*", "*"), "Hi ");
         assert_eq!(spoken("(a) b", "(", ")"), " b");
         assert_eq!(spoken("plain", "", ""), "plain");

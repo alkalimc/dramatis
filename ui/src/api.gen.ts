@@ -136,6 +136,8 @@ export type ApiError = { code: "not_implemented" } | { code: "not_found" } |
 { code: "invalid"; field: string } | 
 /**  The target is disabled and so does not exist for this purpose. */
 { code: "disabled"; person: PersonId } | 
+/**  The corpus has no persona for this person: nobody can speak as them yet. */
+{ code: "no_persona"; person: PersonId } | 
 /**  Quota band three: no new calls until the window releases. */
 { code: "quota_exhausted"; release_at: Timestamp } | 
 /**  No chat role configured: the app is in library form. */
@@ -427,6 +429,8 @@ export type PersonPage = {
 	summary: string | null,
 	trust: number,
 	mode: Mode,
+	/**  See [`RosterRow::has_persona`]. */
+	has_persona: boolean,
 	last_seen: Timestamp | null,
 	tasks_done: number,
 	companions: PersonRef[],
@@ -540,6 +544,11 @@ export type RosterGroup = {
 export type RosterRow = {
 	person: PersonRef,
 	mode: Mode,
+	/**
+	 *  Whether the corpus has a persona for them. Without one they can be read about but
+	 *  not talked to, asked, relayed to or put in a group.
+	 */
+	has_persona: boolean,
 	recent: Activity | null,
 	/**  People they often appear with in the corpus. */
 	companions: PersonRef[],
