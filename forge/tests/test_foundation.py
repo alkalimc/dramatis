@@ -330,7 +330,7 @@ def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_decla
     assert list(sp.conflicts) == [("s2", "Bob")]
 
 
-def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, pack):
+def _loose_speakers(tmp_path, pack, script_keys):
     from dramatis_forge.speakers import Speakers
     ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None,
                     portrait_loose=lambda k: k.split("_")[0])
@@ -338,11 +338,23 @@ def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, p
     with Archive(tmp_path / "t.archive") as a:
         a.write_identity({"Ann": [("Ann", "canonical", 0)]})
         a.put_page("Ann", "7_ann", 1, "now")
+        insert(a, [Line(scene="S", seq=i, speaker="X", text="t", portrait=k)
+                   for i, k in enumerate(script_keys, 1)])
         a.commit()
-        sp = Speakers(a, p, replace(Params().speaker, portrait_lines=1))
+        return Speakers(a, p, replace(Params().speaker, portrait_lines=1))
+
+
+def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, pack):
+    sp = _loose_speakers(tmp_path, pack, ["7_other", "8_other"])
     assert sp.loose_person == {"7": "Ann"}
     assert sp._portrait_person("7_other") == "Ann"
     assert sp._portrait_person("8_other") is None
+
+
+def test_a_number_the_scripts_spell_with_two_slugs_names_no_portrait(tmp_path, pack):
+    sp = _loose_speakers(tmp_path, pack, ["7_other", "7_third"])
+    assert sp._portrait_person("7_other") is None
+    assert sp._portrait_person("7_ann") == "Ann"  # the exact key still matches
 
 
 def test_a_reply_id_no_choice_offers_is_counted_as_unresolved(pack):
