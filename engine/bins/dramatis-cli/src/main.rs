@@ -343,6 +343,7 @@ fn search(path: &Path, request: &SearchRequest) -> Result<()> {
         let how = match resolved.how {
             index::How::Unique => "alias     ",
             index::How::Qualified => "qualified ",
+            index::How::Word => "word      ",
         };
         let person = resolved.person.as_deref().unwrap_or("(not a person)");
         println!(
