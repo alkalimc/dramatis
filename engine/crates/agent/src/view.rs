@@ -8,7 +8,6 @@ use world::quota::{self, Band, Span};
 use world::{Actor, ChannelId, FactId, MessageId, PersonId, Shape, TaskId, Tier};
 
 use crate::error::{Result, timestamp};
-use crate::store;
 
 pub fn channel_id(c: ChannelId) -> t::ChannelId {
     t::ChannelId(c.0.to_string())
