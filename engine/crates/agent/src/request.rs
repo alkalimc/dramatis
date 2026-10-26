@@ -341,6 +341,7 @@ pub fn build(call: &Call<'_>, ep: &Endpoint) -> Result<Request> {
 mod tests {
     use super::*;
     use llm::Caps;
+    use serde_json::json;
 
     fn ep(protocol: Protocol, caps: Caps) -> Endpoint {
         Endpoint {
@@ -401,6 +402,35 @@ mod tests {
         assert_eq!(harness_texts(&msgs[1]).count(), 0);
         assert_eq!(harness_texts(&msgs[2]).collect::<Vec<_>>(), ["found"]);
         assert!(parse(b"{\"item\":\"user\",\"text\":\"old\"}").is_none());
+    }
+
+    #[test]
+    fn native_blocks_go_back_only_to_their_own_protocol() {
+        let thinking = json!({"type": "thinking", "thinking": "", "signature": "s"});
+        let reasoning = json!({"type": "reasoning", "id": "rs", "encrypted_content": "e"});
+        let log = [
+            Message::user("hi"),
+            Message::assistant(vec![Part::Native(thinking.clone()), Part::Text("a".into())]),
+            Message::assistant(vec![Part::Native(reasoning.clone())]),
+        ];
+        let kept = |p| for_protocol(&log, p);
+        let on_messages = kept(Protocol::AnthropicMessages);
+        assert_eq!(
+            on_messages.len(),
+            2,
+            "a reply of foreign blocks only is dropped"
+        );
+        assert_eq!(on_messages[1].parts[0], Part::Native(thinking));
+        assert_eq!(kept(Protocol::OpenAiResponses).len(), 3);
+        assert_eq!(
+            kept(Protocol::OpenAiResponses)[1].parts,
+            [Part::Text("a".into())]
+        );
+        assert_eq!(
+            kept(Protocol::OpenAiChat)[1].parts,
+            [Part::Text("a".into())]
+        );
+        assert_eq!(log[1].parts.len(), 2, "the log itself is untouched");
     }
 
     #[test]
