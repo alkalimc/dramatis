@@ -137,6 +137,9 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
         replace(a, target=_canonical(a.target, roster.of_page, redirects))
         for a in buckets["alias"]]
     buckets["alias"] = [a for a in buckets["alias"] if a.alias != a.target]
+    persons = set(roster.of_page.values())
+    buckets["alias"] = [Alias(*row) for row in settle_term_targets(
+        [a.row() for a in buckets["alias"]], persons, ("realname",))]
     check_aliases(buckets["alias"], redirects, set(roster.of_page.values()), rep)
 
     # ---- store, reconciling produced against stored ----
@@ -234,6 +237,50 @@ def _canonical(name: str, to_person: Mapping[str, str], redirects: Mapping[str, 
     return to_person.get(name, name)
 
 
+#: Alias kinds whose target is a person by construction (a name the site or the story gives
+#: that person). A term rendering that points at one of these names points at the person.
+PERSON_NAME_KINDS = ("realname", "speaker")
+#: Alias kind for a short foreign term rendering that must match as a whole word, with the
+#: case it is written in. Same target semantics as `TERM_ALIAS`; the engine reads the kind.
+TERM_EXACT_ALIAS = "term_exact"
+_RE_CJK_ANY = re.compile(r"[\u3400-\u9fff]")
+
+
+def settle_term_targets(
+    rows: list[tuple[str, str, str]], persons: set[str], via: tuple[str, ...] = PERSON_NAME_KINDS,
+) -> list[tuple[str, str, str]]:
+    """Point term renderings that name another alias (a real name, a speaker label) at the
+    person that alias names, when the alias names exactly one. `rows` are (alias, target,
+    kind); a rendering never ends on an alias when the chain can be followed to a person."""
+    names: dict[str, set[str]] = {}
+    for alias, target, kind in rows:
+        if kind in via and target in persons:
+            names.setdefault(alias, set()).add(target)
+    out = []
+    for alias, target, kind in rows:
+        found = names.get(target)
+        if kind in (TERM_ALIAS, TERM_EXACT_ALIAS) and target not in persons and found and len(found) == 1:
+            target = next(iter(found))
+        if alias != target:
+            out.append((alias, target, kind))
+    return out
+
+
+def mark_exact_terms(rows: list[tuple[str, str, str]], max_chars: int) -> list[tuple[str, str, str]]:
+    """Term renderings of at most `max_chars` characters with no CJK character (a short
+    foreign word: `Ben`, `Dr.`, `Ace`) become `term_exact` (0 turns the rule off)."""
+    if max_chars <= 0:
+        return rows
+    return [(a, t, TERM_EXACT_ALIAS if k == TERM_ALIAS and len(a) <= max_chars
+             and not _RE_CJK_ANY.search(a) else k) for a, t, k in rows]
+
+
+def alias_chains(rows: list[tuple[str, str, str]], persons: set[str]) -> list[tuple[str, str, str]]:
+    """Rows whose target is itself an alias and not a person: a hop too many."""
+    names = {a for a, _, _ in rows}
+    return [r for r in rows if r[1] in names and r[1] not in persons]
+
+
 #: A rendering with more characters of the corpus language than this, or with a sentence
 #: stop, is a gloss and not a name. (A long name in another script is still a name.)
 ALIAS_MAX_CHARS = 25
@@ -245,13 +292,14 @@ def check_aliases(
 ) -> None:
     """G4: the alias table must not disagree with itself.
 
-    * a target that is itself a redirect is a hop too many (`persons` are exempt: a person
-      is the end of the chain by definition);
+    * a target that is itself an alias of any kind is a hop too many (`persons` are exempt:
+      a person is the end of the chain by definition);
     * a term rendering that is a sentence is a note taken for a spelling;
     * a term rendering that another relation (redirect, real name, disambiguation) sends
       elsewhere is a real conflict, left for a person to read.
     """
-    hops = [a for a in aliases if a.target in redirects and a.target not in persons]
+    names = {a.alias for a in aliases} | set(redirects)
+    hops = [a for a in aliases if a.target in names and a.target not in persons]
     if hops:
         rep.ledger.add(
             "G4", f"{len(hops)} alias(es) point at another alias, not at its canonical name "

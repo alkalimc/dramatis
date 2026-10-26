@@ -483,6 +483,10 @@ class ChunkTemplate:
     #: Absorb a trailing stub shorter than `target // 2` into the previous unit,
     #: rather than emitting a fragment that embeds as noise.
     absorb_tail: bool = True
+    #: Prose templates: a last piece of a split entry shorter than this joins the piece
+    #: before it, so a unit may exceed `max_chars` by up to `min_tail - 1` characters.
+    #: 0 leaves tails alone (dialogue has `absorb_tail` for the same purpose).
+    min_tail: int = 0
     #: Sequence templates only: a unit ends before a scene change only once it holds this
     #: many characters as well as half its records; six short lines are not a scene.
     cut_min_chars: int = 0
@@ -565,6 +569,13 @@ class ChunkPolicy:
     #: record a run of its own. A page that tells several things in turn gets depth `n`: the
     #: records sharing their first `n` headings are one run.
     lore_spans: tuple[tuple[str, int], ...] = ()
+    #: Regexes over a lore page's title with a named group `subject`: the page is about the
+    #: person it names, so every record on it is that person's own material (when the name
+    #: is a roster page or a unique redirect or real-name alias; no other inference).
+    lore_subject_pages: tuple[str, ...] = ()
+    #: Regexes over a lore page's title for pages that list one entry per person, headed by
+    #: the person's name: a record's subject is the last segment of its heading path.
+    lore_leaf_pages: tuple[str, ...] = ()
     #: Regexes no header may match: words of the work's interface. A match is a failure of
     #: the rules above, found on the units that shipped.
     header_taboo: tuple[str, ...] = ()
@@ -591,6 +602,15 @@ class ChunkPolicy:
     #: A dossier item whose identical text appears on at least this many persons is a
     #: stock text of the work, not theirs: stored once, owned by nobody. 0 turns it off.
     shared_min: int = 0
+
+    def lore_subject(self, page: str, path: tuple[str, ...]) -> str | None:
+        """The name a lore record is about, if the page declares one."""
+        for rx in self.lore_subject_pages:
+            if m := re.search(rx, page):
+                return m.group("subject")
+        if path and any(re.search(rx, page) for rx in self.lore_leaf_pages):
+            return path[-1]
+        return None
 
     def label(self, key: str) -> str:
         return self.labels.get(key) or LABELS[key]

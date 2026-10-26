@@ -34,9 +34,27 @@ class Speaker:
 
 
 @dataclass(frozen=True)
+class Scope:
+    #: A person lived the dialogue units this many before and after each unit they speak in,
+    #: within the same scene. A unit holds about a dozen lines, so 2 reaches the exchange
+    #: leading into and out of their turn without taking in a long scene they left or joined.
+    lived_window: int = 2
+
+
+@dataclass(frozen=True)
+class Alias:
+    #: A foreign-script term rendering with at most this many characters is matched as a
+    #: whole word, case-sensitively (0 turns it off): short common words would otherwise
+    #: fire inside ordinary text.
+    whole_word_max: int = 4
+
+
+@dataclass(frozen=True)
 class Params:
     coldstart: Coldstart = field(default_factory=Coldstart)
     speaker: Speaker = field(default_factory=Speaker)
+    scope: Scope = field(default_factory=Scope)
+    alias: Alias = field(default_factory=Alias)
 
     @classmethod
     def load(cls, path: Path | None) -> Params:

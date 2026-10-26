@@ -25,7 +25,9 @@ from .archive import Archive
 from .chunk import CARD_SPAN, Env, archive_triggers, engine_meta_test
 from .chunk import build as build_chunks
 from .config import RunInfo
-from .normalize import TERM_ALIAS
+from .normalize import (
+    TERM_ALIAS, alias_chains, mark_exact_terms, settle_term_targets,
+)
 from .folio import FOLIO_FORMAT_VERSION, Folio
 from .guards import Ledger
 from .pack import Pack, PersonSource
@@ -183,13 +185,18 @@ def run(
         rep.chunks = ord_
 
         _write_roster(archive, folio, pack, params, env)
-        _write_relations(archive, folio, pack)
-        folio.write_aliases([
+        _write_relations(archive, folio, pack, params)
+        alias_rows = [
             *((r["alias"], r["target"], r["kind"])
               for r in archive.db.execute("SELECT alias,target,kind FROM aliases")),
             # A speaker label the portraits settle is a name the story gives that person.
             *((label, person, SPEAKER_ALIAS) for label, person in env.speakers.speaker_aliases()),
-        ])
+        ]
+        alias_rows = mark_exact_terms(
+            settle_term_targets(alias_rows, set(env.speakers.person_of.values())),
+            params.alias.whole_word_max)
+        _check_alias_chains(rep, alias_rows, set(env.speakers.person_of.values()))
+        folio.write_aliases(alias_rows)
         for template, n in sorted(env.skipped.items()):
             rep.ledger.add(
                 "G5", f"{n} {template} record(s) made no unit: the pack's policy skips their slot")
@@ -424,13 +431,15 @@ def coldstart(
     return [{"person_id": p, "reason": reasons[p]} for p in chosen]
 
 
-def _write_relations(archive: Archive, folio: Folio, pack: Pack) -> None:
+def _write_relations(archive: Archive, folio: Folio, pack: Pack, params: Params) -> None:
     """Co-appearance and first-hand knowledge, both from who speaks in which scene.
 
     A scene is a dialogue unit's `span_of`. `cooccur` counts, per unordered pair, the
     scenes both speak in. `knowledge_scope` is `self` (every unit attributed to the
-    person) plus `lived` (the other dialogue units of every scene they speak in).
+    person) plus `lived` (the dialogue units within `scope.lived_window` units before and
+    after each unit they speak in, in the same scene).
     """
+    window = params.scope.lived_window
     dialogue = pack.chunking.shaped("dialogue")
     marks = ",".join("?" * len(dialogue))
     units_of: dict[str, list[str]] = {}
@@ -439,11 +448,13 @@ def _write_relations(archive: Archive, folio: Folio, pack: Pack) -> None:
     ):
         units_of.setdefault(scene, []).append(chunk_id)
     in_scene: dict[str, set[str]] = {}
-    for scene, person_id in folio.db.execute(
-        "SELECT DISTINCT c.span_of, u.person_id FROM unit_persons u "
+    speaks_in: dict[str, list[tuple[str, str]]] = {}
+    for scene, person_id, chunk_id in folio.db.execute(
+        "SELECT c.span_of, u.person_id, c.id FROM unit_persons u "
         f"JOIN chunks c ON c.id = u.chunk_id WHERE c.template IN ({marks})", dialogue,
     ):
         in_scene.setdefault(scene, set()).add(person_id)
+        speaks_in.setdefault(scene, []).append((person_id, chunk_id))
 
     pairs: dict[tuple[str, str], int] = {}
     for people in in_scene.values():
@@ -459,8 +470,29 @@ def _write_relations(archive: Archive, folio: Folio, pack: Pack) -> None:
     # `self` wins where a unit is both: it is the stronger claim.
     folio.db.executemany(
         "INSERT OR IGNORE INTO knowledge_scope(person_id,chunk_id,kind) VALUES(?,?,'lived')",
-        ((person_id, cid) for scene, people in in_scene.items()
-         for person_id in people for cid in units_of.get(scene, ())))
+        ((person_id, cid) for scene, spoken in speaks_in.items()
+         for person_id, cid in _lived(units_of.get(scene, ()), spoken, window)))
+
+
+def _lived(units: list[str], spoken: list[tuple[str, str]], window: int):
+    """(person, unit) for each unit within `window` units of one the person speaks in."""
+    at = {cid: i for i, cid in enumerate(units)}
+    for person_id, cid in spoken:
+        i = at.get(cid)
+        if i is None:
+            continue
+        for j in range(max(i - window, 0), min(i + window + 1, len(units))):
+            yield person_id, units[j]
+
+
+def _check_alias_chains(rep: CorpusReport, rows: list[tuple[str, str, str]], persons: set[str]) -> None:
+    """G4, after speaker aliases join the table: no alias may end on another alias."""
+    speaker_names = {a for a, _, k in rows if k == SPEAKER_ALIAS}
+    hops = [r for r in alias_chains(rows, persons) if r[1] in speaker_names]
+    if hops:
+        rep.ledger.add(
+            "G4", f"{len(hops)} alias(es) point at a speaker alias, not at its person "
+                  "(first: " + ", ".join(f"{a}->{t}" for a, t, _ in hops[:5]) + ")")
 
 
 def _redundancy(

@@ -78,16 +78,22 @@ class Chunk:
 CARD_SPAN = "#card"
 
 
-def _split(text: str, limit: int, breaks: tuple[str, ...]) -> list[str]:
+def _split(text: str, limit: int, breaks: tuple[str, ...], min_tail: int = 0) -> list[str]:
     """Cut over-long text at the most natural boundary available.
 
     `breaks` is tried in order (paragraph, then sentence, then clause, typically). A
     hard character cut is the last resort rather than the rule: splitting mid-clause
     produces a unit whose first sentence is a fragment, and a fragment embeds as noise.
+
+    A last piece shorter than `min_tail` characters is folded back into the piece before
+    it (0 disables): a few words alone, such as a signature line, embed as noise. The
+    folded piece may exceed `limit` by up to `min_tail - 1` characters.
     """
     if len(text) <= limit:
         return [text]
     out: list[str] = []
+    #: The whitespace stripped at the last cut, restored if the tail folds back.
+    gap = ""
     rest = text
     while len(rest) > limit:
         window = rest[:limit]
@@ -100,11 +106,18 @@ def _split(text: str, limit: int, breaks: tuple[str, ...]) -> list[str]:
             cut = -1
         if cut <= 0:
             cut = limit
-        out.append(rest[:cut].strip())
-        rest = rest[cut:].lstrip()
+        piece = rest[:cut]
+        out.append(piece.strip())
+        tail = rest[cut:]
+        gap = piece[len(piece.rstrip()):] + tail[:len(tail) - len(tail.lstrip())]
+        rest = tail.lstrip()
     if rest:
         out.append(rest)
-    return [p for p in out if p]
+    out = [p for p in out if p]
+    if min_tail and len(out) > 1 and len(out[-1]) < min_tail:
+        tail = out.pop()
+        out[-1] = f"{out[-1]}{gap}{tail}"
+    return out
 
 
 @dataclass
@@ -145,8 +158,13 @@ def _lore(
     """
     policy = pack.chunking
     label_sep = policy.sep("label")
+    speakers = env.speakers
     for r in archive.db.execute("SELECT page,seq,path,text,revid FROM lore ORDER BY page,seq"):
         path = tuple(json.loads(r["path"]))
+        # Only names the site itself declares: a roster page (or form) title, or a redirect
+        # or real name that points at exactly one person.
+        subject = policy.lore_subject(r["page"], path)
+        owner = subject and (speakers.person_of.get(subject) or speakers.alias_person.get(subject))
         crumbs = policy.lore_crumbs(r["page"], path)
         head = header.format(
             page=crumbs[0] if crumbs else r["page"],
@@ -154,10 +172,11 @@ def _lore(
         body = r["text"]
         if crumbs and body.startswith(f"{crumbs[-1]}{label_sep}") and len(crumbs) > 1:
             body = body[len(crumbs[-1]) + len(label_sep):].lstrip() or body
-        for part in _split(body, t.max_chars, policy.breaks):
+        for part in _split(body, t.max_chars, policy.breaks, t.min_tail):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=" › ".join(path) or r["page"], revid=r["revid"],
+                persons=(owner,) if owner else (),
                 span_of=policy.lore_run(r["page"], path, r["seq"]),
                 span_from=r["seq"], span_to=r["seq"],
             )
@@ -350,7 +369,7 @@ def _dialogue(
             # An over-long unit still splits on characters, but it keeps one span:
             # the parts are the same stretch of conversation, so a reader widening
             # from any of them should get the same neighbours.
-            for part in _split(body, t.max_chars, pack.chunking.breaks):
+            for part in _split(body, t.max_chars, pack.chunking.breaks, t.min_tail):
                 yield Chunk(
                     template=t.name, page=scene["id"], text=part, header=head,
                     title=scene["id"], persons=persons, revid=scene["revid"],
@@ -550,7 +569,7 @@ def _profile(
             head = header.format(
                 person=f"{named(person_id)}{tag(page)}",
                 section=f" · {policy.section_name(title)}" if title else "")
-            for part in _split(text, t.max_chars, policy.breaks):
+            for part in _split(text, t.max_chars, policy.breaks, t.min_tail):
                 yield Chunk(
                     template=t.name, page=page, text=part, header=head,
                     title=title or person_id, persons=(person_id,),
@@ -626,7 +645,7 @@ def _letter(
             body = f"{r['date']}\n{body}"
         sender = r["sender"] or ""
         owner = speakers.person_of.get(sender) or speakers.alias_person.get(sender)
-        for part in _split(body, t.max_chars, pack.chunking.breaks):
+        for part in _split(body, t.max_chars, pack.chunking.breaks, t.min_tail):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=r["title"] or label("letter"),
