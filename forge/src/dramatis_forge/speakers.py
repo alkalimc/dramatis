@@ -183,7 +183,9 @@ class Speakers:
             own = self.person_of.get(label)
             if own is not None:
                 shown, n, total = self._shown(portraits)
-                if shown is not None and shown != own and n == total and n >= 3:
+                declared = self.declared.get((scene, label))
+                if (shown is not None and shown != own and n == total and n >= 3
+                        and declared != shown):
                     self.conflicts[(scene, label)] = Conflict(scene, label, own, shown, n)
         return out
 
