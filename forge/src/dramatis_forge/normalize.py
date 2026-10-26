@@ -12,6 +12,7 @@ they end up inside whichever parser happened to need them first.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 
 from . import baseline as baseline_mod
@@ -127,6 +128,7 @@ def run(archive: Archive, pack: Pack, *, progress=None) -> Report:
 
     # ---- aliases from the site's own naming relations ----
     buckets.setdefault("alias", []).extend(_site_aliases(archive, pack, roster, rep))
+    buckets["alias"].extend(term_aliases(buckets.get("term", ()), roster.of_page))
 
     # ---- store, reconciling produced against stored ----
     for kind in ORDER:
@@ -181,6 +183,30 @@ def _check_yield(ctx: PageContext, route, produced: list[Record], cleaner: Clean
             "G3", f"{YIELD_DETAIL}{kept / shown:.0%} of visible text ({kept:,} of {shown:,} "
                   f"letters) is under the route's floor of {route.min_yield:.0%}",
             page=ctx.title)
+
+
+#: Alias kind for a rendering of a glossary term in another script or spelling.
+TERM_ALIAS = "term"
+#: Where one cell of a glossary row holds several renderings.
+_RE_RENDERINGS = re.compile(r"[/\n]")
+
+
+def term_aliases(terms, to_person: dict[str, str]) -> list[Alias]:
+    """Every rendering of a glossary term is a name for it.
+
+    A glossary says which foreign spelling means which native term; as an alias table it
+    lets a query in one spelling reach text written in another. The terms themselves are
+    not units: a row of translations is a lookup, not something anyone says.
+    """
+    out: dict[tuple[str, str], Alias] = {}
+    for term in terms:
+        target = to_person.get(term.term, term.term)
+        for value in term.translations.values():
+            for form in _RE_RENDERINGS.split(value):
+                form = form.strip()
+                if form and form != term.term:
+                    out.setdefault((form, target), Alias(alias=form, target=target, kind=TERM_ALIAS))
+    return list(out.values())
 
 
 def _site_aliases(

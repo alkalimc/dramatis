@@ -102,6 +102,10 @@ class SeedSet:
     #: advance. `scope` neither queries nor clears these sets, so re-scoping does not
     #: forget what fetching found.
     discovered: bool = False
+    #: `(title, wikitext) -> class name` for a set whose pages come in layouts so unlike that
+    #: one set's boundaries say little: the reading sample takes each class's own first and
+    #: largest page instead of the set's.
+    layout: Callable[[str, str], str] | None = None
 
     def __post_init__(self) -> None:
         if self.enumerate is None and self.fixed is None and not self.discovered:
@@ -300,8 +304,11 @@ class InlineRules:
     tab_class: str = ""
     #: Heading path given to prose that precedes the first heading.
     lead_section: str = "lead"
-    #: Joins a content template's qualifier to its body.
+    #: Joins a content template's qualifier to its body; also joins a definition-list term
+    #: to its definition.
     qualifier_sep: str = ": "
+    #: Joins the several definitions of one term of a definition list.
+    list_sep: str = ", "
     #: Regular-expression character class of the corpus language's letters, for
     #: measuring yield (`Cleaner.visible`). Empty counts every letter, which on a page
     #: carrying other languages or file names measures the wrong thing.
@@ -533,6 +540,13 @@ class ChunkPolicy:
     voice_skip: tuple[str, ...] = ()
     #: The same rewriting for the names of dossier sections and items in a header.
     section_words: tuple[tuple[str, str], ...] = ()
+    #: Pages of a lore template whose header names the page by the last segment of its
+    #: title, as `(regex, replacement)` pairs: the first that matches rewrites the title.
+    #: What the wiki calls the page (a namespace, a section of the site) is not a topic.
+    lore_pages: tuple[tuple[str, str], ...] = ()
+    #: Regexes for heading-path segments a header leaves out: letter buckets, bare numbers,
+    #: template names. They place an entry on the wiki's page, not in the world.
+    lore_path_drop: tuple[str, ...] = ()
     #: Regexes no header may match: words of the work's interface. A match is a failure of
     #: the rules above, found on the units that shipped.
     header_taboo: tuple[str, ...] = ()
@@ -581,6 +595,18 @@ class ChunkPolicy:
         """What a header calls a voice line: its title, else its trigger's words."""
         raw = title or self.triggers.get(trigger) or ""
         return self._reworded(self.voice_words, raw) or self.label("voice")
+
+    def lore_crumbs(self, page: str, path: tuple[str, ...]) -> list[str]:
+        """A lore unit's header parts: its topic, then the headings below it, in-world only."""
+        top = self._reworded(self.lore_pages, page)
+        drop = re.compile("|".join(self.lore_path_drop)) if self.lore_path_drop else None
+        out = [top] if top else []
+        for seg in path:
+            if drop is not None and drop.search(seg):
+                continue
+            if seg and (not out or out[-1] != seg):
+                out.append(seg)
+        return out
 
     def section_name(self, name: str) -> str:
         """A dossier section or item as a header names it."""

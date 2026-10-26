@@ -216,3 +216,44 @@ def test_a_skipped_slot_makes_no_unit_and_is_counted(tmp_path, pack):
         rep = corpus.run(a, p, tmp_path / "t.folio", segmenter="bigram")
     assert [c.text for c in got] == ["Hi."] and env.skipped == {"voice": 1}
     assert any("made no unit" in f.detail for f in rep.ledger.findings)
+
+
+def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
+    from dramatis_forge.report import samples
+    seeds = tuple(replace(s, layout=lambda t, w: "long" if len(w) > 30 else "short")
+                  if s.key == "people" else s for s in pack.seeds)
+    p = replace(pack, seeds=seeds)
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_seeds({"people": ["P1", "P2", "P3", "P4"]})
+        for title, text in (("P1", "x" * 10), ("P2", "y" * 50), ("P3", "z" * 40), ("P4", "w" * 20)):
+            a.put_page(title, text, 1, "now")
+        a.commit()
+        sel = samples.select(a, p)
+    picked = {route: set(titles) for route, titles in sel.routes.items() if "people" in route}
+    layer = {r: t for r, t in picked.items() if r.endswith(("long", "short"))}
+    # each class is read through its first and its largest page, and nothing else
+    assert {r.rsplit(" · ", 1)[1]: ts for r, ts in layer.items()} == {
+        "long": {"P2"}, "short": {"P1", "P4"}}
+
+
+def test_every_rendering_of_a_term_is_an_alias_for_it():
+    from dramatis_forge.normalize import TERM_ALIAS, term_aliases
+    from dramatis_forge.records import Term
+    got = term_aliases([
+        Term(page="g", term="Home", translations={"en": "Homeland/Home Town", "jp": "ホーム\nHome"}),
+        Term(page="g", term="Ann", translations={"en": "Annie"}),
+    ], {"Ann": "Ann (person)"})
+    assert sorted((a.alias, a.target, a.kind) for a in got) == [
+        ("Annie", "Ann (person)", TERM_ALIAS), ("Home Town", "Home", TERM_ALIAS),
+        ("Homeland", "Home", TERM_ALIAS), ("ホーム", "Home", TERM_ALIAS)]
+
+
+def test_an_archived_kind_nothing_reads_is_a_high_finding(tmp_path, pack):
+    from dramatis_forge import corpus
+    from dramatis_forge.records import Letter
+    with Archive(tmp_path / "t.archive") as a:
+        insert(a, [Letter(page="m", body="Dear reader.", sender="Ann")])
+        rep = corpus.CorpusReport()
+        corpus._check_consumers(rep, a, pack)
+    assert [f.severity for f in rep.ledger.findings] == ["high"]
+    assert "letter" in rep.ledger.findings[0].detail

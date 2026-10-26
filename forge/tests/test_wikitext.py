@@ -174,3 +174,9 @@ def test_a_commented_out_heading_is_not_a_section(clean):
     assert ("Hidden",) not in paths and ("Shown",) in paths
     from dramatis_forge.wikitext import top_sections
     assert list(top_sections("== A ==\nx\n<!-- == B ==\ny -->")) == ["A"]
+
+
+def test_list_markers_are_layout_and_definitions_fold_into_their_term():
+    cleaner = Cleaner(InlineRules(qualifier_sep=": ", list_sep=" | "))
+    got = cleaner.text("Boss\n:Tall\nCrew\n:Ann\n:Bob\n* plain item\n** nested\n# numbered")
+    assert got == "Boss: Tall\nCrew: Ann | Bob\nplain item\nnested\nnumbered"

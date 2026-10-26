@@ -133,15 +133,29 @@ class Env:
 def _lore(
     archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
 ) -> Iterator[Chunk]:
-    for r in archive.db.execute("SELECT page,path,text,revid FROM lore ORDER BY page,seq"):
-        path = json.loads(r["path"])
-        breadcrumb = " › ".join(path)
-        head = header.format(page=r["page"], path=f" › {breadcrumb}" if breadcrumb else "")
-        for i, part in enumerate(_split(r["text"], t.max_chars, pack.chunking.breaks)):
+    """One unit per lore record, in the order the source has them.
+
+    A record's address is its place among its page's records, so a hit widens to the
+    entries around it in the source and not to unrelated text that shares a heading. The
+    header names the topic and the headings below it; a body that opens by repeating the
+    last of those drops the repeat, which the header already says.
+    """
+    policy = pack.chunking
+    label_sep = policy.sep("label")
+    for r in archive.db.execute("SELECT page,seq,path,text,revid FROM lore ORDER BY page,seq"):
+        path = tuple(json.loads(r["path"]))
+        crumbs = policy.lore_crumbs(r["page"], path)
+        head = header.format(
+            page=crumbs[0] if crumbs else r["page"],
+            path=f" › {' › '.join(crumbs[1:])}" if len(crumbs) > 1 else "")
+        body = r["text"]
+        if crumbs and body.startswith(f"{crumbs[-1]}{label_sep}") and len(crumbs) > 1:
+            body = body[len(crumbs[-1]) + len(label_sep):].lstrip() or body
+        for part in _split(body, t.max_chars, policy.breaks):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
-                title=breadcrumb or r["page"], revid=r["revid"],
-                span_of=f"{r['page']}#{breadcrumb}", span_from=i, span_to=i,
+                title=" › ".join(path) or r["page"], revid=r["revid"],
+                span_of=r["page"], span_from=r["seq"], span_to=r["seq"],
             )
 
 
@@ -522,13 +536,15 @@ def _profile(
 def _letter(
     archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
 ) -> Iterator[Chunk]:
+    """One unit per letter, addressed by its place on its page: the letters of a run sent
+    day after day read as a run when a hit is widened."""
     label = pack.chunking.label
-    person_of = archive.person_of()
+    speakers = env.speakers
     revids = {row["title"]: row["revid"]
               for row in archive.db.execute("SELECT title,revid FROM raw.pages")}
-    for i, r in enumerate(archive.db.execute(
-        "SELECT page,sender,date,title,body FROM letters ORDER BY page,seq"
-    )):
+    for r in archive.db.execute(
+        "SELECT page,seq,sender,date,title,body FROM letters ORDER BY page,seq"
+    ):
         head = header.format(
             sender=r["sender"] or label("unsigned"),
             title=f" · {r['title']}" if r["title"] else "",
@@ -536,13 +552,15 @@ def _letter(
         body = r["body"]
         if r["date"]:
             body = f"{r['date']}\n{body}"
+        sender = r["sender"] or ""
+        owner = speakers.person_of.get(sender) or speakers.alias_person.get(sender)
         for part in _split(body, t.max_chars, pack.chunking.breaks):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=r["title"] or label("letter"),
-                persons=(person_of[r["sender"]],) if r["sender"] in person_of else (),
+                persons=(owner,) if owner else (),
                 revid=revids.get(r["page"]),
-                span_of=f"{r['page']}#letter{i}", span_from=i, span_to=i,
+                span_of=r["page"], span_from=r["seq"], span_to=r["seq"],
             )
 
 

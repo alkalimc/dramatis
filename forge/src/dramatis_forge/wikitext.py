@@ -406,9 +406,26 @@ class Cleaner:
         # Character references are markup too; after the tag pass so a decoded `&lt;` can
         # never be mistaken for a tag. A non-breaking space is just a space in prose.
         s = html.unescape(s).replace("\xa0", " ")
+        s = self._lists(s)
         s = re.sub(r"[ \t]+", " ", s)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
+
+    _RE_DEFINITION = re.compile(r"(?m)^([^\s:;*#][^\n]*)\n+((?:[ \t]*:[^\n]*(?:\n+|$))+)")
+    _RE_MARK = re.compile(r"(?m)^[ \t]*[*#:;]+[ \t]*")
+
+    def _lists(self, s: str) -> str:
+        """Wiki list markers are layout. A term followed by `:` definitions reads
+        `term: first, second`; any other marker is dropped and its text kept."""
+        def fold(m: re.Match) -> str:
+            items = [self._RE_MARK.sub("", x).strip() for x in m.group(2).splitlines()]
+            items = [x for x in items if x]
+            if not items:
+                return m.group(0)
+            return (f"{m.group(1).strip()}{self.rules.qualifier_sep}"
+                    f"{self.rules.list_sep.join(items)}\n")
+        s = self._RE_DEFINITION.sub(fold, s)
+        return self._RE_MARK.sub("", s)
 
     # ---- sections ----
 

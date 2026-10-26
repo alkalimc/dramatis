@@ -25,6 +25,7 @@ from .archive import Archive
 from .chunk import CARD_SPAN, Env, archive_triggers, engine_meta_test
 from .chunk import build as build_chunks
 from .config import RunInfo
+from .normalize import TERM_ALIAS
 from .folio import FOLIO_FORMAT_VERSION, Folio
 from .guards import Ledger
 from .pack import Pack, PersonSource
@@ -192,6 +193,7 @@ def run(
         for template, n in sorted(env.skipped.items()):
             rep.ledger.add(
                 "G5", f"{n} {template} record(s) made no unit: the pack's policy skips their slot")
+        _check_consumers(rep, archive, pack)
         _check_story_coverage(rep, archive, pack, spans)
         _check_attribution(rep, archive, folio, pack, env, params)
 
@@ -257,6 +259,15 @@ def run(
         folio.set_meta("clock.year_offset", pack.year_offset)
         folio.set_meta("user_placeholder", pack.user_placeholder)
         # chunk id -> the other form pages its text also appears on, in form order.
+        # What the checks above counted, for the figure report: a defect that is fixed stays
+        # visible as a number that must stay at its floor.
+        folio.set_meta("checks", {
+            "records_uncovered": rep.records_uncovered, "span_gaps": rep.span_gaps,
+            "people_without_lines": len(rep.people_without_lines),
+            "owners_missing": len(rep.owners_missing), "owner_scenes": rep.scenes_with_owner,
+            "markup_residue": sum(rep.markup_residue.values()),
+            "skipped": sum(env.skipped.values()),
+        })
         folio.set_meta("form_copies", {cid: list(dict.fromkeys(pages))
                                        for cid, pages in sorted(copies.items())})
         # Written last: the fingerprint has to cover everything above it.
@@ -563,6 +574,30 @@ def _check(
         rep.ledger.add(
             "G5", "voice trigger key(s) the pack gives no words for: "
                   + ", ".join(rep.unnamed_triggers))
+
+
+#: Record kinds that structure other records or become aliases rather than units.
+_NOT_UNITS = frozenset({"scene", "alias", "term"})
+
+
+def _check_consumers(rep: CorpusReport, archive: Archive, pack: Pack) -> None:
+    """G5: a record kind the archive holds but nothing reads is a loss no count shows.
+
+    The output of a parser nobody consumes looks like a working parser: it produces,
+    stores and reconciles, and its text reaches no reader.
+    """
+    from .records import KINDS
+    consumed = {src for t in pack.chunking.templates for src in t.sources} | _NOT_UNITS
+    for cls in KINDS:
+        n = archive.count(cls.TABLE)
+        if n and cls.KIND not in consumed:
+            rep.ledger.add(
+                "G5", f"{n} {cls.KIND} record(s) are archived and no unit template or alias "
+                      "rule reads them", high=True)
+    terms = archive.count("terms")
+    if terms and not archive.count("aliases", "kind=?", (TERM_ALIAS,)):
+        rep.ledger.add(
+            "G5", f"{terms} glossary term(s) are archived but gave no alias", high=True)
 
 
 def _check_story_coverage(

@@ -317,6 +317,14 @@ def _d_engine_meta_headers(src: _Sources, _m: str | None):
                       if test(*row)))
 
 
+def _d_check(src: _Sources, member: str | None):
+    """One count the build's own checks recorded (manifest `checks`)."""
+    table = src.meta["folio"].get("checks")
+    if not isinstance(table, Mapping) or member not in table:
+        return None
+    return _count(int(table[member]))
+
+
 def _d_birthdays(src: _Sources, _m: str | None):
     """Persons whose birthday the builder could read as `MM-DD`."""
     assert src.folio is not None
@@ -551,6 +559,7 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "birthdays": (("folio",), _d_birthdays),
     "engine_meta_headers": (("archive", "folio"), _d_engine_meta_headers),
     "form_copies": (("folio",), _d_form_copies),
+    "check": (("folio",), _d_check),
     "same_person_copies": (("folio",), _d_same_person_copies),
     "stopword_top_df": (("folio",), _d_stopword_top_df),
     "pipeline_hours": (("archive",), _d_pipeline_hours),
