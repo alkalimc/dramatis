@@ -59,6 +59,10 @@ class Speakers:
     #: loose portrait key -> person, for the looser key (see `IdentityRules.portrait_loose`)
     #: that names exactly one person; a fallback for labels that are not page titles.
     loose_person: dict[str, str] = field(init=False, default_factory=dict)
+    #: Loose portrait keys that the scripts spell with exactly one full key. A page's id
+    #: stands in for a script key only through such a loose key: where scripts use several
+    #: slugs under one number, the number names no single portrait.
+    loose_unique: set[str] = field(init=False, default_factory=set)
     #: (scene, label) -> person, from the pack's declared exceptions.
     declared: dict[tuple[str, str], str] = field(init=False, default_factory=dict)
     #: Declared exceptions whose person is on no roster page (the pack went stale).
@@ -73,6 +77,7 @@ class Speakers:
         self.person_of = self.archive.person_of()
         self.generic = frozenset(self.pack.chunking.generic_speakers)
         self._portraits()
+        self._script_keys()
         self._declared()
         self._aliases()
         self._labels()
@@ -98,6 +103,18 @@ class Speakers:
                     loose[lk] |= people
             self.loose_person = {k: next(iter(v)) for k, v in loose.items() if len(v) == 1}
 
+    def _script_keys(self) -> None:
+        loose_of = self.pack.identity.portrait_loose
+        if loose_of is None:
+            return
+        seen: dict[str, set[str]] = defaultdict(set)
+        for r in self.archive.db.execute(
+            "SELECT DISTINCT portrait FROM lines WHERE portrait IS NOT NULL"
+        ):
+            if (lk := loose_of(r["portrait"])) is not None:
+                seen[lk].add(r["portrait"])
+        self.loose_unique = {k for k, v in seen.items() if len(v) == 1}
+
     def _declared(self) -> None:
         for scene, label, person in self.pack.chunking.speaker_as:
             resolved = self.person_of.get(person)
@@ -112,7 +129,9 @@ class Speakers:
             return self.portrait_person[key]
         loose_of = self.pack.identity.portrait_loose
         lk = loose_of(key) if loose_of is not None else None
-        return self.loose_person.get(lk) if lk is not None else None
+        if lk is None or lk not in self.loose_unique:
+            return None
+        return self.loose_person.get(lk)
 
     def _aliases(self) -> None:
         roster = set(self.person_of.values())

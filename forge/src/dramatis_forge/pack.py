@@ -582,6 +582,11 @@ class ChunkPolicy:
     #: Identity-card fields left out of the card text: attributes of the work's mechanics
     #: rather than of the person. They stay on the person's facets for display.
     card_omit: tuple[str, ...] = ()
+    #: `(section title, section text, fields shown on the person's card) -> remainder`: for a
+    #: dossier section that restates the card field by field, the text left once the fields
+    #: the card already shows are taken out ("" when nothing is left); None for any other
+    #: section. A remainder is the section's own unit, so a fact is stated once.
+    card_restated: Callable[[str, str, Mapping[str, str]], str | None] | None = None
     #: Card field values that mean "none" and say nothing about the person.
     placeholder_values: tuple[str, ...] = ()
     #: Dossier items shorter than this join the item before them (0 turns it off), if their

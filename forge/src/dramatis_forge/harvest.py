@@ -273,6 +273,7 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
     # A page whose body is transcluded from a subpage is discovered by reading its parent,
     # so a changed parent can reveal a subpage no enumeration knows about. Reads held
     # pages only, and fetches just what is not held yet.
+    left_scope: list[Finding] = []
     for hook in pack.followups:
         discovered: set[str] = set()
         for row in archive.pages(archive.seed(hook.of_seed)):
@@ -284,13 +285,19 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
                 progress(f"followup {hook.label or hook.seed}: {len(pending)} pages")
             _fetch(wiki, archive, pack, pending, res, progress)
             res.followups[hook.seed] = len(pending)
-        archive.add_seeds(hook.seed, discovered)
+        # The set is what this run found: a page its parent no longer refers to leaves it.
+        left = archive.replace_seed(hook.seed, discovered)
+        if left:
+            left_scope.append(Finding(
+                "G1", LOW,
+                f"{len(left)} page(s) of {hook.seed} no longer referenced by their parent "
+                f"(first: {', '.join(left[:3])}); left the set"))
 
     for title in p.gone:
         if archive.page(title) is not None:
             archive.drop_page(title, inspect_mod.collect(archive, title, pack))
 
-    res.findings = list(p.findings)
+    res.findings = [*p.findings, *left_scope]
     archive.write_findings([f.row() for f in res.findings], stage="sync")
 
     revid_after = _held_revids(archive)

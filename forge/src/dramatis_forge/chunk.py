@@ -530,9 +530,13 @@ def _profile(
                     items.append((page, k, v))
 
         base_page = next((p for p in held if dossier[p]["fields"]), None)
+        #: The card fields each page's own sections may restate: the person's card, with
+        #: the page's differing fields on top.
+        shown: dict[str, dict[str, str]] = {}
         if base_page is not None:
             base = {k: v for k, v in dossier[base_page]["fields"].items()
                     if k not in omit and v not in placeholders}
+            shown = {base_page: dict(base)}
             if base:
                 body = "\n".join(f"{k}{sep('label')}{v}" for k, v in base.items())
                 others = list(dict.fromkeys(
@@ -555,6 +559,7 @@ def _profile(
                         if k not in omit and v not in placeholders and base.get(k) != v}
                 if not diff:
                     continue
+                shown[page] = {**base, **diff}
                 head = header.format(
                     person=f"{named(person_id)}{tag(page)}", section=f" · {label('card')}")
                 yield Chunk(
@@ -564,6 +569,16 @@ def _profile(
                     revid=dossier[page]["revid"],
                     span_of=f"{person_id}{CARD_SPAN}", span_from=n, span_to=n,
                 )
+
+        if policy.card_restated is not None:
+            rest = []
+            for page, title, text in sections:
+                left = policy.card_restated(title, text, shown.get(page, shown.get(base_page, {})))
+                if left is None:
+                    rest.append((page, title, text))
+                elif left:
+                    rest.append((page, title, left))
+            sections = rest
 
         for i, (page, title, text) in enumerate(sections + _fold_short(items, policy)):
             head = header.format(

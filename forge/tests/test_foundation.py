@@ -330,7 +330,7 @@ def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_decla
     assert list(sp.conflicts) == [("s2", "Bob")]
 
 
-def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, pack):
+def _loose_speakers(tmp_path, pack, script_keys):
     from dramatis_forge.speakers import Speakers
     ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None,
                     portrait_loose=lambda k: k.split("_")[0])
@@ -338,11 +338,23 @@ def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, p
     with Archive(tmp_path / "t.archive") as a:
         a.write_identity({"Ann": [("Ann", "canonical", 0)]})
         a.put_page("Ann", "7_ann", 1, "now")
+        insert(a, [Line(scene="S", seq=i, speaker="X", text="t", portrait=k)
+                   for i, k in enumerate(script_keys, 1)])
         a.commit()
-        sp = Speakers(a, p, replace(Params().speaker, portrait_lines=1))
+        return Speakers(a, p, replace(Params().speaker, portrait_lines=1))
+
+
+def test_a_portrait_id_spelled_differently_resolves_a_non_page_label(tmp_path, pack):
+    sp = _loose_speakers(tmp_path, pack, ["7_other", "8_other"])
     assert sp.loose_person == {"7": "Ann"}
     assert sp._portrait_person("7_other") == "Ann"
     assert sp._portrait_person("8_other") is None
+
+
+def test_a_number_the_scripts_spell_with_two_slugs_names_no_portrait(tmp_path, pack):
+    sp = _loose_speakers(tmp_path, pack, ["7_other", "7_third"])
+    assert sp._portrait_person("7_other") is None
+    assert sp._portrait_person("7_ann") == "Ann"  # the exact key still matches
 
 
 def test_a_reply_id_no_choice_offers_is_counted_as_unresolved(pack):
@@ -407,3 +419,25 @@ def test_lore_runs_follow_the_pages_declared_shape(pack):
     assert policy.lore_run("Plain", ("a",), 3) == "Plain"
     assert policy.lore_run("List", ("a",), 3) == "List#3"
     assert policy.lore_run("Story", ("tale", "part 2"), 5) == "Story#tale"
+
+
+def test_a_section_that_restates_the_card_keeps_only_what_the_card_lacks(tmp_path, forms_pack):
+    def restated(title, text, shown):
+        if title != "Basics":
+            return None
+        kept = [ln for ln in text.splitlines()
+                if shown.get(ln.partition(": ")[0]) != ln.partition(": ")[2]]
+        return "\n".join(kept)
+
+    p = replace(forms_pack, chunking=replace(forms_pack.chunking, card_restated=restated))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)]})
+        insert(a, [
+            Dossier(page="Ann", fields={"name": "Ann", "age": "30"},
+                    sections=({"title": "Basics", "text": "name: Ann\nage: 30\nbuilt: May 1"},), revid=1),
+            Dossier(page="Bob", fields={"name": "Bob", "age": "9"},
+                    sections=({"title": "Basics", "text": "name: Bob\nage: 9"},), revid=2),
+        ])
+        units = [c for c in chunk.build(a, p) if c.span_of and c.span_of.endswith("#dossier")]
+    # Ann keeps the one line her card lacks; Bob's section only repeated the card, so no unit
+    assert [(c.persons, c.text) for c in units] == [(("Ann",), "built: May 1")]
