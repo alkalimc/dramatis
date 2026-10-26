@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import __version__, segment
 from .archive import Archive
-from .chunk import archive_triggers, engine_meta_test
+from .chunk import CARD_SPAN, archive_triggers, engine_meta_test
 from .chunk import build as build_chunks
 from .config import RunInfo
 from .folio import FOLIO_FORMAT_VERSION, Folio
@@ -268,14 +268,15 @@ def _material(archive: Archive, folio: Folio, dialogue: tuple[str, ...]) -> dict
     """Characters of source material that are a person's own, over every template.
 
     Non-dialogue units attributed to a person are wholly theirs (their voice lines, their
-    dossier sections, letters they wrote). A dialogue unit is shared by everyone speaking
+    dossier sections, letters they wrote); identity cards are not counted, being tables. A dialogue unit is shared by everyone speaking
     in it, so it contributes only the person's own lines, resolved through identity.
     """
     material: dict[str, int] = {}
     marks = ",".join("?" * len(dialogue))
     for person_id, chars in folio.db.execute(
         "SELECT u.person_id, SUM(c.chars) FROM unit_persons u JOIN chunks c ON c.id = u.chunk_id "
-        f"WHERE c.template NOT IN ({marks}) GROUP BY u.person_id", dialogue,
+        f"WHERE c.template NOT IN ({marks}) AND c.span_of NOT LIKE ? "
+        "GROUP BY u.person_id", (*dialogue, f"%{CARD_SPAN}"),
     ):
         material[person_id] = int(chars or 0)
     person_of = archive.person_of()

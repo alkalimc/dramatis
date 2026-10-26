@@ -69,6 +69,12 @@ class Chunk:
         )
 
 
+#: Suffix of the span address of an identity card. A card is a table of attributes, not
+#: something the person said or that was written about them in prose, so readers that
+#: measure a person's own material leave it out.
+CARD_SPAN = "#card"
+
+
 def _split(text: str, limit: int, breaks: tuple[str, ...]) -> list[str]:
     """Cut over-long text at the most natural boundary available.
 
@@ -222,9 +228,41 @@ def _dialogue(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> It
                 )
 
 
+def _display_names(archive: Archive, pack: Pack) -> dict[str, str]:
+    """Page -> the name a reader sees for it, where the dossier gives one."""
+    key = pack.identity.display_facet
+    out: dict[str, str] = {}
+    if key:
+        for r in archive.db.execute("SELECT page,fields FROM dossiers"):
+            value = json.loads(r["fields"]).get(key)
+            if value:
+                out[r["page"]] = value
+    return out
+
+
+def _form_tag(archive: Archive, pack: Pack) -> Callable[[str], str]:
+    """Page -> the text that tells a person's forms apart in a header ("" for the person).
+
+    Two forms of one person speak differently and say different things in the same slot, so
+    a header that names only the person makes the two read as one slot said twice.
+    """
+    display = _display_names(archive, pack)
+    person_of = archive.person_of()
+    sep = pack.chunking.sep
+
+    def tag(page: str) -> str:
+        person = person_of.get(page)
+        if person is None or page == person:
+            return ""
+        name, base = display.get(page, page), display.get(person, person)
+        return sep("form").format(name) if name != base else ""
+    return tag
+
+
 def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Iterator[Chunk]:
     policy = pack.chunking
     person_of = archive.person_of()
+    tag = _form_tag(archive, pack)
     # Voice records name their source page; the revision lives with the fetched page.
     # Attribution has to reach every unit, so it is looked up rather than left null.
     revids = {row["title"]: row["revid"]
@@ -243,7 +281,8 @@ def _voice(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Itera
         # header keeps the two lines from reading as one line said twice.
         name = policy.voice_name(r["trigger"] or "", r["title"] or "")
         head = header.format(
-            person=person, name=name, variant=f" · {r['variant']}" if r["variant"] else "",
+            person=f"{person}{tag(r['subject'])}", name=name,
+            variant=f" · {r['variant']}" if r["variant"] else "",
         )
         yield Chunk(
             template=t.name, page=r["page"], text=r["text"], header=head,
@@ -257,62 +296,111 @@ def _profile(archive: Archive, pack: Pack, t: ChunkTemplate, header: str) -> Ite
     """One identity card per person, then one unit per dossier section.
 
     Cards are assembled per *person*, not per page, so a second form does not produce
-    a second half-empty contact. Attribute text is kept out of the prose units
-    and given a unit of its own: mixing a table of measurements into a paragraph of
+    a second half-empty contact: a form adds a card of its own only for the fields on
+    which it differs from the person's first page. Attribute text is kept out of the prose
+    units and given a unit of its own: mixing a table of measurements into a paragraph of
     biography degrades retrieval for both kinds of question.
     """
-    label, sep = pack.chunking.label, pack.chunking.sep
-    memoir = pack.chunking.kind("memoir")
+    policy = pack.chunking
+    label, sep = policy.label, policy.sep
+    memoir = policy.kind("memoir")
+    omit = set(policy.card_omit)
     person_of = archive.person_of()
     forms = archive.persons()
+    display = _display_names(archive, pack)
+    tag = _form_tag(archive, pack)
+
+    dossier: dict[str, dict] = {}
+    for row in archive.db.execute("SELECT page,fields,sections,items,revid FROM dossiers"):
+        dossier[row["page"]] = {
+            "fields": json.loads(row["fields"]), "revid": row["revid"],
+            "sections": json.loads(row["sections"]), "items": json.loads(row["items"]),
+        }
+
+    # Stock texts: the same item text on many persons is the work's, not theirs.
+    stock: dict[tuple[str, str], set[str]] = {}
+    if policy.shared_min:
+        for person_id, form_rows in forms.items():
+            for f in form_rows:
+                for k, v in dossier.get(f["page"], {}).get("items", {}).items():
+                    if isinstance(v, str) and v:
+                        stock.setdefault((k, v), set()).add(person_id)
+    is_stock = {kv for kv, owners in stock.items() if len(owners) >= policy.shared_min}
+    stock_first: dict[tuple[str, str], str] = {}
 
     for person_id, form_rows in sorted(forms.items()):
         pages = [f["page"] for f in form_rows]
-        merged_fields: dict[str, str] = {}
+        held = [p for p in pages if p in dossier]
         sections: list[tuple[str, str, str]] = []
         items: list[tuple[str, str, str]] = []
-        revid: int | None = None
 
-        for page in pages:
-            row = archive.db.execute(
-                "SELECT fields,sections,items,revid FROM dossiers WHERE page=?", (page,)
-            ).fetchone()
-            if row is None:
-                continue
-            revid = revid or row["revid"]
-            for k, v in json.loads(row["fields"]).items():
-                merged_fields.setdefault(k, v)
-            for s in json.loads(row["sections"]):
+        for page in held:
+            for s in dossier[page]["sections"]:
                 if s.get("text"):
                     sections.append((page, s.get("title", ""), s["text"]))
-            for k, v in json.loads(row["items"]).items():
+            for k, v in dossier[page]["items"].items():
                 if k == memoir:
                     for rec in v:
                         if rec.get("intro"):
                             items.append((page, rec.get("set", memoir), rec["intro"]))
                 elif isinstance(v, str) and v:
+                    if (k, v) in is_stock:
+                        stock_first.setdefault((k, v), page)
+                        continue
                     items.append((page, k, v))
 
-        if merged_fields:
-            body = "\n".join(f"{k}{sep('label')}{v}" for k, v in merged_fields.items())
-            others = [p for p in pages if p != person_id]
-            if others:
-                body += f"\n{label('other_forms')}{sep('label')}" + sep("list").join(others)
-            head = header.format(person=person_id, section=f" · {label('card')}")
-            yield Chunk(
-                template=t.name, page=person_id, text=body, header=head,
-                title=f"{person_id} {label('card')}", persons=(person_id,), revid=revid,
-                span_of=f"{person_id}#card", span_from=0, span_to=0,
-            )
+        base_page = next((p for p in held if dossier[p]["fields"]), None)
+        if base_page is not None:
+            base = {k: v for k, v in dossier[base_page]["fields"].items() if k not in omit}
+            if base:
+                body = "\n".join(f"{k}{sep('label')}{v}" for k, v in base.items())
+                others = list(dict.fromkeys(
+                    display.get(p, p) for p in pages
+                    if p != base_page and display.get(p, p) != display.get(base_page, base_page)))
+                if others:
+                    body += f"\n{label('other_forms')}{sep('label')}" + sep("list").join(others)
+                head = header.format(person=person_id, section=f" · {label('card')}")
+                yield Chunk(
+                    template=t.name, page=person_id, text=body, header=head,
+                    title=f"{person_id} {label('card')}", persons=(person_id,),
+                    revid=dossier[base_page]["revid"],
+                    span_of=f"{person_id}{CARD_SPAN}", span_from=0, span_to=0,
+                )
+            for n, page in enumerate(held, start=1):
+                if page == base_page:
+                    continue
+                diff = {k: v for k, v in dossier[page]["fields"].items()
+                        if k not in omit and base.get(k) != v}
+                if not diff:
+                    continue
+                head = header.format(
+                    person=f"{person_id}{tag(page)}", section=f" · {label('card')}")
+                yield Chunk(
+                    template=t.name, page=page,
+                    text="\n".join(f"{k}{sep('label')}{v}" for k, v in diff.items()),
+                    header=head, title=f"{person_id} {label('card')}", persons=(person_id,),
+                    revid=dossier[page]["revid"],
+                    span_of=f"{person_id}{CARD_SPAN}", span_from=n, span_to=n,
+                )
 
         for i, (page, title, text) in enumerate(sections + items):
-            head = header.format(person=person_id, section=f" · {title}" if title else "")
-            for part in _split(text, t.max_chars, pack.chunking.breaks):
+            head = header.format(
+                person=f"{person_id}{tag(page)}", section=f" · {title}" if title else "")
+            for part in _split(text, t.max_chars, policy.breaks):
                 yield Chunk(
                     template=t.name, page=page, text=part, header=head,
-                    title=title or person_id, persons=(person_id,), revid=revid,
+                    title=title or person_id, persons=(person_id,),
+                    revid=dossier[page]["revid"],
                     span_of=f"{person_id}#dossier", span_from=i, span_to=i,
                 )
+
+    for n, ((key, text), page) in enumerate(sorted(stock_first.items())):
+        head = header.format(person=label("shared"), section=f" · {key}")
+        yield Chunk(
+            template=t.name, page=page, text=text, header=head, title=key,
+            revid=dossier[page]["revid"], span_of=f"{label('shared')}#stock",
+            span_from=n, span_to=n,
+        )
 
     ref_revids = {row["title"]: row["revid"]
                   for row in archive.db.execute("SELECT title,revid FROM raw.pages")}

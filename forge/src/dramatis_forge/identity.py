@@ -28,9 +28,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .guards import HIGH, Finding
+from .guards import HIGH, LOW, Finding
 from .records import Alias
-from .pack import IdentityRules
+from .pack import IdentityEvidence, IdentityRules
 
 CANONICAL = "canonical"
 #: Alias kind for "this page is one of that person's forms".
@@ -57,6 +57,8 @@ class Roster:
     people: dict[str, Person] = field(default_factory=dict)
     #: page -> person_id, for every page including canonical ones.
     of_page: dict[str, str] = field(default_factory=dict)
+    #: Pages the pack took out of the roster (`IdentityRules.excluded`), with their forms.
+    excluded: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
 
     def __len__(self) -> int:
@@ -97,6 +99,7 @@ def resolve(
     rules: IdentityRules,
     pages: Mapping[str, str],
     roster_titles: frozenset[str],
+    evidence: IdentityEvidence | None = None,
 ) -> Roster:
     """Apply a pack's declarations, then check the invariants the model needs.
 
@@ -142,5 +145,18 @@ def resolve(
                 "the roster entry and portrait would have no source",
                 person.person_id,
             ))
+
+    if rules.excluded is not None:
+        leaving = set(rules.excluded(pages, roster_titles, evidence or IdentityEvidence()))
+        for person_id in sorted(p for p in out.people if p in leaving):
+            gone = out.people.pop(person_id)
+            for f in gone.forms:
+                out.of_page.pop(f.page, None)
+                out.excluded.append(f.page)
+        if out.excluded:
+            out.findings.append(Finding(
+                "G4", LOW,
+                f"{len(out.excluded)} roster page(s) left the roster as not being people in "
+                "their own right: " + ", ".join(sorted(out.excluded))))
 
     return out

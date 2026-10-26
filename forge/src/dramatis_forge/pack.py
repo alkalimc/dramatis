@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -314,6 +314,16 @@ class InlineRules:
 
 
 @dataclass(frozen=True)
+class IdentityEvidence:
+    """Facts about the corpus a pack may weigh when deciding which pages leave the roster."""
+
+    #: Speaker label -> number of lines spoken under it.
+    spoken: Mapping[str, int] = field(default_factory=dict)
+    #: Redirect alias -> target page.
+    redirects: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class IdentityRules:
     """How page identity maps to person identity.
 
@@ -339,6 +349,17 @@ class IdentityRules:
     #: convention, and the field naming it is written in the site's language. Falling
     #: back to the page title is always correct, just sometimes less specific.
     display_facet: str = ""
+    #: Roster pages that are not people in their own right (a game-mode copy of a character,
+    #: a placeholder class) and leave the roster after resolution, with every form that
+    #: resolved to them. `(pages, roster titles, evidence) -> titles`. A page the story
+    #: gives lines to is a person even when the site files it as a mode copy, which is why
+    #: the evidence is passed in rather than judged from the page alone.
+    excluded: Callable[
+        [Mapping[str, str], frozenset[str], IdentityEvidence], Collection[str]] | None = None
+    #: Wikitext of a roster page -> the key its portrait id carries in story scripts, or
+    #: None. The story reader derives the same key from each script's portrait names, so a
+    #: speaker label that is not a page title can still be traced to a person.
+    portrait_key: Callable[[str], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -498,6 +519,12 @@ class ChunkPolicy:
     #: pages (a "before battle" or "after battle" page). Dropped from the header only:
     #: the page, citation and span keep the full title.
     page_part: str = ""
+    #: Identity-card fields left out of the card text: attributes of the work's mechanics
+    #: rather than of the person. They stay on the person's facets for display.
+    card_omit: tuple[str, ...] = ()
+    #: A dossier item whose identical text appears on at least this many persons is a
+    #: stock text of the work, not theirs: stored once, owned by nobody. 0 turns it off.
+    shared_min: int = 0
 
     def label(self, key: str) -> str:
         return self.labels.get(key) or LABELS[key]
@@ -537,6 +564,7 @@ LABELS: Mapping[str, str] = {
     "card": "identity card",     # the merged-fields unit of a person's dossier
     "other_forms": "other forms",  # label for the list of a person's other pages
     "source": "source",          # provenance line appended to a lore unit
+    "shared": "shared",          # header owner of a stock text that belongs to no one
 }
 
 #: Fallbacks for `ChunkPolicy.kinds`. A pack whose parsers use different strings must
@@ -553,6 +581,7 @@ SEPARATORS: Mapping[str, str] = {
     "label": ": ",     # between a label (speaker, field name) and its text
     "list": ", ",      # between items of an inline list
     "mark": "[{}] ",   # around an inline marker word; `{}` is the word
+    "form": " ({})",   # a person's name followed by the name of one of their forms
 }
 
 
