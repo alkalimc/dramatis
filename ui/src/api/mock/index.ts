@@ -52,6 +52,7 @@ const later = (minutes: number) => iso(-minutes);
 const PRESETS: Profile[] = [
   { name: "deepseek", base_url: "https://api.deepseek.com", wire_api: "chat", model: [] },
   { name: "openai-compatible", base_url: "https://api.openai.com/v1", wire_api: "chat", model: [] },
+  { name: "anthropic-compatible", base_url: "https://api.anthropic.com/v1", wire_api: "messages", model: [] },
   { name: "local", base_url: "http://127.0.0.1:8080/v1", wire_api: "chat", model: [] },
 ];
 

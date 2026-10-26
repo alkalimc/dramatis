@@ -1,12 +1,12 @@
 import type { Activity, Audience, Author, ToolAction } from "../api";
-import type { T } from "../i18n";
+import { userTitle, type T } from "../i18n";
 
 export type Names = Record<string, string>;
 
 export function authorName(a: Author, t: T, names: Names, userName: string | null): string {
   switch (a.kind) {
     case "user":
-      return userName ? t("user.title", { name: userName }) : t("user.you");
+      return userTitle(t, userName);
     case "host":
       return t("host.name");
     case "person":

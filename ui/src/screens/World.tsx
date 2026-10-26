@@ -3,6 +3,7 @@ import type { FactScope, FactView } from "../api";
 import { useT } from "../i18n";
 import { audienceText, when } from "../lib/format";
 import { useQuery } from "../lib/useQuery";
+import { InlineError } from "../ui/ErrorBar";
 import { useActions, useApi, useStore } from "../store";
 
 const SCOPES: FactScope[] = ["all", "world", "own", "commitment", "hurt", "deleted"];
@@ -13,7 +14,7 @@ export function WorldDrawer() {
   const api = useApi();
   const version = useStore((s) => s.worldVersion);
   const [scope, setScope] = useState<FactScope>("all");
-  const { data: list, reload } = useQuery(() => api.commands.facts({ scope, person: null, task: null }), [api, scope, version]);
+  const { data: list, error, loading, reload } = useQuery(() => api.commands.facts({ scope, person: null, task: null }), [api, scope, version]);
 
   return (
     <div className="drawer-body world">
@@ -28,6 +29,12 @@ export function WorldDrawer() {
           </button>
         ))}
       </div>
+      {error && <InlineError error={error} onRetry={reload} />}
+      {loading && !list && (
+        <p className="muted" role="status">
+          {t("app.loading")}
+        </p>
+      )}
       {list && list.items.length === 0 && <p className="muted">{t("world.empty")}</p>}
       <ul className="facts">
         {list?.items.map((f) => (

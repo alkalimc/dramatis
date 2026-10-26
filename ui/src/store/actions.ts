@@ -1,5 +1,6 @@
-import { ApiFailure, call, type Api, type ChannelId, type Mode, type Settings, type Target } from "../api";
+import { asFailure, settle, type Api, type ChannelId, type Mode, type Result, type Settings, type Target } from "../api";
 import type { Store } from ".";
+import type { LoadKey } from "./state";
 
 const PAGE = 50;
 
@@ -11,37 +12,38 @@ export function createActions(api: Api, store: Store) {
   const { commands: c } = api;
   const d = store.dispatch;
 
-  /** Run a command; on failure announce it and resolve `undefined`. */
-  async function attempt<T>(p: Promise<{ status: "ok"; data: T } | { status: "error"; error: import("../api").ApiError }>): Promise<T | undefined> {
-    try {
-      return await call(p);
-    } catch (e) {
-      if (e instanceof ApiFailure) {
-        d({ type: "error", error: e.error });
-        return undefined;
-      }
-      throw e;
-    }
+  /**
+   * Run a command without ever throwing. With a `key` the outcome lands in the store's
+   * load state (the screen shows it inline, with a retry); without one a failure is
+   * announced in the error bar. Resolves `undefined` on failure.
+   */
+  async function attempt<T>(p: Result<T>, key?: LoadKey): Promise<T | undefined> {
+    if (key) d({ type: "loading", key });
+    const r = await settle(p);
+    if (key) d({ type: "loaded", key, error: r.ok ? null : r.error });
+    else if (!r.ok) d({ type: "error", error: r.error });
+    else if (store.getState().error) d({ type: "error", error: null });
+    return r.ok ? r.data : undefined;
   }
 
   async function refreshDigest() {
-    const digest = await attempt(c.digest());
+    const digest = await attempt(c.digest(), "digest");
     if (digest) d({ type: "digest", digest });
   }
   async function refreshRoster() {
-    const roster = await attempt(c.roster());
+    const roster = await attempt(c.roster(), "roster");
     if (roster) d({ type: "roster", roster });
   }
   async function refreshChannels() {
-    const channels = await attempt(c.channels());
+    const channels = await attempt(c.channels(), "channels");
     if (channels) d({ type: "channels", channels });
   }
   async function refreshQuota() {
-    const quota = await attempt(c.quota());
+    const quota = await attempt(c.quota(), "quota");
     if (quota) d({ type: "quota", quota });
   }
   async function refreshEndpoints() {
-    const endpoints = await attempt(c.endpoints());
+    const endpoints = await attempt(c.endpoints(), "endpoints");
     if (endpoints) d({ type: "endpoints", endpoints });
   }
   async function refreshClock() {
@@ -52,7 +54,7 @@ export function createActions(api: Api, store: Store) {
 
   /** Status decides the form; the full form also needs the host channel and presence. */
   async function refreshStatus() {
-    const status = await attempt(c.appStatus());
+    const status = await attempt(c.appStatus(), "status");
     if (!status) return;
     d({ type: "status", status });
     if (status.form === "full" && !status.needs_setup) await enterFull();
@@ -60,7 +62,7 @@ export function createActions(api: Api, store: Store) {
 
   let presenceSent = false;
   async function enterFull() {
-    const host = await attempt(c.hostChannel());
+    const host = await attempt(c.hostChannel(), "host");
     if (!host) return;
     d({ type: "hostChannel", id: host });
     await loadHistory(host);
@@ -78,9 +80,9 @@ export function createActions(api: Api, store: Store) {
 
   async function boot() {
     const [wording, settings, coldstart] = await Promise.all([
-      attempt(c.wording()),
-      attempt(c.settings()),
-      attempt(c.coldstart()),
+      attempt(c.wording(), "wording"),
+      attempt(c.settings(), "settings"),
+      attempt(c.coldstart(), "coldstart"),
     ]);
     if (wording) d({ type: "wording", wording });
     if (settings) d({ type: "settings", settings });
@@ -93,7 +95,7 @@ export function createActions(api: Api, store: Store) {
     const loaded = store.getState().messages[channel] ?? [];
     if (!older && loaded.length > 0) return;
     const before = older && loaded.length > 0 ? loaded[0].id : null;
-    const page = await attempt(c.history(channel, before, PAGE));
+    const page = await attempt(c.history(channel, before, PAGE), `history:${channel}`);
     if (!page) return;
     d({ type: "history", channel, messages: page, older, done: page.length < PAGE });
   }
@@ -156,9 +158,20 @@ export type Actions = ReturnType<typeof createActions>;
 
 /** Feed engine events into the store. Returns the unsubscribe. */
 export async function subscribe(api: Api, store: Store, actions: Actions): Promise<() => void> {
+  const offs: (() => void)[] = [];
+  try {
+    offs.push(...(await listenAll(api, store, actions)));
+    store.dispatch({ type: "loaded", key: "events", error: null });
+  } catch (err) {
+    store.dispatch({ type: "loaded", key: "events", error: asFailure(err) });
+  }
+  return () => offs.forEach((off) => off());
+}
+
+async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() => void)[]> {
   const e = api.events;
   const d = store.dispatch;
-  const offs = await Promise.all([
+  return Promise.all([
     e.messageDelta.listen(({ payload }) => d({ type: "messageDelta", event: payload })),
     e.messageAdded.listen(({ payload }) => {
       d({ type: "messageAdded", event: payload });
@@ -168,6 +181,11 @@ export async function subscribe(api: Api, store: Store, actions: Actions): Promi
       if (!s.channels.some((ch) => ch.id === payload.message.channel) && payload.message.channel !== s.hostChannel) {
         void actions.refreshChannels();
       }
+    }),
+    // The OS notification is the engine's; here it only means a channel may be new.
+    e.notification.listen(({ payload }) => {
+      const s = store.getState();
+      if (!s.channels.some((ch) => ch.id === payload.channel) && payload.channel !== s.hostChannel) void actions.refreshChannels();
     }),
     e.toolCalled.listen(({ payload }) => d({ type: "toolCalled", event: payload })),
     e.modeChanged.listen(({ payload }) => d({ type: "modeChanged", event: payload })),
@@ -187,5 +205,4 @@ export async function subscribe(api: Api, store: Store, actions: Actions): Promi
       }
     }),
   ]);
-  return () => offs.forEach((off) => off());
 }

@@ -1,11 +1,13 @@
 import { useId, useState } from "react";
-import type { ApiError, EndpointsView, Profile, ProfileView, Role, WireApi } from "../api";
+import { settle, type EndpointsView, type Failure, type Model, type Profile, type ProfileView, type Role, type WireApi } from "../api";
 import { useT } from "../i18n";
 import { useActions, useApi, useStore } from "../store";
+import { InlineError, errorText } from "../ui/ErrorBar";
 
 const REASONING = ["low", "medium", "high"] as const;
+const WIRES: WireApi[] = ["chat", "responses", "messages"];
 
-type Fetched = Record<string, { models?: string[]; error?: ApiError }>;
+type Fetched = Record<string, { models?: string[]; error?: Failure }>;
 
 function knownModels(p: Profile, fetched: Fetched): string[] {
   return [...new Set([...(fetched[p.name]?.models ?? []), ...(p.model ?? []).map((m) => m.id)])];
@@ -17,7 +19,17 @@ export function EndpointsPage() {
   const view = useStore((s) => s.endpoints);
   const [fetched, setFetched] = useState<Fetched>({});
   const [adding, setAdding] = useState(false);
-  if (!view) return <p className="muted">{t("app.loading")}</p>;
+  const actions = useActions();
+  const loadError = useStore((s) => s.loadErrors.endpoints);
+  if (!view) {
+    return loadError ? (
+      <InlineError error={loadError} onRetry={() => void actions.refreshEndpoints()} />
+    ) : (
+      <p className="muted" role="status">
+        {t("app.loading")}
+      </p>
+    );
+  }
   const chat = view.roles?.chat ?? null;
 
   return (
@@ -30,6 +42,7 @@ export function EndpointsPage() {
           </button>
         )}
       </header>
+      {loadError && <InlineError error={loadError} onRetry={() => void actions.refreshEndpoints()} />}
       {adding && <AddProfile view={view} onDone={() => setAdding(false)} />}
       {view.profiles.length === 0 && !adding && <p className="muted">{t("endpoints.empty")}</p>}
       <ul className="profiles">
@@ -71,12 +84,13 @@ function ProfileCard({
   const failed = fetched[p.name]?.error;
   const [model, setModel] = useState(active && role ? role.model : (models[0] ?? ""));
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const fetchModels = async () => {
     setBusy(true);
-    const r = await api.commands.fetchModels(p.name);
+    const r = await settle(api.commands.fetchModels(p.name));
     setBusy(false);
-    if (r.status === "error") return onFetched(p.name, { error: r.error });
+    if (!r.ok) return onFetched(p.name, { error: r.error });
     onFetched(p.name, { models: r.data });
     if (!model && r.data[0]) setModel(r.data[0]);
     // Remember what the endpoint offers, so the list survives a restart.
@@ -115,7 +129,7 @@ function ProfileCard({
     <li className={`card profile${active ? " active" : ""}`}>
       <header className="row">
         <h4>{p.name}</h4>
-        <span className="tag">{p.wire_api}</span>
+        <span className="tag">{t(`endpoints.wire.${p.wire_api}`)}</span>
         <span className="spacer" />
         {active ? (
           <span className="tag on">● {t("endpoints.in_use")}</span>
@@ -145,24 +159,39 @@ function ProfileCard({
             </select>
           </>
         )}
-        <button type="button" className="ghost" disabled={busy} onClick={fetchModels}>
+        <button type="button" className="ghost" disabled={busy} aria-busy={busy} onClick={fetchModels}>
           {busy ? t("endpoints.fetching") : t("endpoints.fetch")}
         </button>
       </div>
       {failed && (
-        <div className="fetch-error" role="alert">
+        <div className="fetch-error" role="status">
           <p>{t("endpoints.fetch.failed")}</p>
+          <p className="muted small">{errorText(failed, t, {}).text}</p>
           {"detail" in failed && <pre className="raw">{failed.detail}</pre>}
         </div>
       )}
+      {editing && (
+        <EditProfile
+          profile={p}
+          onDone={async (saved) => {
+            setEditing(false);
+            if (saved) await actions.refreshEndpoints();
+          }}
+        />
+      )}
       <KeyField profile={p.name} hasKey={view.has_key} />
-      {!active && (
-        <p className="row end">
+      <p className="row end">
+        {!editing && (
+          <button type="button" className="link" aria-label={t("endpoints.edit.label", { name: p.name })} onClick={() => setEditing(true)}>
+            {t("endpoints.edit")}
+          </button>
+        )}
+        {!active && (
           <button type="button" className="link danger" onClick={remove}>
             {t("endpoints.remove")}
           </button>
-        </p>
-      )}
+        )}
+      </p>
     </li>
   );
 }
@@ -259,9 +288,7 @@ function AddProfile({ view, onDone }: { view: EndpointsView; onDone: () => void 
       <input id={`${id}-u`} type="url" value={url} onChange={(e) => setUrl(e.target.value)} required />
       <label htmlFor={`${id}-w`}>{t("endpoints.preset.wire")}</label>
       <select id={`${id}-w`} value={wire} onChange={(e) => setWire(e.target.value as WireApi)}>
-        <option value="chat">chat</option>
-        <option value="responses">responses</option>
-        <option value="messages">messages</option>
+        <WireOptions />
       </select>
       <p className="row end">
         <button type="button" className="ghost" onClick={onDone}>
@@ -350,5 +377,132 @@ function Roles({ view, fetched }: { view: EndpointsView; fetched: Fetched }) {
         </select>
       </div>
     </section>
+  );
+}
+
+/** The wire choices, each with a hint on what it speaks. */
+function WireOptions() {
+  const t = useT();
+  return (
+    <>
+      {WIRES.map((w) => (
+        <option key={w} value={w}>
+          {t("endpoints.wire.option", { wire: t(`endpoints.wire.${w}`), hint: t(`endpoints.wire.${w}.hint`) })}
+        </option>
+      ))}
+    </>
+  );
+}
+
+type NumField = "context_window" | "cache_min_prefix" | "cache_breakpoints" | "price_in" | "price_in_cached" | "price_in_cache_write" | "price_out";
+const NUM_FIELDS: NumField[] = ["context_window", "cache_min_prefix", "cache_breakpoints", "price_in", "price_in_cached", "price_in_cache_write", "price_out"];
+// Cache write is only priced on the Anthropic-style wire.
+const visible = (f: NumField, wire: WireApi) => f !== "price_in_cache_write" || wire === "messages";
+
+/** Empty field = absent (the engine's defaults apply); anything else must be a number. */
+function parseNum(raw: string): number | null | undefined {
+  if (!raw.trim()) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+function EditProfile({ profile, onDone }: { profile: Profile; onDone: (saved: boolean) => void | Promise<void> }) {
+  const t = useT();
+  const api = useApi();
+  const actions = useActions();
+  const id = useId();
+  const [url, setUrl] = useState(profile.base_url);
+  const [wire, setWire] = useState<WireApi>(profile.wire_api);
+  const [models, setModels] = useState<Model[]>(profile.model ?? []);
+  const [bad, setBad] = useState<string | null>(null);
+
+  const patch = (i: number, change: Partial<Model>) => setModels((ms) => ms.map((m, j) => (j === i ? { ...m, ...change } : m)));
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const ids = models.map((m) => m.id.trim()).filter(Boolean);
+    if (new Set(ids).size !== ids.length) return setBad("model");
+    setBad(null);
+    const next: Model[] = models.filter((m) => m.id.trim()).map((m) => ({ ...m, id: m.id.trim() }));
+    const ok = await actions.attempt(api.commands.updateProfile(profile.name, { ...profile, base_url: url.trim(), wire_api: wire, model: next }));
+    if (ok !== undefined) await onDone(true);
+  };
+
+  return (
+    <form className="edit-profile" aria-label={t("endpoints.edit.label", { name: profile.name })} onSubmit={save}>
+      <label htmlFor={`${id}-u`}>{t("endpoints.preset.url")}</label>
+      <input id={`${id}-u`} type="url" value={url} onChange={(e) => setUrl(e.target.value)} required />
+      <label htmlFor={`${id}-w`}>{t("endpoints.preset.wire")}</label>
+      <select id={`${id}-w`} value={wire} onChange={(e) => setWire(e.target.value as WireApi)}>
+        <WireOptions />
+      </select>
+      <h5>{t("endpoints.models")}</h5>
+      {models.length === 0 && <p className="muted small">{t("endpoints.models.empty")}</p>}
+      {bad && <p className="muted" role="status">{t("error.invalid", { field: t("endpoints.model.id") })}</p>}
+      <ul className="model-list">
+        {models.map((m, i) => (
+          <li key={i}>
+            <div className="row">
+              <label htmlFor={`${id}-m${i}`} className="sr-only">
+                {t("endpoints.model.id")}
+              </label>
+              <input id={`${id}-m${i}`} value={m.id} placeholder={t("endpoints.model.untitled")} onChange={(e) => patch(i, { id: e.target.value })} />
+              <button type="button" className="link danger" aria-label={t("endpoints.model.remove", { id: m.id || t("endpoints.model.untitled") })} onClick={() => setModels((ms) => ms.filter((_, j) => j !== i))}>
+                {t("endpoints.remove")}
+              </button>
+            </div>
+            <details>
+              <summary>{t("endpoints.model.details")}</summary>
+              <label htmlFor={`${id}-f${i}`}>{t("endpoints.model.forced_tool")}</label>
+              <select
+                id={`${id}-f${i}`}
+                value={m.forced_tool == null ? "" : String(m.forced_tool)}
+                onChange={(e) => patch(i, { forced_tool: e.target.value === "" ? null : e.target.value === "true" })}
+              >
+                <option value="">{t("endpoints.model.forced_tool.unknown")}</option>
+                <option value="true">{t("endpoints.model.forced_tool.yes")}</option>
+                <option value="false">{t("endpoints.model.forced_tool.no")}</option>
+              </select>
+              {NUM_FIELDS.filter((f) => visible(f, wire)).map((f) => (
+                <NumInput key={f} id={`${id}-${f}${i}`} label={t(`endpoints.model.${f}`)} value={m[f]} onChange={(v) => patch(i, { [f]: v })} />
+              ))}
+              <p className="muted small">{t("endpoints.model.prices.hint")}</p>
+            </details>
+          </li>
+        ))}
+      </ul>
+      <p className="row">
+        <button type="button" className="ghost" onClick={() => setModels((ms) => [...ms, { id: "" }])}>
+          + {t("endpoints.model.add")}
+        </button>
+        <span className="spacer" />
+        <button type="button" className="ghost" onClick={() => void onDone(false)}>
+          {t("endpoints.edit.cancel")}
+        </button>
+        <button type="submit">{t("endpoints.edit.save")}</button>
+      </p>
+    </form>
+  );
+}
+
+/** A number field that keeps what is typed until it parses; empty means "use the default". */
+function NumInput({ id, label, value, onChange }: { id: string; label: string; value: number | null | undefined; onChange: (v: number | null) => void }) {
+  const [raw, setRaw] = useState(value == null ? "" : String(value));
+  const invalid = parseNum(raw) === undefined;
+  return (
+    <>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        inputMode="decimal"
+        value={raw}
+        aria-invalid={invalid}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          const v = parseNum(e.target.value);
+          if (v !== undefined) onChange(v);
+        }}
+      />
+    </>
   );
 }
