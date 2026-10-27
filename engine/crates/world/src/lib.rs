@@ -116,6 +116,9 @@ impl World {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let mut conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // The app and the terminal client may hold the same file: a writer waits for the
+        // other instead of failing with "database is locked".
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn)?;
         Ok(Self { conn })
     }
