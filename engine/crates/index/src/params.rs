@@ -68,10 +68,10 @@ impl Default for ConfidenceBands {
     /// person, so they say nothing about the scores.
     fn default() -> Self {
         Self {
-            low_top1: 9.84,
-            low_entropy: 0.283,
-            high_top1: 9.84,
-            high_entropy: 0.196,
+            low_top1: 11.068,
+            low_entropy: 0.307,
+            high_top1: 11.068,
+            high_entropy: 0.184,
         }
     }
 }
