@@ -34,14 +34,15 @@ fn spoken(text: &str, open: &str, close: &str) -> String {
     without_cites(&out)
 }
 
-/// `text` without its `[#id]` citation marks: they name sources, they are not speech.
+/// `text` without its `[#id]` citation marks (one id, or a comma-separated list): they
+/// name sources, they are not speech.
 fn without_cites(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(i) = rest.find("[#") {
         let tail = &rest[i + 2..];
         match tail.find(']') {
-            Some(end) if end > 0 && end <= 128 && !tail[..end].contains(char::is_whitespace) => {
+            Some(end) if is_cite_list(&tail[..end]) => {
                 out.push_str(rest[..i].trim_end_matches([' ', '\t']));
                 rest = &tail[end + 1..];
             }
@@ -53,6 +54,16 @@ fn without_cites(text: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// The inside of a citation bracket after its first `#`: ids, each optionally prefixed
+/// by `#`, separated by commas with optional spaces.
+fn is_cite_list(inside: &str) -> bool {
+    !inside.starts_with(char::is_whitespace)
+        && inside.split(',').all(|item| {
+            let id = item.trim().trim_start_matches('#');
+            !id.is_empty() && id.len() <= 128 && !id.contains(char::is_whitespace)
+        })
 }
 
 impl Engine {
@@ -339,5 +350,9 @@ mod tests {
         assert_eq!(spoken("plain", "", ""), "plain");
         assert_eq!(spoken("Yes. [#voice:ab12] Go.", "*", "*"), "Yes. Go.");
         assert_eq!(spoken("[# not an id] ok", "*", "*"), "[# not an id] ok");
+        assert_eq!(
+            spoken("Yes [#a:1,#b:2] and [#c:3, #d:4] go [#e:5, ].", "*", "*"),
+            "Yes and go [#e:5, ]."
+        );
     }
 }

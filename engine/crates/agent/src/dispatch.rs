@@ -250,7 +250,7 @@ impl Agent {
                     if !turn.text.is_empty() {
                         turn.text.push('\n');
                     }
-                    turn.text.push_str(&r.text);
+                    turn.text.push_str(&crate::assemble::visible_text(&r.text));
                     turn.closed = true;
                     return Ok(Ok(self.say(names, "harness.done", &[])));
                 };

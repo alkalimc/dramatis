@@ -483,6 +483,30 @@ async fn a_per_request_model_does_not_roll_for_material_and_records_no_points() 
     assert_eq!(calls, 2);
 }
 
+#[tokio::test]
+async fn emulated_tools_are_left_out_of_ordinary_turns_only() {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let e = env_with(ep, |_| {});
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        say("Cooler water."),
+        call(
+            "wrapup",
+            json!({"facts": [], "summary": "They talked about tea."}),
+        ),
+    ]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let json = e.fake.json();
+    assert!(json[0].get("tools").is_none() && json[0].get("tool_choice").is_none());
+    assert_eq!(forced_tool(&json[1]), Some("wrapup"));
+    assert!(json[1]["tools"].as_array().is_some_and(|t| !t.is_empty()));
+}
+
 async fn rolls_over(wire: WireApi) {
     let e = env_with(endpoints(wire, true, None), |c| c.agent.roll.k = 10.0);
     let ch = direct(&e, "ann");
