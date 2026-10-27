@@ -688,9 +688,13 @@ impl Agent {
     /// when the log holds nothing to wrap up, and in the host's own log (it keeps no
     /// memories). With `summary` (a rollover) the summary for the next segment is asked.
     pub(crate) async fn run_wrapup(&self, ch: ChannelId, summary: bool) -> Result<Option<Summary>> {
-        let (role, _) = self.chat()?;
+        let kind = self.log_kind(&self.db(), ch)?;
+        if kind == LogKind::Host {
+            return Ok(None);
+        }
+        let (role, _) = self.role_for(kind)?;
         let forced = role.profile.wire_api.may_force_tool();
-        if (forced && !role.forced_tool()) || self.log_kind(&self.db(), ch)? == LogKind::Host {
+        if forced && !role.forced_tool() {
             return Ok(None);
         }
         let Some(seg) = world::log::current(&self.db(), ch)? else {

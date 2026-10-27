@@ -7,7 +7,7 @@ use world::quota::Prices;
 
 use crate::error::{Error, Result};
 
-/// The chat role, resolved: profile, model and what is known about the model.
+/// A runtime role (chat or host), resolved: profile, model and what is known about the model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatRole {
     pub profile: Profile,
@@ -19,12 +19,21 @@ impl ChatRole {
     /// The chat role of an endpoints file. A model the profile does not list is known
     /// only by name: no forced tool (wrap-up skipped), no window, default prices.
     pub fn resolve(endpoints: &Endpoints) -> Result<Self> {
-        let role = endpoints
-            .roles
-            .as_ref()
-            .ok_or(Error::NoEndpoint)?
-            .chat
-            .clone();
+        Self::from_role(endpoints, &Self::roles(endpoints)?.chat)
+    }
+
+    /// The host role; the chat role where the file has none.
+    pub fn resolve_host(endpoints: &Endpoints) -> Result<Self> {
+        let roles = Self::roles(endpoints)?;
+        Self::from_role(endpoints, roles.host.as_ref().unwrap_or(&roles.chat))
+    }
+
+    fn roles(endpoints: &Endpoints) -> Result<&api::endpoints::Roles> {
+        endpoints.roles.as_ref().ok_or(Error::NoEndpoint)
+    }
+
+    fn from_role(endpoints: &Endpoints, role: &api::endpoints::Role) -> Result<Self> {
+        let role = role.clone();
         let profile = endpoints
             .profile(&role.profile)
             .ok_or(Error::NoEndpoint)?
@@ -168,6 +177,18 @@ mod tests {
             ChatRole::resolve(&Endpoints::default()),
             Err(Error::NoEndpoint)
         ));
+        let with_host = Endpoints::from_toml(
+            "[[profile]]\nname='p'\nbase_url='x'\nwire_api='chat'\n[roles]\n\
+             chat={profile='p', model='c'}\nhost={profile='p', model='h', reasoning='low'}\n",
+        )
+        .unwrap();
+        let h = ChatRole::resolve_host(&with_host).unwrap();
+        assert_eq!(
+            (h.model.id.as_str(), h.reasoning.as_deref()),
+            ("h", Some("low"))
+        );
+        assert_eq!(ChatRole::resolve(&with_host).unwrap().model.id, "c");
+        assert_eq!(ChatRole::resolve_host(&unlisted).unwrap().model.id, "typed");
         let keys = StaticKeys(vec![("p".into(), Secret::new("k"))]);
         assert!(key(Some(&keys), "p").unwrap().is_some());
         assert!(key(Some(&keys), "q").unwrap().is_none());

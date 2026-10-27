@@ -26,6 +26,7 @@ use crate::endpoint::{self, ChatRole, Keys};
 use crate::error::{Error, Result};
 use crate::params;
 use crate::persona::{self, HostLayers, Personas};
+use crate::session::LogKind;
 use crate::text::{Names, Wording};
 
 /// Everything pushed to the UI, as the api event types.
@@ -260,8 +261,18 @@ impl Agent {
     }
 
     pub(crate) fn chat(&self) -> Result<(ChatRole, llm::Endpoint)> {
+        self.role_for(LogKind::Person)
+    }
+
+    /// The role and endpoint of a log kind: the host's own log uses the host role
+    /// (the chat role where none is set), every other log the chat role. A group log
+    /// belongs to its persons, whoever else is a member.
+    pub(crate) fn role_for(&self, kind: LogKind) -> Result<(ChatRole, llm::Endpoint)> {
         let endpoints = self.endpoints();
-        let role = ChatRole::resolve(&endpoints)?;
+        let role = match kind {
+            LogKind::Person => ChatRole::resolve(&endpoints)?,
+            LogKind::Host => ChatRole::resolve_host(&endpoints)?,
+        };
         let key = endpoint::key(self.keys.as_deref(), &role.profile.name)?;
         let ep = endpoint::endpoint(&role.profile, &role.model, key);
         Ok((role, ep))

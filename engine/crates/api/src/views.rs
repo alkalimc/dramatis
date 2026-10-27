@@ -575,5 +575,7 @@ pub struct ProfileView {
 #[serde(rename_all = "snake_case")]
 pub enum RoleKind {
     Chat,
+    /// The in-world assistant; absent, it uses the chat role.
+    Host,
     Tts,
 }

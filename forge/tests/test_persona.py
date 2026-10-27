@@ -121,6 +121,14 @@ def test_endpoints_mirror_the_engine_shape():
     assert Endpoints.from_toml("") == Endpoints()
 
 
+def test_endpoints_accept_an_optional_host_role():
+    text = ("[[profile]]\nname='a'\nbase_url='x'\nwire_api='chat'\n[roles]\n"
+            "chat={profile='a', model='m'}\nhost={profile='a', model='h'}\n")
+    assert Endpoints.from_toml(text).roles.host.model == "h"
+    with pytest.raises(EndpointsError, match="not defined"):
+        Endpoints.from_toml(text.replace("host={profile='a'", "host={profile='b'"))
+
+
 @pytest.mark.parametrize("text, message", [
     ("[[profile]]\nname='a'\nbase_url='x'\nwire_api='chat'\napi_key='k'\n", "unknown key"),
     ("[[profile]]\nname='a'\nbase_url='x'\nwire_api='grpc'\n", "wire_api"),

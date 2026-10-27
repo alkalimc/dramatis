@@ -337,6 +337,8 @@ export const en = {
   "endpoints.model.prices.hint": "Any currency per any number of tokens: only the ratios to the input price are used. Empty fields use the defaults.",
   "endpoints.roles": "Roles",
   "endpoints.role.chat": "Chat",
+  "endpoints.role.host": "Host",
+  "endpoints.role.host.same": "Same as chat",
   "endpoints.role.tts": "Read aloud",
   "endpoints.role.off": "Off",
   "endpoints.role.none": "Not set",

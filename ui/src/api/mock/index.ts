@@ -828,6 +828,9 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         if (!role) return fail({ code: "invalid", field: "role" });
         endpoints = { ...endpoints, roles: { ...(endpoints.roles ?? {}), chat: role } };
         library = false;
+      } else if (kind === "host") {
+        if (!endpoints.roles) return fail({ code: "invalid", field: "role" });
+        endpoints = { ...endpoints, roles: { ...endpoints.roles, host: role } };
       } else {
         if (!endpoints.roles) return fail({ code: "invalid", field: "role" });
         endpoints = { ...endpoints, roles: { ...endpoints.roles, tts: role } };

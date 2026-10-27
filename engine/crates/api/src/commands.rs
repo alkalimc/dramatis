@@ -191,7 +191,8 @@ commands! {
     fn fetch_models(profile: String) -> Vec<String>;
     /// Store the key in the keychain. It is never returned by any command.
     fn set_key(profile: String, key: String) -> ();
-    /// `None` switches the role off (only meaningful for read-aloud).
+    /// `None` switches the role off (read-aloud) or back to the default (host: the chat
+    /// role); the chat role itself cannot be removed.
     fn set_role(kind: RoleKind, role: Option<Role>) -> ();
 }
 

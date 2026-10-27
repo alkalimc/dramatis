@@ -429,6 +429,22 @@ pub fn endpoints(wire: WireApi, forced_tool: bool, window: Option<u32>) -> Endpo
     .unwrap()
 }
 
+/// [`endpoints`] with a separate host role on its own model, `model-h`.
+pub fn endpoints_with_host(wire: WireApi) -> Endpoints {
+    let mut e = endpoints(wire, true, None);
+    e.profiles[0].models.push(api::endpoints::Model {
+        id: "model-h".into(),
+        forced_tool: Some(true),
+        ..Default::default()
+    });
+    e.roles.as_mut().unwrap().host = Some(api::endpoints::Role {
+        profile: "p".into(),
+        model: "model-h".into(),
+        reasoning: None,
+    });
+    e
+}
+
 pub struct Env {
     pub agent: Arc<Agent>,
     pub fake: Arc<Fake>,

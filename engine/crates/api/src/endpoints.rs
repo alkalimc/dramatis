@@ -25,8 +25,11 @@
 //! [roles]                              # absent = no chat model: the app runs as a library
 //! chat = { profile = "example", model = "model-a" }
 //! tts = { profile = "example", model = "tts-1" }                          # optional
+//! host = { profile = "example", model = "model-b" }                       # optional
 //! persona = { profile = "example", model = "model-a", reasoning = "high" }  # optional
 //! ```
+//!
+//! `host` is the model of the in-world terminal assistant; absent, the host uses `chat`.
 //!
 //! Absent optional keys stay absent when written back (TOML has no null).
 //!
@@ -117,8 +120,12 @@ pub struct Model {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(deny_unknown_fields)]
 pub struct Roles {
-    /// Every runtime call: direct, group, ask, openings, interjections, wrap-up, host.
+    /// Every runtime call made by persons: direct, group, ask, openings, interjections,
+    /// wrap-up. Also the host's calls when `host` is absent.
     pub chat: Role,
+    /// Every runtime call made as or for the host. Absent: the host uses `chat`.
+    #[serde(default)]
+    pub host: Option<Role>,
     /// Read-aloud (`/audio/speech`). Absent: no play button.
     #[serde(default)]
     pub tts: Option<Role>,
@@ -173,6 +180,7 @@ impl Endpoints {
         if let Some(roles) = &self.roles {
             let named = [
                 ("chat", Some(&roles.chat)),
+                ("host", roles.host.as_ref()),
                 ("tts", roles.tts.as_ref()),
                 ("persona", roles.persona.as_ref()),
             ];
@@ -246,6 +254,7 @@ cache_breakpoints = 0              # automatic prefix caching
 
 [roles]
 chat = { profile = "primary", model = "model-a" }
+host = { profile = "primary", model = "model-b" }
 persona = { profile = "primary", model = "model-a", reasoning = "high" }
 "#;
 
@@ -272,6 +281,7 @@ persona = { profile = "primary", model = "model-a", reasoning = "high" }
             Some("high")
         );
         assert!(roles.tts.is_none());
+        assert_eq!(roles.host.as_ref().unwrap().model, "model-b");
     }
 
     #[test]
@@ -338,6 +348,11 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
                     model: "m".into(),
                     reasoning: None,
                 },
+                host: Some(Role {
+                    profile: "deepseek".into(),
+                    model: "m".into(),
+                    reasoning: Some("low".into()),
+                }),
                 tts: Some(Role {
                     profile: "deepseek".into(),
                     model: "m".into(),
@@ -369,6 +384,13 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
         assert!(matches!(
             Endpoints::from_toml(dangling),
             Err(Error::UnknownProfile { role: "chat", .. })
+        ));
+        let dangling_host = "[[profile]]\nname='a'\nbase_url='x'\nwire_api='chat'\n\
+                             [roles]\nchat = { profile = 'a', model = 'm' }\n\
+                             host = { profile = 'nope', model = 'm' }\n";
+        assert!(matches!(
+            Endpoints::from_toml(dangling_host),
+            Err(Error::UnknownProfile { role: "host", .. })
         ));
         // A key in the file must never be silently accepted and ignored.
         let secret = "[[profile]]\nname='a'\nbase_url='x'\nwire_api='chat'\napi_key='k'\n";

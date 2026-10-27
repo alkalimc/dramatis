@@ -130,6 +130,20 @@ describe("endpoints", () => {
     expect(screen.getByDisplayValue("https://api.anthropic.com/v1")).toBeDefined();
   });
 
+  test("host role defaults to the chat model and can be set apart", async () => {
+    const user = userEvent.setup();
+    const { actions, store } = renderWith(<EndpointsPage />);
+    await act(() => actions.refreshEndpoints());
+    const host = (await screen.findByLabelText("Host")) as HTMLSelectElement;
+    expect(host.value).toBe("");
+    expect(within(host).getByRole("option", { name: "Same as chat" })).toBeDefined();
+    const [other] = within(host).getAllByRole("option").filter((o) => (o as HTMLOptionElement).value);
+    await user.selectOptions(host, (other as HTMLOptionElement).value);
+    await waitFor(() => expect(store.getState().endpoints?.roles?.host).toBeTruthy());
+    await user.selectOptions(host, "");
+    await waitFor(() => expect(store.getState().endpoints?.roles?.host ?? null).toBeNull());
+  });
+
   test("edit form: cache write price shows on the messages wire only; key is never shown", async () => {
     const user = userEvent.setup();
     const { actions } = renderWith(<EndpointsPage />);

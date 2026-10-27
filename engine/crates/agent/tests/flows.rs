@@ -1189,3 +1189,56 @@ async fn a_relay_is_posted_as_a_retelling_in_the_recipients_channel() {
         Err(agent::Error::NoPersona(_))
     ));
 }
+
+fn models_sent(e: &Env) -> Vec<String> {
+    e.fake
+        .json()
+        .iter()
+        .map(|v| v["model"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+fn metered_models(agent: &agent::Agent) -> Vec<(String, String)> {
+    agent.with_world(|w| {
+        let mut stmt = w
+            .prepare("SELECT shape, model FROM meter ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    })
+}
+
+#[tokio::test]
+async fn the_host_role_serves_the_host_and_chat_serves_persons() {
+    for wire in WIRES {
+        let e = env_with(endpoints_with_host(wire), |_| {});
+        let host = e.agent.with_world(|w| channel::host(w).unwrap());
+        let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+        e.agent
+            .with_world(|w| channel::add_participant(w, g, &Actor::Host).unwrap());
+        let ch = direct(&e, "ann");
+        e.fake
+            .push([say("host hi"), say("group hi"), say("ann hi")]);
+        e.agent.send(host, "hello", None).await.unwrap();
+        e.agent.send(g, "jasmine tea", None).await.unwrap();
+        e.agent.send(ch, "jasmine tea", None).await.unwrap();
+        assert_eq!(models_sent(&e), ["model-h", "model-a", "model-a"]);
+        let metered = metered_models(&e.agent);
+        assert_eq!(
+            metered.iter().map(|m| m.1.as_str()).collect::<Vec<_>>(),
+            ["model-h", "model-a", "model-a"],
+            "{metered:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn without_a_host_role_the_host_uses_chat() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([say("host hi")]);
+    e.agent.send(host, "hello", None).await.unwrap();
+    assert_eq!(models_sent(&e), ["model-a"]);
+}

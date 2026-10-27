@@ -96,7 +96,10 @@ export const commands = {
 	fetchModels: (profile: string) => typedError<string[], ApiError>(__TAURI_INVOKE("fetch_models", { profile })),
 	/**  Store the key in the keychain. It is never returned by any command. */
 	setKey: (profile: string, key: string) => typedError<null, ApiError>(__TAURI_INVOKE("set_key", { profile, key })),
-	/**  `None` switches the role off (only meaningful for read-aloud). */
+	/**
+	 *  `None` switches the role off (read-aloud) or back to the default (host: the chat
+	 *  role); the chat role itself cannot be removed.
+	 */
 	setRole: (kind: RoleKind, role: {
 	profile: string,
 	model: string,
@@ -510,11 +513,18 @@ export type Role = {
 };
 
 /**  The roles the endpoints drawer can set. The persona role is maintainer-only. */
-export type RoleKind = "chat" | "tts";
+export type RoleKind = "chat" | 
+/**  The in-world assistant; absent, it uses the chat role. */
+"host" | "tts";
 
 export type Roles = {
-	/**  Every runtime call: direct, group, ask, openings, interjections, wrap-up, host. */
+	/**
+	 *  Every runtime call made by persons: direct, group, ask, openings, interjections,
+	 *  wrap-up. Also the host's calls when `host` is absent.
+	 */
 	chat: Role,
+	/**  Every runtime call made as or for the host. Absent: the host uses `chat`. */
+	host?: Role | null,
 	/**  Read-aloud (`/audio/speech`). Absent: no play button. */
 	tts?: Role | null,
 	/**  Maintainer-only offline persona generation. The app never reads it. */
