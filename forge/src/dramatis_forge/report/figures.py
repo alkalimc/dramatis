@@ -35,7 +35,7 @@ from pathlib import Path
 from ..chunk import engine_meta_test
 from ..config import Paths
 from ..guards import GUARDS, HIGH
-from ..pack import Pack, pack_dir
+from ..pack import FigureSpec, Pack, pack_dir
 from ..text import table_head
 from . import tokens as tokens_mod
 
