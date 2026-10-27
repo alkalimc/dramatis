@@ -31,6 +31,11 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
         force: Annotated[bool, typer.Option(
             "--force", help="Call again even where the current version already passed.")]
             = False,
+        stale: Annotated[bool, typer.Option(
+            "--stale", help="No network: list personas whose source material has changed "
+                            "since they were written, in persona/STALE.md.")] = False,
+        regenerate: Annotated[bool, typer.Option(
+            "--regenerate", help="With --stale: call again for the stale ones only.")] = False,
         endpoints: Annotated[Path | None, typer.Option(
             "--endpoints", help="Endpoints file (default: $DRAMATIS_HOME/endpoints.toml).")]
             = None,
@@ -40,17 +45,28 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
 
         Resumable: a subject whose rows carry the current generator version and still pass
         the gates is skipped, and a stored reply for the current version is reused without
-        a call. Reports go to <home>/<pack>/persona/; with --probe, one readable file per
-        subject goes to persona/probe/.
+        a call. With --stale, nothing is generated: the personas are compared with the
+        folio and persona/STALE.md lists those whose sent material changed; add
+        --regenerate to redo exactly those. Reports go to <home>/<pack>/persona/; with
+        --probe, one readable file per subject goes to persona/probe/.
         """
         pk, paths = resolve(pack, home)
         tick = lambda m: console.print(f"  [dim]persona[/dim] {m}", highlight=False)  # noqa: E731
         try:
             result = execute(pk, paths, probe=probe, only=only, force=force,
-                             endpoints_path=endpoints, progress=tick)
+                             stale=stale, regenerate=regenerate, endpoints_path=endpoints,
+                             progress=tick)
         except UsageError as exc:
             die(str(exc), exc.hint)
             return
+        found = result.stale
+        if found is not None:
+            console.print(f"stale {len(found.stale)} · new material only "
+                          f"{len(found.new_only)} · never generated {len(found.never)} · "
+                          f"no source record {len(found.no_record)} · up to date {found.current}")
+            if not regenerate:
+                console.print(f"[cyan]{result.written[0]}[/cyan]")
+                return
         rep = result.report
         console.print(f"generator [bold]{rep.version}[/bold] · "
                       + " · ".join(f"{k} {v}" for k, v in sorted(rep.by_status().items())))

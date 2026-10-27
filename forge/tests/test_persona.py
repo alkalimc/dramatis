@@ -36,8 +36,10 @@ from dramatis_forge.persona.endpoints import (
 )
 from dramatis_forge.persona.gates import META, PRESCRIPTIVE, STRUCTURE, Lexicons, check
 from dramatis_forge.persona.generator import DEFAULT, Generator, HostSource
+from dramatis_forge.persona import stale as stale_mod
 from dramatis_forge.persona.material import estimate_tokens, for_host, for_person, speech_units
 from dramatis_forge.persona.params import Persona
+from dramatis_forge.persona.store import RawCache
 from dramatis_forge.persona.run import (
     FAILED,
     RESTORED,
@@ -284,6 +286,44 @@ def test_material_budget_drops_and_counts(paths):
     mat = for_person(db, "Alice", GEN, tight, estimate_tokens, ": ")
     assert mat.tokens <= 30
     assert mat.dropped and mat.story_found == 3 and len(mat.story) < 3
+
+
+def test_budget_fills_identity_and_voice_before_dossier_and_keeps_what_fits(paths):
+    db = open_db(paths)
+    full = for_person(db, "Alice", GEN, Persona(material_tokens=10**6, story_tokens=0),
+                      estimate_tokens, ": ")
+    own = sum(i.tokens for i in full.items if i.kind in ("card", "voice"))
+    assert own < full.tokens
+    mat = for_person(db, "Alice", GEN, Persona(material_tokens=own, story_tokens=0),
+                     estimate_tokens, ": ")
+    assert {i.kind for i in mat.items} == {"card", "voice"}
+    assert mat.dropped.get("quote") and mat.dropped.get("char_ref") and not mat.story
+
+
+def test_story_budget_is_reserved_before_the_items(paths):
+    db = open_db(paths)
+    p = Persona(material_tokens=60, story_tokens=15)
+    mat = for_person(db, "Alice", GEN, p, estimate_tokens, ": ")
+    assert mat.story and sum(s.tokens for s in mat.story) <= 15 and mat.tokens <= 60
+
+
+def test_thin_people_send_everything_under_the_default_budget(paths):
+    db = open_db(paths)
+    for person in ("Bob", "Carol", "Frank", "Gil", "Alice"):
+        mat = for_person(db, person, GEN, Persona(), estimate_tokens, ": ")
+        assert not mat.dropped, person
+    assert Persona().material_tokens == 5000 and Persona().story_tokens == 1500
+
+
+def test_material_names_the_units_it_was_made_from(paths):
+    db = open_db(paths)
+    p = Persona(material_tokens=40, story_tokens=0)
+    mat = for_person(db, "Alice", GEN, p, estimate_tokens, ": ")
+    assert mat.sent and mat.sent < mat.attributed  # something was left out for budget
+    assert "voice:0004" in mat.attributed and "profile:0003" not in mat.attributed  # dropped
+    everything = for_person(db, "Alice", GEN, Persona(), estimate_tokens, ": ")
+    assert {"dialogue:0007", "dialogue:0008"} <= everything.sent
+    assert "dialogue:0007" in everything.attributed
 
 
 def test_host_material_is_found_by_name(paths):
@@ -615,3 +655,148 @@ def test_params_override_from_toml(tmp_path):
 def test_no_network_even_without_the_mock():
     with pytest.raises(RuntimeError, match="network"):
         httpx.get("https://llm.example.invalid/v1/models")
+
+
+# --------------------------------------------------------------------------- #
+# staleness
+# --------------------------------------------------------------------------- #
+
+
+def edit_unit(paths: Paths, old_id: str, new_id: str, text: str) -> None:
+    """What a rebuilt folio looks like when a unit's text changed: its id is a content
+    hash, so the old id is gone and a new one stands in its place."""
+    import sqlite3
+    db = sqlite3.connect(paths.folio)
+    try:
+        with db:
+            db.execute("UPDATE chunks SET id=?, text=? WHERE id=?", (new_id, text, old_id))
+            db.execute("UPDATE unit_persons SET chunk_id=? WHERE chunk_id=?", (new_id, old_id))
+    finally:
+        db.close()
+
+
+def add_alice_line(paths: Paths) -> None:
+    import sqlite3
+    db = sqlite3.connect(paths.folio)
+    try:
+        with db:
+            db.execute(
+                "INSERT INTO chunks(id, ord, template, page, revid, title, header, text, chars, "
+                "span_of, span_from, span_to) VALUES('dialogue:0099', 99, 'dialogue', 'Chapter 7', "
+                "1, 'Chapter 7', '', 'Alice: A new line.', 18, 'Chapter 7', 99, 99)")
+            db.execute("INSERT INTO unit_persons(chunk_id, person_id) VALUES('dialogue:0099', "
+                       "'Alice')")
+    finally:
+        db.close()
+
+
+def stale_run(toy, paths, endpoints_file, ep, **kw):
+    return run(toy, paths, endpoints_file, ep, stale=True, **kw)
+
+
+def test_a_written_persona_records_what_it_was_made_from(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    entry = RawCache(paths.pack_dir / "persona" / "raw").entry("Alice")
+    assert entry is not None
+    source = entry["source"]
+    assert "voice:0004" in source["sent"] and set(source["sent"]) <= set(source["attributed"])
+
+
+def test_unchanged_material_is_not_stale(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    build_folio(paths.folio)  # a rebuild from an unchanged corpus
+    res = stale_run(toy, paths, endpoints_file, ep, only=["Alice"], lookup=key_lookup(None))
+    assert res.stale is not None
+    assert (res.stale.stale, res.stale.new_only, res.stale.current) == ([], [], 1)
+    assert len(ep.requests) == 1  # listing calls nothing
+    md = (paths.pack_dir / "persona" / "STALE.md").read_text()
+    assert "stale: 0" in md and res.written == [paths.pack_dir / "persona" / "STALE.md"]
+
+
+def test_a_changed_sent_unit_makes_the_persona_stale(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    build_folio(paths.folio)
+    edit_unit(paths, "voice:0004", "voice:0004x", "Good evening. The lamp is out.")
+    res = stale_run(toy, paths, endpoints_file, ep, only=["Alice"], lookup=key_lookup(None))
+    row = res.stale.stale[0]
+    assert (row.subject, row.changed, res.stale.new_only) == ("Alice", 1, [])
+    assert "| Alice |" in (paths.pack_dir / "persona" / "STALE.md").read_text()
+
+
+def test_only_new_units_is_the_weak_signal_listed_apart(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    build_folio(paths.folio)
+    add_alice_line(paths)
+    res = stale_run(toy, paths, endpoints_file, ep, only=["Alice"], lookup=key_lookup(None))
+    assert res.stale.stale == [] and res.stale.to_regenerate == []
+    assert [(r.subject, r.changed, r.new) for r in res.stale.new_only] == [("Alice", 0, 1)]
+
+
+def test_a_changed_unit_that_was_never_sent_does_not_count(paths, tmp_path):
+    db = open_db(paths)
+    cache = RawCache(tmp_path / "raw")
+    mat = for_person(db, "Alice", GEN, Persona(), estimate_tokens, ": ")
+    sent = sorted(mat.sent)
+    cache.save("Alice", "v1", {}, {}, {}, {"sent": sent, "attributed": sent + ["profile:0abc"]})
+    material_of = stale_mod.current_material(db, GEN, ": ")
+    res = stale_mod.check(db, cache, "v1", ["Alice"], material_of)
+    assert res.current == 1 and not res.stale  # "profile:0abc" is not in the folio, unsent
+
+
+def test_never_generated_no_record_and_older_versions_are_told_apart(paths, tmp_path):
+    db = open_db(paths)
+    cache = RawCache(tmp_path / "raw")
+    cache.save("Alice", "v1", {}, {}, {}, None)  # written before sources were recorded
+    cache.save("Bob", "v0", {}, {}, {}, {"sent": [], "attributed": []})
+    material_of = stale_mod.current_material(db, GEN, ": ")
+    res = stale_mod.check(db, cache, "v1", ["Alice", "Bob", "Carol", "Dan"], material_of)
+    assert res.no_record == ["Alice"] and res.older_version == 1
+    assert res.never == ["Carol"]  # Dan has no material at all, so there is nothing to make
+
+
+def test_regenerate_calls_only_the_stale_ones(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice", "Frank"])
+    assert len(ep.requests) == 2
+    build_folio(paths.folio)
+    edit_unit(paths, "voice:0004", "voice:0004x", "Good evening. The lamp is out.")
+    res = run(toy, paths, endpoints_file, ep, stale=True, regenerate=True)
+    assert [(o.subject, o.status) for o in res.report.outcomes] == [("Alice", WRITTEN)]
+    assert len(ep.requests) == 3
+    assert (paths.pack_dir / "persona" / "STALE.md").exists()
+    # The new reply records the new sources, so it is current again.
+    again = stale_run(toy, paths, endpoints_file, ep, only=["Alice"], lookup=key_lookup(None))
+    assert again.stale.stale == [] and again.stale.current == 1
+
+
+def test_regenerate_needs_stale(toy, paths, endpoints_file):
+    with pytest.raises(UsageError, match="--stale"):
+        run(toy, paths, endpoints_file, FakeEndpoint(recorded("responses_ok.json")),
+            regenerate=True)
+
+
+def test_the_cli_lists_stale_personas_without_a_key(toy, paths, endpoints_file, monkeypatch):
+    import typer
+    from rich.console import Console
+    from typer.testing import CliRunner
+
+    from dramatis_forge.persona import cli
+    from dramatis_forge.persona import generator as gen_mod
+
+    monkeypatch.setattr(gen_mod, "load", lambda _pack: GEN)
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    build_folio(paths.folio)
+    edit_unit(paths, "voice:0004", "voice:0004x", "Good evening. The lamp is out.")
+
+    app = typer.Typer()
+    cli.register(app, resolve=lambda _p, _h: (toy, paths),
+                 die=lambda m, h: pytest.fail(f"{m} {h}"), console=Console(width=200))
+    out = CliRunner().invoke(app, ["--stale", "--endpoints", str(endpoints_file())])
+    assert out.exit_code == 0, out.output
+    assert "stale 1" in out.output and "STALE.md" in out.output
+    assert len(ep.requests) == 1

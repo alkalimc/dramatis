@@ -20,6 +20,7 @@ from ..pack import Pack, pack_dir
 from ..report.tokens import load_counter
 from . import generator as generator_mod
 from . import report as report_mod
+from . import stale as stale_mod
 from .client import Client, request
 from .endpoints import Endpoints, EndpointsError, KeyLookup, persona_target
 from .material import HOST, estimate_tokens
@@ -38,6 +39,8 @@ class UsageError(Exception):
 class Result:
     report: Report
     written: list[Path]
+    #: Set when the run was asked to compare personas with the folio (`stale`).
+    stale: stale_mod.Result | None = None
 
 
 def counter_for(pack: Pack) -> tuple[Callable[[str], int], str]:
@@ -55,6 +58,8 @@ def execute(
     probe: bool = False,
     only: list[str] | None = None,
     force: bool = False,
+    stale: bool = False,
+    regenerate: bool = False,
     endpoints_path: Path | None = None,
     params_path: Path | None = None,
     lookup: KeyLookup | None = None,
@@ -63,6 +68,8 @@ def execute(
     generator: generator_mod.Generator | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> Result:
+    if regenerate and not stale:
+        raise UsageError("--regenerate goes with --stale", "use --force to redo a subject")
     if not paths.folio.exists():
         raise UsageError(f"no folio at {paths.folio}", "run `forge build` first")
     try:
@@ -99,12 +106,25 @@ def execute(
     db = sqlite3.connect(paths.folio)
     try:
         subjects = _subjects(db, gen, params, probe=probe, only=only)
+        found: stale_mod.Result | None = None
+        listed: list[Path] = []
+        if stale:
+            # Comparing needs no key and no call; only regenerating does.
+            skip = ineligible(db, params)
+            found = stale_mod.check(
+                db, RawCache(root / "raw"), version, [s for s in subjects if s not in skip],
+                stale_mod.current_material(db, gen, pack.chunking.sep("label")))
+            listed = [stale_mod.write(found, root)]
+            if not regenerate:
+                return Result(report=Report(version=version, counter=counter_name),
+                              written=listed, stale=found)
+            subjects, force = found.to_regenerate, True
         ctx = Context(db=db, gen=gen, params=params, version=version, count=count,
                       sep=pack.chunking.sep("label"), cache=RawCache(root / "raw"),
                       connect=connect, placeholder=placeholder, force=force,
                       progress=progress)
         rep = run(ctx, subjects, counter_name)
-        written = report_mod.write(rep, root, probe=probe)
+        written = listed + report_mod.write(rep, root, probe=probe)
         if probe:
             for o in rep.outcomes:
                 schema = gen.schema(o.subject == HOST)
@@ -114,7 +134,7 @@ def execute(
                         profile.wire_api, role, system, user, schema))
     finally:
         db.close()
-    return Result(report=rep, written=written)
+    return Result(report=rep, written=written, stale=found)
 
 
 def user_placeholder(folio: Path) -> str:

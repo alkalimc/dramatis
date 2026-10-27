@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import gates, store
+from . import gates, stale, store
 from .client import CallError, Client, Usage
 from .generator import Generator, fill
 from .material import HOST, Counter, Material, for_host, for_person, speech_units
@@ -250,7 +250,7 @@ def one(ctx: Context, subject: str, lex: gates.Lexicons,
     out.output, out.attempts = reply.output, reply.attempts
     out.usage = reply.usage + reply.wasted
     out.raw_path = ctx.cache.save(subject, ctx.version, reply.output, reply.raw,
-                                  out.usage.as_dict())
+                                  out.usage.as_dict(), stale.source_of(mat))
     return _settle(ctx, out, judge, fields)
 
 
