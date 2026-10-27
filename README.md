@@ -83,6 +83,46 @@ export DRAMATIS_FOLIO=/path/to/artifacts/<pack>/<pack>.folio
 ./target/release/dramatis-cli bench
 ```
 
+## Terminal
+
+Talk to the persons of a corpus from a shell, with the same agent the desktop app uses.
+
+```sh
+cd engine
+cargo run -p dramatis-cli --release -- chat              # then /list, /talk <person>
+cargo run -p dramatis-cli --release -- chat <person>     # open a direct channel at once
+printf '/talk <person>\nhello\n/wrapup\n' | ./target/release/dramatis-cli chat
+```
+
+The corpus is `--folio`, else `$DRAMATIS_FOLIO`, else the `.folio` in `$DRAMATIS_HOME`
+(default `~/.dramatis`). Endpoints come from `--endpoints`, else
+`$DRAMATIS_HOME/endpoints.toml`, and keys from the system keychain exactly as in the app. The
+first run of each new build triggers a macOS keychain prompt: choose Always Allow.
+
+The world (channels, memories, usage) lives in `$DRAMATIS_HOME/cli/world.sqlite`, separate
+from the app's. Use `--world <path>` for another file (the app's, for example), `--fresh` for
+a throwaway in-memory world, and `--user <name>` to set the user's name.
+
+| Command | What it does |
+| --- | --- |
+| `/list [filter]` | persons with a persona, and whether the host is available |
+| `/talk <person>` | open the direct channel; an id, display name, other form or alias |
+| `/group <p1> <p2> ...` | start a group channel |
+| `/host` | switch to the host's channel |
+| `/wrapup` | end the conversation and show the memories it wrote |
+| `/memories [person]` | stored memories and who can see them, or those a person may recall |
+| `/history [n]` | reprint the last n messages (default 10) |
+| `/search <query>` | retrieval only, as the current speaker would see it; no model call |
+| `/stats` | one row per model call of this session: shape, model, tokens, seconds |
+| `/help`, `/quit` | Ctrl-D also leaves |
+
+Anything else is sent to the current channel. Replies stream as they are written; scene lines
+are dimmed, citation marks are hidden and the cited sources are listed after the reply, tool
+actions get one dim line, and a dim line gives the call count and time. Colour is off when
+stdout is not a terminal or `NO_COLOR` is set. A failed call prints its error and the session
+goes on. Ctrl-C while a reply is pending cancels the wait (the message you sent stays in the
+history); at the prompt it leaves.
+
 ## Writing a pack
 
 The contract is `forge/src/dramatis_forge/pack.py`: a module `packs/<name>/__init__.py`

@@ -18,3 +18,15 @@ eval = { path = "../../crates/eval" }
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+api = { path = "../../crates/api" }
+agent = { path = "../../crates/agent" }
+world = { path = "../../crates/world" }
+llm = { path = "../../crates/llm" }
+rusqlite.workspace = true
+toml.workspace = true
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
+
+[dev-dependencies]
+folio = { path = "../../crates/folio", features = ["fixture"] }
+async-trait.workspace = true
+futures = "=0.3.34"
