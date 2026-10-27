@@ -9,6 +9,7 @@ with its version. `forge build` creates the folio afresh, which drops every prom
 the cache lets the next `forge persona` restore rows for the same version without
 calling the endpoint again.
 
+The entry also holds the subject's example lines, so a rebuilt folio gets them back too.
 Each entry also records what the reply was generated from (`source`: the ids of the units
 whose text was sent, and of every unit that could have been), which `stale` compares with
 a rebuilt folio.
@@ -27,12 +28,14 @@ from typing import Any
 SLOTS = {
     "system_prompt": "system",
     "tone_rules": "tone",
-    "fallback_line": "fallback",
     "capability_line": "capability",
     "in_world": "in_world",
     "meta": "meta",
 }
 FIELDS = {slot: name for name, slot in SLOTS.items()}
+#: Not a generated field: the person's own lines, picked from the material (see
+#: `material.select_examples`) and stored with the subject's other rows, one per line.
+LINES = "lines"
 
 
 def tone_body(rules: list[str]) -> str:
@@ -67,21 +70,30 @@ def read(db: sqlite3.Connection, subject: str,
     return versions.pop(), output
 
 
+def read_lines(db: sqlite3.Connection, subject: str) -> list[str]:
+    row = db.execute("SELECT body FROM prompts WHERE subject=? AND slot=?",
+                     (subject, LINES)).fetchone()
+    return [ln for ln in row[0].split("\n") if ln] if row else []
+
+
 def write(db: sqlite3.Connection, subject: str, output: dict[str, Any],
-          fields: tuple[str, ...], version: str) -> None:
-    slots = [SLOTS[name] for name in fields]
+          fields: tuple[str, ...], version: str, lines: list[str] | None = None) -> None:
+    rows = to_rows(output, fields)
+    if lines:
+        rows.append((LINES, "\n".join(lines)))
+    slots = [slot for slot, _ in rows] + ([] if lines else [LINES])
     with db:
         db.execute(f"DELETE FROM prompts WHERE subject=? AND slot IN ({','.join('?' * len(slots))})",
                    (subject, *slots))
         db.executemany(
             "INSERT INTO prompts(subject, slot, body, generator_version) VALUES(?,?,?,?)",
-            [(subject, slot, body, version) for slot, body in to_rows(output, fields)])
+            [(subject, slot, body, version) for slot, body in rows])
 
 
 def remove(db: sqlite3.Connection, subject: str, fields: tuple[str, ...]) -> None:
     """Drop a subject's rows: a person whose current output fails is shown as missing,
     not as an older persona."""
-    slots = [SLOTS[name] for name in fields]
+    slots = [SLOTS[name] for name in fields] + [LINES]
     with db:
         db.execute(f"DELETE FROM prompts WHERE subject=? AND slot IN ({','.join('?' * len(slots))})",
                    (subject, *slots))
@@ -114,6 +126,20 @@ class RawCache:
         output = entry.get("output")
         return output if isinstance(output, dict) else None
 
+    def lines(self, subject: str, version: str) -> list[str]:
+        """The example lines saved with the reply of this version."""
+        path = self.path(subject)
+        if not path.exists():
+            return []
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return []
+        lines = entry.get("lines")
+        if entry.get("generator_version") != version or not isinstance(lines, list):
+            return []
+        return [ln for ln in lines if isinstance(ln, str)]
+
     def entry(self, subject: str) -> dict[str, Any] | None:
         """The stored entry of any version, or None."""
         path = self.path(subject)
@@ -127,12 +153,14 @@ class RawCache:
 
     def save(self, subject: str, version: str, output: dict[str, Any],
              raw: dict[str, Any], usage: dict[str, int],
-             source: dict[str, list[str]] | None = None) -> Path:
+             source: dict[str, list[str]] | None = None,
+             lines: list[str] | None = None) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.path(subject)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"subject": subject, "generator_version": version,
-                                   "source": source, "output": output, "usage": usage,
+                                   "source": source, "lines": lines or [], "output": output,
+                                   "usage": usage,
                                    "response": raw},
                                   ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)

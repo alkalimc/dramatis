@@ -58,6 +58,8 @@ class Outcome:
     attempts: int = 0
     raw_path: Path | None = None
     prompt: tuple[str, str] | None = None
+    #: The example lines stored with the subject's rows.
+    lines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -229,14 +231,17 @@ def one(ctx: Context, subject: str, lex: gates.Lexicons,
             verdict = judge(stored[1])
             if verdict.passed:
                 return Outcome(subject, RESUMED, output=stored[1], verdict=verdict,
-                               raw_path=_existing(ctx.cache.path(subject)))
+                               raw_path=_existing(ctx.cache.path(subject)),
+                               lines=store.read_lines(ctx.db, subject))
         cached = ctx.cache.load(subject, ctx.version)
         if cached is not None:
             return _settle(ctx, Outcome(subject, RESTORED, output=cached,
-                                        raw_path=ctx.cache.path(subject)), judge, fields)
+                                        raw_path=ctx.cache.path(subject),
+                                        lines=ctx.cache.lines(subject, ctx.version)),
+                           judge, fields)
 
     mat = _material(ctx, subject)
-    out = Outcome(subject, WRITTEN, material=mat)
+    out = Outcome(subject, WRITTEN, material=mat, lines=[e.text for e in mat.examples])
     if mat.empty:
         out.status, out.reasons = EMPTY, ["no material to generate from"]
         return out
@@ -250,7 +255,7 @@ def one(ctx: Context, subject: str, lex: gates.Lexicons,
     out.output, out.attempts = reply.output, reply.attempts
     out.usage = reply.usage + reply.wasted
     out.raw_path = ctx.cache.save(subject, ctx.version, reply.output, reply.raw,
-                                  out.usage.as_dict(), stale.source_of(mat))
+                                  out.usage.as_dict(), stale.source_of(mat), out.lines)
     return _settle(ctx, out, judge, fields)
 
 
@@ -263,7 +268,7 @@ def _settle(ctx: Context, out: Outcome, judge: Callable[[dict], gates.Verdict],
     assert out.output is not None
     out.verdict = judge(out.output)
     if out.verdict.passed:
-        store.write(ctx.db, out.subject, out.output, fields, ctx.version)
+        store.write(ctx.db, out.subject, out.output, fields, ctx.version, out.lines)
     else:
         store.remove(ctx.db, out.subject, fields)
         out.status, out.reasons = FAILED, out.verdict.reasons()

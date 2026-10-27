@@ -26,10 +26,10 @@ from .params import Persona
 
 #: Bump when the framework changes how prompts are assembled, which material is selected,
 #: or how outputs are read: none of that is in the pack text the digest also covers.
-CODE_VERSION = "2"
+CODE_VERSION = "3"
 
 #: Output fields every subject returns, in order.
-PERSON_FIELDS = ("system_prompt", "tone_rules", "fallback_line", "capability_line")
+PERSON_FIELDS = ("system_prompt", "tone_rules", "capability_line")
 #: Output fields the host returns on top of `PERSON_FIELDS`.
 HOST_FIELDS = ("in_world", "meta")
 
@@ -121,7 +121,9 @@ class Generator:
                      repr(self.title_kinds), repr(self.line_drops), self.user_rule,
                      placeholder, repr(self.host),
                      model, reasoning or "", repr(params.prompt_values()),
-                     str(params.material_tokens), str(params.story_tokens)):
+                     str(params.material_tokens), str(params.story_tokens),
+                     repr((params.example_lines, params.example_tokens,
+                           params.example_min_tokens))):
             h.update(part.encode())
             h.update(b"\x00")
         return f"{self.label}-{h.hexdigest()[:12]}"
@@ -151,11 +153,10 @@ You write the opening character brief for one person in an interactive fiction. 
 is placed, unchanged, at the start of every conversation with that person; another model
 reads it and speaks as them. Use only the source material you are given.
 
-The brief covers exactly four things:
+The brief covers exactly three things:
 1. How they speak: tone, sentence length and rhythm, verbal habits, how they address others.
 2. What they care about: loyalties, convictions, what they avoid or dislike.
-3. What they say when unsure: one line in their own voice.
-4. Who they are: identity, role, affiliation, origin, as the material states them.
+3. Who they are: identity, role, affiliation, origin, as the material states them.
 
 Never write:
 - Claims about capability or talkativeness ("you are erudite", "you know everything",
@@ -180,9 +181,9 @@ necessarily said), context only.
 
 Fields:
 - system_prompt: continuous prose in the second person, at most {prompt_chars} characters.
-- tone_rules: {tone_min} to {tone_max} one-sentence rules about how they speak, each with a
-  short example from the material where possible.
-- fallback_line: one line they would say when unsure, as spoken, first person.
+- tone_rules: {tone_min} to {tone_max} one-sentence habits of speech: how and when each
+  one shows, not a phrase to repeat. The speaking model also receives a few of their real
+  lines, so do not just quote catchphrases.
 - capability_line: identity and field for a roster, at most {capability_chars} characters,
   no praise.
 """

@@ -74,6 +74,17 @@ class Line:
     unit: str = ""
 
 
+@dataclass(frozen=True)
+class Example:
+    """One of the person's own lines picked as a tone reference."""
+
+    form_page: str
+    kind: str  # "voice" or "story"
+    text: str
+    tokens: int
+    unit: str
+
+
 @dataclass
 class Material:
     subject: str
@@ -87,6 +98,9 @@ class Material:
     story_found: int = 0
     #: Ids of every unit that yielded an item or a line before the budget, sent or not.
     attributed: set[str] = field(default_factory=set)
+    #: The person's own lines kept as tone references; stored beside the generated slots,
+    #: not sent to the generator.
+    examples: list[Example] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -99,7 +113,8 @@ class Material:
     @property
     def sent(self) -> set[str]:
         """Ids of the units whose text is in the material as sent."""
-        return {i.unit for i in self.items} | {s.unit for s in self.story}
+        return ({i.unit for i in self.items} | {s.unit for s in self.story}
+                | {e.unit for e in self.examples})
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -234,6 +249,64 @@ def _sample(lines: list[Line], budget: int) -> list[Line]:
     return []
 
 
+def _van_der_corput(n: int) -> float:
+    """The n-th term of the base-2 low-discrepancy sequence (0.5, 0.25, 0.75, 0.125, ...):
+    any prefix of it is spread evenly over [0, 1), so a pick order built from it stays
+    spread however many lines are finally taken."""
+    x, denom = 0.0, 1.0
+    n += 1
+    while n:
+        denom *= 2
+        x += (n & 1) / denom
+        n >>= 1
+    return x
+
+
+def select_examples(cands: list[Example], scenes: list[str], rank: dict[str, int],
+                    p: Persona, drops: list[re.Pattern[str]]) -> list[Example]:
+    """About `persona.example_lines` of the person's own lines, chosen without the model.
+
+    Candidates are in corpus order, `scenes[i]` being the title of the unit of `cands[i]`.
+    Lines that are too short (an interjection) or too long, or that the generator's line
+    drops match (a prompt rather than speech), are out; so is a second line from one
+    scene or trigger, since those are near-duplicates. The rest are grouped by form, then
+    kind, and taken round-robin, each group in an evenly spread order, until the count or
+    `persona.example_tokens` is reached. A line that does not fit the budget is skipped.
+    """
+    longest = p.example_tokens // 4
+    groups: dict[tuple[int, str], list[Example]] = {}
+    seen: set[tuple[str, str, str]] = set()
+    for ex, scene in zip(cands, scenes, strict=True):
+        if not p.example_min_tokens <= ex.tokens <= longest:
+            continue
+        if any(rx.fullmatch(ex.text) for rx in drops):
+            continue
+        key = (ex.form_page, ex.kind, scene)
+        if key in seen:
+            continue
+        seen.add(key)
+        groups.setdefault((rank.get(ex.form_page, len(rank)), ex.kind), []).append(ex)
+    order = sorted(groups, key=lambda g: (g[0], g[1] != "voice"))
+    picked: list[Example] = []
+    used: dict[tuple[int, str], set[int]] = {g: set() for g in order}
+    budget = p.example_tokens
+    step = 0
+    while len(picked) < p.example_lines and step < 64:
+        for g in order:
+            rows = groups[g]
+            idx = int(_van_der_corput(step) * len(rows))
+            if idx in used[g] or len(picked) >= p.example_lines:
+                continue
+            used[g].add(idx)
+            if rows[idx].tokens <= budget:
+                picked.append(rows[idx])
+                budget -= rows[idx].tokens
+        step += 1
+    pos = {id(ex): i for i, ex in enumerate(cands)}
+    return sorted(picked, key=lambda e: (rank.get(e.form_page, len(rank)), e.kind != "voice",
+                                         pos[id(e)]))
+
+
 def _budget(mat: Material, items: list[Item], story: list[Line], p: Persona) -> None:
     story_budget = min(p.story_tokens, sum(s.tokens for s in story))
     mat.story_found = len(story)
@@ -267,6 +340,8 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
 
     items: list[Item] = []
     story: list[Line] = []
+    cands: list[Example] = []
+    scenes: list[str] = []
     seen: set[str] = set()
     attributed: set[str] = set()
     units = db.execute(
@@ -282,8 +357,11 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
                     continue
                 seen.add(words)
                 form = speaker if speaker in rank else primary
-                story.append(Line(form, title or page, words, count(before + words), before,
-                                  uid))
+                tokens = count(before + words)
+                story.append(Line(form, title or page, words, tokens, before, uid))
+                cands.append(Example(form, "story", " ".join(words.split()),
+                                     count(words) if before else tokens, uid))
+                scenes.append(title or page)
             continue
         kind = rules.kind(_kind(shape, span_of), title)
         if kind is None:
@@ -295,6 +373,9 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
         shown = "" if kind == "card" else (title or "")
         attributed.add(uid)
         items.append(Item(kind, form, shown, body, count(shown + body), uid))
+        if kind == "voice":
+            cands.append(Example(form, "voice", " ".join(body.split()), count(body), uid))
+            scenes.append(title or "")
     # Within a kind, alternate between forms (canonical first) so a budget cut leaves every
     # form some voice, not the first page's whole list: the brief must hear how they differ.
     nth: dict[tuple[str, str], int] = {}
@@ -307,6 +388,7 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
 
     mat = Material(subject=person_id, display=display, forms=forms, attributed=attributed)
     _budget(mat, items, story, p)
+    mat.examples = select_examples(cands, scenes, rank, p, rules.drops)
     return mat
 
 
@@ -320,6 +402,8 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
     rules = _Rules(gen)
     display = src.names[0] if src.names else HOST
     story: list[Line] = []
+    cands: list[Example] = []
+    scenes: list[str] = []
     seen: set[str] = set()
     attributed: set[str] = set()
     if dialogue and names:
@@ -336,8 +420,11 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
                     seen.add(words)
                     # Tagged with the host, like a person's lines with their form: the
                     # scene is already the group heading.
-                    story.append(Line(display, title or page, words, count(before + words),
-                                      before, uid))
+                    tokens = count(before + words)
+                    story.append(Line(display, title or page, words, tokens, before, uid))
+                    cands.append(Example(display, "story", " ".join(words.split()),
+                                         count(words) if before else tokens, uid))
+                    scenes.append(title or page)
     items: list[Item] = []
     for uid, template, page, title, text, span_of in db.execute(
         "SELECT id, template, page, title, text, span_of FROM chunks ORDER BY ord"
@@ -353,4 +440,5 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
             items.append(Item(kind, page, title, body, count(title + body), uid))
     mat = Material(subject=HOST, display=display, forms=list(src.names), attributed=attributed)
     _budget(mat, items, story, p)
+    mat.examples = select_examples(cands, scenes, {display: 0}, p, rules.drops)
     return mat

@@ -7,6 +7,7 @@ the key lookup is injected, and the real `keyring` and sockets are patched to ra
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -37,7 +38,14 @@ from dramatis_forge.persona.endpoints import (
 from dramatis_forge.persona.gates import META, PRESCRIPTIVE, STRUCTURE, Lexicons, check
 from dramatis_forge.persona.generator import DEFAULT, Generator, HostSource
 from dramatis_forge.persona import stale as stale_mod
-from dramatis_forge.persona.material import estimate_tokens, for_host, for_person, speech_units
+from dramatis_forge.persona.material import (
+    Example,
+    estimate_tokens,
+    for_host,
+    for_person,
+    select_examples,
+    speech_units,
+)
 from dramatis_forge.persona.params import Persona
 from dramatis_forge.persona.store import RawCache
 from dramatis_forge.persona.run import (
@@ -411,14 +419,14 @@ def test_host_meta_layer_may_use_meta_words_but_nothing_else_may():
 
 
 def test_ascii_meta_terms_match_whole_words_only():
-    out = dict(output_of("responses_ok.json"), fallback_line="Rapid tides; the gamekeeper knows.")
+    out = dict(output_of("responses_ok.json"), capability_line="Rapid tides; gamekeeper")
     assert judge(out).passed
 
 
 @pytest.mark.parametrize("change, detail", [
     ({"tone_rules": ["one", "two"]}, "outside persona.tone_rules"),
     ({"capability_line": "x" * 41}, "persona.capability_chars"),
-    ({"fallback_line": "  "}, "missing, empty"),
+    ({"capability_line": "  "}, "missing, empty"),
     ({"system_prompt": "word " * 3000}, "persona.prompt_tokens"),
     ({"extra": "field"}, "unexpected field"),
 ])
@@ -438,12 +446,12 @@ def test_missing_host_layers_fail_gate_five():
     "Good morning, reader.",           # the placeholder's word without its brackets
 ])
 def test_user_is_named_only_by_the_placeholder(text):
-    v = judge({**output_of("responses_ok.json"), "fallback_line": text})
+    v = judge({**output_of("responses_ok.json"), "capability_line": text})
     assert v.count(STRUCTURE) == 1 and "names the user" in v.reasons()[0]
 
 
 def test_placeholder_itself_passes():
-    out = {**output_of("responses_ok.json"), "fallback_line": f"Ask me later, Dr.{PLACEHOLDER}."}
+    out = {**output_of("responses_ok.json"), "capability_line": f"Ask Dr.{PLACEHOLDER}."}
     assert judge(out).passed
 
 
@@ -478,13 +486,13 @@ def test_run_writes_passing_people_and_reports_the_rest(toy, paths, endpoints_fi
     assert r[("Alice", "tone")][0].count("\n") == 2
     assert r[("Alice", "system")][1] == rep.version
     assert ("Bob", "system") not in r
-    assert {sl for (s, sl) in r if s == "host"} >= {"system", "tone", "fallback", "capability",
+    assert {sl for (s, sl) in r if s == "host"} >= {"system", "tone", "capability",
                                                      "in_world", "meta"}
 
     # The prompt the model saw keeps the placeholder and states the budgets.
     sent = ep.bodies[0]["input"]
     assert PLACEHOLDER in sent[1]["content"] and PLACEHOLDER in sent[0]["content"]
-    assert "3 to 6" in sent[0]["content"] and "{" not in sent[0]["content"].split("Fields:")[1]
+    assert "3 to 4" in sent[0]["content"] and "{" not in sent[0]["content"].split("Fields:")[1]
 
     report = json.loads((paths.pack_dir / "persona" / "report.json").read_text())
     assert report["figures"] == {"persona.meta_leak": 1, "prescriptive.rate": round(1 / 6, 4)}
@@ -813,3 +821,102 @@ def test_a_budget_cut_keeps_voice_from_every_form(paths):
                      estimate_tokens, ": ")
     forms = {i.form_page for i in mat.items if i.kind == "voice"}
     assert forms == {"Alice", "Alice (Winter)"}
+
+
+# --------------------------------------------------------------------------- #
+# example lines: the person's own words, picked without the model
+# --------------------------------------------------------------------------- #
+
+
+def lines_of(forms: dict[str, tuple[int, int]], words: int = 12) -> tuple[list[Example], list[str]]:
+    """Synthetic candidates: per form, (voice count, story count), each line its own scene."""
+    cands, scenes = [], []
+    for form, (voices, stories) in forms.items():
+        for kind, n in (("voice", voices), ("story", stories)):
+            for i in range(n):
+                cands.append(Example(form, kind, f"{form} {kind} line {i} " + "word " * words,
+                                     words + 6, f"{kind}:{form}:{i}"))
+                scenes.append(f"{kind} {i}")
+    return cands, scenes
+
+
+def pick(forms, p=None, drops=()):
+    p = p or Persona()
+    cands, scenes = lines_of(forms)
+    rank = {f: i for i, f in enumerate(forms)}
+    return select_examples(cands, scenes, rank, p, [re.compile(d) for d in drops])
+
+
+def test_examples_are_deterministic_and_spread_over_forms_and_kinds():
+    forms = {"A": (30, 30), "B": (30, 30), "C": (3, 0)}
+    got = pick(forms)
+    assert got == pick(forms) and len(got) == Persona().example_lines
+    assert {e.form_page for e in got} == {"A", "B", "C"}
+    assert {e.kind for e in got if e.form_page == "A"} == {"voice", "story"}
+    # Spread inside a group, not the first lines of it.
+    a_voice = sorted(int(e.text.split()[3]) for e in got if e.form_page == "A" and e.kind == "voice")
+    assert a_voice[-1] > 10
+
+
+def test_examples_respect_count_and_token_budget():
+    forms = {"A": (30, 30)}
+    assert len(pick(forms, Persona(example_lines=3))) == 3
+    one = pick(forms, Persona(example_lines=1))[0].tokens
+    tight = Persona(example_tokens=one * 4 + 1)
+    got = pick(forms, tight)
+    assert sum(e.tokens for e in got) <= tight.example_tokens and len(got) == 4
+
+
+def test_examples_skip_interjections_long_lines_prompts_and_repeated_scenes():
+    short = Example("A", "voice", "Hmph.", 3, "v1")
+    long_ = Example("A", "story", "word " * 300, 300, "s1")
+    prompt = Example("A", "story", "[Tap to continue]", 12, "s2")
+    ok = Example("A", "voice", "Stay by the stove tonight, it is cold.", 12, "v2")
+    twin = Example("A", "voice", "Stay near the stove tonight, it is cold.", 12, "v3")
+    got = select_examples([short, long_, prompt, ok, twin], ["a", "b", "c", "d", "d"],
+                          {"A": 0}, Persona(), [re.compile(r"\[.*\]")])
+    assert got == [ok]
+
+
+def test_material_picks_examples_from_the_folio_and_counts_their_units_as_sent(paths):
+    db = open_db(paths)
+    mat = for_person(db, "Alice", GEN, Persona(example_min_tokens=1), estimate_tokens, ": ")
+    texts = [e.text for e in mat.examples]
+    assert "Good evening, <reader>. The lamp is lit." in texts
+    assert f"Good morning, Dr.{PLACEHOLDER}." in texts  # placeholder kept verbatim
+    assert {e.form_page for e in mat.examples} == {"Alice", "Alice (Winter)"}
+    assert {e.unit for e in mat.examples} <= mat.sent
+    lean = for_person(db, "Alice", GEN, Persona(material_tokens=1, story_tokens=0),
+                      estimate_tokens, ": ")
+    assert {e.unit for e in lean.examples} <= lean.sent  # even when the budget cut them
+
+
+def test_lines_are_stored_with_the_rows_and_restored_from_the_cache(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    r = rows(paths)
+    body, version = r[("Alice", "lines")]
+    assert "Cold tonight. Stay near the stove." in body.split("\n")
+    assert version == r[("Alice", "system")][1]
+    assert not any(slot == "fallback" for _s, slot in r)
+
+    build_folio(paths.folio)
+    assert ("Alice", "lines") not in rows(paths)
+    restored = run(toy, paths, endpoints_file, ep, only=["Alice"], lookup=key_lookup(None))
+    assert [o.status for o in restored.report.outcomes] == [RESTORED]
+    assert rows(paths)[("Alice", "lines")][0] == body
+
+
+def test_probe_report_shows_the_example_lines(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("chat_ok.json"))
+    run(toy, paths, endpoints_file, ep, wire="chat", probe=True, only=["Alice"])
+    probe = paths.pack_dir / "persona" / "probe"
+    md = next(probe.glob("Alice-*.md")).read_text()
+    assert "## Example lines" in md and "Cold tonight. Stay near the stove." in md
+    assert "Cold tonight. Stay near the stove." in next(probe.glob("Alice-*.json")).read_text()
+
+
+def test_the_output_schema_has_no_fallback_line():
+    assert "fallback_line" not in GEN.fields(True) + GEN.fields(False)
+    assert "fallback_line" not in GEN.schema(True)["properties"]
+    assert "fallback" not in GEN.system and "when unsure" not in GEN.system

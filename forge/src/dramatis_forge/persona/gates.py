@@ -5,7 +5,7 @@
   other persons' sessions must never contain the host's meta vocabulary.
 ⑤ structure and budget: schema complete, `system_prompt` within `persona.prompt_tokens`,
   `capability_line` within `persona.capability_chars`, `tone_rules` count within
-  `persona.tone_rules`, `fallback_line` non-empty; and the user is named only by the
+  `persona.tone_rules`; and the user is named only by the
   corpus's placeholder: no altered placeholder, no other name (the pack's patterns).
 ⑥ prescriptive phrasing: capability claims and negative knowledge lists in
   `system_prompt` and `tone_rules` (the host's `in_world` too, which sits beside them),
