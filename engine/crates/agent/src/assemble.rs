@@ -357,8 +357,56 @@ pub fn visible_text(raw: &str) -> String {
         rest = "";
     }
     out.push_str(rest);
-    let kept: Vec<&str> = out.lines().filter(|l| !is_markup_line(l)).collect();
+    let lines: Vec<&str> = out.lines().collect();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        i += 1;
+        if is_markup_line(line) {
+            continue;
+        }
+        if let Some((name, closed)) = opening_tag_line(line) {
+            if closed {
+                continue;
+            }
+            // A block goes through its closing line; with none, it is left as written
+            // rather than swallowing the rest of the reply.
+            let close = format!("</{name}>");
+            if let Some(n) = lines[i..].iter().position(|l| l.trim() == close) {
+                i += n + 1;
+                continue;
+            }
+        }
+        kept.push(line);
+    }
     kept.join("\n").trim().to_owned()
+}
+
+/// A line that opens a UI element a proxy passes through, such as
+/// `<ElicitationsGroup message="…">`: a tag whose name starts with an ASCII capital.
+/// Returns the name, and whether the element also closes on this line
+/// (`<Name …>…</Name>`). Lowercase tags and prose that merely contains `<` do not match.
+fn opening_tag_line(line: &str) -> Option<(&str, bool)> {
+    let t = line.trim();
+    let body = t.strip_prefix('<')?;
+    if !body.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return None;
+    }
+    let name_end = body
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'))
+        .unwrap_or(body.len());
+    let name = &body[..name_end];
+    let after = &body[name_end..];
+    if !(after.is_empty() || after.starts_with(char::is_whitespace) || after.starts_with('>')) {
+        return None;
+    }
+    let close = format!("</{name}>");
+    if t.ends_with(&close) {
+        return Some((name, true));
+    }
+    // Otherwise the whole line is the one opening tag.
+    (t.ends_with('>') && !t.ends_with("/>") && !after.contains('<')).then_some((name, false))
 }
 
 /// A line that is one self-closing markup tag, such as a chat app's follow-up suggestion
@@ -430,6 +478,36 @@ mod tests {
             "Yes.\nGo."
         );
         assert_eq!(visible_text("a < b and c/>"), "a < b and c/>");
+    }
+
+    #[test]
+    fn multi_line_ui_elements_are_dropped() {
+        let raw = "Next.\n<ElicitationsGroup message=\"\u{63a5}\u{4e0b}\u{6765}\u{ff1f}\">\n</ElicitationsGroup>\nDone.";
+        assert_eq!(visible_text(raw), "Next.\nDone.");
+        let nested = "A\n<Group title=\"t\">\n  <Choice label=\"x\"/>\n  <Choice label=\"y\">go</Choice>\n</Group>\nB";
+        assert_eq!(visible_text(nested), "A\nB");
+        assert_eq!(visible_text("A\n<Note kind=\"k\">text</Note>\nB"), "A\nB");
+        assert_eq!(visible_text("A\n  <Group>\n  </Group>  "), "A");
+    }
+
+    #[test]
+    fn ordinary_angle_brackets_and_lowercase_tags_stay() {
+        for keep in [
+            "if a < b then <c> stays",
+            "<Name> is a placeholder in the text",
+            "<div>\nhtml\n</div>",
+            "<b>bold</b>",
+            "x <Group> y",
+            "<Group>\nunclosed block stays",
+            "<Groupie>\nnot closed by </Group>",
+        ] {
+            assert_eq!(visible_text(keep), keep, "{keep}");
+        }
+    }
+
+    #[test]
+    fn a_block_is_not_closed_by_another_name() {
+        assert_eq!(visible_text("<A>\n</B>\nrest"), "<A>\n</B>\nrest");
     }
 
     #[test]
