@@ -800,3 +800,16 @@ def test_the_cli_lists_stale_personas_without_a_key(toy, paths, endpoints_file, 
     assert out.exit_code == 0, out.output
     assert "stale 1" in out.output and "STALE.md" in out.output
     assert len(ep.requests) == 1
+
+
+def test_a_budget_cut_keeps_voice_from_every_form(paths):
+    db = open_db(paths)
+    voices = [i for i in for_person(db, "Alice", GEN, Persona(material_tokens=10**6, story_tokens=0),
+                                    estimate_tokens, ": ").items if i.kind == "voice"]
+    room = sum(i.tokens for i in voices[:2]) + sum(
+        i.tokens for i in for_person(db, "Alice", GEN, Persona(), estimate_tokens, ": ").items
+        if i.kind == "card")
+    mat = for_person(db, "Alice", GEN, Persona(material_tokens=room, story_tokens=0),
+                     estimate_tokens, ": ")
+    forms = {i.form_page for i in mat.items if i.kind == "voice"}
+    assert forms == {"Alice", "Alice (Winter)"}

@@ -295,7 +295,15 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
         shown = "" if kind == "card" else (title or "")
         attributed.add(uid)
         items.append(Item(kind, form, shown, body, count(shown + body), uid))
-    items.sort(key=lambda i: rank.get(i.form_page, len(rank)))  # canonical form first
+    # Within a kind, alternate between forms (canonical first) so a budget cut leaves every
+    # form some voice, not the first page's whole list: the brief must hear how they differ.
+    nth: dict[tuple[str, str], int] = {}
+    keyed = []
+    for i in items:
+        k = nth.get((i.kind, i.form_page), 0)
+        nth[(i.kind, i.form_page)] = k + 1
+        keyed.append(((k, rank.get(i.form_page, len(rank))), i))
+    items = [i for _, i in sorted(keyed, key=lambda t: t[0])]
 
     mat = Material(subject=person_id, display=display, forms=forms, attributed=attributed)
     _budget(mat, items, story, p)
