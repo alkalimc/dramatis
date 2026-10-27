@@ -303,7 +303,7 @@ def _attribution(pk: Pack, paths: Paths) -> None:
         return
     with Archive(paths.archive, readonly=True) as archive, \
             Folio(paths.folio, readonly=True) as folio:
-        data = attribution_mod.collect(archive, folio)
+        data = attribution_mod.collect(archive, folio, pk)
     if not data.complete:
         _die(f"{data.units_without_revid:,} unit(s) have no source revision",
              "attribution would claim a traceability that does not exist")

@@ -223,6 +223,9 @@ class Route:
     #: per route because what a page may legitimately leave out (gameplay tables,
     #: real-world commentary, other languages) differs by layout.
     min_yield: float = 0.0
+    #: The page yields names (aliases, glossary terms) and no units. It is still a source of
+    #: the corpus, so attribution lists it.
+    names: bool = False
 
     def matches(self, seed: str, title: str) -> bool:
         if seed != self.seed:
@@ -388,6 +391,9 @@ class PersonSource:
     facets: Mapping[str, str] = field(default_factory=dict)
     sections: tuple[Mapping[str, str], ...] = ()
     items: Mapping[str, Any] = field(default_factory=dict)
+    #: Each form's own facets, canonical first: for a hook that must look past a merged
+    #: value the canonical page leaves unsaid.
+    forms: tuple[Mapping[str, str], ...] = ()
 
 
 def _no_birthday(_person: PersonSource) -> str | None:

@@ -146,6 +146,9 @@ class _Index:
         self.text: dict[str, str] = {}
         self.title: dict[str, str] = {}
         self.template: dict[str, str] = {}
+        #: Lore units named by their own title, or by the last part of a title path: an entry
+        #: with no page of its own that a glossary still names.
+        self.by_name: dict[str, list[str]] = {}
         for r in folio.db.execute(
             "SELECT id,page,template,title,header,text FROM chunks ORDER BY ord"
         ):
@@ -153,6 +156,9 @@ class _Index:
             self.text[r["id"]] = f"{r['header']}\n{r['text']}"
             self.title[r["id"]] = r["title"] or ""
             self.template[r["id"]] = r["template"]
+            if r["title"] and self.shapes[r["template"]] == "lore":
+                for name in {r["title"], r["title"].rsplit(" › ", 1)[-1]}:
+                    self.by_name.setdefault(name, []).append(r["id"])
         for r in folio.db.execute(
             "SELECT u.person_id, u.chunk_id FROM unit_persons u "
             "JOIN chunks c ON c.id = u.chunk_id ORDER BY c.ord, u.person_id"
@@ -167,9 +173,11 @@ class _Index:
 
         Person before page matters: a target naming an alternate form should collect the
         whole person's material, which is the entire point of resolving identity before
-        building a benchmark on top of it.
+        building a benchmark on top of it. An entry with neither a person nor a page of its
+        own is found by the title it was filed under.
         """
-        return self.by_person.get(target) or self.by_page.get(target) or []
+        return (self.by_person.get(target) or self.by_page.get(target)
+                or self.by_name.get(target) or [])
 
 
 def _stratum(query: str, gold_ids: list[str], index: _Index) -> str:

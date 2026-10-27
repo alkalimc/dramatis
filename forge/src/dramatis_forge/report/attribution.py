@@ -56,13 +56,14 @@ class Attribution:
         return self.unit_count > 0 and self.units_without_revid == 0
 
 
-def collect(archive: Archive, folio: Folio) -> Attribution:
+def collect(archive: Archive, folio: Folio, pack: Pack | None = None) -> Attribution:
     """Gather provenance from the built corpus, with editors from the archive's cache.
 
     Reads the folio rather than the archive for unit counts, because the folio is what
     ships: attributing what was built is the point, not attributing what was parsed.
     Editors are cached per revision by `forge sync` (`harvest.refresh_editors`), so this
-    never needs the network.
+    never needs the network. A page that only supplies names (a route marked `names`) has
+    no units and is listed with none.
     """
     out = Attribution(
         synced_at=str(archive.get_meta("synced_at") or ""),
@@ -89,6 +90,16 @@ def collect(archive: Archive, folio: Folio) -> Attribution:
             "units": r["units"],
             "editor": by_revid.get(r["revid"], ""),
         })
+    named = {r.title for r in pack.routes if r.names and r.title} if pack else set()
+    for title in sorted(named - {p["page"] for p in out.pages}):
+        row = archive.db.execute(
+            "SELECT revid FROM raw.pages WHERE title=?", (title,)).fetchone()
+        if row is not None:
+            out.pages.append({
+                "page": title, "revid": row["revid"], "units": 0,
+                "editor": by_revid.get(row["revid"], ""),
+            })
+    out.pages.sort(key=lambda p: p["page"])
     return out
 
 

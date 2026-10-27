@@ -156,12 +156,17 @@ def _lore(
     A record's address is its place among its page's records, so a hit widens to the
     entries around it in the source and not to unrelated text that shares a heading. The
     header names the topic and the headings below it; a body that opens by repeating the
-    last of those drops the repeat, which the header already says.
+    last of those drops the repeat, which the header already says. The place counts units,
+    not records, so the pieces of a split entry keep their order.
     """
     policy = pack.chunking
     label_sep = policy.sep("label")
     speakers = env.speakers
+    place = 0
+    last_page = None
     for r in archive.db.execute("SELECT page,seq,path,text,revid FROM lore ORDER BY page,seq"):
+        if r["page"] != last_page:
+            last_page, place = r["page"], 0
         path = tuple(json.loads(r["path"]))
         # Only names the site itself declares: a roster page (or form) title, or a redirect
         # or real name that points at exactly one person.
@@ -180,8 +185,10 @@ def _lore(
                 title=" › ".join(path) or r["page"], revid=r["revid"],
                 persons=(owner,) if owner else (),
                 span_of=policy.lore_run(r["page"], path, r["seq"]),
-                span_from=r["seq"], span_to=r["seq"],
+                span_from=place, span_to=place,
             )
+            # Pieces of one over-long entry take consecutive places, so neighbours stay ordered.
+            place += 1
 
 
 class Row(NamedTuple):
@@ -589,6 +596,9 @@ def _profile(
             rest = []
             for page, title, text in sections:
                 left = policy.card_restated(title, text, shown.get(page, shown.get(base_page, {})))
+                if left and page != base_page and base_page in shown:
+                    # A form's page may also restate the person's own card, not only its own.
+                    left = policy.card_restated(title, left, shown[base_page]) or ""
                 if left is None:
                     rest.append((page, title, text))
                 elif left:

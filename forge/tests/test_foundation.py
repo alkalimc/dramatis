@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from dramatis_forge import chunk
+from dramatis_forge import chunk, corpus
 from dramatis_forge.archive import Archive
 from dramatis_forge.guards import LOW
 from dramatis_forge.identity import resolve
@@ -467,6 +467,34 @@ def test_lore_runs_follow_the_pages_declared_shape(pack):
     assert policy.lore_run("Plain", ("a",), 3) == "Plain"
     assert policy.lore_run("List", ("a",), 3) == "List#3"
     assert policy.lore_run("Story", ("tale", "part 2"), 5) == "Story#tale"
+
+
+def test_person_source_keeps_each_forms_own_facets(tmp_path):
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0), ("Ann2", "alter", 10)]})
+        insert(a, [Dossier(page="Ann", fields={"born": "?"}, revid=1),
+                   Dossier(page="Ann2", fields={"born": "03-14", "home": "Cape"}, revid=2)])
+        source = corpus._person_sources(a)["Ann"]
+    assert source.facets == {"born": "?", "home": "Cape"}
+    assert [f["born"] for f in source.forms] == ["?", "03-14"]
+
+
+def test_a_form_section_may_restate_the_persons_own_card(tmp_path, forms_pack):
+    def restated(title, text, shown):
+        kept = [ln for ln in text.splitlines()
+                if shown.get(ln.partition(": ")[0]) != ln.partition(": ")[2]]
+        return "\n".join(kept)
+
+    p = replace(forms_pack, chunking=replace(forms_pack.chunking, card_restated=restated))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0), ("Ann2", "alter", 10)]})
+        insert(a, [
+            Dossier(page="Ann", fields={"name": "Ann"}, revid=1),
+            Dossier(page="Ann2", fields={"name": "Ann the Second"},
+                    sections=({"title": "Basics", "text": "name: Ann\nbuilt: May 1"},), revid=2),
+        ])
+        units = [c for c in chunk.build(a, p) if c.span_of and c.span_of.endswith("#dossier")]
+    assert [c.text for c in units] == ["built: May 1"]
 
 
 def test_a_section_that_restates_the_card_keeps_only_what_the_card_lacks(tmp_path, forms_pack):

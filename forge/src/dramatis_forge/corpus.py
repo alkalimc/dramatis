@@ -26,7 +26,7 @@ from .chunk import CARD_SPAN, Env, archive_triggers, engine_meta_test
 from .chunk import build as build_chunks
 from .config import RunInfo
 from .normalize import (
-    TERM_ALIAS, alias_chains, mark_exact_terms, settle_term_targets,
+    PERSON_NAME_KINDS, TERM_ALIAS, TERM_EXACT_ALIAS, alias_chains, mark_exact_terms, settle_term_targets,
 )
 from .folio import FOLIO_FORMAT_VERSION, Folio
 from .guards import Ledger
@@ -196,6 +196,7 @@ def run(
             settle_term_targets(alias_rows),
             params.alias.whole_word_max)
         _check_alias_chains(rep, alias_rows, set(env.speakers.person_of.values()))
+        alias_rows = _drop_unreached_names(rep, folio, alias_rows)
         folio.write_aliases(alias_rows)
         for template, n in sorted(env.skipped.items()):
             rep.ledger.add(
@@ -303,18 +304,20 @@ def _person_sources(archive: Archive) -> dict[str, PersonSource]:
         facets: dict[str, str] = {}
         sections: list[dict[str, str]] = []
         items: dict[str, object] = {}
+        own: list[dict[str, str]] = []
         for f in forms:
             row = archive.db.execute(
                 "SELECT fields,sections,items FROM dossiers WHERE page=?", (f["page"],)
             ).fetchone()
             if row is None:
                 continue
-            for k, v in json.loads(row["fields"]).items():
+            own.append(json.loads(row["fields"]))
+            for k, v in own[-1].items():
                 facets.setdefault(k, v)
             sections.extend(json.loads(row["sections"]))
             for k, v in json.loads(row["items"]).items():
                 items.setdefault(k, v)
-        out[person_id] = PersonSource(person_id, facets, tuple(sections), items)
+        out[person_id] = PersonSource(person_id, facets, tuple(sections), items, tuple(own))
     return out
 
 
@@ -495,6 +498,36 @@ def _check_alias_chains(rep: CorpusReport, rows: list[tuple[str, str, str]], per
         rep.ledger.add(
             "G4", f"{len(hops)} alias(es) point at a speaker alias, not at its person "
                   "(first: " + ", ".join(f"{a}->{t}" for a, t, _ in hops[:5]) + ")")
+
+
+#: Alias kinds taken from a table of names. A name for something the corpus never mentions
+#: would send a query to nothing.
+_TABLE_KINDS = (PERSON_NAME_KINDS[0], TERM_ALIAS, TERM_EXACT_ALIAS)
+
+
+def _drop_unreached_names(
+    rep: CorpusReport, folio: Folio, rows: list[tuple[str, str, str]]
+) -> list[tuple[str, str, str]]:
+    """Drop a table-derived alias whose target is neither a person, a page with units, nor
+    written in any unit."""
+    people = {r[0] for r in folio.db.execute("SELECT person_id FROM persons")}
+    people |= {r[0] for r in folio.db.execute("SELECT DISTINCT page FROM chunks")}
+    corpus = "\n".join(f"{h}\n{t}" for h, t in folio.db.execute("SELECT header,text FROM chunks"))
+    reached: dict[str, bool] = {}
+    kept = []
+    for row in rows:
+        target = row[1]
+        if row[2] in _TABLE_KINDS and target not in people:
+            if target not in reached:
+                reached[target] = target in corpus
+            if not reached[target]:
+                continue
+        kept.append(row)
+    if len(kept) < len(rows):
+        rep.ledger.add(
+            "G3", f"{len(rows) - len(kept)} name alias(es) dropped: the corpus has no unit "
+                  "that names their target")
+    return kept
 
 
 def _redundancy(
