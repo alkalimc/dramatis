@@ -57,6 +57,7 @@ impl Transport for Scripted {
         Ok(StreamResponse {
             status: 200,
             chunks: futures::stream::iter(vec![Ok(body.into_bytes())]).boxed(),
+            retry_after: None,
         })
     }
 }

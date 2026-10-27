@@ -81,6 +81,7 @@ impl Transport for ShowUsage {
         Ok(StreamResponse {
             status: r.status,
             chunks,
+            retry_after: None,
         })
     }
 }

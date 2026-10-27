@@ -19,6 +19,11 @@ const DEFAULTS: &[(&str, &str)] = &[
         "The quota for this period is used up until {when}. The archive stays available.",
     ),
     (
+        "host.rate_limited",
+        "The language model service is rate limited right now. Your message is kept; \
+         send it again later.",
+    ),
+    (
         "harness.introduce",
         "{user} opens the app for the first time. Introduce yourself in a few lines.",
     ),

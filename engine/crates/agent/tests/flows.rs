@@ -612,6 +612,35 @@ async fn short_english_replies_that_are_not_refusals_pass() {
     assert_eq!(hist.last().unwrap().text, "I can't help laughing. Tea!");
 }
 
+#[tokio::test]
+async fn a_rate_limit_keeps_the_message_and_the_host_says_so() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake
+        .push([Reply::Limited(Some(3600)), say("Cooler water.")]);
+    let posted = e.agent.post(ch, "how should I brew tea?", None).unwrap();
+    let err = e.agent.respond(posted.clone()).await.unwrap_err();
+    assert!(matches!(
+        err,
+        agent::Error::RateLimited {
+            retry_after: Some(3600)
+        }
+    ));
+    assert!(err.to_string().contains("rate limited"));
+    // The message stays, and the host says why nothing came back.
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.len(), 1);
+    assert!(
+        e.sink
+            .take()
+            .iter()
+            .any(|ev| format!("{ev:?}").contains("rate limited"))
+    );
+    // Asking again goes through.
+    e.agent.respond(posted).await.unwrap();
+    assert_eq!(e.agent.history(ch, None, 10).unwrap().len(), 2);
+}
+
 async fn rolls_over(wire: WireApi) {
     let e = env_with(endpoints(wire, true, None), |c| c.agent.roll.k = 10.0);
     let ch = direct(&e, "ann");

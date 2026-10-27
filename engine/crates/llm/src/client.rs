@@ -41,6 +41,17 @@ impl Retry {
         }
     }
 
+    /// The endpoint's own hint when it gave one, else the backoff.
+    fn wait(&self, failed: u32, e: &Error) -> Duration {
+        match e {
+            Error::RateLimited {
+                retry_after: Some(n),
+                ..
+            } => Duration::from_secs(*n),
+            _ => self.delay(failed),
+        }
+    }
+
     fn delay(&self, failed: u32) -> Duration {
         (self.base * 2u32.saturating_pow(failed.saturating_sub(1))).min(Duration::from_secs(60))
     }
@@ -76,13 +87,15 @@ impl Llm {
         let mut failed = 0;
         loop {
             let outcome = match self.transport.send(req.clone()).await {
-                Ok(r) if r.status >= 400 => Err(Error::from_status(r.status, &r.body)),
+                Ok(r) if r.status >= 400 => {
+                    Err(Error::from_status(r.status, &r.body, r.retry_after))
+                }
                 other => other,
             };
             match outcome {
                 Err(e) if e.retryable() && failed + 1 < self.retry.attempts => {
                     failed += 1;
-                    tokio::time::sleep(self.retry.delay(failed)).await;
+                    tokio::time::sleep(self.retry.wait(failed, &e)).await;
                 }
                 other => return other,
             }
@@ -93,13 +106,17 @@ impl Llm {
         let mut failed = 0;
         loop {
             let outcome = match self.transport.open(req.clone()).await {
-                Ok(StreamResponse { status, chunks }) if status >= 400 => {
+                Ok(StreamResponse {
+                    status,
+                    chunks,
+                    retry_after,
+                }) if status >= 400 => {
                     let body: Vec<u8> = chunks
                         .filter_map(|c| async move { c.ok() })
                         .collect::<Vec<_>>()
                         .await
                         .concat();
-                    Err(Error::from_status(status, &body))
+                    Err(Error::from_status(status, &body, retry_after))
                 }
                 Ok(r) => Ok(r.chunks),
                 Err(e) => Err(e),
@@ -107,7 +124,7 @@ impl Llm {
             match outcome {
                 Err(e) if e.retryable() && failed + 1 < self.retry.attempts => {
                     failed += 1;
-                    tokio::time::sleep(self.retry.delay(failed)).await;
+                    tokio::time::sleep(self.retry.wait(failed, &e)).await;
                 }
                 other => return other,
             }

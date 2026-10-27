@@ -461,6 +461,55 @@ async fn errors_map_and_only_transient_ones_retry() {
 }
 
 #[tokio::test]
+async fn a_long_rate_limit_is_final_and_typed() {
+    let ep = endpoint(Protocol::OpenAiResponses);
+    let retry = Retry {
+        attempts: 3,
+        base: Duration::from_millis(1),
+    };
+    let body = r#"{"error":{"message":"all slots full"}}"#;
+    let t = Arc::new(MemoryTransport::new([Ok(
+        Canned::status(429, body).retry_after(3600)
+    )]));
+    let e = Llm::new(t.clone(), retry)
+        .stream(&ep, &base_request())
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(
+        &e,
+        Error::RateLimited {
+            retry_after: Some(3600),
+            ..
+        }
+    ));
+    assert_eq!(
+        e.to_string(),
+        "HTTP 429 (retry after 3600 s): all slots full"
+    );
+    assert_eq!(t.sent().len(), 1, "no waiting out an hour inside a call");
+
+    // Without a hint the limit is retried a few times, then reported as such.
+    let t = Arc::new(MemoryTransport::new([
+        Ok(Canned::status(429, body)),
+        Ok(Canned::status(429, body)),
+        Ok(Canned::status(429, body)),
+    ]));
+    let e = Llm::new(t.clone(), retry)
+        .complete(&ep, &base_request())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        e,
+        Error::RateLimited {
+            retry_after: None,
+            ..
+        }
+    ));
+    assert_eq!(t.sent().len(), 3);
+}
+
+#[tokio::test]
 async fn models_speech_and_embeddings() {
     let ep = endpoint(Protocol::AnthropicMessages);
     let list = r#"{"data":[{"id":"claude-a"},{"id":"claude-b"}]}"#;
