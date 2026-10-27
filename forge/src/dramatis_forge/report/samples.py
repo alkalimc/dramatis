@@ -136,9 +136,6 @@ def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> S
 
     route_of: dict[str, str] = {}
     members: dict[str, list[str]] = {}
-    layouts = {s.key: s.layout for s in pack.seeds if s.layout is not None}
-    stratified: set[str] = set()
-    layered: set[str] = set()
     in_roster = set(archive.person_of())
     dossier_pages = {r[0] for r in archive.db.execute("SELECT page FROM dossiers")}
 
@@ -167,31 +164,15 @@ def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> S
                 sel.silent.setdefault(why_silent(title), []).append(title)
                 continue
             members.setdefault(label, []).append(title)
-            if seed in layouts:
-                # Layers are drawn from pages that produced units.
-                row = archive.page(title)
-                klass = layouts[seed](title, (row["wikitext"] or "") if row else "")
-                layered.add(label)
-                layer = f"{label} · {klass}"
-                members.setdefault(layer, []).append(title)
-                stratified.add(layer)
 
-    # A layered set's own entry goes last: it takes only pages its layers did not already pick.
-    for label, titles in sorted(members.items(), key=lambda kv: (kv[0] in layered, kv[0])):
-        if label not in layered:  # the layout classes below stand in for the set's own
-            sel.add(label, titles[0], "first")
-            sel.add(label, max(titles, key=lambda t: (sizes.get(t, 0), t)), "largest")
-        if label in stratified:
-            continue  # a layout class is read through its first and largest page
-        if label not in layered:
-            sel.add(label, min(titles, key=lambda t: (sizes.get(t, 0), t)), "smallest")
-        taken = {t for layer in stratified if layer.startswith(f"{label} · ")
-                 for t in sel.routes.get(layer, {})}
-        rest = [t for t in titles if t not in taken]
-        busiest = max(rest, key=lambda t: (records.get(t, 0), t), default=None)
+    for label, titles in sorted(members.items()):
+        sel.add(label, titles[0], "first")
+        sel.add(label, max(titles, key=lambda t: (sizes.get(t, 0), t)), "largest")
+        sel.add(label, min(titles, key=lambda t: (sizes.get(t, 0), t)), "smallest")
+        busiest = max(titles, key=lambda t: (records.get(t, 0), t), default=None)
         if busiest is not None and records.get(busiest):
             sel.add(label, busiest, "most_records")
-        flagged = next((t for t in rest if t in findings), None)
+        flagged = next((t for t in titles if t in findings), None)
         if flagged is not None:
             sel.add(label, flagged, "findings")
 

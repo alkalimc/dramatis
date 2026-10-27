@@ -196,12 +196,12 @@ def test_speakers_resolve_by_page_then_portrait_then_alias(tmp_path, pack):
 def test_slot_names_are_reworded_and_interface_words_are_caught(pack):
     policy = replace(
         pack.chunking, voice_words=((r"^Touch$", "when touched"), (r"^Squad(\d*)$", r"in a team \1")),
-        header_taboo=("Touch|Squad",), labels={"voice": "voice"}, triggers={"T": "Squad"},
+        header_taboo=("Touch|Squad",), labels={"voice": "voice"},
         section_words=((r"^Elite(\d)$", r"outfit \1"),))
-    assert policy.voice_name("", "Touch") == "when touched"
-    assert policy.voice_name("", "Squad2") == "in a team 2"
-    assert policy.voice_name("T", "") == "in a team"          # the trigger's words are reworded
-    assert policy.voice_name("", "Other") == "Other"
+    assert policy.voice_name("Touch") == "when touched"
+    assert policy.voice_name("Squad2") == "in a team 2"
+    assert policy.voice_name("") == "voice"
+    assert policy.voice_name("Other") == "Other"
     assert policy.section_name("Elite0") == "outfit 0"
     test = chunk.engine_meta_test(policy, [])
     assert test("voice", "p", "[voice] A · Touch") and not test("voice", "p", "[voice] A · when touched")
@@ -224,32 +224,6 @@ def test_a_skipped_slot_makes_no_unit_and_is_counted(tmp_path, pack):
         rep = corpus.run(a, p, tmp_path / "t.folio", segmenter="bigram")
     assert [c.text for c in got] == ["Hi."] and env.skipped == {"voice": 1}
     assert any("made no unit" in f.detail for f in rep.ledger.findings)
-
-
-def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
-    from dramatis_forge.report import samples
-    seeds = tuple(replace(s, layout=lambda t, w: "long" if len(w) > 30 else "short")
-                  if s.key == "people" else s for s in pack.seeds)
-    p = replace(pack, seeds=seeds)
-    with Archive(tmp_path / "t.archive") as a:
-        a.write_seeds({"people": ["P1", "P2", "P3", "P4"]})
-        for title, text in (("P1", "x" * 10), ("P2", "y" * 50), ("P3", "z" * 40), ("P4", "w" * 20)):
-            a.put_page(title, text, 1, "now")
-        a.put_page("P5", "v" * 5, 1, "now")
-        a.write_seeds({"people": ["P1", "P2", "P3", "P4", "P5"]})
-        # P5 produced nothing: it is not drawn into the layers of pages that did
-        from dramatis_forge.records import Lore
-        insert(a, [Lore(page=t, path=("x",), text="body", revid=1) for t in ("P1", "P2", "P3", "P4")])
-        a.commit()
-        sel = samples.select(a, p)
-    picked = {route: set(titles) for route, titles in sel.routes.items() if "people" in route}
-    layer = {r: t for r, t in picked.items() if r.endswith(("long", "short"))}
-    # each class is read through its first and its largest page, and nothing else
-    assert {r.rsplit(" · ", 1)[1]: ts for r, ts in layer.items()} == {
-        "long": {"P2"}, "short": {"P1", "P4"}}
-    # P5 is listed by reason and has no layer
-    assert not any(r.endswith("excluded") for r in picked)
-    assert [t for titles in sel.silent.values() for t in titles] == ["P5"]
 
 
 def test_every_rendering_of_a_term_is_an_alias_for_it():
@@ -275,13 +249,6 @@ def test_an_archived_kind_nothing_reads_is_a_high_finding(tmp_path, pack):
     assert "letter" in rep.ledger.findings[0].detail
 
 
-def test_a_form_kind_without_a_card_adds_none(tmp_path, forms_pack):
-    p = replace(forms_pack, chunking=replace(forms_pack.chunking, cardless_forms=("alt",)))
-    with make(tmp_path, p) as a:
-        units = [c for c in chunk.build(a, p) if c.span_of and c.span_of.endswith("#card")]
-    assert [c.header for c in units] == ["[file] Alice · identity card", "[file] Bob · identity card"]
-
-
 def test_a_declared_name_outranks_a_portrait_and_a_skipped_section_makes_no_unit(tmp_path, pack):
     from dramatis_forge.records import Alias
     from dramatis_forge.speakers import Speakers
@@ -293,10 +260,10 @@ def test_a_declared_name_outranks_a_portrait_and_a_skipped_section_makes_no_unit
         a.put_page("Bob", "k-bob", 2, "now")
         insert(a, [Alias(alias="Annie", target="Ann", kind="redirect")])
         sp = Speakers(a, p, replace(Params().speaker, portrait_lines=1))
-        # the label is declared to be Ann's, whatever the portrait on screen
-        assert sp.owner("Annie", "s") == "Ann"
+        # a redirect names the person, whatever the portrait on screen
+        assert sp.owner("Annie") == "Ann"
         # an unresolved label stays open, whatever the portraits in its scene show
-        assert sp.owner("Stranger", "s") is None
+        assert sp.owner("Stranger") is None
 
     policy = replace(pack.chunking, section_skip=("^Ratings$",))
     q = replace(pack, chunking=policy)
@@ -310,11 +277,10 @@ def test_a_declared_name_outranks_a_portrait_and_a_skipped_section_makes_no_unit
     assert env.skipped == {"profile": 1}
 
 
-def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_declared(tmp_path, pack):
+def test_placeholders_and_unresolved_labels_are_nobodys(tmp_path, pack):
     from dramatis_forge.speakers import Speakers
     ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None)
-    policy = replace(pack.chunking, generic_speakers=("???",),
-                     speaker_as=(("s1", "Bob", "Ann"),))
+    policy = replace(pack.chunking, generic_speakers=("???",))
     p = replace(pack, identity=ident, chunking=policy)
     rows = [{"speaker": s, "portrait": "k-ann"} for s in ("???", "Bob", "Bob", "Bob", "Crowd")]
     with Archive(tmp_path / "t.archive") as a:
@@ -323,21 +289,15 @@ def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_decla
         a.commit()
         sp = Speakers(a, p, Params().speaker)
         got = sp.scene_owners("s1", rows)
-        other = sp.scene_owners("s2", rows)
-    # a placeholder and an unknown label are nobody's even when one portrait fills the scene
-    assert got == {"???": None, "Bob": "Ann", "Crowd": None}
-    # the exception is for one scene only
-    assert other["Bob"] == "Bob"
-    # a declared exception is already the explanation; the same label elsewhere is a conflict
-    assert list(sp.conflicts) == [("s2", "Bob")]
+    # a placeholder and an unknown label are nobody's even when one portrait fills the scene;
+    # a page-title label stands, and the clash with the portrait is reported
+    assert got == {"???": None, "Bob": "Bob", "Crowd": None}
+    assert list(sp.conflicts) == [("s1", "Bob")]
 
 
-def test_a_real_name_segment_names_its_only_person_and_a_nobody_exception_overrides_names(
-        tmp_path, pack):
+def test_a_real_name_segment_names_its_only_person(tmp_path, pack):
     from dramatis_forge.records import Alias
     from dramatis_forge.speakers import Speakers
-    policy = replace(pack.chunking, speaker_as=(("s2", "Mary", None),))
-    p = replace(pack, chunking=policy)
     with Archive(tmp_path / "t.archive") as a:
         a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)],
                           "Cy": [("Cy", "canonical", 0)]})
@@ -350,12 +310,11 @@ def test_a_real_name_segment_names_its_only_person_and_a_nobody_exception_overri
                    Line(scene="s1", seq=3, speaker="Kent", text="d"),
                    Line(scene="s2", seq=2, speaker="Kent", text="e")])
         a.commit()
-        sp = Speakers(a, p, Params().speaker)
-    assert sp.owner("Mary", "s1") == "Ann"
-    # the exception holds in its scene, and its lines do not count towards the person
-    assert sp.owner("Mary", "s2") is None and sp.segment_person["Mary"] == ("Ann", 1)
+        sp = Speakers(a, pack, Params().speaker)
+    assert sp.owner("Mary") == "Ann"
+    assert sp.segment_person["Mary"] == ("Ann", 2)
     # a segment two people's names share settles nobody
-    assert sp.owner("Smith", "s1") is None
+    assert sp.owner("Smith") is None
     assert sp.segment_shared == {"Smith": (["Ann", "Cy"], 1)}
     assert sp.segment_person["Kent"] == ("Bob", 2)
 
@@ -418,10 +377,8 @@ def test_term_aliases_land_on_the_canonical_name_and_conflicts_are_reported():
     assert any("'Mish'" in d for d in details)
 
 
-def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
-    p = replace(forms_pack, chunking=replace(
-        forms_pack.chunking, placeholder_values=("none",), item_min_chars=20, foldable_items=("^tiny$",),
-        cardless_forms=("mode",)))
+def test_nested_form_names_are_not_repeated(tmp_path, forms_pack):
+    p = forms_pack
     with Archive(tmp_path / "t.archive") as a:
         a.write_identity({"Alice": [("Alice", "canonical", 0), ("Alice(Winter)", "alt", 1),
                                     ("Alice(Mode)", "mode", 2)]})
@@ -435,31 +392,9 @@ def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
         ])
         units = list(chunk.build(a, p))
     cards = {c.header: c.text for c in units if c.span_of and c.span_of.endswith("#card")}
-    # the person is not repeated inside the form's name, "none" is not a field, a mode copy is
-    # not listed among the other forms
-    assert cards["[file] Alice · identity card"] == "name: Alice\njob: x\nother forms: Alice(Winter)"
+    # the person is not repeated inside the form's name
     assert cards["[file] Alice <Winter> · identity card"] == "name: Alice(Winter)"
-    items = [c.text for c in units if c.span_of == "Alice#dossier"]
-    # only the kind of item the pack names is folded; "blurb" is short and complete alone
-    assert items == ["A long enough entry that stands alone.\ntiny: Short.", "Brief."]
-
-
-def test_placeholder_only_fields_make_no_unit(tmp_path, forms_pack):
-    p = replace(forms_pack, chunking=replace(forms_pack.chunking, placeholder_only=r"[?\uff1f\s]+"))
-    with Archive(tmp_path / "t.archive") as a:
-        a.write_identity({"Alice": [("Alice", "canonical", 0)]})
-        insert(a, [Dossier(
-            page="Alice", fields={"name": "Alice"}, revid=1,
-            sections=({"title": "???", "text": "\uff1f\uff1f \uff1f"},
-                      {"title": "???", "text": "Real text."},
-                      {"title": "Life", "text": "Born in the north."}),
-            items={"???": "??"})])
-        env = chunk.Env.for_build(a, p)
-        units = list(chunk.build(a, p, env=env))
-    texts = [c.text for c in units if c.span_of == "Alice#dossier"]
-    assert env.placeholders == 2
-    assert "Real text." in "\n".join(texts) and "Born in the north." in "\n".join(texts)
-    assert not any(re.fullmatch(r"[?\uff1f\s]+", t) for t in texts)
+    assert cards["[file] Alice · identity card"].startswith("name: Alice\nteam: none\njob: x")
 
 
 def test_lore_runs_follow_the_pages_declared_shape(pack):

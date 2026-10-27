@@ -104,10 +104,6 @@ class SeedSet:
     #: advance. `scope` neither queries nor clears these sets, so re-scoping does not
     #: forget what fetching found.
     discovered: bool = False
-    #: `(title, wikitext) -> class name` for a set whose pages come in layouts so unlike that
-    #: one set's boundaries say little: the reading sample takes each class's own first and
-    #: largest page instead of the set's.
-    layout: Callable[[str, str], str] | None = None
 
     def __post_init__(self) -> None:
         if self.enumerate is None and self.fixed is None and not self.discovered:
@@ -491,10 +487,6 @@ class ChunkTemplate:
     #: Absorb a trailing stub shorter than `target // 2` into the previous unit,
     #: rather than emitting a fragment that embeds as noise.
     absorb_tail: bool = True
-    #: Prose templates: a last piece of a split entry shorter than this joins the piece
-    #: before it, so a unit may exceed `max_chars` by up to `min_tail - 1` characters.
-    #: 0 leaves tails alone (dialogue has `absorb_tail` for the same purpose).
-    min_tail: int = 0
     #: Sequence templates only: a unit ends before a scene change only once it holds this
     #: many characters as well as half its records; six short lines are not a scene.
     cut_min_chars: int = 0
@@ -536,11 +528,6 @@ class ChunkPolicy:
     breaks: tuple[str, ...] = ("\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ")
     #: Punctuation the renderer writes between parts of a unit; keys as in `SEPARATORS`.
     separators: Mapping[str, str] = field(default_factory=dict)
-    #: A voice record's trigger key (the game engine's name for when a line plays) ->
-    #: the words a reader would use. Unit text never carries the key itself: it is no
-    #: help to retrieval, and a model may say it aloud. A line with its own title is
-    #: named by the title; one with neither falls back to the `voice` label.
-    triggers: Mapping[str, str] = field(default_factory=dict)
     #: Regex for the part of a scene's page title that only splits one story across
     #: pages (a "before battle" or "after battle" page). Dropped from the header only:
     #: the page, citation and span keep the full title.
@@ -560,8 +547,6 @@ class ChunkPolicy:
     #: Titles of dossier sections that are the work's mechanics (stat ratings), not prose
     #: about the person; they make no unit.
     section_skip: tuple[str, ...] = ()
-    #: Form kinds that add no identity card of their own: their fields are the mode's.
-    cardless_forms: tuple[str, ...] = ()
     #: The same rewriting for the names of dossier sections and items in a header.
     section_words: tuple[tuple[str, str], ...] = ()
     #: Pages of a lore template whose header names the page by the last segment of its
@@ -595,24 +580,9 @@ class ChunkPolicy:
     #: the card already shows are taken out ("" when nothing is left); None for any other
     #: section. A remainder is the section's own unit, so a fact is stated once.
     card_restated: Callable[[str, str, Mapping[str, str]], str | None] | None = None
-    #: Card field values that mean "none" and say nothing about the person.
-    placeholder_values: tuple[str, ...] = ()
-    #: A record field (a dossier section or item) whose title and value both match this
-    #: pattern in full is a slot the source fills with a stand-in; it is dropped before any
-    #: unit is cut ("" turns it off).
-    placeholder_only: str = ""
-    #: Dossier items shorter than this join the item before them (0 turns it off), if their
-    #: title matches one of `foldable_items`: an entry of a kind that is read alongside its
-    #: neighbours. Other short items (a blurb, a token's description) are complete as they are.
-    item_min_chars: int = 0
-    foldable_items: tuple[str, ...] = ()
     #: Speaker labels that stand for someone not named yet. They belong to nobody: the
     #: same label is a different person each time, and a portrait only shows who was on screen.
     generic_speakers: tuple[str, ...] = ()
-    #: `(scene, label, person page)` exceptions to "a page-title label is that page's
-    #: person": a declared disguise. A None person says the label is nobody in that scene (a
-    #: bystander sharing a person's name). Each entry is a decision about one scene.
-    speaker_as: tuple[tuple[str, str, str | None], ...] = ()
     #: Regex over a scene id with a named group `owner` for scenes that belong to one
     #: person (a record of their own); the owner missing from their own scene is a failure
     #: of attribution, not a fact about the story. Empty disables the check.
@@ -657,10 +627,11 @@ class ChunkPolicy:
                 return re.sub(pattern, replacement, text).strip()
         return text
 
-    def voice_name(self, trigger: str, title: str) -> str:
-        """What a header calls a voice line: its title, else its trigger's words."""
-        raw = title or self.triggers.get(trigger) or ""
-        return self._reworded(self.voice_words, raw) or self.label("voice")
+    def voice_name(self, title: str) -> str:
+        """What a header calls a voice line: its title reworded, else the `voice` label.
+        The trigger key is never used: the engine's word is no help to retrieval, and a
+        model may say it aloud."""
+        return self._reworded(self.voice_words, title) or self.label("voice")
 
     def lore_crumbs(self, page: str, path: tuple[str, ...]) -> list[str]:
         """A lore unit's header parts: its topic, then the headings below it, in-world only."""
