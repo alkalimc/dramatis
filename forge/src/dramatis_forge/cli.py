@@ -14,6 +14,7 @@ watermark. Both are resumable: pages already held are never fetched twice.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -445,6 +446,19 @@ def report_figures(
         console.print("[green]every link resolves, every id is defined, every key is known[/green]")
     if failed or rep.hits:
         raise typer.Exit(1)
+
+
+@report_app.command("wording")
+def report_wording(
+    out: Annotated[Path, typer.Argument(help="JSON file to write.")],
+    pack: PackOpt = "",
+    home: HomeOpt = None,
+) -> None:
+    """Export the pack's wording as JSON, for the UI's browser preview (dev only)."""
+    pk, _ = _resolve(pack, home)
+    out.write_text(json.dumps(dict(pk.wording), ensure_ascii=False, indent=1, sort_keys=True)
+                   + "\n", encoding="utf-8")
+    console.print(f"[green]{out}[/green]  {len(pk.wording)} keys")
 
 
 @report_app.command("coverage")

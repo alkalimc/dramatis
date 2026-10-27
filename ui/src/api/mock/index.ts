@@ -5,6 +5,9 @@
 // Demo switches (query string): `form=library` (no endpoint yet), `first=1` (first open),
 // `tts=0` (no read-aloud role), `tier=ultra`, `band=quiet|exhausted`, `marker=paren`
 // (scene lines in `(...)` instead of `*...*`).
+//
+// `ui/wording.local.json` (git-ignored; exported by the forge) supplies a corpus's wording
+// when present, so the preview shows that corpus's language.
 import type {
   ApiError,
   AppStatus,
@@ -42,6 +45,11 @@ import { createBus } from "./bus";
 import { PASSAGES, PERSONS, passage, type MockPerson } from "./data";
 
 type Result<T> = Promise<{ status: "ok"; data: T } | { status: "error"; error: ApiError }>;
+
+const localWording = import.meta.glob<Record<string, string>>("/wording.local.json", {
+  eager: true,
+  import: "default",
+});
 
 const ok = <T>(data: T): Result<T> => Promise.resolve({ status: "ok", data });
 const fail = <T>(error: ApiError): Result<T> => Promise.resolve({ status: "error", error });
@@ -465,7 +473,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         corpus: { state: "loaded", name: "demo", encoder_mismatch: false },
         needs_setup: settings.user_name === null,
       }),
-    wording: () => ok({ entries: {}, scene_marker: scene }),
+    wording: () => ok({ entries: Object.values(localWording)[0] ?? {}, scene_marker: scene }),
     presence: async () => {
       const r = ok({ items: [...digestItems] });
       if (library || settings.user_name === null || band !== "open") return r;
