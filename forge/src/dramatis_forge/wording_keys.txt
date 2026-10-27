@@ -238,6 +238,7 @@ harness.tone.normal
 harness.topic
 harness.wrapup
 harness.wrapup.summary
+harness.wrapup.shape
 host.name
 host.quota_exhausted
 host.rate_limited

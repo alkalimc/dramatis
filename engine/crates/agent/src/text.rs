@@ -105,6 +105,10 @@ const DEFAULTS: &[(&str, &str)] = &[
          call if it is available; otherwise reply with just the JSON object the schema \
          describes.",
     ),
+    (
+        "harness.wrapup.shape",
+        "Reply with one JSON object only, no code fence, using exactly these keys: {shape}",
+    ),
     ("harness.opening", "{name} speaks first."),
     ("harness.opening.commitment", "A promise is due: {text}"),
     (
