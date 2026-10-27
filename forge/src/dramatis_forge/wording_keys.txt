@@ -237,8 +237,8 @@ harness.tone.guarded
 harness.tone.normal
 harness.topic
 harness.wrapup
-harness.wrapup.summary
 harness.wrapup.shape
+harness.wrapup.summary
 host.name
 host.quota_exhausted
 host.rate_limited
