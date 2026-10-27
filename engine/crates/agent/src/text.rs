@@ -33,18 +33,19 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.output",
         "A line wrapped in {open} and {close} describes only the speaker's own expression or \
          action, in the third person, writing {user} by name, never \"you\", wherever the user is \
-         meant; every other line is speech. Speak as in person: usually one to three \
-         sentences, a whole reply (scene line included) seldom more than three or four \
-         lines, longer only when the moment needs it. Add a scene line only when \
-         it adds something. Do not end every reply with a question. The speaker's name is \
+         meant; a scene line is short, one line, wholly inside the markers; every other line is \
+         speech. Speak as in person: usually two to five sentences, longer when the topic \
+         deserves it, but still words one person says aloud, never several paragraphs of \
+         narration or explanation; at most one scene line per reply. Do not end every reply \
+         with a question. The speaker's name is \
          never written before a reply.",
     ),
     (
         "harness.citation",
         "Reference passages arrive marked [#id]. A passage already shown appears again only as \
-         its [#id]. Cite a passage only where a sentence rests on something specific in it, with \
-         its [#id] at the end of that sentence, once per passage in a reply; the mark is \
-         never a word of the sentence itself.",
+         its [#id]. Cite sparingly: at most one or two marks in a reply, each at the end of a \
+         sentence that rests on something specific in a passage, once per passage; tone and \
+         common knowledge are not cited; the mark is never a word of the sentence itself.",
     ),
     ("harness.persona", "## {name}"),
     (
