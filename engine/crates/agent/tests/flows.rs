@@ -484,7 +484,7 @@ async fn a_per_request_model_does_not_roll_for_material_and_records_no_points() 
 }
 
 #[tokio::test]
-async fn emulated_tools_are_left_out_of_ordinary_turns_only() {
+async fn emulated_tools_are_left_out_of_every_turn() {
     let mut ep = endpoints(WireApi::Chat, true, None);
     ep.profiles[0].models[0].native_tools = Some(false);
     let e = env_with(ep, |_| {});
@@ -503,8 +503,9 @@ async fn emulated_tools_are_left_out_of_ordinary_turns_only() {
     e.agent.wrapup(ch).await.unwrap();
     let json = e.fake.json();
     assert!(json[0].get("tools").is_none() && json[0].get("tool_choice").is_none());
-    assert_eq!(forced_tool(&json[1]), Some("wrapup"));
-    assert!(json[1]["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    // The wrap-up asks for structured output instead.
+    assert!(json[1].get("tools").is_none() && json[1].get("tool_choice").is_none());
+    assert_eq!(json[1]["response_format"]["type"], "json_schema");
 }
 
 #[tokio::test]
@@ -534,6 +535,72 @@ async fn an_emulated_wrapup_written_as_a_text_block_still_counts() {
         let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
         assert_eq!(facts.len(), 1, "{block}");
     }
+}
+
+#[tokio::test]
+async fn an_emulated_wrapup_asks_for_json_and_applies_it() {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let e = env_with(ep, |_| {});
+    let ch = direct(&e, "ann");
+    let doc = json!({"facts": [
+        {"kind": "fact", "text": "The user likes jasmine tea.", "due": null}
+    ], "hurt": null, "summary": null});
+    e.fake.push([say("Cooler water."), say(&doc.to_string())]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let last = e.fake.json().pop().unwrap();
+    assert!(last.get("tools").is_none() && last.get("tool_choice").is_none());
+    assert_eq!(last["response_format"]["type"], "json_schema");
+    assert!(last["response_format"]["json_schema"]["schema"]["properties"]["facts"].is_object());
+    assert_eq!(
+        e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn an_emulated_wrapup_in_prose_records_nothing() {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let e = env_with(ep, |_| {});
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        say("Cooler water."),
+        say("* **Event**: tea.\n* **State**: calm."),
+    ]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    assert!(
+        e.agent
+            .with_world(|w| fact::all(w, false).unwrap())
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn a_native_endpoint_still_forces_the_wrapup_tool() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        say("Cooler water."),
+        call(
+            "wrapup",
+            json!({"facts": [{"kind": "fact", "text": "Likes tea"}]}),
+        ),
+    ]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let last = e.fake.json().pop().unwrap();
+    assert_eq!(forced_tool(&last), Some("wrapup"));
+    assert!(last.get("response_format").is_none());
+    assert_eq!(
+        e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
+        1
+    );
 }
 
 #[tokio::test]

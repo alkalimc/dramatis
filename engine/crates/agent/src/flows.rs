@@ -702,7 +702,8 @@ impl Agent {
     }
 
     /// The `wrapup` turn on the channel's current segment, forced through `tool_choice`
-    /// where the protocol allows it and the model honours it; where the protocol must
+    /// where the protocol allows it and the model honours it; on an endpoint that only
+    /// emulates tools, asked as a JSON document instead (see `Agent::call`); where the protocol must
     /// keep `tool_choice` unchanged, the harness line alone asks for the call, and a
     /// reply without it counts as no wrap-up. Skipped when the model cannot be forced,
     /// when the log holds nothing to wrap up, and in the host's own log (it keeps no
@@ -713,7 +714,9 @@ impl Agent {
             return Ok(None);
         }
         let (role, _) = self.role_for(kind)?;
-        let forced = role.profile.wire_api.may_force_tool();
+        // An emulated endpoint is asked for structured output, not forced to a call.
+        let emulated = role.model.emulated_tools();
+        let forced = !emulated && role.profile.wire_api.may_force_tool();
         if forced && !role.forced_tool() {
             return Ok(None);
         }

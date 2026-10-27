@@ -498,6 +498,17 @@ impl Agent {
             .id;
         let names = self.segment_names(seg)?;
         let mut shape = self.shape_for(&role, kind, &names);
+        // Emulated tools do not answer a wrap-up reliably, but structured output does: the
+        // call carries no tools and asks for the `wrapup` arguments as one JSON document.
+        let structured = role.model.emulated_tools() && turn.wrapup;
+        let schema = structured
+            .then(|| shape.tools.iter().find(|t| t.name == "wrapup"))
+            .flatten()
+            .map(|t| t.parameters.clone());
+        let choice = if structured { ToolChoice::Auto } else { choice };
+        if structured {
+            shape.tools.clear();
+        }
         // The stored shape keeps the full list; only this call's request leaves it out.
         if role.model.emulated_tools()
             && kind == LogKind::Person
@@ -509,7 +520,7 @@ impl Agent {
             shape.tools.clear();
         }
         let log = self.log(seg)?;
-        let req = request::build(
+        let mut req = request::build(
             &Call {
                 shape: &shape,
                 cache_key: cache_key(seg),
@@ -519,6 +530,7 @@ impl Agent {
             },
             &ep,
         )?;
+        req.output_schema = schema;
         let mut retried = false;
         let (reply, refused) = loop {
             let mut events = self.llm.stream(&ep, &req).await?;
@@ -580,8 +592,10 @@ impl Agent {
             }
             break (reply, refused);
         };
-        let mut reply = if role.model.emulated_tools() && (turn.wrapup || !shape.tools.is_empty()) {
-            adopt_text_call(reply, turn.wrapup, &shape.tools)
+        let mut reply = if structured {
+            adopt_json_call(reply)
+        } else if role.model.emulated_tools() && !shape.tools.is_empty() {
+            adopt_text_call(reply, false, &shape.tools)
         } else {
             reply
         };
@@ -733,7 +747,8 @@ impl Agent {
                 ToolChoice::Auto
             };
             let reply = self.call(turn, choice).await?;
-            let text = assemble::visible_text(&reply.text());
+            let text =
+                assemble::visible_text(&reply.text(), (&self.corpus.scene.0, &self.corpus.scene.1));
             if !text.is_empty() {
                 if !turn.text.is_empty() {
                     turn.text.push('\n');
@@ -947,6 +962,25 @@ impl Agent {
 pub(crate) struct Log {
     pub system: [String; 3],
     pub items: Vec<Message>,
+}
+
+/// The reply to a structured wrap-up request: the JSON document becomes the `wrapup`
+/// call, so the loop treats it like a tool call. A reply that is not a JSON object is
+/// still read as a fenced call block; with neither it stays text, and nothing is recorded.
+fn adopt_json_call(mut reply: Response) -> Response {
+    let text = reply.text();
+    let doc = text.trim();
+    let is_object = serde_json::from_str::<serde_json::Value>(doc).is_ok_and(|v| v.is_object());
+    if !is_object {
+        return adopt_text_call(reply, true, &[]);
+    }
+    reply.parts.retain(|p| !matches!(p, Part::Text(_)));
+    reply.parts.push(Part::ToolCall {
+        id: "json_call_0".into(),
+        name: "wrapup".into(),
+        args_json: doc.to_owned(),
+    });
+    reply
 }
 
 /// On an endpoint that only emulates tools, a call may arrive as a fenced block in the
