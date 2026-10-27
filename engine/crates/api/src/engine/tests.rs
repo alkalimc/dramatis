@@ -435,6 +435,9 @@ async fn endpoints_round_trip_through_the_file_and_the_keychain() {
     e.set_role(RoleKind::Tts, Some(chat_role("a")))
         .await
         .unwrap();
+    e.set_role(RoleKind::Host, Some(chat_role("a")))
+        .await
+        .unwrap();
 
     let view = e.endpoints().await.unwrap();
     assert!(view.profiles[0].has_key);
@@ -453,9 +456,15 @@ async fn endpoints_round_trip_through_the_file_and_the_keychain() {
     e.update_profile("a".into(), profile("b")).await.unwrap();
     let view = e.endpoints().await.unwrap();
     assert_eq!(view.roles.as_ref().unwrap().chat.profile, "b");
+    assert_eq!(
+        view.roles.as_ref().unwrap().host.as_ref().unwrap().profile,
+        "b"
+    );
     assert!(view.profiles[0].has_key && !r.engine.ports.keys.has("a"));
 
     e.set_role(RoleKind::Tts, None).await.unwrap();
+    e.set_role(RoleKind::Host, None).await.unwrap();
+    assert!(e.endpoints().await.unwrap().roles.unwrap().host.is_none());
     assert_eq!(
         e.set_role(RoleKind::Chat, None).await,
         Err(ApiError::Invalid {

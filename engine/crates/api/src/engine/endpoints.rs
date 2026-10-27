@@ -75,9 +75,14 @@ impl Engine {
         }
         if renamed {
             for role in e.roles.iter_mut().flat_map(|r| {
-                [Some(&mut r.chat), r.tts.as_mut(), r.persona.as_mut()]
-                    .into_iter()
-                    .flatten()
+                [
+                    Some(&mut r.chat),
+                    r.host.as_mut(),
+                    r.tts.as_mut(),
+                    r.persona.as_mut(),
+                ]
+                .into_iter()
+                .flatten()
             }) {
                 if role.profile == name {
                     role.profile = profile.name.clone();
@@ -95,10 +100,15 @@ impl Engine {
             return Err(ApiError::NotFound);
         }
         let used = e.roles.iter().any(|r| {
-            [Some(&r.chat), r.tts.as_ref(), r.persona.as_ref()]
-                .into_iter()
-                .flatten()
-                .any(|role| role.profile == name)
+            [
+                Some(&r.chat),
+                r.host.as_ref(),
+                r.tts.as_ref(),
+                r.persona.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|role| role.profile == name)
         });
         if used {
             return Err(invalid("profile"));
@@ -141,12 +151,18 @@ impl Engine {
                 None => {
                     e.roles = Some(Roles {
                         chat,
+                        host: None,
                         tts: None,
                         persona: None,
                     })
                 }
             },
-            // Only read-aloud can be switched off; the chat role is replaced, not removed.
+            (RoleKind::Host, host) => match e.roles.as_mut() {
+                Some(r) => r.host = host,
+                None if host.is_none() => {}
+                None => return Err(invalid("chat")),
+            },
+            // Only read-aloud and the host can be unset; the chat role is replaced, not removed.
             (RoleKind::Chat, None) => return Err(invalid("role")),
             (RoleKind::Tts, tts) => match e.roles.as_mut() {
                 Some(r) => r.tts = tts,

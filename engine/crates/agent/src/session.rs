@@ -102,7 +102,7 @@ impl Agent {
         })
     }
 
-    /// The request shape for a log kind under the current chat role.
+    /// The request shape for a log kind under the role of that kind.
     pub(crate) fn shape_for(
         &self,
         role: &ChatRole,
@@ -295,10 +295,10 @@ impl Agent {
         summary: Option<&Summary>,
         tail: Option<Tail>,
     ) -> Result<SegmentId> {
-        let (role, _) = self.chat()?;
         let conn = self.db();
-        let names = self.names_now(&conn)?;
         let kind = self.log_kind(&conn, ch)?;
+        let (role, _) = self.role_for(kind)?;
+        let names = self.names_now(&conn)?;
         let shape = self.shape_for(&role, kind, &names);
         let [a, b, c] = self.prefix(&conn, ch, &names, summary, tail)?;
         let id = log::open_segment(
@@ -314,8 +314,8 @@ impl Agent {
 
     /// Why the current segment must roll over, if it must.
     fn must_roll(&self, ch: ChannelId) -> Result<Option<Roll>> {
-        let (role, _) = self.chat()?;
         let conn = self.db();
+        let (role, _) = self.role_for(self.log_kind(&conn, ch)?)?;
         let Some(seg) = log::current(&conn, ch)? else {
             return Ok(Some(Roll::Fresh));
         };
@@ -490,11 +490,11 @@ impl Agent {
     /// One model call on the channel's current segment, streamed. The reply is appended
     /// verbatim and its usage metered before anything else happens.
     pub(crate) async fn call(&self, turn: &mut Turn, choice: ToolChoice) -> Result<Response> {
-        let (role, ep) = self.chat()?;
+        let kind = self.log_kind(&self.db(), turn.channel)?;
+        let (role, ep) = self.role_for(kind)?;
         let seg = log::current(&self.db(), turn.channel)?
             .ok_or_else(|| Error::Invalid(format!("channel {} has no log", turn.channel)))?
             .id;
-        let kind = self.log_kind(&self.db(), turn.channel)?;
         let names = self.segment_names(seg)?;
         let shape = self.shape_for(&role, kind, &names);
         let log = self.log(seg)?;
@@ -587,11 +587,12 @@ impl Agent {
         Ok(reply)
     }
 
-    /// Whether the chat endpoint's protocol lets `tool_choice` differ between calls on
-    /// one log. Where it does not, a different choice drops the cached history, so every
-    /// call sends the same one and the harness asks in text instead.
-    pub(crate) fn may_vary_choice(&self) -> Result<bool> {
-        Ok(self.chat()?.0.profile.wire_api.may_force_tool())
+    /// Whether the protocol of the channel's role lets `tool_choice` differ between calls
+    /// on one log. Where it does not, a different choice drops the cached history, so
+    /// every call sends the same one and the harness asks in text instead.
+    pub(crate) fn may_vary_choice(&self, ch: ChannelId) -> Result<bool> {
+        let kind = self.log_kind(&self.db(), ch)?;
+        Ok(self.role_for(kind)?.0.profile.wire_api.may_force_tool())
     }
 
     pub(crate) fn emit_quota(&self) -> Result<()> {
@@ -661,7 +662,7 @@ impl Agent {
                 world::task::spend_turn(&self.db(), task)?;
             }
             let last = step + 1 == max_steps;
-            let choice = if last && turn.task.is_none() && self.may_vary_choice()? {
+            let choice = if last && turn.task.is_none() && self.may_vary_choice(turn.channel)? {
                 ToolChoice::None
             } else {
                 ToolChoice::Auto
