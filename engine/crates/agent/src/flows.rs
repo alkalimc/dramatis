@@ -110,22 +110,33 @@ impl Agent {
     /// Run the replies to a posted message. Errors after the message was stored (the
     /// endpoint failed, the quota ran out) leave it stored.
     pub async fn respond(&self, posted: Posted) -> Result<()> {
-        let _turn = self.turns.lock().await;
-        let ch = channel::get(&self.db(), posted.channel)?;
-        if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
-            self.exhausted_line(release_at)?;
-            return Err(Error::QuotaExhausted { release_at });
+        let asks = {
+            let _turn = self.lock_channel(posted.channel).await;
+            let ch = channel::get(&self.db(), posted.channel)?;
+            if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
+                self.exhausted_line(release_at)?;
+                return Err(Error::QuotaExhausted { release_at });
+            }
+            if ch.is_host_channel() {
+                self.host_turn(&posted).await?
+            } else if ch.kind == ChannelKind::Group {
+                self.group_turn(&posted).await?;
+                Vec::new()
+            } else {
+                let person = ch.person().cloned().ok_or_else(|| {
+                    Error::Invalid(format!("channel {} has no owner", posted.channel))
+                })?;
+                self.direct_turn(&posted, &person).await?;
+                Vec::new()
+            }
+        };
+        // Requests the host made run in the asked person's channel, after the host's own
+        // lock is released: no flow holds two channel locks.
+        for asked in asks {
+            let _turn = self.lock_channel(asked.channel).await;
+            self.run_ask(asked.task, asked.channel).await?;
         }
-        if ch.is_host_channel() {
-            self.host_turn(&posted).await
-        } else if ch.kind == ChannelKind::Group {
-            self.group_turn(&posted).await
-        } else {
-            let person = ch.person().cloned().ok_or_else(|| {
-                Error::Invalid(format!("channel {} has no owner", posted.channel))
-            })?;
-            self.direct_turn(&posted, &person).await
-        }
+        Ok(())
     }
 
     /// `post` then `respond`.
@@ -192,7 +203,8 @@ impl Agent {
         self.append_user(seg, &text, posted.image.as_ref())
     }
 
-    async fn host_turn(&self, posted: &Posted) -> Result<()> {
+    /// Returns the requests the host made; the caller runs them.
+    async fn host_turn(&self, posted: &Posted) -> Result<Vec<world::task::Asked>> {
         let seg = self
             .ensure_segment(posted.channel, Some(posted.message))
             .await?;
@@ -201,10 +213,7 @@ impl Agent {
         turn.authorized = posted.authorized;
         self.run(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
-        for asked in std::mem::take(&mut turn.asks) {
-            self.run_ask(asked.task, asked.channel).await?;
-        }
-        Ok(())
+        Ok(std::mem::take(&mut turn.asks))
     }
 
     async fn direct_turn(&self, posted: &Posted, person: &PersonId) -> Result<()> {
@@ -628,7 +637,7 @@ impl Agent {
 
     /// Work on a request until it is answered or its turns run out.
     pub async fn run_request(&self, asked: world::task::Asked) -> Result<()> {
-        let _turn = self.turns.lock().await;
+        let _turn = self.lock_channel(asked.channel).await;
         if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
             return Err(Error::QuotaExhausted { release_at });
         }
@@ -675,7 +684,7 @@ impl Agent {
 
     /// The conversation in a channel ended: close its sessions and wrap it up.
     pub async fn wrapup(&self, ch: ChannelId) -> Result<()> {
-        let _turn = self.turns.lock().await;
+        let _turn = self.lock_channel(ch).await;
         session::close_channel(&self.db(), ch, self.now().ms)?;
         self.run_wrapup(ch, false).await?;
         Ok(())
@@ -788,9 +797,10 @@ impl Agent {
     /// talking about the user under the old name. A log with nothing appended yet is
     /// simply replaced.
     pub async fn on_rename(&self) -> Result<()> {
-        let _turn = self.turns.lock().await;
         let channels = crate::store::channels_with_segments(&self.db())?;
         for ch in channels {
+            // One channel at a time: each roll waits for that channel's turn only.
+            let _turn = self.lock_channel(ch).await;
             let Some(seg) = world::log::current(&self.db(), ch)? else {
                 continue;
             };
@@ -815,14 +825,24 @@ impl Agent {
     /// the host's one line, at most one opening) and returns the digest at once if the
     /// moment is not a presence occasion.
     pub async fn presence(&self, opened: bool) -> Result<PresenceOutcome> {
-        let _turn = self.turns.lock().await;
         let now = self.now();
-        if !world::presence::is_return(&self.db(), now.ms, opened, &self.config.world)? {
-            return Ok(PresenceOutcome {
-                digest: self.world_digest(now)?,
+        let not_a_return = |me: &Self| -> Result<Option<PresenceOutcome>> {
+            if world::presence::is_return(&me.db(), now.ms, opened, &me.config.world)? {
+                return Ok(None);
+            }
+            Ok(Some(PresenceOutcome {
+                digest: me.world_digest(now)?,
                 host_spoke: false,
                 opened: None,
-            });
+            }))
+        };
+        // The digest alone never waits behind a model call.
+        if let Some(out) = not_a_return(self)? {
+            return Ok(out);
+        }
+        let _plan = self.planner.lock().await;
+        if let Some(out) = not_a_return(self)? {
+            return Ok(out);
         }
         let words = self.words_hits(now)?;
         let birthdays = self.birthdays()?;
@@ -856,7 +876,7 @@ impl Agent {
         for call in planned.calls {
             match call {
                 Call::Wrapup { channel } => {
-                    self.run_wrapup(channel, false).await?;
+                    self.wrapup_ended(channel).await?;
                 }
                 Call::HostLine(d) if !introduce => {
                     let d = self.persona_digest(d);
@@ -878,7 +898,7 @@ impl Agent {
     /// Event seeds outside presence (a commitment fell due, a conclusion was written):
     /// at most one opening, within every limit.
     pub async fn on_event(&self) -> Result<Option<(PersonId, ChannelId)>> {
-        let _turn = self.turns.lock().await;
+        let _plan = self.planner.lock().await;
         if self.chat().is_err() {
             return Ok(None);
         }
@@ -926,21 +946,39 @@ impl Agent {
     /// open. Call it every minute or so; it makes no call when nothing is due.
     pub async fn tick(&self) -> Result<Option<(PersonId, ChannelId)>> {
         let ended = {
-            let _turn = self.turns.lock().await;
-            let ended =
-                session::expire_idle(&self.db(), self.now().ms, &self.config.world.session)?;
-            if self.chat().is_ok() {
-                for ch in &ended {
-                    self.run_wrapup(*ch, false).await?;
-                }
+            let now = self.now().ms;
+            let conn = self.db();
+            // A channel with a flow in progress is not idle, however long the flow takes.
+            for ch in self.busy_channels() {
+                session::touch_channel(&conn, ch, now)?;
             }
-            ended
+            session::expire_idle(&conn, now, &self.config.world.session)?
         };
+        if self.chat().is_ok() {
+            for ch in &ended {
+                self.wrapup_ended(*ch).await?;
+            }
+        }
         let opened = self.on_event().await?;
         if !ended.is_empty() {
             self.changed(vec![WorldChange::Digest]);
         }
         Ok(opened)
+    }
+
+    /// Wrap up a conversation that ended on its own (idle). Its channel may have been
+    /// written to since it was found ended: then the conversation is alive again and
+    /// the wrap-up is left for its own end.
+    async fn wrapup_ended(&self, ch: ChannelId) -> Result<()> {
+        let _turn = self.lock_channel(ch).await;
+        if session::open_sessions(&self.db())?
+            .iter()
+            .any(|s| s.channel == ch)
+        {
+            return Ok(());
+        }
+        self.run_wrapup(ch, false).await?;
+        Ok(())
     }
 
     fn birthdays(&self) -> Result<Vec<(PersonId, MonthDay)>> {
@@ -989,6 +1027,7 @@ impl Agent {
     /// very first open. One call, no tools, nothing the user asked for.
     async fn host_harness(&self, digest: Option<&Digest>) -> Result<bool> {
         let ch = channel::host(&self.db())?;
+        let _turn = self.lock_channel(ch).await;
         let seg = self.ensure_segment(ch, None).await?;
         let names = self.segment_names(seg)?;
         let mut lines = vec![match digest {
@@ -1042,6 +1081,11 @@ impl Agent {
         if !self.has_persona(o.person.as_str()) || !self.decide(CallKind::Opening)?.allowed() {
             return Ok(false);
         }
+        // A channel in the middle of a turn is not interrupted: the seed stays queued and
+        // is planned again at the next occasion.
+        let Some(_turn) = self.try_lock_channel(o.channel) else {
+            return Ok(false);
+        };
         let seg = self.ensure_segment(o.channel, None).await?;
         let names = self.segment_names(seg)?;
         let name = self.display(o.person.as_str())?;

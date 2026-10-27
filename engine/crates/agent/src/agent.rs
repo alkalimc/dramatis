@@ -5,8 +5,17 @@
 //! ever rewritten; a segment ends only by rolling over into a new one.
 //!
 //! Locks: the world and the corpus are each behind a mutex that is only held between
-//! awaits, always taken in that order (world, then corpus). One flow runs at a time
-//! (`turns`), so a log is never appended to by two flows at once.
+//! awaits, always taken in that order (world, then corpus). Flows are ordered per
+//! channel: a flow that writes a channel's log or messages holds that channel's async
+//! lock ([`Agent::lock_channel`]) for the whole turn, so a log is never appended to by
+//! two flows at once while different channels (and the host) run side by side.
+//!
+//! Lock order, outermost first: `planner`, then one channel lock, then the std mutexes
+//! (world, corpus, caches), none of which is held across an await. No flow holds two
+//! channel locks: a flow that touches several channels takes them one at a time, so
+//! there is no order among channels to get wrong. `planner` only keeps the flows that
+//! choose who speaks unprompted (presence, event seeds) from planning the same seed twice;
+//! it is never taken while a channel lock is held.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,7 +29,7 @@ use api::events::{
 use api::tools::Descriptions;
 use index::Index;
 use world::clock::Now;
-use world::{SegmentId, World};
+use world::{ChannelId, SegmentId, World};
 
 use crate::endpoint::{self, ChatRole, Keys};
 use crate::error::{Error, Result};
@@ -43,7 +52,7 @@ pub enum Event {
 
 /// Where events go; the app forwards them to the window. Called with no lock held, so
 /// it may read through the agent's read side ([`Agent::with_world`], [`Agent::history`]);
-/// it must not wait for a flow to finish (flows run one at a time).
+/// it must not wait for a flow to finish.
 pub trait Sink: Send + Sync {
     fn emit(&self, event: Event);
 }
@@ -126,7 +135,14 @@ pub struct Agent {
     pub(crate) llm: llm::Llm,
     pub(crate) sink: Arc<dyn Sink>,
     pub(crate) clock: Arc<dyn Clock>,
-    pub(crate) turns: tokio::sync::Mutex<()>,
+    /// One lock per channel, created on first use. A turn, a wrap-up or a rollover of a
+    /// channel holds its lock; entries are never removed (one small allocation per channel).
+    locks: Mutex<HashMap<ChannelId, Arc<tokio::sync::Mutex<()>>>>,
+    /// Serialises the flows that plan unprompted speech; see the module docs.
+    pub(crate) planner: tokio::sync::Mutex<()>,
+    /// Held while the quota status is read and sent, so a stale status never overtakes
+    /// a fresher one at the UI.
+    pub(crate) quota_events: Mutex<()>,
     /// The last harness context line appended per segment. Lost on restart, which costs
     /// one repeated line.
     pub(crate) contexts: Mutex<HashMap<SegmentId, String>>,
@@ -166,7 +182,9 @@ impl Agent {
             llm: parts.llm,
             sink: parts.sink,
             clock: parts.clock,
-            turns: tokio::sync::Mutex::new(()),
+            locks: Mutex::new(HashMap::new()),
+            planner: tokio::sync::Mutex::new(()),
+            quota_events: Mutex::new(()),
             contexts: Mutex::new(HashMap::new()),
             filled: Mutex::new(HashMap::new()),
         })
@@ -178,6 +196,39 @@ impl Agent {
 
     pub(crate) fn ix(&self) -> MutexGuard<'_, Index> {
         self.index.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn channel_lock(&self, ch: ChannelId) -> Arc<tokio::sync::Mutex<()>> {
+        self.locks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(ch)
+            .or_default()
+            .clone()
+    }
+
+    /// Wait for a channel's turn. Waiters are served in the order they asked, which is
+    /// what keeps two messages to one channel answered in order.
+    pub(crate) async fn lock_channel(&self, ch: ChannelId) -> tokio::sync::OwnedMutexGuard<()> {
+        self.channel_lock(ch).lock_owned().await
+    }
+
+    /// The channel's turn if nobody holds it.
+    pub(crate) fn try_lock_channel(
+        &self,
+        ch: ChannelId,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        self.channel_lock(ch).try_lock_owned().ok()
+    }
+
+    /// Channels with a flow in progress right now.
+    pub(crate) fn busy_channels(&self) -> Vec<ChannelId> {
+        let locks = self.locks.lock().unwrap_or_else(|e| e.into_inner());
+        locks
+            .iter()
+            .filter(|(_, l)| l.try_lock().is_err())
+            .map(|(c, _)| *c)
+            .collect()
     }
 
     pub(crate) fn now(&self) -> Now {
