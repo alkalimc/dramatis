@@ -52,9 +52,10 @@ export function speechOnly(text: string, marker: SceneMarker): string {
 }
 
 /**
- * Text without its `[#id]` citation marks. The marks tell the engine which passages a
+ * Text without its `[#id]` citation marks (one id, or a comma-separated list in one
+ * bracket, each item optionally prefixed by `#`). The marks tell the engine which passages a
  * reply drew on; the reader sees those as the message's sources, not inside the speech.
  */
 export function withoutCites(text: string): string {
-  return text.replace(/[ \t]*\[#[^\]\s]{1,128}\]/g, "").replace(/[ \t]+$/gm, "");
+  return text.replace(/[ \t]*\[#[^\]\s,]{1,128}(?:\s*,\s*#?[^\]\s,]{1,128})*\]/g, "").replace(/[ \t]+$/gm, "");
 }

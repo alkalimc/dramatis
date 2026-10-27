@@ -64,6 +64,13 @@ test("citation marks and the space before them are not shown", () => {
   );
 });
 
+test("several ids in one bracket go together", () => {
+  expect(withoutCites("One.[#a:1,#b:2] Two [#p:3, #q:4] three [#r:5, s:6]")).toBe(
+    "One. Two three",
+  );
+  expect(withoutCites("keep [#a:1, ] and [#a:1,]")).toBe("keep [#a:1, ] and [#a:1,]");
+});
+
 test("brackets that are not citation marks stay", () => {
   expect(withoutCites("[# a b] and [x]")).toBe("[# a b] and [x]");
 });
