@@ -370,6 +370,9 @@ tool.report
 tool.request_join
 tool.search
 tool.wrapup
+typing.marker
+typing.tool
+typing.writing
 user.title
 user.you
 waiting.empty

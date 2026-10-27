@@ -5,6 +5,12 @@ import { Avatar } from "../ui/Avatar";
 import { ChannelHeader, ChannelView } from "./Channel";
 import { ColdstartCard } from "./Coldstart";
 import { Library } from "./Library";
+import { TypingMark } from "./Roster";
+
+function TypingIn({ channel }: { channel: string }) {
+  const on = useStore((s) => Boolean(s.typing[channel]));
+  return on ? <TypingMark /> : null;
+}
 
 /** Pure data, always there, no model call: who has something for the user. */
 export function WaitingPanel() {
@@ -24,6 +30,7 @@ export function WaitingPanel() {
                 <Avatar person={w.person} size="s" />
                 <span className="name">{w.person.name}</span>
                 <span className="what">{activityText(w.activity, t)}</span>
+                <TypingIn channel={w.channel} />
               </button>
             </li>
           ))}

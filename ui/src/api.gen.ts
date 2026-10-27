@@ -120,6 +120,7 @@ export const events = {
 	quotaChanged: makeEvent<QuotaChanged>("quota-changed"),
 	rosterChanged: makeEvent<RosterChanged>("roster-changed"),
 	toolCalled: makeEvent<ToolCalled>("tool-called"),
+	turnActivity: makeEvent<TurnActivity>("turn-activity"),
 	worldChanged: makeEvent<WorldChanged>("world-changed"),
 };
 
@@ -128,6 +129,27 @@ export type About = { kind: "task"; id: TaskId } | { kind: "fact"; id: FactId } 
 
 /**  Something a person did that the user has not seen, or that is due. */
 export type Activity = { kind: "messaged"; at: Timestamp } | { kind: "replied"; task: TaskId; question: string; at: Timestamp } | { kind: "commitment_due"; fact: FactId; text: string; due: Timestamp } | { kind: "came_by"; at: Timestamp } | { kind: "birthday" };
+
+/**  Why a turn failed, coarse enough to pick a word and nothing more. */
+export type ActivityFailure = "rate_limited" | "quota_exhausted" | 
+/**  The future was dropped before the turn ended. */
+"cancelled" | "error";
+
+/**  The step a speaker's turn is in. Sent only when it changes. */
+export type ActivityState = 
+/**
+ *  A request is out and no text has come back yet: includes the wait for the first
+ *  chunk, the retry after a refusal, and an endpoint's rate-limit back-off.
+ */
+{ kind: "thinking" } | 
+/**  Reply text is streaming. */
+{ kind: "writing" } | 
+/**  A tool is running (a lookup, a colleague pulled in, a request to a person). */
+{ kind: "tool"; name: string } | 
+/**  The reply is complete and stored. Clears the indicator. */
+{ kind: "done" } | 
+/**  The turn ended without a reply (or was cancelled). Clears the indicator. */
+{ kind: "failed"; reason: ActivityFailure };
 
 /**
  *  Every command's error. A code the UI maps to an i18n key, never a sentence; `detail`
@@ -644,6 +666,18 @@ export type ToolCalled = {
 export type TrailEntry = {
 	task: TaskSummary,
 	reply: Message | null,
+};
+
+/**
+ *  What a speaker is doing on a channel, from the moment its turn starts until the
+ *  reply is complete or the turn fails. One speaker has at most one live activity per
+ *  channel; a UI shows it as "<name> is typing" and clears it on `done` or `failed`.
+ *  Not sent for the invisible wrap-up.
+ */
+export type TurnActivity = {
+	channel: ChannelId,
+	author: Author,
+	state: ActivityState,
 };
 
 export type Waiting = {

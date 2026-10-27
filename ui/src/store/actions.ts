@@ -188,6 +188,7 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
       if (!s.channels.some((ch) => ch.id === payload.channel) && payload.channel !== s.hostChannel) void actions.refreshChannels();
     }),
     e.toolCalled.listen(({ payload }) => d({ type: "toolCalled", event: payload })),
+    e.turnActivity.listen(({ payload }) => d({ type: "turnActivity", event: payload })),
     e.modeChanged.listen(({ payload }) => d({ type: "modeChanged", event: payload })),
     e.rosterChanged.listen(() => {
       d({ type: "rosterChanged" });

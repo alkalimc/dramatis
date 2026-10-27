@@ -23,6 +23,7 @@ export function createBus() {
     quotaChanged: make<import("../../api.gen").QuotaChanged>(),
     rosterChanged: make<import("../../api.gen").RosterChanged>(),
     toolCalled: make<import("../../api.gen").ToolCalled>(),
+    turnActivity: make<import("../../api.gen").TurnActivity>(),
     worldChanged: make<import("../../api.gen").WorldChanged>(),
   } satisfies Events;
 }

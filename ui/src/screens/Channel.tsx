@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChannelId, ImagePart, Message } from "../api";
 import { useT } from "../i18n";
+import { authorName } from "../lib/format";
 import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
 import { InlineError } from "../ui/ErrorBar";
@@ -25,6 +26,7 @@ export function ChannelView({ channel, header, after }: { channel: ChannelId; he
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const historyError = useStore((s) => s.loadErrors[`history:${channel}`]);
+  const typing = useStore((s) => Boolean(s.typing[channel]));
   const waiting = useStore((s) => Boolean(s.awaiting[channel]));
   const isHost = useStore((s) => s.hostChannel === channel);
   const quota = useStore((s) => s.quota);
@@ -64,7 +66,8 @@ export function ChannelView({ channel, header, after }: { channel: ChannelId; he
         {streams.map(([id, st]) => (
           <PendingActions key={id} id={id} stream={st} />
         ))}
-        {waiting && streams.length === 0 && (
+        <TypingLines channel={channel} />
+        {waiting && streams.length === 0 && !typing && (
           <p className="muted awaiting" role="status">
             {t("message.awaiting")}
           </p>
@@ -74,6 +77,24 @@ export function ChannelView({ channel, header, after }: { channel: ChannelId; he
       </div>
       <Composer channel={channel} />
     </section>
+  );
+}
+
+/** "<name> is typing…" for each speaker generating here, until the engine says done. */
+function TypingLines({ channel }: { channel: ChannelId }) {
+  const t = useT();
+  const who = useStore((s) => s.typing[channel]);
+  const names = useStore((s) => s.names);
+  const user = useStore((s) => s.settings?.user_name ?? null);
+  if (!who) return null;
+  return (
+    <>
+      {Object.entries(who).map(([key, w]) => (
+        <p key={key} className="muted typing" role="status">
+          {t(w.tool ? "typing.tool" : "typing.writing", { name: authorName(w.author, t, names, user) })}
+        </p>
+      ))}
+    </>
   );
 }
 

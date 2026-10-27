@@ -1,6 +1,7 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import type { Message } from "../api";
 import { renderWith } from "../test/render";
+import { ChannelView } from "./Channel";
 import { MessageView, StreamView } from "./Message";
 
 const base: Message = {
@@ -60,4 +61,22 @@ test("a trailing marks-only line makes no bubble", () => {
 test("a streamed reply splits into bubbles as paragraphs arrive and hides a half-typed mark", () => {
   const { container } = renderWith(<StreamView author={base.author} text={"Hello.\n\nSecond one.\n\n[#c-led"} />);
   expect(container.querySelectorAll(".bubble")).toHaveLength(2);
+});
+
+test("the channel shows who is typing, a lookup wording for tools, and clears on done", async () => {
+  const { store } = renderWith(<ChannelView channel="dm:mira" />);
+  const author = { kind: "person", id: "mira" } as const;
+  await act(async () => {
+    store.dispatch({ type: "names", persons: [{ id: "mira", name: "Mira" }] });
+    store.dispatch({ type: "turnActivity", event: { channel: "dm:mira", author, state: { kind: "thinking" } } });
+  });
+  expect(screen.getByText("Mira is typing…")).toBeDefined();
+  await act(async () => {
+    store.dispatch({ type: "turnActivity", event: { channel: "dm:mira", author, state: { kind: "tool", name: "search" } } });
+  });
+  expect(screen.getByText("Mira is looking things up…")).toBeDefined();
+  await act(async () => {
+    store.dispatch({ type: "turnActivity", event: { channel: "dm:mira", author, state: { kind: "done" } } });
+  });
+  expect(screen.queryByText(/Mira is/)).toBeNull();
 });

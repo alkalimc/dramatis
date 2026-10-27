@@ -288,11 +288,14 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
 
   async function stream(channel: ChannelId, author: Author, text: string, extra: Partial<Message> = {}) {
     const id = nextId("m");
+    bus.turnActivity.emit({ channel, author, state: { kind: "thinking" } });
     await wait(300);
     for (const action of extra.actions ?? []) {
+      bus.turnActivity.emit({ channel, author, state: { kind: "tool", name: action.tool } });
       bus.toolCalled.emit({ channel, message: id, author, action });
       await wait(450);
     }
+    bus.turnActivity.emit({ channel, author, state: { kind: "writing" } });
     for (let i = 0; i < text.length; i += 14) {
       bus.messageDelta.emit({ channel, message: id, author, delta: text.slice(i, i + 14) });
       await wait(40);
@@ -302,6 +305,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     const ch = channels.get(channel)!;
     ch.log[ch.log.length - 1] = { ...m, id };
     bus.messageAdded.emit({ message: { ...m, id } });
+    bus.turnActivity.emit({ channel, author, state: { kind: "done" } });
     return id;
   }
 

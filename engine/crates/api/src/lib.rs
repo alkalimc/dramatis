@@ -87,6 +87,7 @@ pub fn emit<H: tauri::Emitter<tauri::Wry> + tauri::Manager<tauri::Wry>>(
     use tauri_specta::Event as _;
     let sent = match event {
         MessageDelta(e) => e.emit(app),
+        TurnActivity(e) => e.emit(app),
         MessageAdded(e) => e.emit(app),
         ToolCalled(e) => e.emit(app),
         WorldChanged(e) => e.emit(app),

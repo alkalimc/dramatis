@@ -244,6 +244,7 @@ impl agent::Sink for AppSink {
         use port::Event as P;
         self.deliver(match event {
             A::MessageDelta(e) => P::MessageDelta(e),
+            A::TurnActivity(e) => P::TurnActivity(e),
             A::MessageAdded(e) => P::MessageAdded(e),
             A::ToolCalled(e) => P::ToolCalled(e),
             A::WorldChanged(e) => P::WorldChanged(e),
