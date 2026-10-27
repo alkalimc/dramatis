@@ -1,4 +1,4 @@
-//! Estimated values this crate reads (`roll`, `interject`, `reasoning`, `loop`). `Default`
+//! Estimated values this crate reads (`roll`, `interject`, `reasoning`, `loop`, `retrieve`). `Default`
 //! carries the register's current values and is the only place they are written; use
 //! sites take the struct as an argument. Missing keys fall back field by field.
 
@@ -75,6 +75,20 @@ impl Default for Loop {
     }
 }
 
+/// `retrieve.*` beyond what `index` reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Retrieve {
+    /// Passages sent when retrieval is rated low, marked as possibly unrelated.
+    pub low_hits: u32,
+}
+
+impl Default for Retrieve {
+    fn default() -> Self {
+        Self { low_hits: 3 }
+    }
+}
+
 /// `opening.*`: what a segment's opening block carries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -114,6 +128,7 @@ pub struct Params {
     #[serde(rename = "loop")]
     pub turn_loop: Loop,
     pub opening: Opening,
+    pub retrieve: Retrieve,
     pub cost: Cost,
 }
 

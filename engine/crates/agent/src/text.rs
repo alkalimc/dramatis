@@ -25,13 +25,17 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.rules",
         "{user} talks with the people of this world through messages. Each reply is spoken \
-         by one of them, as themselves.",
+         by one of them, as themselves. When a person does not know something, they react \
+         the way that person would: brush it off, ask back, go by impression or change the \
+         subject. They never talk about whether they have evidence, records or sources.",
     ),
     (
         "harness.output",
         "A line wrapped in {open} and {close} describes the speaker's expression or action \
-         in the third person; every other line is speech. Scene lines are optional. The \
-         speaker's name is never written before a reply.",
+         in the third person; every other line is speech. Speak as in person: usually one to \
+         three sentences, longer only when the moment needs it. Add a scene line only when \
+         it adds something. Do not end every reply with a question. The speaker's name is \
+         never written before a reply.",
     ),
     (
         "harness.citation",
@@ -40,8 +44,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.persona", "## {name}"),
     (
-        "harness.fallback",
-        "When unsure, {name} sounds like this, put in fresh words each time: {line}",
+        "harness.lines",
+        "Lines {name} has said, only to get the voice. Do not repeat them:",
     ),
     ("harness.tone.guarded", "{name} is wary of {user}."),
     ("harness.tone.normal", "{name} knows {user}."),
@@ -58,13 +62,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.context.turns",
         "[{date} {time} · {turns} turns left on this request]",
     ),
+    ("harness.nothing_found", "Nothing came back for this."),
     (
-        "harness.nothing_found",
-        "There is nothing reliable to go on here.",
-    ),
-    (
-        "harness.join_available",
-        "A colleague may know more: request_join can bring one in.",
+        "harness.low_match",
+        "These passages may be unrelated to the question. Use one only if it really fits.",
     ),
     ("harness.speaker", "{name} answers."),
     ("harness.interject", "{name} may add one line."),

@@ -180,7 +180,7 @@ async fn recorded_streams_replay_through_the_agent() {
 }
 
 #[tokio::test]
-async fn material_is_deduplicated_and_low_confidence_sends_none() {
+async fn material_is_deduplicated_and_nothing_found_is_said_plainly() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
     e.fake.push([say("a"), say("b"), say("c")]);
@@ -193,9 +193,48 @@ async fn material_is_deduplicated_and_low_confidence_sends_none() {
     e.agent.send(ch, "zebra quantum", None).await.unwrap();
     let v = &e.fake.json()[2];
     let entry = list(v).last().unwrap().to_string();
-    assert!(entry.contains("There is nothing reliable to go on here."));
-    assert!(entry.contains("request_join"));
-    assert!(!entry.contains("[#"));
+    assert!(entry.contains("Nothing came back for this."));
+    assert!(!entry.contains("request_join") && !entry.contains("[#"));
+}
+
+#[tokio::test]
+async fn a_persona_carries_the_rules_and_its_own_lines_and_ignores_the_old_fallback() {
+    let e = env(WireApi::Messages);
+    let ch = direct(&e, "ann");
+    let bo = direct(&e, "bo");
+    e.fake.push([say("a"), say("b")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    e.agent.send(bo, "hello", None).await.unwrap();
+    let json = e.fake.json();
+    let system = |v: &Value| v["system"].to_string();
+    let ann = system(&json[0]);
+    assert!(ann.contains("Lines ann has said"), "{ann}");
+    assert!(ann.contains("Mind the steam."));
+    // The slot some folios still carry is never sent; no lines means no section.
+    assert!(!ann.contains("Not sure"));
+    assert!(!system(&json[1]).contains("Lines bo has said"));
+    // Reply shape and how not knowing is played.
+    assert!(ann.contains("one to three sentences") && ann.contains("every reply with a question"));
+    assert!(ann.contains("never talk about whether they have evidence"));
+}
+
+#[tokio::test]
+async fn low_confidence_sends_the_top_passages_marked_as_possibly_unrelated() {
+    let mut weak = retrieve();
+    weak.confidence.low_top1 = 1000.0;
+    weak.confidence.high_top1 = 1000.0;
+    let e = env_retrieving(endpoints(WireApi::Chat, true, None), weak, |c| {
+        c.agent.retrieve.low_hits = 1
+    });
+    let ch = direct(&e, "ann");
+    e.fake.push([say("a")]);
+    e.agent.send(ch, "jasmine tea", None).await.unwrap();
+    let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
+    assert!(entry.contains("may be unrelated"), "{entry}");
+    assert!(entry.contains("poured the jasmine tea"), "{entry}");
+    assert!(!entry.contains("nothing reliable") && !entry.contains("request_join"));
+    // Only `low_hits` passages, without neighbours.
+    assert_eq!(entry.matches("[#").count(), 1, "{entry}");
 }
 
 #[tokio::test]

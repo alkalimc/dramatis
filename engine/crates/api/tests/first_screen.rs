@@ -65,7 +65,7 @@ async fn synthetic_corpus_first_screen() {
         );
     }
     for p in 0..3 {
-        for slot in ["system", "tone", "fallback", "capability"] {
+        for slot in ["system", "tone", "capability"] {
             b.conn()
                 .execute(
                     "INSERT INTO prompts(subject, slot, body) VALUES (?1, ?2, 'x')",

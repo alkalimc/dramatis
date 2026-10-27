@@ -402,9 +402,11 @@ pub fn corpus() -> TempFolio {
             &format!("You are {p}. You call the user Dr.<U>."),
         );
         prompt(p, "tone", &format!("{p} speaks briefly."));
+        // A folio written before example lines existed may still carry this slot.
         prompt(p, "fallback", "Not sure, Dr.<U>.");
         prompt(p, "capability", &format!("{p} knows things."));
     }
+    prompt("ann", "lines", "Tea first, Dr.<U>.\nMind the steam.");
     // Half a persona is no persona.
     prompt("cy", "system", "You are cy.");
     prompt("host", "in_world", IN_WORLD);
