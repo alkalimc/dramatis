@@ -1,0 +1,45 @@
+[project]
+name = "dramatis-research"
+version = "0.1.0"
+description = "Fine-tuning and evaluation of retrievers on structurally supervised wiki data"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+dependencies = [
+    "sentence-transformers==6.2.0",
+    "torch==2.14.1",
+    "transformers==5.21.0",
+    "numpy==2.5.4",
+    "datasets==5.1.0",
+    "accelerate==1.15.0",
+]
+
+[project.optional-dependencies]
+# Low-rank adapters (--lora-rank), the practical way to fine-tune a 0.6B model in 16 GB.
+lora = ["peft==0.21.2"]
+
+[project.scripts]
+dramatis-research = "dramatis_research.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dramatis_research"]
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "ruff==0.13.2", "peft==0.21.2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# An editable install can be invisible on some machines (hidden .pth files), so tests import
+# straight from src.
+pythonpath = ["src", "tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "SIM", "UP"]
