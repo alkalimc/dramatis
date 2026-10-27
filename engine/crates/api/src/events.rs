@@ -35,6 +35,16 @@ events! {
         pub delta: String,
     }
 
+    /// What a speaker is doing on a channel, from the moment its turn starts until the
+    /// reply is complete or the turn fails. One speaker has at most one live activity per
+    /// channel; a UI shows it as "<name> is typing" and clears it on `done` or `failed`.
+    /// Not sent for the invisible wrap-up.
+    TurnActivity {
+        pub channel: ChannelId,
+        pub author: Author,
+        pub state: ActivityState,
+    }
+
     /// A message is complete and stored: a finished stream, a user message echoed back,
     /// an unprompted opening, an interjection.
     MessageAdded {
@@ -88,4 +98,32 @@ pub enum WorldChange {
     Channel { id: ChannelId },
     Trust { person: PersonId },
     Digest,
+}
+
+/// The step a speaker's turn is in. Sent only when it changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActivityState {
+    /// A request is out and no text has come back yet: includes the wait for the first
+    /// chunk, the retry after a refusal, and an endpoint's rate-limit back-off.
+    Thinking,
+    /// Reply text is streaming.
+    Writing,
+    /// A tool is running (a lookup, a colleague pulled in, a request to a person).
+    Tool { name: String },
+    /// The reply is complete and stored. Clears the indicator.
+    Done,
+    /// The turn ended without a reply (or was cancelled). Clears the indicator.
+    Failed { reason: ActivityFailure },
+}
+
+/// Why a turn failed, coarse enough to pick a word and nothing more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityFailure {
+    RateLimited,
+    QuotaExhausted,
+    /// The future was dropped before the turn ended.
+    Cancelled,
+    Error,
 }

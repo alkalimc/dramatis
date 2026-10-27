@@ -10,7 +10,10 @@
 
 use std::collections::HashSet;
 
-use api::events::{MessageAdded, MessageDelta, QuotaChanged, ToolCalled};
+use api::events::{
+    ActivityFailure, ActivityState, MessageAdded, MessageDelta, QuotaChanged, ToolCalled,
+    TurnActivity,
+};
 use api::meta::MessageMeta;
 use api::views::ToolAction;
 use futures::StreamExt;
@@ -65,6 +68,8 @@ pub(crate) struct Turn {
     pub closed: bool,
     /// Parsed `wrapup` arguments, in a wrap-up turn.
     pub wrapped: Option<world::wrapup::Args>,
+    /// The last activity announced for this turn, so only changes are sent.
+    pub activity: Option<ActivityState>,
 }
 
 impl Turn {
@@ -85,7 +90,39 @@ impl Turn {
             asks: Vec::new(),
             closed: false,
             wrapped: None,
+            activity: None,
         }
+    }
+}
+
+/// Ends a turn's activity when the turn's future is dropped before it finished, so a
+/// cancelled turn never leaves an indicator behind.
+struct ActivityGuard<'a> {
+    agent: &'a Agent,
+    channel: ChannelId,
+    speaker: Actor,
+    ended: bool,
+}
+
+impl Drop for ActivityGuard<'_> {
+    fn drop(&mut self) {
+        if !self.ended {
+            self.agent.announce(
+                self.channel,
+                &self.speaker,
+                ActivityState::Failed {
+                    reason: ActivityFailure::Cancelled,
+                },
+            );
+        }
+    }
+}
+
+fn failure(e: &Error) -> ActivityFailure {
+    match e {
+        Error::RateLimited { .. } => ActivityFailure::RateLimited,
+        Error::QuotaExhausted { .. } => ActivityFailure::QuotaExhausted,
+        _ => ActivityFailure::Error,
     }
 }
 
@@ -656,6 +693,7 @@ impl Agent {
             delta.insert(0, '\n');
         }
         let id = self.message_for(turn)?;
+        self.set_activity(turn, ActivityState::Writing);
         self.emit(Event::MessageDelta(MessageDelta {
             channel: crate::view::channel_id(turn.channel),
             message: crate::view::message_id(id),
@@ -715,9 +753,44 @@ impl Agent {
         Ok(())
     }
 
+    fn announce(&self, channel: ChannelId, speaker: &Actor, state: ActivityState) {
+        self.emit(Event::TurnActivity(TurnActivity {
+            channel: crate::view::channel_id(channel),
+            author: crate::view::author(speaker),
+            state,
+        }));
+    }
+
+    /// Announce the turn's activity if it changed. The wrap-up is invisible.
+    pub(crate) fn set_activity(&self, turn: &mut Turn, state: ActivityState) {
+        if turn.wrapup || turn.activity.as_ref() == Some(&state) {
+            return;
+        }
+        self.announce(turn.channel, &turn.speaker, state.clone());
+        turn.activity = Some(state);
+    }
+
     /// Run the model on a turn until it answers in text, a request closes, or the step
     /// budget is spent. The last allowed step offers no tool, so it ends in text.
+    /// The turn's activity runs from here to the end, on every path out.
     pub(crate) async fn run(&self, turn: &mut Turn, max_steps: u32) -> Result<()> {
+        let mut guard = ActivityGuard {
+            agent: self,
+            channel: turn.channel,
+            speaker: turn.speaker.clone(),
+            ended: turn.wrapup,
+        };
+        let out = self.run_steps(turn, max_steps).await;
+        guard.ended = true;
+        let end = match &out {
+            Ok(()) => ActivityState::Done,
+            Err(e) => ActivityState::Failed { reason: failure(e) },
+        };
+        self.set_activity(turn, end);
+        out
+    }
+
+    async fn run_steps(&self, turn: &mut Turn, max_steps: u32) -> Result<()> {
         let max_steps = max_steps.max(1);
         let mut warned = false;
         for step in 0..max_steps {
@@ -746,6 +819,7 @@ impl Agent {
             } else {
                 ToolChoice::Auto
             };
+            self.set_activity(turn, ActivityState::Thinking);
             let reply = self.call(turn, choice).await?;
             let text =
                 assemble::visible_text(&reply.text(), (&self.corpus.scene.0, &self.corpus.scene.1));
@@ -762,6 +836,7 @@ impl Agent {
             let seg = self.current_segment(turn.channel)?;
             let mut results = Vec::with_capacity(calls.len());
             for (id, name, args) in calls {
+                self.set_activity(turn, ActivityState::Tool { name: name.into() });
                 let output = self.dispatch(turn, name, args).await?;
                 results.push(request::tool_result_part(id, output));
             }

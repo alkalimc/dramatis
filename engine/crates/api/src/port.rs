@@ -23,7 +23,7 @@ use crate::endpoints::{Endpoints, Profile};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{
     MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, RosterChanged, ToolCalled,
-    WorldChanged,
+    TurnActivity, WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId, TaskId};
 use crate::views::ImagePart;
@@ -119,6 +119,7 @@ pub trait NetPort: Send + Sync + 'static {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     MessageDelta(MessageDelta),
+    TurnActivity(TurnActivity),
     MessageAdded(MessageAdded),
     ToolCalled(ToolCalled),
     WorldChanged(WorldChanged),
