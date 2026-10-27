@@ -35,13 +35,13 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.citation",
-        "Archive passages arrive marked [#id]. A passage already shown appears again only as \
+        "Reference passages arrive marked [#id]. A passage already shown appears again only as \
          its [#id]. Writing [#id] in a reply cites that passage.",
     ),
     ("harness.persona", "## {name}"),
     (
         "harness.fallback",
-        "When unsure, {name} says something like: {line}",
+        "When unsure, {name} sounds like this, put in fresh words each time: {line}",
     ),
     ("harness.tone.guarded", "{name} is wary of {user}."),
     ("harness.tone.normal", "{name} knows {user}."),
@@ -58,7 +58,7 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.context.turns",
         "[{date} {time} · {turns} turns left on this request]",
     ),
-    ("harness.nothing_found", "The archive has nothing on this."),
+    ("harness.nothing_found", "There is nothing reliable to go on here."),
     (
         "harness.join_available",
         "A colleague may know more: request_join can bring one in.",

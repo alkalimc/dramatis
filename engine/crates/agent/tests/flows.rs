@@ -193,7 +193,7 @@ async fn material_is_deduplicated_and_low_confidence_sends_none() {
     e.agent.send(ch, "zebra quantum", None).await.unwrap();
     let v = &e.fake.json()[2];
     let entry = list(v).last().unwrap().to_string();
-    assert!(entry.contains("The archive has nothing on this."));
+    assert!(entry.contains("There is nothing reliable to go on here."));
     assert!(entry.contains("request_join"));
     assert!(!entry.contains("[#"));
 }
