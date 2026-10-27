@@ -612,6 +612,75 @@ async fn an_emulated_wrapup_in_prose_records_nothing() {
     );
 }
 
+/// The reply a proxy that ignores the schema gave: fenced, with the right keys.
+const FENCED: &str = "```json\n{\n  \"facts\": [\n    {\"kind\": \"commitment\", \"text\": \"The host reviews the supply requests.\", \"due\": \"2031-04-02T15:00\"},\n    {\"kind\": \"commitment\", \"text\": \"The host walks the deck with the user.\", \"due\": \"tomorrow afternoon\"}\n  ],\n  \"summary\": \"Paperwork done.\"\n}\n```";
+
+/// The reply that invented its own field names.
+const INVENTED: &str = "```json\n{\n  \"summary\": \"Paperwork done.\",\n  \"appointments\": [\n    {\"date\": \"tomorrow\", \"time\": \"15:00\", \"content\": \"Review the requests\"}\n  ]\n}\n```";
+
+fn emulated_env() -> (Env, ChannelId) {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let e = env_with(ep, |_| {});
+    let ch = direct(&e, "ann");
+    (e, ch)
+}
+
+#[tokio::test]
+async fn a_fenced_wrapup_document_writes_its_facts_and_keeps_an_unparsable_due() {
+    let (e, ch) = emulated_env();
+    e.fake.push([say("Cooler water."), say(FENCED)]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    assert_eq!(facts.len(), 2);
+    let texts: Vec<_> = facts.iter().map(|f| f.text.as_str()).collect();
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("deck") && t.contains("tomorrow afternoon"))
+    );
+}
+
+#[tokio::test]
+async fn a_wrapup_with_invented_field_names_writes_nothing() {
+    let (e, ch) = emulated_env();
+    e.fake.push([say("Cooler water."), say(INVENTED)]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    assert!(
+        e.agent
+            .with_world(|w| fact::all(w, false).unwrap())
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn the_emulated_wrapup_line_shows_the_schema_keys() {
+    let (e, ch) = emulated_env();
+    e.fake.push([say("Cooler water."), say("{}")]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let last = e.fake.json().pop().unwrap();
+    let ask = list(&last).last().unwrap().to_string();
+    for key in ["facts", "kind", "text", "due", "hurt", "quote", "summary"] {
+        assert!(ask.contains(&format!("\\\"{key}\\\"")), "{key}: {ask}");
+    }
+    assert!(ask.contains("fact|commitment"));
+}
+
+#[tokio::test]
+async fn the_native_wrapup_line_carries_no_example() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("Cooler water."), say("ok")]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let last = e.fake.json().pop().unwrap();
+    let ask = list(&last).last().unwrap().to_string();
+    assert!(ask.contains("wrapup call") && !ask.contains("fact|commitment"));
+}
+
 #[tokio::test]
 async fn a_native_endpoint_still_forces_the_wrapup_tool() {
     let e = env(WireApi::Chat);
