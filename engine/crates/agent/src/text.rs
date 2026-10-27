@@ -41,7 +41,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.citation",
         "Reference passages arrive marked [#id]. A passage already shown appears again only as \
-         its [#id]. Writing [#id] in a reply cites that passage.",
+         its [#id]. To cite a passage, put its [#id] at the end of the sentence that draws on \
+         it; the mark is never a word of the sentence itself.",
     ),
     ("harness.persona", "## {name}"),
     (
