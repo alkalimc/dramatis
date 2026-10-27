@@ -1,9 +1,9 @@
 //! `chat`: talk to the corpus's persons from a terminal.
 //!
-//! A line-based REPL over the same agent the app uses: slash commands, anything else is a
-//! message to the current channel, replies stream as they are generated. The terminal's
-//! own line editing is used; a full-screen interface would add a rendering layer and
-//! input handling that nothing here needs.
+//! A line-based REPL over the same agent, config and world file the app uses: slash
+//! commands, anything else is a message to the current channel, replies stream as they are
+//! generated. On a terminal the line is edited by rustyline, which measures wide (CJK)
+//! characters correctly; piped input is read as plain lines.
 
 mod command;
 mod render;
@@ -33,17 +33,23 @@ pub struct Args {
     /// Endpoints file. Defaults to $DRAMATIS_HOME/endpoints.toml.
     #[arg(long)]
     endpoints: Option<PathBuf>,
-    /// World database to use. Defaults to $DRAMATIS_HOME/cli/world.sqlite, which the app
-    /// never touches.
+    /// World database to use. Defaults to the app's, $DRAMATIS_HOME/world.sqlite; it is
+    /// safe to have both open at once (WAL, busy timeout).
     #[arg(long)]
     world: Option<PathBuf>,
     /// Use a throwaway in-memory world.
     #[arg(long, conflicts_with = "world")]
     fresh: bool,
+    /// Read plain lines even on a terminal: no line editing, no prompt.
+    #[arg(long)]
+    plain: bool,
     /// The user's name in the conversation. Defaults to the corpus's own.
     #[arg(long)]
     user: Option<String>,
 }
+
+/// How long a write waits for another process (the app) to release the world file.
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The local UTC offset at each call, as the app supplies it.
 struct Local;
@@ -78,16 +84,15 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
     let (world, world_label) = if args.fresh {
         (world::World::in_memory()?, "in memory".to_owned())
     } else {
-        let path = match &args.world {
-            Some(p) => p.clone(),
-            None => {
-                let dir = home.root().join("cli");
-                std::fs::create_dir_all(&dir)
-                    .with_context(|| format!("cannot create {}", dir.display()))?;
-                dir.join("world.sqlite")
-            }
-        };
-        (world::World::open(&path)?, path.display().to_string())
+        let path = args.world.clone().unwrap_or_else(|| home.world());
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .with_context(|| format!("cannot create {}", dir.display()))?;
+        }
+        let world = world::World::open(&path)?;
+        // The app may hold the same file: wait for its write lock rather than fail.
+        world.busy_timeout(BUSY_TIMEOUT)?;
+        (world, path.display().to_string())
     };
     let index = index::Index::open(&folio, params.retrieve.clone())
         .with_context(|| format!("cannot open {}", folio.display()))?;
@@ -138,38 +143,85 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         if let Some(person) = args.person {
             session.handle(Command::Talk(person)).await;
         }
-        repl(session).await
+        repl(session, args.plain).await
     })
 }
 
-/// Read lines on a thread of their own, so a Ctrl-C can be heard while waiting for one.
-async fn repl(mut session: Session) -> Result<()> {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lock().lines() {
-            match line {
-                Ok(l) => {
-                    if tx.send(l).is_err() {
-                        break;
+/// Where the next line comes from.
+enum Input {
+    /// Line editing on a terminal; the editor travels to a blocking thread and back.
+    Edit(Box<rustyline::DefaultEditor>),
+    /// Lines of a pipe or file, read on a thread so a Ctrl-C can be heard while waiting.
+    Lines(tokio::sync::mpsc::UnboundedReceiver<String>),
+}
+
+impl Input {
+    fn open(plain: bool) -> Result<Self> {
+        if !plain && std::io::stdin().is_terminal() {
+            return Ok(Self::Edit(Box::new(rustyline::DefaultEditor::new()?)));
+        }
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lock().lines() {
+                match line {
+                    Ok(l) => {
+                        if tx.send(l).is_err() {
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
+            }
+        });
+        Ok(Self::Lines(rx))
+    }
+
+    /// The next line, or `None` at the end of input. `Some("")` for an abandoned line.
+    async fn next(&mut self, prompt: String) -> Option<String> {
+        match self {
+            Self::Lines(rx) => tokio::select! {
+                l = rx.recv() => l,
+                _ = tokio::signal::ctrl_c() => None,
+            },
+            Self::Edit(slot) => {
+                use rustyline::error::ReadlineError;
+                let mut editor =
+                    std::mem::replace(slot, Box::new(rustyline::DefaultEditor::new().ok()?));
+                let (editor, line) = tokio::task::spawn_blocking(move || {
+                    let line = editor.readline(&prompt);
+                    if let Ok(l) = &line
+                        && !l.trim().is_empty()
+                    {
+                        let _ = editor.add_history_entry(l.as_str());
+                    }
+                    (editor, line)
+                })
+                .await
+                .ok()?;
+                *slot = editor;
+                match line {
+                    Ok(l) => Some(l),
+                    Err(ReadlineError::Interrupted) => Some(String::new()),
+                    Err(_) => None,
+                }
             }
         }
-    });
-    let interactive = std::io::stdin().is_terminal();
+    }
+}
+
+async fn repl(mut session: Session, plain: bool) -> Result<()> {
+    let mut input = Input::open(plain)?;
+    let interactive = matches!(input, Input::Edit(_));
     if interactive {
         println!("type /help for commands, /quit or Ctrl-D to leave");
     }
     loop {
-        if interactive {
-            session.prompt();
-        }
-        let line = tokio::select! {
-            l = rx.recv() => l,
-            _ = tokio::signal::ctrl_c() => None,
+        let prompt = if interactive {
+            session.prompt()
+        } else {
+            String::new()
         };
-        let Some(line) = line else {
+        let Some(line) = input.next(prompt).await else {
             println!();
             return Ok(());
         };

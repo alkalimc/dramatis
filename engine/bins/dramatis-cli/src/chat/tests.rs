@@ -200,11 +200,15 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
     ]);
     let first = r.run("how do I brew jasmine tea?").await;
     assert!(
-        first.starts_with("ann: Ann pours tea\nCooler water, Doc. Always.\n"),
+        first.starts_with("ann is typing...\nann: Ann pours tea\nCooler water, Doc. Always.\n"),
         "{first:?}"
     );
     assert!(!first.contains("[#"), "{first:?}");
     assert!(first.contains("sources: Tea page"), "{first:?}");
+    assert!(!first.contains("thin archive"), "{first:?}");
+    // The prompt carries the user's own name, not the channel's speaker.
+    let prompt = r.session.prompt();
+    assert!(prompt.starts_with("[ann] Doc"), "{prompt:?}");
     assert!(first.contains("1 call,"), "{first:?}");
 
     let failed = r.run("and the water?").await;
