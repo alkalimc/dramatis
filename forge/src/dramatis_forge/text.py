@@ -89,6 +89,7 @@ TEXT: Mapping[str, str] = {
     "inspect.forms": "**Forms of one person**: {forms}",
     "inspect.form_item": "{page} ({kind})",
     "inspect.scene_meta": "**Category** {category} · **Group** {group} · **Source** `{source_ref}`",
+    "inspect.body_elsewhere": "The body of scene `{scene}` is stored once, with `{source}`; see that page.",
     "inspect.scene_source": "Stored once as scene `{scene}`; the body was read from `{source}`.",
     "inspect.scene_counts": "{lines:,} lines, {choices:,} branch points.",
     "inspect.body": "## Body",

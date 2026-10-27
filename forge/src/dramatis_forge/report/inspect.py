@@ -72,14 +72,15 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
     db = archive.db
     out: dict = {"title": title, "revid": archive.page(title)["revid"]}
 
-    # A scene is stored once, under its own id; the page its body was read from (a
-    # transcluded subpage) shows the same scene, so each page's archived view sits next
-    # to the source it came from.
+    # A scene is stored once, under its own id. Its body is shown on the page it was read
+    # from (a transcluded subpage); the page that only transcludes it shows the scene and
+    # points there.
     scene = db.execute("SELECT * FROM scenes WHERE id=? OR source_page=? ORDER BY id<>?",
                        (title, title, title)).fetchone()
     if scene:
         sid = scene["id"]
         out["scene"] = dict(scene)
+    if scene and scene["source_page"] in (None, "", title):
         out["lines"] = [dict(r) for r in db.execute(
             "SELECT seq,speaker,text,kind,branch FROM lines WHERE scene=? ORDER BY seq",
             (sid,))]
@@ -206,13 +207,18 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
                 source_ref=s["source_ref"]),
             "",
         ]
-        if s.get("source_page") and s["source_page"] != s["id"]:
-            L += [say("inspect.scene_source", scene=s["id"], source=s["source_page"]), ""]
-        L += [
-            say("inspect.scene_counts", lines=len(rec["lines"]), choices=len(rec["choices"])),
-            "", say("inspect.body"), "",
-        ]
+        elsewhere = "lines" not in rec
+        if elsewhere:
+            L += [say("inspect.body_elsewhere", scene=s["id"], source=s["source_page"]), ""]
+        else:
+            if s.get("source_page") and s["source_page"] != s["id"]:
+                L += [say("inspect.scene_source", scene=s["id"], source=s["source_page"]), ""]
+            L += [
+                say("inspect.scene_counts", lines=len(rec["lines"]), choices=len(rec["choices"])),
+                "", say("inspect.body"), "",
+            ]
         speech, caption = policy.kind("speech"), policy.kind("subtitle")
+        rec = {**rec, "lines": rec.get("lines", []), "choices": rec.get("choices", [])}
         # One sequence by position, as the unit builder reads it: a choice that follows
         # another choice has no line before it to hang from.
         items = sorted([*({"at": ln["seq"], "line": ln} for ln in rec["lines"]),

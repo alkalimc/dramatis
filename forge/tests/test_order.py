@@ -61,18 +61,20 @@ def test_the_yield_check_is_off_unless_a_route_sets_a_floor():
     assert Route("s", parser=lambda ctx: ()).min_yield == 0.0
 
 
-def test_a_transcluded_body_is_stored_once_and_shown_from_both_pages(tmp_path, pack):
+def test_a_transcluded_body_is_stored_once_and_shown_once(tmp_path, pack):
     with Archive(tmp_path / "t.archive") as a:
         a.insert_records([Scene(page="Tale", revid=2, source_page="Tale/data")])
         a.db.execute("INSERT INTO lines(scene,seq,speaker,text,kind) VALUES('Tale',0,'Ann','Hi','s')")
         a.put_page("Tale", "wrapper", 1, "now")
         a.put_page("Tale/data", "Ann: Hi", 2, "now")
-        for page in ("Tale", "Tale/data"):
-            got = inspect.collect(a, page, pack)
-            assert got["scene"]["id"] == "Tale" and [ln["text"] for ln in got["lines"]] == ["Hi"]
-        md = inspect.render(pack, "Tale/data", {"wikitext": "x", "revid": 2},
-                            inspect.collect(a, "Tale/data", pack))
-    assert "`Tale/data`" in md
+        wrapper = inspect.collect(a, "Tale", pack)
+        body = inspect.collect(a, "Tale/data", pack)
+        assert wrapper["scene"]["id"] == body["scene"]["id"] == "Tale"
+        assert "lines" not in wrapper and [ln["text"] for ln in body["lines"]] == ["Hi"]
+        md_wrapper = inspect.render(pack, "Tale", {"wikitext": "x", "revid": 1}, wrapper)
+        md_body = inspect.render(pack, "Tale/data", {"wikitext": "x", "revid": 2}, body)
+    assert "`Tale/data`" in md_wrapper and "Hi" not in md_wrapper
+    assert "Hi" in md_body
 
 
 def test_a_table_row_never_breaks_across_lines(pack):
