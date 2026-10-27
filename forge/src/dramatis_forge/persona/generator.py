@@ -24,8 +24,9 @@ from typing import Any
 from ..pack import _SEARCH, Pack
 from .params import Persona
 
-#: Bump when this module changes how prompts are assembled or outputs are read.
-CODE_VERSION = "1"
+#: Bump when the framework changes how prompts are assembled, which material is selected,
+#: or how outputs are read: none of that is in the pack text the digest also covers.
+CODE_VERSION = "2"
 
 #: Output fields every subject returns, in order.
 PERSON_FIELDS = ("system_prompt", "tone_rules", "fallback_line", "capability_line")
