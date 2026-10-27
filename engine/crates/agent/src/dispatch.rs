@@ -308,7 +308,8 @@ impl Agent {
                     .find_people(topic, Some(&scope), self.config.find_people.k, &[])?
                     .persons
                     .into_iter()
-                    .next()
+                    // Weak evidence is no reason to pull someone in.
+                    .find(|m| m.level != index::Level::Low)
                     .map(|m| m.person)
             }
             (None, None) => None,

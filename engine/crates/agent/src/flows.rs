@@ -226,12 +226,33 @@ impl Agent {
             .await?;
         let speaker = Actor::Person(person.clone());
         let mut turn = Turn::new(posted.channel, speaker.clone(), Shape::Direct);
-        let lines = self.attachment(seg, &mut turn, &posted.text, Vec::new())?;
+        let mut lines = Vec::new();
+        // A colleague spoke here since the owner last did: say who answers now, or the
+        // log's last voice carries on.
+        if self.last_voice(posted)?.is_some_and(|p| &p != person) {
+            let names = self.segment_names(seg)?;
+            let name = self.display(person.as_str())?;
+            lines.push(
+                self.corpus
+                    .wording
+                    .fill("harness.speaker", &names, &[("name", &name)]),
+            );
+        }
+        lines.extend(self.attachment(seg, &mut turn, &posted.text, Vec::new())?);
         self.user_entry(seg, posted, &lines, None)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         self.replied(posted.channel, person)?;
         Ok(())
+    }
+
+    /// The person who wrote the last person message before `posted` in its channel.
+    fn last_voice(&self, posted: &Posted) -> Result<Option<PersonId>> {
+        let before = message::history(&self.db(), posted.channel, Some(posted.message), 8)?;
+        Ok(before.into_iter().rev().find_map(|m| match m.author {
+            Actor::Person(p) => Some(p),
+            _ => None,
+        }))
     }
 
     /// The retrieval attachment of a turn for its speaker.

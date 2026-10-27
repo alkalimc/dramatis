@@ -193,7 +193,7 @@ async fn material_is_deduplicated_and_low_confidence_sends_none() {
     e.agent.send(ch, "zebra quantum", None).await.unwrap();
     let v = &e.fake.json()[2];
     let entry = list(v).last().unwrap().to_string();
-    assert!(entry.contains("The archive has nothing on this."));
+    assert!(entry.contains("There is nothing reliable to go on here."));
     assert!(entry.contains("request_join"));
     assert!(!entry.contains("[#"));
 }
@@ -547,6 +547,60 @@ async fn a_colleague_pulled_in_joins_the_log_as_an_entry() {
     );
     let ch_now = e.agent.with_world(|w| channel::get(w, ch).unwrap());
     assert!(ch_now.has(&Actor::Person(p("bo"))));
+}
+
+#[tokio::test]
+async fn the_owner_is_addressed_again_after_a_colleague_answered() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    // The owner says nothing before handing over.
+    e.fake.push([
+        call("request_join", json!({"topic": "forge blade steel"})),
+        say("Bo here: northern steel."),
+    ]);
+    e.agent
+        .send(ch, "who knows about blades?", None)
+        .await
+        .unwrap();
+    let texts: Vec<String> = e
+        .agent
+        .history(ch, None, 10)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(
+        texts,
+        ["who knows about blades?", "Bo here: northern steel."],
+        "no empty bubble from the owner"
+    );
+    e.fake.push([say("Ann again.")]);
+    e.agent.send(ch, "and you, ann?", None).await.unwrap();
+    let entry = list(&e.fake.json()[2]).last().unwrap().to_string();
+    assert!(entry.contains("ann answers."), "{entry}");
+    // Once the owner has spoken, the next turn needs no reminder.
+    e.fake.push([say("Still ann.")]);
+    e.agent.send(ch, "thanks", None).await.unwrap();
+    let entry = list(&e.fake.json()[3]).last().unwrap().to_string();
+    assert!(!entry.contains("ann answers."), "{entry}");
+}
+
+#[tokio::test]
+async fn a_weak_match_does_not_pull_anyone_in() {
+    // Every score in this small corpus is below the bar for a clear answer.
+    let mut weak = retrieve();
+    weak.confidence.low_top1 = 1000.0;
+    weak.confidence.high_top1 = 1000.0;
+    let e = env_retrieving(endpoints(WireApi::Chat, true, None), weak, |_| {});
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        call("request_join", json!({"topic": "forge blade steel"})),
+        say("Nobody came."),
+    ]);
+    e.agent.send(ch, "someone?", None).await.unwrap();
+    assert!(log_bytes(&e.agent, ch).contains("Nobody suitable is available."));
+    let ch_now = e.agent.with_world(|w| channel::get(w, ch).unwrap());
+    assert!(!ch_now.has(&Actor::Person(p("bo"))));
 }
 
 #[tokio::test]
