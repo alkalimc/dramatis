@@ -332,6 +332,34 @@ def test_placeholders_and_unresolved_labels_are_nobodys_and_exceptions_are_decla
     assert list(sp.conflicts) == [("s2", "Bob")]
 
 
+def test_a_real_name_segment_names_its_only_person_and_a_nobody_exception_overrides_names(
+        tmp_path, pack):
+    from dramatis_forge.records import Alias
+    from dramatis_forge.speakers import Speakers
+    policy = replace(pack.chunking, speaker_as=(("s2", "Mary", None),))
+    p = replace(pack, chunking=policy)
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0)], "Bob": [("Bob", "canonical", 0)],
+                          "Cy": [("Cy", "canonical", 0)]})
+        insert(a, [Alias(alias="Mary Ann Smith", target="Ann", kind="realname"),
+                   Alias(alias="Joan Smith", target="Cy", kind="realname"),
+                   Alias(alias="Rob Kent", target="Bob", kind="realname"),
+                   Line(scene="s1", seq=1, speaker="Mary", text="a"),
+                   Line(scene="s2", seq=1, speaker="Mary", text="b"),
+                   Line(scene="s1", seq=2, speaker="Smith", text="c"),
+                   Line(scene="s1", seq=3, speaker="Kent", text="d"),
+                   Line(scene="s2", seq=2, speaker="Kent", text="e")])
+        a.commit()
+        sp = Speakers(a, p, Params().speaker)
+    assert sp.owner("Mary", "s1") == "Ann"
+    # the exception holds in its scene, and its lines do not count towards the person
+    assert sp.owner("Mary", "s2") is None and sp.segment_person["Mary"] == ("Ann", 1)
+    # a segment two people's names share settles nobody
+    assert sp.owner("Smith", "s1") is None
+    assert sp.segment_shared == {"Smith": (["Ann", "Cy"], 1)}
+    assert sp.segment_person["Kent"] == ("Bob", 2)
+
+
 def _loose_speakers(tmp_path, pack, script_keys):
     from dramatis_forge.speakers import Speakers
     ident = replace(pack.identity, portrait_key=lambda w: w.strip() or None,

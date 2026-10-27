@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .guards import HIGH, LOW
+from .guards import HIGH, LOW, Finding
 from .text import TEXT
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -58,6 +58,8 @@ class HarvestContext:
     """
 
     tables: dict[str, list[dict]] = field(default_factory=dict)
+    #: What an enumerator noticed while enumerating, carried into the scope's findings.
+    findings: list[Finding] = field(default_factory=list)
 
     def rows(self, table: str) -> list[dict]:
         return self.tables.get(table, [])
@@ -602,8 +604,9 @@ class ChunkPolicy:
     #: same label is a different person each time, and a portrait only shows who was on screen.
     generic_speakers: tuple[str, ...] = ()
     #: `(scene, label, person page)` exceptions to "a page-title label is that page's
-    #: person": a declared disguise. Each entry is a decision about one scene.
-    speaker_as: tuple[tuple[str, str, str], ...] = ()
+    #: person": a declared disguise. A None person says the label is nobody in that scene (a
+    #: bystander sharing a person's name). Each entry is a decision about one scene.
+    speaker_as: tuple[tuple[str, str, str | None], ...] = ()
     #: Regex over a scene id with a named group `owner` for scenes that belong to one
     #: person (a record of their own); the owner missing from their own scene is a failure
     #: of attribution, not a fact about the story. Empty disables the check.

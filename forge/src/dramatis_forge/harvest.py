@@ -77,6 +77,8 @@ def scope(wiki: Wiki, pack: Pack, *, progress=None) -> Scope:
         say(f"seed {seed.key} — {seed.source}")
         sc.seeds[seed.key] = sorted({t for t in seed.titles(wiki, ctx) if t})
 
+    sc.findings += ctx.findings
+
     for key in pack.alias_seeds("redirect"):
         titles = sc.seeds.get(key, [])
         if not titles:
@@ -314,6 +316,8 @@ def apply(wiki: Wiki, archive: Archive, pack: Pack, p: Plan, *, progress=None) -
     previous = archive.get_meta("record_counts")
     if previous is not None:
         archive.set_meta("record_counts_previous", previous)
+    if (units := archive.get_meta("unit_pages")) is not None:
+        archive.set_meta("unit_pages_previous", units)
     archive.set_meta("watermark", p.new_watermark)
     archive.set_meta("synced_at", dt.datetime.now(dt.UTC).isoformat(timespec="seconds"))
     archive.set_meta("last_update", {"kind": "full" if p.full else "incremental",

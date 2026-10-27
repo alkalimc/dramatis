@@ -284,7 +284,7 @@ def _build(pk: Pack, paths: Paths, *, samples: bool) -> None:
 
 
 def _samples(pk: Pack, paths: Paths) -> None:
-    with Archive(paths.archive, readonly=True) as archive:
+    with Archive(paths.archive) as archive:
         index, count = samples_mod.write(archive, pk, paths.samples, paths.folio)
     console.print(f"samples: [bold]{count:,}[/bold] page(s) → [cyan]{index}[/cyan]")
 

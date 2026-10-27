@@ -52,6 +52,34 @@ def test_silent_pages_are_listed_by_reason_and_never_sampled(built, pack):
     assert not any(p.name.endswith("excluded") for p in out.iterdir())
 
 
+def test_a_changed_page_with_no_units_gets_one_line_unless_it_lost_its_units(wiki, pack, paths):
+    sync(wiki, pack, paths)
+    build(pack, paths)
+    wiki.edit("Interlude", "{{NoScript}}\nstill nothing\n", story=True)
+    wiki.edit("Chapter 1", "Alice: Rewritten line.\n", story=True)
+    sync(wiki, pack, paths)
+    build(pack, paths)
+    with Archive(paths.archive, readonly=True) as a, Folio(paths.folio, readonly=True) as f:
+        producing = samples.unit_pages(a, f)
+    out = paths.samples
+
+    def doc_of(lost: list[str]) -> str:
+        with Archive(paths.archive) as a:
+            a.set_meta("unit_pages_previous", lost)
+            a.commit()
+            index, _ = samples.write(a, pack, out, paths.folio)
+        return index.read_text(encoding="utf-8")
+
+    doc = doc_of([])
+    assert "| Interlude | changed; no units, so no files | — |" in doc
+    assert not list((out / "changes").glob("Interlude.*"))
+    assert list((out / "changes").glob("Chapter_1.*")) and "Chapter 1" in producing
+    # a page that had units at the last sync and has none now keeps its files
+    doc = doc_of(["Interlude"])
+    assert "changed; had units before the last sync, has none now" in doc
+    assert list((out / "changes").glob("Interlude.*"))
+
+
 def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):
     sync(wiki, pack, paths)
     build(pack, paths)

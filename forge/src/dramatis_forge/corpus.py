@@ -707,6 +707,7 @@ def _check_attribution(
     if pack.chunking.owner_scene:
         owner_rx = re.compile(pack.chunking.owner_scene)
         person_of = archive.person_of()
+        no_lines, lost_owners = set(rep.people_without_lines), set()
         attributed = {(r[0], r[1]) for r in folio.db.execute(
             "SELECT c.span_of, u.person_id FROM unit_persons u JOIN chunks c "
             f"ON c.id = u.chunk_id WHERE c.template IN ({marks})", dialogue)}
@@ -718,6 +719,8 @@ def _check_attribution(
             rep.scenes_with_owner += 1
             if (r["id"], owner) not in attributed:
                 rep.owners_missing.append(r["id"])
+            if owner in no_lines:
+                lost_owners.add(owner)
         if rep.owners_missing:
             ratio = len(rep.owners_missing) / max(rep.scenes_with_owner, 1)
             rep.ledger.add(
@@ -726,10 +729,27 @@ def _check_attribution(
                       + ", ".join(rep.owners_missing[:8]),
                 high=ratio > params.speaker.owner_missing_max)
 
+        if lost_owners:
+            rep.ledger.add(
+                "G4", f"{len(lost_owners)} person(s) own a scene about themselves but have no "
+                      "dialogue unit of their own: " + ", ".join(sorted(lost_owners)), high=True)
+
     for scene, label, person in env.speakers.stale_declared:
         rep.ledger.add(
             "G4", f"declared speaker exception ({label!r} as {person!r}) names a person on no "
                   "roster page; it has no effect", page=scene)
+    sp = env.speakers
+    if sp.segment_person:
+        rep.ledger.add(
+            "G4", f"{len(sp.segment_person)} label(s) belong to one person by a segment of "
+                  "their declared real name: "
+                  + ", ".join(f"{k}>{p} x{n}" for k, (p, n) in sorted(sp.segment_person.items())))
+    if sp.segment_shared:
+        rep.ledger.add(
+            "G4", f"{len(sp.segment_shared)} label(s) are a real-name segment of two or more "
+                  "people and stay unattributed: "
+                  + ", ".join(f"{k}>{'/'.join(p)} x{n}"
+                              for k, (p, n) in sorted(sp.segment_shared.items())))
     for label in env.speakers.placeholders_resolved():
         rep.ledger.add(
             "G4", f"label {label!r} is a placeholder but a page, redirect or portrait count "
