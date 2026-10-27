@@ -471,8 +471,16 @@ pub fn retrieve() -> index::params::Retrieve {
 }
 
 pub fn env_with(endpoints: Endpoints, tune: impl FnOnce(&mut Config)) -> Env {
+    env_retrieving(endpoints, retrieve(), tune)
+}
+
+pub fn env_retrieving(
+    endpoints: Endpoints,
+    retrieve: index::params::Retrieve,
+    tune: impl FnOnce(&mut Config),
+) -> Env {
     let folio_file = corpus();
-    let index = index::Index::open(folio_file.path(), retrieve()).unwrap();
+    let index = index::Index::open(folio_file.path(), retrieve).unwrap();
     let office = tempdir::Dir::new();
     let mut config = Config {
         office: office.0.clone(),

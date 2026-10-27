@@ -850,6 +850,16 @@ impl Agent {
         if turn.wrapup || (turn.message.is_none() && turn.text.is_empty()) {
             return Ok(());
         }
+        // A hand-over with nothing said first: the colleague's answer is the reply, so
+        // no empty bubble stays behind.
+        if turn.joined.is_some() && turn.text.trim().is_empty() {
+            if let Some(id) = turn.message.take() {
+                store::discard_message(&self.db(), id)?;
+            }
+            turn.text.clear();
+            turn.actions.clear();
+            return Ok(());
+        }
         let id = self.message_for(turn)?;
         let meta = MessageMeta {
             cites: self.citations(turn.channel, &turn.text, &turn.shown)?,
