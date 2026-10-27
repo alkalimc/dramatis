@@ -507,6 +507,58 @@ async fn emulated_tools_are_left_out_of_ordinary_turns_only() {
     assert!(json[1]["tools"].as_array().is_some_and(|t| !t.is_empty()));
 }
 
+#[tokio::test]
+async fn an_emulated_wrapup_written_as_a_text_block_still_counts() {
+    // The fence opening may be missing, and the block may sit after some words.
+    for block in [
+        "```tool_call\n{BODY}\n```",
+        "tool_call\n{BODY}\n```",
+        "Noted.\n```tool_call\n{BODY}\n```",
+    ] {
+        let mut ep = endpoints(WireApi::Chat, true, None);
+        ep.profiles[0].models[0].native_tools = Some(false);
+        let e = env_with(ep, |_| {});
+        let ch = direct(&e, "ann");
+        let body = json!({"name": "wrapup", "arguments": {"facts": [
+            {"kind": "fact", "text": "The user likes jasmine tea.", "due": null}
+        ], "hurt": null, "summary": null}});
+        e.fake.push([
+            say("Cooler water."),
+            say(&block.replace("{BODY}", &body.to_string())),
+        ]);
+        e.agent
+            .send(ch, "how should I brew tea?", None)
+            .await
+            .unwrap();
+        e.agent.wrapup(ch).await.unwrap();
+        let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+        assert_eq!(facts.len(), 1, "{block}");
+    }
+}
+
+#[tokio::test]
+async fn a_text_block_is_not_a_call_on_a_native_endpoint() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    let body = json!({"name": "wrapup", "arguments": {"facts": [
+        {"kind": "fact", "text": "The user likes jasmine tea.", "due": null}
+    ], "hurt": null, "summary": null}});
+    e.fake.push([
+        say("Cooler water."),
+        say(&format!("```tool_call\n{body}\n```")),
+    ]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    assert!(
+        e.agent
+            .with_world(|w| fact::all(w, false).unwrap())
+            .is_empty()
+    );
+}
+
 async fn rolls_over(wire: WireApi) {
     let e = env_with(endpoints(wire, true, None), |c| c.agent.roll.k = 10.0);
     let ch = direct(&e, "ann");

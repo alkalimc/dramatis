@@ -14,7 +14,7 @@ use api::events::{MessageAdded, MessageDelta, QuotaChanged, ToolCalled};
 use api::meta::MessageMeta;
 use api::views::ToolAction;
 use futures::StreamExt;
-use llm::{Event as LlmEvent, Message, Response, ToolChoice};
+use llm::{Event as LlmEvent, Message, Part, Response, ToolChoice};
 use world::log::{self, Role};
 use world::quota;
 use world::wrapup::Summary;
@@ -562,6 +562,11 @@ impl Agent {
                 }));
             }
         };
+        let reply = if role.model.emulated_tools() && (turn.wrapup || !shape.tools.is_empty()) {
+            adopt_text_call(reply, turn.wrapup, &shape.tools)
+        } else {
+            reply
+        };
         let now = self.now();
         {
             let conn = self.db();
@@ -895,6 +900,37 @@ impl Agent {
 pub(crate) struct Log {
     pub system: [String; 3],
     pub items: Vec<Message>,
+}
+
+/// On an endpoint that only emulates tools, a call may arrive as a fenced block in the
+/// text instead of a structured call. When no structured call came, the block becomes
+/// the call, so the loop treats both alike; the stored reply keeps the words before it.
+/// Only a tool the request offered counts (in a wrap-up, only `wrapup`).
+fn adopt_text_call(mut reply: Response, wrapup: bool, tools: &[api::tools::ToolSpec]) -> Response {
+    if reply.tool_calls().next().is_some() {
+        return reply;
+    }
+    let Some((name, args_json, lead)) = assemble::text_call(&reply.text()) else {
+        return reply;
+    };
+    let offered = if wrapup {
+        name == "wrapup"
+    } else {
+        tools.iter().any(|t| t.name == name)
+    };
+    if !offered {
+        return reply;
+    }
+    reply.parts.retain(|p| !matches!(p, Part::Text(_)));
+    if !lead.is_empty() {
+        reply.parts.push(Part::Text(lead));
+    }
+    reply.parts.push(Part::ToolCall {
+        id: "text_call_0".into(),
+        name,
+        args_json,
+    });
+    reply
 }
 
 fn log_role(role: llm::Role) -> Role {

@@ -326,6 +326,31 @@ fn id_list(inside: &str) -> Option<Vec<String>> {
 
 const FENCE: &str = "```tool_call";
 
+/// The call an emulating endpoint wrote as text: `tool_call` on a line of its own
+/// (usually behind a code fence, whose opening some endpoints drop), then a JSON object
+/// `{"name": .., "arguments": ..}`. Returns the name, the arguments as JSON text and
+/// the words before the block.
+pub fn text_call(raw: &str) -> Option<(String, String, String)> {
+    let at = raw.find("tool_call")?;
+    let before = raw[..at].trim_end_matches('`');
+    if !(before.is_empty() || before.ends_with('\n')) {
+        return None;
+    }
+    let tail = &raw[at + "tool_call".len()..];
+    let json = &tail[tail.find('{')?..];
+    let value = serde_json::Deserializer::from_str(json)
+        .into_iter::<serde_json::Value>()
+        .next()?
+        .ok()?;
+    let name = value.get("name")?.as_str()?.to_owned();
+    let args = match value.get("arguments") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(v) => v.to_string(),
+        None => "{}".to_owned(),
+    };
+    Some((name, args, before.trim_end().to_owned()))
+}
+
 /// A reply as the user may see it: emulated tool-call blocks the endpoint failed to parse
 /// are dropped. A closed block goes whole. An unclosed one is usually a call whose
 /// arguments carry the words themselves, so its opening line and the `"text": "` lead-in
