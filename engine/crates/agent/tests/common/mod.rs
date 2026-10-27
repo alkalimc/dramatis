@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent::endpoint::StaticKeys;
@@ -45,9 +45,47 @@ pub fn call(name: &str, args: Value) -> Reply {
 #[derive(Default)]
 pub struct Fake {
     script: Mutex<VecDeque<Reply>>,
+    /// Replies for requests whose body contains the marker; checked before `script`.
+    routes: Mutex<Vec<(String, VecDeque<Reply>)>>,
+    hold: Mutex<Option<Arc<Hold>>>,
     pub bodies: Mutex<Vec<Vec<u8>>>,
     /// Calls so far, to number the signatures of reasoning blocks.
     n: AtomicI64,
+}
+
+/// Makes calls wait inside the endpoint: each one that arrives is counted and then waits
+/// until `need` calls have arrived or the hold is released. A test that needs two calls
+/// in flight at once passes only if the agent really sends both before either returns.
+pub struct Hold {
+    need: usize,
+    seen: AtomicUsize,
+    released: AtomicBool,
+}
+
+impl Hold {
+    pub fn new(need: usize) -> Arc<Self> {
+        Arc::new(Self {
+            need,
+            seen: AtomicUsize::new(0),
+            released: AtomicBool::new(false),
+        })
+    }
+
+    /// Calls that have reached the endpoint.
+    pub fn seen(&self) -> usize {
+        self.seen.load(Ordering::SeqCst)
+    }
+
+    pub fn release(&self) {
+        self.released.store(true, Ordering::SeqCst);
+    }
+
+    async fn pass(&self) {
+        self.seen.fetch_add(1, Ordering::SeqCst);
+        while self.seen() < self.need && !self.released.load(Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
 }
 
 pub fn tokens(bytes: usize) -> u64 {
@@ -66,6 +104,19 @@ fn cache_key(body: &[u8]) -> Option<String> {
 impl Fake {
     pub fn push(&self, replies: impl IntoIterator<Item = Reply>) {
         self.script.lock().unwrap().extend(replies);
+    }
+
+    /// Script replies for the requests whose body contains `marker`, whatever order the
+    /// requests arrive in.
+    pub fn push_for(&self, marker: &str, replies: impl IntoIterator<Item = Reply>) {
+        self.routes
+            .lock()
+            .unwrap()
+            .push((marker.to_owned(), replies.into_iter().collect()));
+    }
+
+    pub fn hold(&self, hold: &Arc<Hold>) {
+        *self.hold.lock().unwrap() = Some(hold.clone());
     }
 
     pub fn bodies(&self) -> Vec<Vec<u8>> {
@@ -266,11 +317,17 @@ impl Transport for Fake {
         };
         // The key goes in a header, never in the body.
         assert!(!String::from_utf8_lossy(&req.body).contains("sk-test"));
-        let reply = self
-            .script
+        let text = String::from_utf8_lossy(&req.body);
+        let routed = self
+            .routes
             .lock()
             .unwrap()
-            .pop_front()
+            .iter_mut()
+            .find(|(m, _)| text.contains(m.as_str()))
+            .and_then(|(_, q)| q.pop_front());
+        drop(text);
+        let reply = routed
+            .or_else(|| self.script.lock().unwrap().pop_front())
             .expect("the script has no more replies");
         let out = match &reply {
             Reply::Say(t) => t.len(),
@@ -279,6 +336,10 @@ impl Transport for Fake {
         };
         let usage = self.usage(&req.body, out);
         self.bodies.lock().unwrap().push(req.body);
+        let hold = self.hold.lock().unwrap().clone();
+        if let Some(h) = hold {
+            h.pass().await;
+        }
         let n = self.n.fetch_add(1, Ordering::SeqCst);
         let text = render(wire, &reply, usage, n);
         // Cut mid-event, to exercise events split across chunks.
