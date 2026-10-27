@@ -613,7 +613,7 @@ def test_request_billing_selects_the_larger_budgets():
     role = e.roles.persona
     assert e.profiles[0].models[0].billing == "request" and e.per_request(role)
     p = Persona().billed(e.per_request(role))
-    assert (p.material_tokens, p.story_tokens) == (18000, 9000)
+    assert (p.material_tokens, p.story_tokens) == (12000, 6000)
     assert Persona().billed(False) == Persona()
     token = Endpoints.from_toml(ENDPOINTS.format(wire="chat"))
     assert not token.per_request(token.roles.persona)
