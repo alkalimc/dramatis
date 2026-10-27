@@ -295,7 +295,7 @@ async fn a_request_runs(wire: WireApi) {
                 .last()
                 .unwrap()
                 .to_string()
-                .contains("Call wrapup")
+                .contains("wrapup call")
         );
     } else {
         assert_eq!(forced_tool(last), Some("wrapup"));
@@ -384,7 +384,7 @@ async fn on_the_messages_protocol_the_wrapup_is_asked_in_words() {
     assert_prefix_chain(&e.fake.bodies());
     let v = &e.fake.json()[1];
     assert_eq!(v["tool_choice"]["type"], "auto");
-    assert!(list(v).last().unwrap().to_string().contains("Call wrapup"));
+    assert!(list(v).last().unwrap().to_string().contains("wrapup call"));
     assert!(
         e.agent
             .with_world(|w| fact::all(w, false).unwrap())
@@ -552,14 +552,45 @@ async fn an_emulated_wrapup_asks_for_json_and_applies_it() {
         .await
         .unwrap();
     e.agent.wrapup(ch).await.unwrap();
-    let last = e.fake.json().pop().unwrap();
+    let mut sent = e.fake.json();
+    let last = sent.pop().unwrap();
+    // A structured-output request is one whole reply; the turn before it streamed.
+    assert_eq!(sent[0]["stream"], true);
+    assert!(last.get("stream").is_none());
     assert!(last.get("tools").is_none() && last.get("tool_choice").is_none());
     assert_eq!(last["response_format"]["type"], "json_schema");
     assert!(last["response_format"]["json_schema"]["schema"]["properties"]["facts"].is_object());
+    // The closing line asks out of character and names no note-taking.
+    let ask = list(&last).last().unwrap().to_string();
+    assert!(ask.contains("JSON object") && !ask.contains("note") && !ask.contains("save"));
     assert_eq!(
         e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
         1
     );
+}
+
+#[tokio::test]
+async fn a_structured_wrapup_is_not_streamed_on_any_wire() {
+    for wire in WIRES {
+        let mut ep = endpoints(wire, true, None);
+        ep.profiles[0].models[0].native_tools = Some(false);
+        let e = env_with(ep, |_| {});
+        let ch = direct(&e, "ann");
+        let doc = json!({"facts": [
+            {"kind": "fact", "text": "The user likes jasmine tea.", "due": null}
+        ], "hurt": null, "summary": null});
+        e.fake.push([say("Cooler water."), say(&doc.to_string())]);
+        e.agent.send(ch, "hi", None).await.unwrap();
+        e.agent.wrapup(ch).await.unwrap();
+        let sent = e.fake.json();
+        assert_eq!(sent[0].get("stream"), Some(&json!(true)), "{wire:?}");
+        assert!(sent[1].get("stream").is_none(), "{wire:?}");
+        assert_eq!(
+            e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
+            1,
+            "{wire:?}"
+        );
+    }
 }
 
 #[tokio::test]

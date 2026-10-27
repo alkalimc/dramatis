@@ -140,12 +140,18 @@ impl Llm {
     }
 
     /// One request, events as they arrive, ending in `Done`. Retries cover only the
-    /// connection: once bytes flow, a failure is the caller's to handle.
+    /// connection: once bytes flow, a failure is the caller's to handle. A request that
+    /// carries an output schema is sent whole instead, on every wire: some proxies ignore
+    /// the schema on a streamed request. The stream then holds a single `Done`.
     pub async fn stream(
         &self,
         ep: &Endpoint,
         req: &Request,
     ) -> Result<BoxStream<'static, Result<Event>>> {
+        if req.output_schema.is_some() {
+            let done = self.complete(ep, req).await?;
+            return Ok(futures::stream::iter([Ok(Event::Done(done))]).boxed());
+        }
         let chunks = self.open(self.request(ep, render_stream(ep, req)?)).await?;
         let state = StreamState {
             chunks,

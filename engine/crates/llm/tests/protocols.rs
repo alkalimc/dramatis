@@ -322,6 +322,33 @@ async fn collect(p: Protocol, name: &str, chunk: usize) -> Vec<Event> {
 }
 
 #[tokio::test]
+async fn a_structured_output_request_is_sent_whole_on_every_wire() {
+    for (p, name) in [
+        (Protocol::OpenAiChat, "chat.json"),
+        (Protocol::OpenAiResponses, "responses.json"),
+        (Protocol::AnthropicMessages, "messages.json"),
+    ] {
+        let t = Arc::new(MemoryTransport::new([Ok(Canned::chunked(
+            fixture(name),
+            1 << 16,
+        ))]));
+        let llm = Llm::new(t.clone(), Retry::none());
+        let mut req = base_request();
+        req.output_schema = Some(json!({"type": "object"}));
+        let events: Vec<Event> = llm
+            .stream(&endpoint(p), &req)
+            .await
+            .unwrap()
+            .map(|e| e.unwrap())
+            .collect()
+            .await;
+        assert_eq!(events, [Event::Done(fixture_reply(p))], "{p:?}");
+        let sent: Value = serde_json::from_slice(&t.sent()[0].body).unwrap();
+        assert!(sent.get("stream").is_none(), "{p:?}");
+    }
+}
+
+#[tokio::test]
 async fn streams_decode_to_the_same_response_as_whole_replies() {
     for (p, name, whole) in [
         (
