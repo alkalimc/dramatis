@@ -885,6 +885,48 @@ async fn settings_quota_and_voice_round_trip() {
 }
 
 #[tokio::test]
+async fn notifications_pass_when_on_and_outside_quiet_hours() {
+    let r = rig();
+    let e = &r.engine;
+    // Fresh home at noon: the switch defaults on and the default quiet hours are overnight.
+    assert!(e.may_notify().unwrap());
+
+    let mut s = e.settings().await.unwrap();
+    let mut set = |quiet: Option<(&str, &str)>, on: bool| {
+        s.quiet_hours = quiet.map(|(from, to)| QuietHours {
+            from: from.into(),
+            to: to.into(),
+        });
+        s.notifications = on;
+        s.clone()
+    };
+    // Quiet hours off entirely: only the switch matters.
+    e.update_settings(set(None, true)).await.unwrap();
+    assert!(e.may_notify().unwrap());
+    e.update_settings(set(None, false)).await.unwrap();
+    assert!(!e.may_notify().unwrap());
+    // The window is [from, to): noon is outside one that ends at noon, inside one that
+    // starts at noon, and inside one that spans midnight through the afternoon.
+    e.update_settings(set(Some(("10:00", "12:00")), true))
+        .await
+        .unwrap();
+    assert!(e.may_notify().unwrap());
+    e.update_settings(set(Some(("12:00", "13:00")), true))
+        .await
+        .unwrap();
+    assert!(!e.may_notify().unwrap());
+    e.update_settings(set(Some(("22:00", "13:00")), true))
+        .await
+        .unwrap();
+    assert!(!e.may_notify().unwrap());
+    // Off beats a window that does not cover now.
+    e.update_settings(set(Some(("22:00", "07:00")), false))
+        .await
+        .unwrap();
+    assert!(!e.may_notify().unwrap());
+}
+
+#[tokio::test]
 async fn avatars_are_fetched_once_and_degrade_offline() {
     let png = b"\x89PNG\r\n\x1a\nrest".to_vec();
     let net = Arc::new(Net(Some(png.clone()), Mutex::new(0)));
