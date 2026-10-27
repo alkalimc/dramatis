@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import json
 
 import pytest
@@ -59,18 +61,47 @@ def test_the_yield_check_is_off_unless_a_route_sets_a_floor():
     assert Route("s", parser=lambda ctx: ()).min_yield == 0.0
 
 
-def test_a_transcluded_body_is_stored_once_and_shown_from_both_pages(tmp_path, pack):
+def test_a_transcluded_body_is_stored_once_and_shown_once(tmp_path, pack):
     with Archive(tmp_path / "t.archive") as a:
         a.insert_records([Scene(page="Tale", revid=2, source_page="Tale/data")])
         a.db.execute("INSERT INTO lines(scene,seq,speaker,text,kind) VALUES('Tale',0,'Ann','Hi','s')")
         a.put_page("Tale", "wrapper", 1, "now")
         a.put_page("Tale/data", "Ann: Hi", 2, "now")
-        for page in ("Tale", "Tale/data"):
-            got = inspect.collect(a, page, pack)
-            assert got["scene"]["id"] == "Tale" and [ln["text"] for ln in got["lines"]] == ["Hi"]
-        md = inspect.render(pack, "Tale/data", {"wikitext": "x", "revid": 2},
-                            inspect.collect(a, "Tale/data", pack))
-    assert "`Tale/data`" in md
+        wrapper = inspect.collect(a, "Tale", pack)
+        body = inspect.collect(a, "Tale/data", pack)
+        assert wrapper["scene"]["id"] == body["scene"]["id"] == "Tale"
+        assert "lines" not in wrapper and [ln["text"] for ln in body["lines"]] == ["Hi"]
+        md_wrapper = inspect.render(pack, "Tale", {"wikitext": "x", "revid": 1}, wrapper)
+        md_body = inspect.render(pack, "Tale/data", {"wikitext": "x", "revid": 2}, body)
+    assert "`Tale/data`" in md_wrapper and "Hi" not in md_wrapper
+    assert "Hi" in md_body
+
+
+def test_a_table_row_never_breaks_across_lines(pack):
+    rec = {"terms": [{"term": "Team A4", "category": "x|y",
+                      "translations": {"en": "Op Team A4\nDetachment 4",
+                                       "ja": "p|q"}},
+                     {"term": "B", "category": "", "translations": {"en": "plain"}}],
+           "aliases": [{"alias": "a\nb", "target": "t|u"}], "_alias_total": 1}
+    md = inspect.render(pack, "T", {"wikitext": "x", "revid": 1}, rec).split("\n")
+    rows = [ln for ln in md if ln.startswith("|")]
+    terms = rows[:4]
+    assert "Op Team A4 / Detachment 4" in terms[2]
+    assert len({len(re.findall(r"(?<!\\)\|", r)) for r in terms}) == 1
+    assert all(r.endswith("|") for r in rows)
+
+
+def test_a_form_page_says_whose_form_it_is(tmp_path, pack):
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0), ("Ann(Winter)", "alt", 1)]})
+        a.put_page("Ann", "x", 1, "now")
+        a.put_page("Ann(Winter)", "x", 2, "now")
+        form = inspect.collect(a, "Ann(Winter)", pack)
+        base = inspect.collect(a, "Ann", pack)
+    assert form["form_of"] == {"person": "Ann", "kind": "alt"}
+    assert "form_of" not in base
+    md = inspect.render(pack, "Ann(Winter)", {"wikitext": "x", "revid": 2}, form)
+    assert "Ann" in md.split("\n")[5] and "alt" in md.split("\n")[5]
 
 
 def test_voice_variants_share_a_slot(tmp_path):

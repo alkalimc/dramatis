@@ -21,8 +21,9 @@ from pathlib import Path
 
 from ..archive import Archive
 from ..chunk import reply_text
+from ..identity import CANONICAL
 from ..pack import Pack
-from ..text import table_head
+from ..text import cell, table_head
 
 SAFE = re.compile(r"[^\w.-]")
 #: How many rows of a large per-page listing to show.
@@ -71,14 +72,15 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
     db = archive.db
     out: dict = {"title": title, "revid": archive.page(title)["revid"]}
 
-    # A scene is stored once, under its own id; the page its body was read from (a
-    # transcluded subpage) shows the same scene, so each page's archived view sits next
-    # to the source it came from.
+    # A scene is stored once, under its own id. Its body is shown on the page it was read
+    # from (a transcluded subpage); the page that only transcludes it shows the scene and
+    # points there.
     scene = db.execute("SELECT * FROM scenes WHERE id=? OR source_page=? ORDER BY id<>?",
                        (title, title, title)).fetchone()
     if scene:
         sid = scene["id"]
         out["scene"] = dict(scene)
+    if scene and scene["source_page"] in (None, "", title):
         out["lines"] = [dict(r) for r in db.execute(
             "SELECT seq,speaker,text,kind,branch FROM lines WHERE scene=? ORDER BY seq",
             (sid,))]
@@ -142,6 +144,10 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
             out["aliases"] = rows
             out["_alias_total"] = archive.count("aliases", "kind=?", (kind,))
 
+    own = db.execute("SELECT person_id,kind FROM forms WHERE page=?", (title,)).fetchone()
+    if own is not None and own["kind"] != CANONICAL:
+        out["form_of"] = {"person": own["person_id"], "kind": own["kind"]}
+
     forms = [dict(r) for r in db.execute(
         "SELECT page,kind,ordinal FROM forms WHERE person_id=? ORDER BY ordinal", (title,))]
     if len(forms) > 1:
@@ -185,6 +191,11 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
     ]
     preamble = len(L)
 
+    if "form_of" in rec:
+        of = rec["form_of"]
+        L += [say("inspect.form_of", person=of["person"],
+                  kind=pack.text.get(f"inspect.form_kind.{of['kind']}", of["kind"])), ""]
+
     if "forms" in rec:
         L += [say("inspect.forms", forms=list_sep.join(
             say("inspect.form_item", page=f["page"], kind=f["kind"]) for f in rec["forms"])), ""]
@@ -196,13 +207,18 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
                 source_ref=s["source_ref"]),
             "",
         ]
-        if s.get("source_page") and s["source_page"] != s["id"]:
-            L += [say("inspect.scene_source", scene=s["id"], source=s["source_page"]), ""]
-        L += [
-            say("inspect.scene_counts", lines=len(rec["lines"]), choices=len(rec["choices"])),
-            "", say("inspect.body"), "",
-        ]
+        elsewhere = "lines" not in rec
+        if elsewhere:
+            L += [say("inspect.body_elsewhere", scene=s["id"], source=s["source_page"]), ""]
+        else:
+            if s.get("source_page") and s["source_page"] != s["id"]:
+                L += [say("inspect.scene_source", scene=s["id"], source=s["source_page"]), ""]
+            L += [
+                say("inspect.scene_counts", lines=len(rec["lines"]), choices=len(rec["choices"])),
+                "", say("inspect.body"), "",
+            ]
         speech, caption = policy.kind("speech"), policy.kind("subtitle")
+        rec = {**rec, "lines": rec.get("lines", []), "choices": rec.get("choices", [])}
         # One sequence by position, as the unit builder reads it: a choice that follows
         # another choice has no line before it to hang from.
         items = sorted([*({"at": ln["seq"], "line": ln} for ln in rec["lines"]),
@@ -238,9 +254,13 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
         memoir = policy.kind("memoir")
         L += [say("inspect.fields"), ""]
         L += [f"- **{k}**{lsep}{v}" for k, v in d["fields"].items() if v]
-        if d["sections"]:
+        stand_in = re.compile(policy.placeholder_only) if policy.placeholder_only else None
+        sections = [sec for sec in d["sections"] if not (
+            stand_in and stand_in.fullmatch(sec["text"].strip())
+            and (not sec["title"].strip() or stand_in.fullmatch(sec["title"].strip())))]
+        if sections:
             L += ["", say("inspect.dossier_body"), ""]
-            for sec in d["sections"]:
+            for sec in sections:
                 L += [f"### {sec['title']}", "", sec["text"], ""]
         items = {k: v for k, v in d["items"].items() if k != memoir and isinstance(v, str) and v}
         if items:
@@ -278,7 +298,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
               *table_head("|".join([say("inspect.term"), *labels, say("inspect.category")]))]
         for t in rec["terms"]:
             cells = [t["term"], *(t["translations"].get(k, "") for k in labels), t["category"]]
-            L.append("| " + " | ".join(cells) + " |")
+            L.append("| " + " | ".join(cell(c) for c in cells) + " |")
         L.append("")
 
     if "char_refs" in rec:
@@ -291,7 +311,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
     if "aliases" in rec:
         L += [say("inspect.aliases", shown=len(rec["aliases"]), total=rec["_alias_total"]), "",
               say("inspect.aliases_note"), "", *table_head(say("inspect.alias_head"))]
-        L += [f"| {a['alias']} | {a['target']} |" for a in rec["aliases"]]
+        L += [f"| {cell(a['alias'])} | {cell(a['target'])} |" for a in rec["aliases"]]
         L.append("")
 
     if "guard_findings" in rec:

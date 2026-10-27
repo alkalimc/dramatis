@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -246,8 +247,9 @@ def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
     # each class is read through its first and its largest page, and nothing else
     assert {r.rsplit(" · ", 1)[1]: ts for r, ts in layer.items()} == {
         "long": {"P2"}, "short": {"P1", "P4"}}
-    assert {r.rsplit(" · ", 1)[1]: ts for r, ts in picked.items()
-            if r.endswith("excluded")} == {"excluded": {"P5"}}
+    # P5 is listed by reason and has no layer
+    assert not any(r.endswith("excluded") for r in picked)
+    assert [t for titles in sel.silent.values() for t in titles] == ["P5"]
 
 
 def test_every_rendering_of_a_term_is_an_alias_for_it():
@@ -412,6 +414,24 @@ def test_nested_form_names_short_items_and_placeholders(tmp_path, forms_pack):
     items = [c.text for c in units if c.span_of == "Alice#dossier"]
     # only the kind of item the pack names is folded; "blurb" is short and complete alone
     assert items == ["A long enough entry that stands alone.\ntiny: Short.", "Brief."]
+
+
+def test_placeholder_only_fields_make_no_unit(tmp_path, forms_pack):
+    p = replace(forms_pack, chunking=replace(forms_pack.chunking, placeholder_only=r"[?\uff1f\s]+"))
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Alice": [("Alice", "canonical", 0)]})
+        insert(a, [Dossier(
+            page="Alice", fields={"name": "Alice"}, revid=1,
+            sections=({"title": "???", "text": "\uff1f\uff1f \uff1f"},
+                      {"title": "???", "text": "Real text."},
+                      {"title": "Life", "text": "Born in the north."}),
+            items={"???": "??"})])
+        env = chunk.Env.for_build(a, p)
+        units = list(chunk.build(a, p, env=env))
+    texts = [c.text for c in units if c.span_of == "Alice#dossier"]
+    assert env.placeholders == 2
+    assert "Real text." in "\n".join(texts) and "Born in the north." in "\n".join(texts)
+    assert not any(re.fullmatch(r"[?\uff1f\s]+", t) for t in texts)
 
 
 def test_lore_runs_follow_the_pages_declared_shape(pack):

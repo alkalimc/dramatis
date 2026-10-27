@@ -11,6 +11,7 @@ Values are `str.format` templates. A pack may reorder or drop fields, but not in
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 TEXT: Mapping[str, str] = {
@@ -84,9 +85,11 @@ TEXT: Mapping[str, str] = {
     # ---- per-page inspection ----
     "inspect.header": "> Archived text. Source {chars:,} characters, revid {revid}.",
     "inspect.header_note": "> This is what every downstream stage sees.",
+    "inspect.form_of": "**Form page**: belongs to {person}; form kind: {kind}.",
     "inspect.forms": "**Forms of one person**: {forms}",
     "inspect.form_item": "{page} ({kind})",
     "inspect.scene_meta": "**Category** {category} · **Group** {group} · **Source** `{source_ref}`",
+    "inspect.body_elsewhere": "The body of scene `{scene}` is stored once, with `{source}`; see that page.",
     "inspect.scene_source": "Stored once as scene `{scene}`; the body was read from `{source}`.",
     "inspect.scene_counts": "{lines:,} lines, {choices:,} branch points.",
     "inspect.body": "## Body",
@@ -146,11 +149,22 @@ TEXT: Mapping[str, str] = {
     "samples.why.smallest": "smallest non-empty source",
     "samples.why.most_records": "most records",
     "samples.why.findings": "first with guard findings",
-    "samples.why.empty": "first that produced nothing: {reason}",
+    "samples.silent": "## Pages not sampled",
+    "samples.silent_note": "These pages are held but produce no unit, so there is nothing to read.",
+    "samples.silent.roster": "### Left the roster",
+    "samples.silent.empty": "### No unit: {reason}",
+    "samples.silent.none": "### No unit, no stated reason",
     "samples.why.kind": "first yielding `{kind}` records",
     "samples.why.alias": "alias-producing page",
     "samples.why.multi_form": "first person with several forms",
 }
+
+
+def cell(value: object) -> str:
+    """Text for one Markdown table cell: a line break becomes ` / ` and `|` is escaped, so a
+    row never spans lines and never gains a column."""
+    text = re.sub(r"\s*\n\s*", " / ", str(value).strip())
+    return text.replace("|", "\\|")
 
 
 def table_head(columns: str) -> list[str]:

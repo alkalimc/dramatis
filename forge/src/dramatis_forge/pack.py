@@ -589,6 +589,10 @@ class ChunkPolicy:
     card_restated: Callable[[str, str, Mapping[str, str]], str | None] | None = None
     #: Card field values that mean "none" and say nothing about the person.
     placeholder_values: tuple[str, ...] = ()
+    #: A record field (a dossier section or item) whose title and value both match this
+    #: pattern in full is a slot the source fills with a stand-in; it is dropped before any
+    #: unit is cut ("" turns it off).
+    placeholder_only: str = ""
     #: Dossier items shorter than this join the item before them (0 turns it off), if their
     #: title matches one of `foldable_items`: an entry of a kind that is read alongside its
     #: neighbours. Other short items (a blurb, a token's description) are complete as they are.
@@ -797,6 +801,9 @@ class WikiConfig:
     history_url: str = ""
     #: One exact revision, `{revid}` substituted.
     revision_url: str = ""
+    #: Where a person's avatar image lives, `{page}` substituted with the person's page
+    #: title. Stored in the folio like the other patterns; empty means no avatars.
+    avatar_url: str = ""
     rate: float = 8.0
     #: Namespaces whose changes can matter for incremental update.
     watch_namespaces: tuple[int, ...] = (0,)
