@@ -110,6 +110,14 @@ A debug build loads the UI from the dev server; nothing needs to exist in `ui/di
 that embeds the UI (`--features custom-protocol`, which `pnpm tauri build` enables) needs
 `pnpm build` in `ui/` first.
 
+The browser preview (`pnpm dev` without the app) shows the neutral English text. To preview a
+corpus's own wording, export it once and reload; the file is git-ignored:
+
+```sh
+cd forge && DRAMATIS_PACKS=<dir holding packs/> ./forge report wording ../ui/wording.local.json --pack <name>
+cd ui && pnpm dev                            # the mock picks up ui/wording.local.json
+```
+
 `ui/src/api.gen.ts` is generated from `engine/crates/api`; never edit it. After changing
 a command or event type:
 

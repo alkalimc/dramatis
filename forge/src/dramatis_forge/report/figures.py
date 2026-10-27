@@ -402,6 +402,17 @@ def _d_pack_lines(src: _Sources, _m: str | None):
                       for line in path.read_text(encoding="utf-8").splitlines() if line.strip()))
 
 
+def wording_keys() -> list[str]:
+    """Every key the client, the agent harness and the tool list read from the wording."""
+    path = Path(__file__).resolve().parent.parent / "wording_keys.txt"
+    return [k for k in path.read_text(encoding="utf-8").split() if k]
+
+
+def _d_wording_missing(src: _Sources, _m: str | None):
+    """Keys the pack's wording leaves to the neutral English fallback."""
+    return _count(sum(1 for k in wording_keys() if k not in src.pack.wording))
+
+
 def _d_roster_pages(src: _Sources, _m: str | None):
     assert src.archive is not None
     return _count(src.archive.execute("select count(*) from forms").fetchone()[0])
@@ -545,6 +556,7 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "pages": (("archive",), _d_pages),
     "persons": (("archive",), _d_persons),
     "pack_lines": ((), _d_pack_lines),
+    "wording_missing": ((), _d_wording_missing),
     "units_with_revid": (("folio",), _d_units_with_revid),
     "units_attributed": (("folio",), _d_units_attributed),
     "units_per_person": (("folio",), _d_units_per_person),
