@@ -95,6 +95,7 @@ def write_probe(outcome: Outcome, root: Path, *, db: sqlite3.Connection,
         raw["response"] = cached.get("response")
         raw["usage"] = cached.get("usage")
     raw["output"] = outcome.output
+    raw["lines"] = outcome.lines
     js = root / f"{stem}.json"
     js.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
     return [md, js]
@@ -144,7 +145,10 @@ def _probe_markdown(o: Outcome, db: sqlite3.Connection) -> str:
             out.append("")
     else:
         out += ["(none)", ""]
-    out += ["## Gates", "", *_gates(o.verdict), ""]
+    out += ["## Example lines", "",
+            "Picked from the material, not generated; stored as the `lines` slot.", ""]
+    out += [f"{i}. {ln}" for i, ln in enumerate(o.lines, 1)] if o.lines else ["(none)"]
+    out += ["", "## Gates", "", *_gates(o.verdict), ""]
     if o.reasons and o.verdict is None:
         out += [f"- {r}" for r in o.reasons] + [""]
     if o.usage.input or o.usage.output:

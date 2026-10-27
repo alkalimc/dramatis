@@ -21,13 +21,19 @@ class Persona:
     #: Upper bound on `capability_line`, in characters.
     capability_chars: int = 40
     #: Inclusive bounds on the number of `tone_rules`.
-    tone_rules: tuple[int, int] = (3, 6)
+    tone_rules: tuple[int, int] = (3, 4)
     #: Input budget for one person's whole material block, in tokens. Facts reach the
     #: speaking model by retrieval, so the brief needs only enough of a person's own
     #: words and a few identity lines to hear how they speak.
     material_tokens: int = 5000
     #: Share of `material_tokens` reserved for the sample of story lines, in tokens.
     story_tokens: int = 1500
+    #: Own lines of a person kept as tone references: how many, the budget for all of
+    #: them together (a line may take at most a quarter of it), and the shortest line
+    #: worth keeping, in tokens. They are picked from the material, not generated.
+    example_lines: int = 8
+    example_tokens: int = 400
+    example_min_tokens: int = 8
     #: Attempts per endpoint call before the person is reported as failed.
     retries: int = 3
     #: Least number of voice and dialogue units attributed to a person for them to get a

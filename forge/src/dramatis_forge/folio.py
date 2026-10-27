@@ -147,7 +147,9 @@ CREATE TABLE IF NOT EXISTS aliases (
 CREATE INDEX IF NOT EXISTS idx_aliases_alias ON aliases(alias);
 
 -- Assembled, never generated, at runtime. Slots are a closed set:
---   subject = person_id      system | tone | fallback | capability
+--   subject = person_id      system | tone | capability | lines (their own lines, one per
+--                            line, picked from the material as tone references; a
+--                            folio built earlier may still hold a retired `fallback` row)
 --   subject = 'host'         in_world | meta (the host's two layers; meta never enters
 --                            another person's session), coldstart (the builder's
 --                            first-run recommendation order), and any person slot
@@ -158,7 +160,7 @@ CREATE TABLE IF NOT EXISTS prompts (
     subject           TEXT NOT NULL,
     slot              TEXT NOT NULL CHECK (slot IN (
                           'system', 'tone', 'fallback', 'capability',
-                          'in_world', 'meta', 'coldstart')),
+                          'in_world', 'meta', 'coldstart', 'lines')),
     body              TEXT NOT NULL,
     generator_version TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (subject, slot)
