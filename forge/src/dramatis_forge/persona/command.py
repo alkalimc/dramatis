@@ -43,6 +43,9 @@ class Result:
     stale: stale_mod.Result | None = None
 
 
+#: Calls in flight at once when the persona model is billed per request.
+REQUEST_JOBS = 3
+
 def counter_for(pack: Pack) -> tuple[Callable[[str], int], str]:
     """The pack's reference tokenizer, else the documented estimate."""
     count = load_counter(pack.tokenizer, pack_dir(pack.name)) if pack.tokenizer else None
@@ -67,9 +70,9 @@ def execute(
     counter: Callable[[str], int] | None = None,
     generator: generator_mod.Generator | None = None,
     progress: Callable[[str], None] | None = None,
-    jobs: int = 1,
+    jobs: int | None = None,
 ) -> Result:
-    if jobs < 1:
+    if jobs is not None and jobs < 1:
         raise UsageError("--jobs must be at least 1")
     if regenerate and not stale:
         raise UsageError("--regenerate goes with --stale", "use --force to redo a subject")
@@ -85,7 +88,11 @@ def execute(
                          'add under [roles]: persona = { profile = "<name>", '
                          'model = "<id>", reasoning = "high" }')
     params = Persona.load(params_path if params_path is not None else paths.home / "params.toml")
-    params = params.billed(endpoints.per_request(role))
+    per_request = endpoints.per_request(role)
+    params = params.billed(per_request)
+    if jobs is None:
+        # A request-billed proxy pays per call, not per token: overlap a few calls.
+        jobs = REQUEST_JOBS if per_request else 1
     gen = generator or generator_mod.load(pack)
     placeholder = user_placeholder(paths.folio)
     version = gen.version(model=role.model, reasoning=role.reasoning, params=params,
@@ -103,7 +110,7 @@ def execute(
         except EndpointsError as exc:
             raise UsageError(str(exc), exc.hint) from exc
         return Client(target, retries=params.retries, transport=transport,
-                      rate_limit_wait_s=params.rate_limit_wait_s)
+                      rate_limit_wait_s=params.rate_limit_wait_s, on_limit=progress)
 
     profile = endpoints.profile(role.profile)
     assert profile is not None  # checked when parsing

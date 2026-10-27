@@ -130,8 +130,11 @@ class Client:
                  wait: Callable[[Any], float] | None = None,
                  rate_limit_wait_s: float = 0.0, gate: Gate | None = None,
                  clock: Callable[[], float] | None = None,
-                 sleep: Callable[[float], None] | None = None) -> None:
+                 sleep: Callable[[float], None] | None = None,
+                 on_limit: Callable[[str], None] | None = None) -> None:
         self.target = target
+        #: Told about each rate-limit pause, so a long wait is visible in the run log.
+        self.on_limit = on_limit
         self.retries = max(1, retries)
         self.rate_limit_wait_s = rate_limit_wait_s
         self.gate = gate or Gate(clock, sleep)
@@ -186,6 +189,8 @@ class Client:
                             f"persona.rate_limit_wait_s {self.rate_limit_wait_s:.0f}: "
                             f"{exc.reason}", exc.raw, wasted) from exc
                     self.gate.hold(delay)
+                    if self.on_limit is not None:
+                        self.on_limit(f"rate limited (HTTP 429): every call waits {delay:.0f} s")
                     pause = False
                     continue
                 attempts += 1

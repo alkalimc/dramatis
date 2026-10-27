@@ -36,10 +36,11 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
                             "since they were written, in persona/STALE.md.")] = False,
         regenerate: Annotated[bool, typer.Option(
             "--regenerate", help="With --stale: call again for the stale ones only.")] = False,
-        jobs: Annotated[int, typer.Option(
+        jobs: Annotated[int | None, typer.Option(
             "--jobs", "-j", min=1,
-            help="Model calls in flight at once (default 1). Use 3 to 5 with a "
-                 "request-billed proxy; on HTTP 429 every worker waits together.")] = 1,
+            help="Model calls in flight at once. Default: 3 when the persona model is "
+                 "billed per request, else 1. On HTTP 429 every worker waits together.")]
+            = None,
         endpoints: Annotated[Path | None, typer.Option(
             "--endpoints", help="Endpoints file (default: $DRAMATIS_HOME/endpoints.toml).")]
             = None,
