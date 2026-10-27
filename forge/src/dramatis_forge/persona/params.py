@@ -17,11 +17,11 @@ from pathlib import Path
 class Persona:
     #: Upper bound on the generated `system_prompt` (and each host layer), in tokens of
     #: the pack's reference tokenizer, or of the documented estimate when it is absent.
-    prompt_tokens: int = 700
+    prompt_tokens: int = 400
     #: Upper bound on `capability_line`, in characters.
     capability_chars: int = 40
     #: Inclusive bounds on the number of `tone_rules`.
-    tone_rules: tuple[int, int] = (3, 8)
+    tone_rules: tuple[int, int] = (3, 6)
     #: Input budget for one person's whole material block, in tokens.
     material_tokens: int = 16000
     #: Share of `material_tokens` reserved for the sample of story lines, in tokens.

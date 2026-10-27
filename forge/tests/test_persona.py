@@ -444,7 +444,7 @@ def test_run_writes_passing_people_and_reports_the_rest(toy, paths, endpoints_fi
     # The prompt the model saw keeps the placeholder and states the budgets.
     sent = ep.bodies[0]["input"]
     assert PLACEHOLDER in sent[1]["content"] and PLACEHOLDER in sent[0]["content"]
-    assert "3 to 8" in sent[0]["content"] and "{" not in sent[0]["content"].split("Fields:")[1]
+    assert "3 to 6" in sent[0]["content"] and "{" not in sent[0]["content"].split("Fields:")[1]
 
     report = json.loads((paths.pack_dir / "persona" / "report.json").read_text())
     assert report["figures"] == {"persona.meta_leak": 1, "prescriptive.rate": round(1 / 6, 4)}
