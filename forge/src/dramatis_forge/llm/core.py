@@ -51,7 +51,7 @@ def complete(endpoint: Endpoint, request: Request, *,
     assert last is not None
     raise LlmError(f"gave up after {attempts} attempt(s): {last}", status=last.status,
                    raw=last.raw, retryable=True, attempts=attempts,
-                   reason=str(last)) from last
+                   reason=str(last), retry_after=last.retry_after) from last
 
 
 def _once(endpoint: Endpoint, request: Request,
@@ -60,22 +60,22 @@ def _once(endpoint: Endpoint, request: Request,
         return wire_messages.once(endpoint.model, endpoint.base_url, endpoint.key, request,
                                   transport)
     try:
-        status, raw = wire_openai.once(endpoint.protocol, endpoint.model, endpoint.base_url,
+        status, raw, wait = wire_openai.once(endpoint.protocol, endpoint.model, endpoint.base_url,
                                        endpoint.key, request, transport)
     except httpx.TransportError as exc:
         raise LlmError(f"transport: {exc}", retryable=True) from exc
-    _check(status, raw)
+    _check(status, raw, wait)
     if not isinstance(raw, dict):
         raise LlmError("response body is not a JSON object", raw=raw, retryable=True)
     return wire_openai.decode(raw, endpoint.protocol)
 
 
-def _check(status: int, raw: Any) -> None:
+def _check(status: int, raw: Any, retry_after: float | None = None) -> None:
     if status < 400:
         return
     message = wire_openai._get(raw, "error", "message") or ""
     raise LlmError(f"HTTP {status}: {message}", status=status, raw=raw,
-                   retryable=status in wire_openai.RETRY_STATUS)
+                   retryable=status in wire_openai.RETRY_STATUS, retry_after=retry_after)
 
 
 def models(endpoint: Endpoint, *, transport: httpx.BaseTransport | None = None) -> list[str]:

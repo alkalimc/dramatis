@@ -36,6 +36,10 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
                             "since they were written, in persona/STALE.md.")] = False,
         regenerate: Annotated[bool, typer.Option(
             "--regenerate", help="With --stale: call again for the stale ones only.")] = False,
+        jobs: Annotated[int, typer.Option(
+            "--jobs", "-j", min=1,
+            help="Model calls in flight at once (default 1). Use 3 to 5 with a "
+                 "request-billed proxy; on HTTP 429 every worker waits together.")] = 1,
         endpoints: Annotated[Path | None, typer.Option(
             "--endpoints", help="Endpoints file (default: $DRAMATIS_HOME/endpoints.toml).")]
             = None,
@@ -55,7 +59,7 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
         try:
             result = execute(pk, paths, probe=probe, only=only, force=force,
                              stale=stale, regenerate=regenerate, endpoints_path=endpoints,
-                             progress=tick)
+                             progress=tick, jobs=jobs)
         except UsageError as exc:
             die(str(exc), exc.hint)
             return

@@ -23,18 +23,25 @@ Figures (`persona.meta_leak`, `prescriptive.rate`) are measured over every subje
 current output, written or not: over written rows alone they would be zero by
 construction. They are written to the run report beside the folio, not into the
 folio's manifest, which the build fingerprint covers.
+
+With `jobs` above 1 the model calls of different subjects overlap, in threads. Only the
+call itself runs off the main thread; reading the folio, assembling material and every
+write (prompts rows, the raw cache) stay on the main thread, because a sqlite connection
+belongs to the thread that made it. Outcomes are reported in subject order, so the report
+is the one a serial run gives.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import gates, stale, store
-from .client import CallError, Client, Usage
+from .client import CallError, Client, Reply, Usage
 from .generator import Generator, fill
 from .material import HOST, Counter, Material, for_host, for_person, speech_units
 from .params import Persona
@@ -179,6 +186,8 @@ class Context:
     placeholder: str = ""
     force: bool = False
     progress: Callable[[str], None] | None = None
+    #: Subjects whose model call may be in flight at once.
+    jobs: int = 1
     _client: Client | None = None
 
     def client(self) -> Client:
@@ -213,8 +222,31 @@ def _material(ctx: Context, subject: str) -> Material:
     return for_person(ctx.db, subject, ctx.gen, ctx.params, ctx.count, ctx.sep)
 
 
+@dataclass
+class Pending:
+    """A subject that needs a model call: everything the call and the settling need."""
+
+    out: Outcome
+    system: str
+    user: str
+    schema: dict
+    host: bool
+    fields: tuple[str, ...]
+    judge: Callable[[dict[str, Any]], gates.Verdict]
+
+
 def one(ctx: Context, subject: str, lex: gates.Lexicons,
         skip: dict[str, str] | None = None) -> Outcome:
+    step = prepare(ctx, subject, lex, skip)
+    if isinstance(step, Outcome):
+        return step
+    return conclude(ctx, step, call(ctx, step))
+
+
+def prepare(ctx: Context, subject: str, lex: gates.Lexicons,
+            skip: dict[str, str] | None = None) -> Outcome | Pending:
+    """Everything up to the model call: an outcome when the subject needs none, else the
+    call to make. Touches the folio, so it runs on the thread that owns the connection."""
     host = subject == HOST
     fields = ctx.gen.fields(host)
     if skip and subject in skip:
@@ -247,16 +279,30 @@ def one(ctx: Context, subject: str, lex: gates.Lexicons,
         return out
     system, user = out.prompt = prompts_for(ctx, mat, host)
     ctx.say(f"{subject}: calling ({mat.tokens:,} material tokens)")
+    return Pending(out, system, user, ctx.gen.schema(host), host, fields, judge)
+
+
+def call(ctx: Context, p: Pending) -> Reply | CallError:
+    """The model call alone. Touches neither the folio nor the cache, so it may run on
+    any thread once the client exists (`Context.client` is not thread-safe to create)."""
     try:
-        reply = ctx.client().call(system, user, ctx.gen.schema(host))
+        return ctx.client().call(p.system, p.user, p.schema)
     except CallError as exc:
-        out.status, out.reasons, out.usage = ERROR, [f"call: {exc}"], exc.usage
+        return exc
+
+
+def conclude(ctx: Context, p: Pending, result: Reply | CallError) -> Outcome:
+    out = p.out
+    if isinstance(result, CallError):
+        out.status, out.reasons, out.usage = ERROR, [f"call: {result}"], result.usage
         return out
-    out.output, out.attempts = reply.output, reply.attempts
-    out.usage = reply.usage + reply.wasted
-    out.raw_path = ctx.cache.save(subject, ctx.version, reply.output, reply.raw,
-                                  out.usage.as_dict(), stale.source_of(mat), out.lines)
-    return _settle(ctx, out, judge, fields)
+    out.output, out.attempts = result.output, result.attempts
+    out.usage = result.usage + result.wasted
+    assert out.material is not None
+    out.raw_path = ctx.cache.save(out.subject, ctx.version, result.output, result.raw,
+                                  out.usage.as_dict(), stale.source_of(out.material),
+                                  out.lines)
+    return _settle(ctx, out, p.judge, p.fields)
 
 
 def _existing(path: Path) -> Path | None:
@@ -275,18 +321,60 @@ def _settle(ctx: Context, out: Outcome, judge: Callable[[dict], gates.Verdict],
     return out
 
 
+def _pooled(ctx: Context, subjects: list[str], lex: gates.Lexicons, skip: dict[str, str],
+            outcomes: dict[int, Outcome], finish: Callable[[Outcome], None]) -> None:
+    """Prepare and settle on this thread; only the calls go to the pool, `jobs` at a time."""
+    flying: dict[Future, tuple[int, Pending]] = {}
+
+    def settle() -> None:
+        ready, _ = wait(flying, return_when=FIRST_COMPLETED)
+        for fut in ready:
+            i, pending = flying.pop(fut)
+            outcomes[i] = conclude(ctx, pending, fut.result())
+            finish(outcomes[i])
+
+    pool = ThreadPoolExecutor(max_workers=ctx.jobs, thread_name_prefix="persona")
+    try:
+        for i, subject in enumerate(subjects):
+            step = prepare(ctx, subject, lex, skip)
+            if isinstance(step, Outcome):
+                outcomes[i] = step
+                finish(step)
+                continue
+            ctx.client()  # made here: a missing key must fail the run, not a worker
+            while len(flying) >= ctx.jobs:
+                settle()
+            flying[pool.submit(call, ctx, step)] = (i, step)
+        while flying:
+            settle()
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
 def run(ctx: Context, subjects: list[str], counter_name: str) -> Report:
     rep = Report(version=ctx.version, counter=counter_name, placeholder=ctx.placeholder)
     lex = gates.Lexicons(ctx.gen, ctx.placeholder)
     skip = ineligible(ctx.db, ctx.params)
+    done = 0
+
+    def finish(out: Outcome) -> None:
+        nonlocal done
+        done += 1
+        ctx.say(f"[{done}/{len(subjects)}] {out.subject}: {out.status}"
+                + (f" — {out.reasons[0]}" if out.reasons else ""))
+
+    # Outcomes by position, so completion order never shows in the report.
+    outcomes: dict[int, Outcome] = {}
     try:
-        for i, subject in enumerate(subjects, 1):
-            out = one(ctx, subject, lex, skip)
-            rep.outcomes.append(out)
-            ctx.say(f"[{i}/{len(subjects)}] {subject}: {out.status}"
-                    + (f" — {out.reasons[0]}" if out.reasons else ""))
+        if ctx.jobs <= 1:
+            for i, subject in enumerate(subjects):
+                outcomes[i] = one(ctx, subject, lex, skip)
+                finish(outcomes[i])
+        else:
+            _pooled(ctx, subjects, lex, skip, outcomes, finish)
     finally:
         ctx.close()
+    rep.outcomes = [outcomes[i] for i in range(len(subjects))]
     have = {r[0] for r in ctx.db.execute("SELECT DISTINCT subject FROM prompts WHERE slot='system'")}
     rep.missing = [p for p in roster(ctx.db) if p not in have]
     return rep

@@ -101,7 +101,8 @@ class LlmError(Exception):
     body, if any."""
 
     def __init__(self, message: str, *, status: int | None = None, raw: Any = None,
-                 retryable: bool = False, attempts: int = 1, reason: str = "") -> None:
+                 retryable: bool = False, attempts: int = 1, reason: str = "",
+                 retry_after: float | None = None) -> None:
         super().__init__(message)
         #: The last failure alone, without the attempt count `message` may carry.
         self.reason = reason or message
@@ -109,3 +110,5 @@ class LlmError(Exception):
         self.raw = raw
         self.retryable = retryable
         self.attempts = attempts
+        #: Seconds the server asked to wait (`Retry-After`), when it said.
+        self.retry_after = retry_after

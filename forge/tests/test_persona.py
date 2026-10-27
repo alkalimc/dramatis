@@ -227,7 +227,7 @@ def test_transient_failures_retry_and_are_billed():
 
 
 def test_retries_are_bounded():
-    ep = FakeEndpoint((429, {"error": {"message": "slow down"}}))
+    ep = FakeEndpoint((503, {"error": {"message": "slow down"}}))
     with client(ep, "chat", retries=2) as c, pytest.raises(CallError, match="2 attempt"):
         c.call("s", "u", GEN.schema(False))
     assert len(ep.requests) == 2
