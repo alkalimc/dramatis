@@ -31,8 +31,9 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.output",
-        "A line wrapped in {open} and {close} describes the speaker's expression or action \
-         in the third person; every other line is speech. Speak as in person: usually one to \
+        "A line wrapped in {open} and {close} describes only the speaker's own expression or \
+         action, in the third person, and calls the other side {user}; every other line is \
+         speech. Speak as in person: usually one to \
          three sentences, longer only when the moment needs it. Add a scene line only when \
          it adds something. Do not end every reply with a question. The speaker's name is \
          never written before a reply.",
