@@ -58,7 +58,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.context.turns",
         "[{date} {time} · {turns} turns left on this request]",
     ),
-    ("harness.nothing_found", "There is nothing reliable to go on here."),
+    (
+        "harness.nothing_found",
+        "There is nothing reliable to go on here.",
+    ),
     (
         "harness.join_available",
         "A colleague may know more: request_join can bring one in.",
