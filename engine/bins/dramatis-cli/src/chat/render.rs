@@ -147,17 +147,26 @@ fn cite_end(text: &str, start: usize) -> Option<usize> {
 }
 
 /// A whole message, rendered: speech as written minus citation marks, scene lines styled.
-/// Every line ends with a newline.
+/// Every line ends with a newline. A line that held nothing but marks is dropped, and so
+/// are the blank lines left at the end, so a closing list of marks leaves no gap.
 pub fn message(text: &str, marker: &Marker, style: Style) -> String {
-    let mut out = String::new();
+    let mut lines: Vec<String> = Vec::new();
     for line in text.lines() {
         match marker.inner(line) {
-            Some(inner) => out.push_str(&style.scene(inner)),
-            None => out.push_str(&without_cites(line)),
+            Some(inner) => lines.push(style.scene(inner)),
+            None => {
+                let speech = without_cites(line);
+                if speech.trim().is_empty() && !line.trim().is_empty() {
+                    continue;
+                }
+                lines.push(speech);
+            }
         }
-        out.push('\n');
     }
-    out
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.iter().map(|l| format!("{l}\n")).collect()
 }
 
 /// Renders a reply as its deltas arrive. Speech is written as soon as it cannot change
@@ -171,6 +180,9 @@ pub struct Streamer {
     printed: usize,
     /// Whether the cursor sits at the start of a line. A reply starts after its name.
     col0: bool,
+    /// Blank lines seen but not yet written: they separate paragraphs, so they are only
+    /// written once more text follows and never trail the reply.
+    blanks: usize,
 }
 
 impl Streamer {
@@ -181,6 +193,7 @@ impl Streamer {
             line: String::new(),
             printed: 0,
             col0: false,
+            blanks: 0,
         }
     }
 
@@ -207,7 +220,8 @@ impl Streamer {
         let mut out = String::new();
         if !self.line.is_empty() {
             out.push_str(&self.complete());
-        } else if !self.col0 {
+        }
+        if !self.col0 {
             out.push('\n');
             self.col0 = true;
         }
@@ -217,14 +231,29 @@ impl Streamer {
     fn complete(&mut self) -> String {
         let line = std::mem::take(&mut self.line);
         let printed = std::mem::take(&mut self.printed);
-        self.col0 = true;
         if printed == 0
             && let Some(inner) = self.marker.inner(&line)
         {
-            return format!("{}\n", self.style.scene(inner));
+            return self.write(&format!("{}\n", self.style.scene(inner)));
         }
         let speech = without_cites(&line);
-        format!("{}\n", speech.get(printed..).unwrap_or_default())
+        let rest = speech.get(printed..).unwrap_or_default();
+        if printed == 0 && speech.trim().is_empty() {
+            // A blank line waits for what follows; a line of marks alone is dropped.
+            if line.trim().is_empty() {
+                self.blanks += 1;
+            }
+            return String::new();
+        }
+        self.write(&format!("{rest}\n"))
+    }
+
+    /// `text` preceded by the blank lines held back, marking the cursor position.
+    fn write(&mut self, text: &str) -> String {
+        let mut out = "\n".repeat(std::mem::take(&mut self.blanks));
+        out.push_str(text);
+        self.col0 = text.ends_with('\n');
+        out
     }
 
     fn partial(&mut self) -> String {
@@ -241,10 +270,10 @@ impl Streamer {
         let speech = without_cites(safe);
         let out = speech.get(self.printed..).unwrap_or_default().to_owned();
         self.printed = speech.len().max(self.printed);
-        if !out.is_empty() {
-            self.col0 = false;
+        if out.is_empty() {
+            return out;
         }
-        out
+        self.write(&out)
     }
 }
 
@@ -340,5 +369,18 @@ mod tests {
         let mut s = Streamer::new(marker(), Style::PLAIN);
         assert_eq!(s.push("no newline [#a]"), "no newline");
         assert_eq!(s.finish(), "\n");
+    }
+
+    #[test]
+    fn paragraphs_stay_apart_and_a_closing_marks_line_leaves_no_gap() {
+        let text = "First part.\n\nSecond part.\n\n[#u1, #u2]\n";
+        let whole = message(text, &marker(), Style::PLAIN);
+        assert_eq!(whole, "First part.\n\nSecond part.\n");
+        for size in 1..12 {
+            assert_eq!(stream(text, size), whole, "size {size}");
+            assert_eq!(stream(text.trim_end(), size), whole, "trimmed, size {size}");
+        }
+        assert_eq!(message("[#a]", &marker(), Style::PLAIN), "");
+        assert_eq!(stream("[#a]", 2), "\n");
     }
 }
