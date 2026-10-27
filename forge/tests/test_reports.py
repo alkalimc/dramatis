@@ -221,10 +221,11 @@ def test_lore_units_never_share_a_place(built):
 
 def test_name_alias_to_an_unmentioned_target_is_dropped(built):
     rows = [("a", "Alice", "term"), ("b", "lighthouse", "term"), ("c", "Nowhere Land", "term"),
-            ("d", "Nowhere Land", "redirect"), ("e", "Nowhere Land", "realname")]
+            ("d", "Nowhere Land", "redirect"), ("e", "Nowhere Land", "realname"),
+            ("f", "Chapter 1", "term")]
     with Folio(built.folio, readonly=True) as f:
         kept = corpus._drop_unreached_names(corpus.CorpusReport(), f, rows)
-    assert kept == rows[:2] + [rows[3]]
+    assert kept == rows[:2] + [rows[3], rows[5]]
 
 
 def test_say_prefers_pack_text_then_framework_default(pack):

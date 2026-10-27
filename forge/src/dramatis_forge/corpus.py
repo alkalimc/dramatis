@@ -508,8 +508,10 @@ _TABLE_KINDS = (PERSON_NAME_KINDS[0], TERM_ALIAS, TERM_EXACT_ALIAS)
 def _drop_unreached_names(
     rep: CorpusReport, folio: Folio, rows: list[tuple[str, str, str]]
 ) -> list[tuple[str, str, str]]:
-    """Drop a table-derived alias whose target is neither a person nor written in any unit."""
+    """Drop a table-derived alias whose target is neither a person, a page with units, nor
+    written in any unit."""
     people = {r[0] for r in folio.db.execute("SELECT person_id FROM persons")}
+    people |= {r[0] for r in folio.db.execute("SELECT DISTINCT page FROM chunks")}
     corpus = "\n".join(f"{h}\n{t}" for h, t in folio.db.execute("SELECT header,text FROM chunks"))
     reached: dict[str, bool] = {}
     kept = []
