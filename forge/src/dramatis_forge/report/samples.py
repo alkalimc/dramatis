@@ -31,7 +31,7 @@ from ..archive import Archive
 from ..guards import HIGH
 from ..normalize import YIELD_DETAIL
 from ..pack import Pack
-from ..text import table_head
+from ..text import cell, table_head
 from . import inspect as inspect_mod
 
 #: Example pages quoted per residue pattern in the formatting-quality section.
@@ -271,10 +271,10 @@ def _quality(archive: Archive, pack: Pack) -> list[str]:
 
 def _row(pack: Pack, title: str, why: str, written: list[Path], outdir: Path) -> str:
     if not written:
-        return f"| {title} | {why} | — |"
+        return f"| {cell(title)} | {cell(why)} | — |"
     rel = [p.relative_to(outdir).as_posix() for p in written]
     files = pack.say("samples.files", source=rel[0], records=rel[1], archived=rel[2])
-    return f"| {title} | {why.replace('|', '/')} | {files} |"
+    return f"| {cell(title)} | {cell(why)} | {files} |"
 
 
 def _prune(outdir: Path, kept: set[Path]) -> None:

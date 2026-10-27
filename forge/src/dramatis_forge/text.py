@@ -11,6 +11,7 @@ Values are `str.format` templates. A pack may reorder or drop fields, but not in
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 TEXT: Mapping[str, str] = {
@@ -151,6 +152,13 @@ TEXT: Mapping[str, str] = {
     "samples.why.alias": "alias-producing page",
     "samples.why.multi_form": "first person with several forms",
 }
+
+
+def cell(value: object) -> str:
+    """Text for one Markdown table cell: a line break becomes ` / ` and `|` is escaped, so a
+    row never spans lines and never gains a column."""
+    text = re.sub(r"\s*\n\s*", " / ", str(value).strip())
+    return text.replace("|", "\\|")
 
 
 def table_head(columns: str) -> list[str]:

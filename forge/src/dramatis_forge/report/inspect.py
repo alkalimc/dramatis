@@ -22,7 +22,7 @@ from pathlib import Path
 from ..archive import Archive
 from ..chunk import reply_text
 from ..pack import Pack
-from ..text import table_head
+from ..text import cell, table_head
 
 SAFE = re.compile(r"[^\w.-]")
 #: How many rows of a large per-page listing to show.
@@ -278,7 +278,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
               *table_head("|".join([say("inspect.term"), *labels, say("inspect.category")]))]
         for t in rec["terms"]:
             cells = [t["term"], *(t["translations"].get(k, "") for k in labels), t["category"]]
-            L.append("| " + " | ".join(cells) + " |")
+            L.append("| " + " | ".join(cell(c) for c in cells) + " |")
         L.append("")
 
     if "char_refs" in rec:
@@ -291,7 +291,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
     if "aliases" in rec:
         L += [say("inspect.aliases", shown=len(rec["aliases"]), total=rec["_alias_total"]), "",
               say("inspect.aliases_note"), "", *table_head(say("inspect.alias_head"))]
-        L += [f"| {a['alias']} | {a['target']} |" for a in rec["aliases"]]
+        L += [f"| {cell(a['alias'])} | {cell(a['target'])} |" for a in rec["aliases"]]
         L.append("")
 
     if "guard_findings" in rec:

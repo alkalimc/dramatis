@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import json
 
 import pytest
@@ -71,6 +73,20 @@ def test_a_transcluded_body_is_stored_once_and_shown_from_both_pages(tmp_path, p
         md = inspect.render(pack, "Tale/data", {"wikitext": "x", "revid": 2},
                             inspect.collect(a, "Tale/data", pack))
     assert "`Tale/data`" in md
+
+
+def test_a_table_row_never_breaks_across_lines(pack):
+    rec = {"terms": [{"term": "Team A4", "category": "x|y",
+                      "translations": {"en": "Op Team A4\nDetachment 4",
+                                       "ja": "p|q"}},
+                     {"term": "B", "category": "", "translations": {"en": "plain"}}],
+           "aliases": [{"alias": "a\nb", "target": "t|u"}], "_alias_total": 1}
+    md = inspect.render(pack, "T", {"wikitext": "x", "revid": 1}, rec).split("\n")
+    rows = [ln for ln in md if ln.startswith("|")]
+    terms = rows[:4]
+    assert "Op Team A4 / Detachment 4" in terms[2]
+    assert len({len(re.findall(r"(?<!\\)\|", r)) for r in terms}) == 1
+    assert all(r.endswith("|") for r in rows)
 
 
 def test_voice_variants_share_a_slot(tmp_path):
