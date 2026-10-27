@@ -33,8 +33,8 @@ class Persona:
     #: far more of a person's material than a sample. Still bounded: a request-billed proxy
     #: may cap the request in bytes (the local Gemini one takes 128,000), and Chinese
     #: material runs about five bytes per counted token with the prompt around it.
-    request_material_tokens: int = 18000
-    request_story_tokens: int = 9000
+    request_material_tokens: int = 12000
+    request_story_tokens: int = 6000
     #: Own lines of a person kept as tone references: how many, the budget for all of
     #: them together (a line may take at most a quarter of it), and the shortest line
     #: worth keeping, in tokens. They are picked from the material, not generated.
