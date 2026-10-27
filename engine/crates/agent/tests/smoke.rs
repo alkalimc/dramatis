@@ -9,8 +9,9 @@
 //!
 //! The chat role's key is read from the system keychain (service `dramatis`, account
 //! `profile.<name>`). `DRAMATIS_SMOKE_PERSON` picks who to talk to (default: the first
-//! person with a persona). The world database is a throwaway in memory. It prints one
-//! meter row per call; from the second call on the cached input must be non-zero.
+//! person with a persona) and `DRAMATIS_SMOKE_SAY` what the user says, one message per
+//! line. The world database is a throwaway in memory. It prints one meter row per call;
+//! from the second call on the cached input must be non-zero.
 
 use std::sync::Arc;
 
@@ -47,11 +48,13 @@ async fn two_turns_and_a_wrapup_hit_the_cache() {
             .to_owned()
     });
     let ch = agent.open_direct(&world::PersonId(person.clone())).unwrap();
-    for text in ["Hello. How are you today?", "What did you do this morning?"] {
+    let say = std::env::var("DRAMATIS_SMOKE_SAY")
+        .unwrap_or_else(|_| "Hello. How are you today?\nWhat did you do this morning?".into());
+    for text in say.lines().filter(|l| !l.trim().is_empty()) {
         agent.send(ch, text, None).await.unwrap();
     }
     agent.wrapup(ch).await.unwrap();
-    for m in agent.history(ch, None, 10).unwrap() {
+    for m in agent.history(ch, None, 50).unwrap() {
         println!("{:?}: {}", m.author, m.text);
     }
     let rows: Vec<(String, i64, i64, i64)> = agent.with_world(|w| {
