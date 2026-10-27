@@ -23,8 +23,10 @@ silently pass.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 DEFAULT_SEED = 1
 DEFAULT_TEST_SHARE = 0.2
@@ -97,6 +99,14 @@ def assign(page_persons: Mapping[str, set[str]], *, seed: int = DEFAULT_SEED,
     train_persons = {x for p in train for x in page_persons[p]} - test_persons
     return Split(mode, seed, share, frozenset(train), frozenset(test), frozenset(test_persons),
                  frozenset(train_persons))
+
+
+def load(path: Path) -> Split:
+    """Read back a `split.json` written by `pairs`."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return Split(raw["mode"], raw["seed"], raw["test_share"],
+                 frozenset(raw["pages"]["train"]), frozenset(raw["pages"]["test"]),
+                 frozenset(raw["persons"]["test"]), frozenset(raw["persons"]["train"]))
 
 
 def clean_for_train(split: Split, page: str, persons: Iterable[str]) -> bool:

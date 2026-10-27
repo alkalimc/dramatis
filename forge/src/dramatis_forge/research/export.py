@@ -93,7 +93,7 @@ def eval_query(c: source.Corpus, p: Pair) -> dict:
     }
 
 
-def _write_lines(path: Path, rows: list[dict]) -> None:
+def write_lines(path: Path, rows: list[dict]) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(pairs_mod.dumps(row) + "\n")
@@ -110,7 +110,7 @@ def merge_units(outdir: Path, rows: list[dict]) -> int:
     have = {r["id"]: r for r in read_lines(path)} if path.exists() else {}
     for r in rows:
         have[r["id"]] = r
-    _write_lines(path, [have[k] for k in sorted(have)])
+    write_lines(path, [have[k] for k in sorted(have)])
     return len(have)
 
 
@@ -141,9 +141,9 @@ def run(folio_path: Path, outdir: Path, *, seed: int = split_mod.DEFAULT_SEED,
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / UNITS).unlink(missing_ok=True)
     merge_units(outdir, [units[u] for u in sorted(units, key=lambda u: c.units[u].ord)])
-    _write_lines(outdir / TRAIN, [p.as_dict() for p in train])
-    _write_lines(outdir / TEST, [p.as_dict() for p in test])
-    _write_lines(outdir / EVAL, sorted(evals, key=lambda q: q["qid"]))
+    write_lines(outdir / TRAIN, [p.as_dict() for p in train])
+    write_lines(outdir / TEST, [p.as_dict() for p in test])
+    write_lines(outdir / EVAL, sorted(evals, key=lambda q: q["qid"]))
     info = sp.as_dict()
     info["folio"] = {"fingerprint": c.fingerprint, "chunks": c.chunk_count}
     (outdir / SPLIT).write_text(json.dumps(info, ensure_ascii=False, indent=1) + "\n",

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from dramatis_forge import segment
 from dramatis_forge.folio import Folio
 
 N = 24
@@ -70,6 +71,10 @@ def build(path: Path, *, extra_page: bool = False) -> Path:
         f.add_unit_persons(links)
         f.write_persons(persons)
         f.write_aliases(aliases)
+        seg = segment.load("bigram")
+        f.add_fts([(r[1], seg(f"{r[6]}\n{r[7]}")) for r in rows])
+        f.set_meta("segmenter", "char-bigram/1")
+        f.set_meta("stopwords", [])
         f.set_meta("template_shapes", SHAPES)
         f.set_meta("build_fingerprint", "sha256:toy")
         f.set_meta("chunk_count", len(rows))
