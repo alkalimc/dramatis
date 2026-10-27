@@ -37,7 +37,9 @@ MAX_ALSO = 50
 
 HOW = {
     "alias": "other entities with the same name (homonym), then entities whose names "
-             "share the most character bigrams with the alias (lookalike)",
+             "share the most character bigrams with the alias (lookalike), then other entities "
+             "named by the same kind of alias, in a stable hash order (same_kind_entity; "
+             "the weakest kind, so it fills only what the first two leave)",
     "disambiguation": "the other candidates on the same disambiguation page (sibling)",
     "section": "the other sections of the same page, nearest in document order first "
                "(sibling_section)",

@@ -68,6 +68,11 @@ def test_alias_negatives_are_homonyms_first(folio, tmp_path):
     c = corpus(folio)
     raw = [r for r in pairs.alias(c) if r.query == "Twin" and r.positive == f"card:{pid(1)}"]
     assert raw and raw[0].candidates[0] == (f"card:{pid(2)}", "homonym")
+    # Every alias pair has negatives; lookalikes follow the homonyms. (Same-kind entities
+    # come last and only fill what is not already named by the first two kinds.)
+    everyone = list(pairs.alias(c))
+    assert everyone and all(r.candidates for r in everyone)
+    assert {k for r in everyone for _, k in r.candidates} >= {"homonym", "lookalike"}
 
 
 def test_disambiguation_negatives_are_siblings(folio):

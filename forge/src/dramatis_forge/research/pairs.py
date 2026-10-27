@@ -140,6 +140,13 @@ def alias(c: Corpus) -> Iterable[Raw]:
                 u = c.primary_unit(other_t)
                 if u:
                     cands.append((u, "lookalike"))
+            # Last resort so a pair is not left without any negative: other entities that
+            # the same kind of alias points at. Weaker than the two kinds above (nothing
+            # says they are confusable), so it comes last and carries its own label.
+            for other_t in _rank(a, sorted({x for _, x in rows} - {t}))[:_POOL]:
+                u = c.primary_unit(other_t)
+                if u:
+                    cands.append((u, "same_kind_entity"))
             also = [x for x in _entity_units(c, t) if x != pos]
             yield Raw(a, pos, "alias", kind, (t,) if t in c.persons else (),
                       _dedupe(cands, {pos}), also)
