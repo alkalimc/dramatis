@@ -21,6 +21,7 @@
 //! price_in_cached = 0.1                #   ratios to price_in are used
 //! price_in_cache_write = 1.25          # messages only: writing a cache entry
 //! price_out = 4.0
+//! billing = "token"                    # "token" (default) | "request": a flat fee per call
 //!
 //! [roles]                              # absent = no chat model: the app runs as a library
 //! chat = { profile = "example", model = "model-a" }
@@ -30,6 +31,11 @@
 //! ```
 //!
 //! `host` is the model of the in-world terminal assistant; absent, the host uses `chat`.
+//!
+//! `billing = "request"` marks a model billed per call whatever its size: the app never
+//! rolls a segment for token cost, records no quota points for its calls (a request is not
+//! a token price), and the offline persona generator sends its larger material budget.
+//! The key is edited in the file only.
 //!
 //! Absent optional keys stay absent when written back (TOML has no null).
 //!
@@ -115,6 +121,25 @@ pub struct Model {
     pub price_in_cache_write: Option<f64>,
     #[serde(default)]
     pub price_out: Option<f64>,
+    /// How the model is charged. Absent: per token.
+    #[serde(default)]
+    pub billing: Option<Billing>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Billing {
+    /// By input and output tokens, at the model's prices.
+    Token,
+    /// A fixed fee per call; call size costs nothing.
+    Request,
+}
+
+impl Model {
+    /// Whether a call costs the same whatever it carries.
+    pub fn per_request(&self) -> bool {
+        self.billing == Some(Billing::Request)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -315,6 +340,18 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
     }
 
     #[test]
+    fn billing_defaults_to_tokens() {
+        let e = Endpoints::from_toml(
+            "[[profile]]\nname='a'\nbase_url='x'\nwire_api='chat'\n\
+             [[profile.model]]\nid='t'\n[[profile.model]]\nid='r'\nbilling='request'\n",
+        )
+        .unwrap();
+        let m = &e.profiles[0].models;
+        assert!(!m[0].per_request() && m[1].per_request());
+        assert!(Endpoints::from_toml("[[profile]]\nname='a'\nbase_url='x'\nwire_api='chat'\n[[profile.model]]\nid='t'\nbilling='free'\n").is_err());
+    }
+
+    #[test]
     fn round_trips() {
         let e = Endpoints::from_toml(MAINTAINER_SHAPE).unwrap();
         let text = e.to_toml().unwrap();
@@ -338,6 +375,7 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
                         price_in_cached: Some(0.25),
                         price_in_cache_write: Some(1.25),
                         price_out: Some(4.0),
+                        billing: Some(Billing::Request),
                     });
                     p
                 })

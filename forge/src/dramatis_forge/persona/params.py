@@ -28,6 +28,11 @@ class Persona:
     material_tokens: int = 5000
     #: Share of `material_tokens` reserved for the sample of story lines, in tokens.
     story_tokens: int = 1500
+    #: The same two budgets when the persona model is billed per request, whatever the
+    #: size of the call (`billing = "request"` in the endpoints file): one call carries
+    #: a person's whole material instead of a sample of it.
+    request_material_tokens: int = 60000
+    request_story_tokens: int = 30000
     #: Own lines of a person kept as tone references: how many, the budget for all of
     #: them together (a line may take at most a quarter of it), and the shortest line
     #: worth keeping, in tokens. They are picked from the material, not generated.
@@ -48,6 +53,13 @@ class Persona:
         return {"prompt_tokens": self.prompt_tokens, "prompt_chars": self.prompt_tokens,
                 "capability_chars": self.capability_chars,
                 "tone_min": self.tone_rules[0], "tone_max": self.tone_rules[1]}
+
+    def billed(self, per_request: bool) -> Persona:
+        """The parameters a run uses: the larger input budgets under per-request billing."""
+        if not per_request:
+            return self
+        return replace(self, material_tokens=self.request_material_tokens,
+                       story_tokens=self.request_story_tokens)
 
     @classmethod
     def load(cls, path: Path | None) -> Persona:

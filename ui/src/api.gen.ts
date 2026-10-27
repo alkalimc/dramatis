@@ -168,6 +168,12 @@ export type Author = { kind: "user" } |
 /**  The in-world assistant. */
 { kind: "host" } | { kind: "person"; id: PersonId };
 
+export type Billing = 
+/**  By input and output tokens, at the model's prices. */
+"token" | 
+/**  A fixed fee per call; call size costs nothing. */
+"request";
+
 /**  The call shapes spending is broken down by. */
 export type CallShape = "direct" | "group" | "opening" | "ask" | "host" | "wrapup";
 
@@ -394,6 +400,8 @@ export type Model = {
 	/**  Writing a cache entry (Anthropic-style wire); absent: the `cost.w` parameter. */
 	price_in_cache_write?: number | null,
 	price_out?: number | null,
+	/**  How the model is charged. Absent: per token. */
+	billing?: Billing | null,
 };
 
 export type MonthDay = {

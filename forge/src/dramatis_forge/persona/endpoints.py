@@ -54,6 +54,11 @@ class Model:
     price_in_cached: float | None = None
     price_in_cache_write: float | None = None
     price_out: float | None = None
+    #: "token" (default) or "request": a flat fee per call whatever its size.
+    billing: str | None = None
+
+
+BILLINGS = ("token", "request")
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,13 @@ class Endpoints:
 
     def profile(self, name: str) -> Profile | None:
         return next((p for p in self.profiles if p.name == name), None)
+
+    def per_request(self, role: Role) -> bool:
+        """Whether the model a role names is billed per call. A model the profile does
+        not list is billed per token."""
+        profile = self.profile(role.profile)
+        model = next((m for m in profile.models if m.id == role.model), None) if profile else None
+        return model is not None and model.billing == "request"
 
     @classmethod
     def from_toml(cls, text: str) -> Endpoints:
@@ -153,6 +165,14 @@ def _opt(table: dict, key: str, kind: type | tuple[type, ...], where: str) -> An
     return value
 
 
+def _billing(table: dict, where: str) -> str | None:
+    value = _opt(table, "billing", str, where)
+    if value is not None and value not in BILLINGS:
+        raise EndpointsError(f"endpoints file: `billing` in {where} is `{value}`; "
+                             f"expected one of {', '.join(BILLINGS)}")
+    return value
+
+
 def _profile(raw: Any) -> Profile:
     _only(raw, {"name", "base_url", "wire_api", "model"}, "[[profile]]")
     name = _need(raw, "name", str, "[[profile]]")
@@ -174,6 +194,7 @@ def _profile(raw: Any) -> Profile:
             price_in_cached=_opt(m, "price_in_cached", (int, float), where),
             price_in_cache_write=_opt(m, "price_in_cache_write", (int, float), where),
             price_out=_opt(m, "price_out", (int, float), where),
+            billing=_billing(m, where),
         ))
     return Profile(name=name, base_url=_need(raw, "base_url", str, where), wire_api=wire,
                    models=tuple(models))

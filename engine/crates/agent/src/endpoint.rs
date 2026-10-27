@@ -58,6 +58,11 @@ impl ChatRole {
         self.model.forced_tool == Some(true)
     }
 
+    /// Whether this role's model is billed per call rather than per token.
+    pub fn per_request(&self) -> bool {
+        self.model.per_request()
+    }
+
     pub fn prices(&self) -> Option<Prices> {
         match (
             self.model.price_in,
