@@ -422,6 +422,7 @@ pub fn visible_text(raw: &str, scene: (&str, &str)) -> String {
         rest = "";
     }
     out.push_str(rest);
+    let out = drop_abandoned_draft(&out, scene);
     let lines: Vec<&str> = out.lines().collect();
     let mut kept: Vec<&str> = Vec::new();
     let mut i = 0;
@@ -484,6 +485,52 @@ fn is_empty_scene(line: &str, (open, close): (&str, &str)) -> bool {
             .is_some_and(|inner| inner.trim().is_empty())
 }
 
+/// Marks that end a sentence: a scene line after one of these is a new beat, not a
+/// restart.
+const SENTENCE_END: &[char] = &[
+    '.', '!', '?', ';', '~', '"', ')', '\u{3002}', '\u{ff01}', '\u{ff1f}', '\u{ff1b}', '\u{2026}',
+    '\u{ff5e}', '\u{201d}', '\u{300d}', '\u{300f}', '\u{ff09}',
+];
+
+/// How far a scene line reaches: it opens the text, closes on the same line, and a
+/// blank line (or the end) follows, as an opening does. Returns the length through the
+/// closing mark.
+fn scene_line_len(s: &str, (open, close): (&str, &str)) -> Option<usize> {
+    let inner = s.strip_prefix(open)?;
+    let end = inner.find(close)?;
+    if inner[..end].contains('\n') {
+        return None;
+    }
+    let rest = &inner[end + close.len()..];
+    let mut lines = rest.splitn(3, '\n');
+    let tail_blank = lines.next()?.trim().is_empty();
+    let next_blank = lines.next().is_none_or(|l| l.trim().is_empty());
+    (tail_blank && next_blank).then_some(open.len() + end + close.len())
+}
+
+/// A model sometimes drops a draft mid-sentence and starts the reply over, with a fresh
+/// scene line glued to the cut-off words. When the reply opened with a scene line and
+/// such a scene line (alone on its line, followed by a blank line) follows words that do
+/// not end a sentence, everything before the restart goes. A scene mark after a full
+/// stop, one with words after it, or a reply whose only scene line is mid-line is left
+/// alone.
+fn drop_abandoned_draft<'a>(text: &'a str, scene: (&str, &str)) -> &'a str {
+    let (open, close) = scene;
+    let text = text.trim_start();
+    if open.is_empty() || close.is_empty() || scene_line_len(text, scene).is_none() {
+        return text;
+    }
+    let restart = text.rmatch_indices(open).map(|(i, _)| i).find(|&i| {
+        let before = text[..i].trim_end_matches([' ', '\t']);
+        i > 0
+            && !before.is_empty()
+            && !before.ends_with('\n')
+            && !before.ends_with(SENTENCE_END)
+            && scene_line_len(&text[i..], scene).is_some()
+    });
+    restart.map_or(text, |i| &text[i..])
+}
+
 /// A line that is one self-closing markup tag, such as a chat app's follow-up suggestion
 /// (`<FollowUp label="…"/>`) a proxy passes through. Never speech.
 fn is_markup_line(line: &str) -> bool {
@@ -522,6 +569,47 @@ mod tests {
         visible_text(raw, ("(", ")"))
     }
     use std::collections::BTreeMap;
+
+    const FW: (&str, &str) = ("\u{ff08}", "\u{ff09}");
+
+    #[test]
+    fn a_restarted_opening_drops_the_abandoned_draft() {
+        // Full-width marks, a cut-off sentence, then the scene line again.
+        let raw = "\u{ff08}takes the report\u{2026}\u{ff09}\n\nThe small drift in this figure \
+                   suggests you did not come at night only to check numbers and hear me\
+                   \u{ff08}takes the report from the doctor and leafs through it\u{ff09}\n\n\
+                   Sit down, Doctor.";
+        assert_eq!(
+            visible_text(raw, FW),
+            "\u{ff08}takes the report from the doctor and leafs through it\u{ff09}\n\nSit down, Doctor."
+        );
+        assert_eq!(
+            visible("(waves)\n\nWell, I was about to say(waves again)\n\nHello."),
+            "(waves again)\n\nHello."
+        );
+    }
+
+    #[test]
+    fn a_scene_line_that_is_not_a_restart_is_kept() {
+        // After a full stop it is a new beat.
+        let a = "(nods)\n\nFine. (smiles)\n\nGo on.";
+        assert_eq!(visible(a), a);
+        // The only scene line comes mid-line: nothing to restart.
+        let b = "I was about to say(smiles)\n\nGo on.";
+        assert_eq!(visible(b), b);
+        // Words follow the mark: an aside, not a new draft.
+        let c = "(nods)\n\nWell, I was(smiles) about to say it.";
+        assert_eq!(visible(c), c);
+        // Ordinary parentheses are not scene marks.
+        let d = "(nods)\n\nIt was fine (mostly) and then(more) I left.";
+        assert_eq!(
+            visible(d),
+            "(nods)\n\nIt was fine (mostly) and then(more) I left."
+        );
+        // A mark at the start of a later line is not mid-line.
+        let e = "(nods)\n\nWell, I was\n(smiles)\n\nGo on.";
+        assert_eq!(visible(e), e);
+    }
 
     #[test]
     fn refusals_are_short_english_stock_phrases() {
