@@ -143,6 +143,8 @@ def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> S
     dossier_pages = {r[0] for r in archive.db.execute("SELECT page FROM dossiers")}
 
     def produces(title: str) -> bool:
+        if title in pack.alias_pages:  # its aliases are the output
+            return True
         return title in producing if producing is not None else bool(records.get(title))
 
     def why_silent(title: str) -> tuple[str, tuple]:
@@ -150,6 +152,8 @@ def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> S
             return ("roster", ())
         reason = next((d for g, d in findings.get(title, [])
                        if g == "G3" and not d.startswith(YIELD_DETAIL)), "")
+        if not reason:  # a parser's own account of why the page has nothing to say
+            reason = next((d for g, d in findings.get(title, []) if g == "G2"), "")
         return ("empty", (("reason", reason),)) if reason else ("none", ())
 
     for seed in pack.fetch_seeds:
