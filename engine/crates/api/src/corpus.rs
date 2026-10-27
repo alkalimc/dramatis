@@ -17,7 +17,7 @@ use crate::views::CorpusState;
 /// The host's subject id in the prompts table.
 pub const HOST: &str = "host";
 /// The prompt slots a persona is made of: a person has one only with all of them.
-pub const PERSONA_SLOTS: [&str; 4] = ["system", "tone", "fallback", "capability"];
+pub const PERSONA_SLOTS: [&str; 3] = ["system", "tone", "capability"];
 /// Built at corpus time: the first-run card, `[{person_id, reason}]`.
 const COLDSTART_SLOT: &str = "coldstart";
 /// Co-appearing people kept per person; screens show fewer, after dropping the disabled.

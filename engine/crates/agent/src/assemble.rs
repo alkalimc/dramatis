@@ -80,9 +80,12 @@ pub fn persona_section(ctx: &Ctx<'_>, member: &Member<'_>) -> String {
                     parts.push(ctx.names.sub(body.trim()).into_owned());
                 }
             }
-            if !persona.fallback.trim().is_empty() {
-                let line = ctx.names.sub(persona.fallback.trim()).into_owned();
-                parts.push(ctx.fill("harness.fallback", &[("name", name), ("line", &line)]));
+            if !persona.lines.trim().is_empty() {
+                let lines = ctx.names.sub(persona.lines.trim()).into_owned();
+                parts.push(format!(
+                    "{}\n{lines}",
+                    ctx.fill("harness.lines", &[("name", name)])
+                ));
             }
             parts.join("\n")
         }
@@ -195,23 +198,20 @@ fn unit_block(ctx: &Ctx<'_>, u: &Unit) -> String {
 }
 
 /// Render a search response. `seen` is what the session already carries; ids sent here
-/// are added to it. Low confidence sends no material at all, only the plain statement
-/// (and, for a person, that a colleague can be brought in).
+/// are added to it. At low confidence only the best `low_hits` passages go out, without
+/// neighbours and marked as possibly unrelated; when nothing came back, only the plain
+/// statement of that.
 pub fn material(
     ctx: &Ctx<'_>,
     resp: &SearchResponse,
     seen: &mut HashSet<String>,
-    offer_join: bool,
+    low_hits: usize,
 ) -> Material {
     let level = resp.confidence.level;
-    if level == Level::Low {
-        let mut text = ctx.fill("harness.nothing_found", &[]);
-        if offer_join {
-            text.push('\n');
-            text.push_str(&ctx.fill("harness.join_available", &[]));
-        }
+    let low = level == Level::Low;
+    if resp.hits.is_empty() && resp.excluded.is_empty() {
         return Material {
-            text,
+            text: ctx.fill("harness.nothing_found", &[]),
             level: Some(level),
             ..Material::default()
         };
@@ -221,6 +221,9 @@ pub fn material(
         ..Material::default()
     };
     let mut blocks = Vec::new();
+    if low {
+        blocks.push(ctx.fill("harness.low_match", &[]));
+    }
     let push_unit =
         |u: &Unit, out: &mut Material, blocks: &mut Vec<String>, seen: &mut HashSet<String>| {
             out.shown.push(u.id.clone());
@@ -236,14 +239,15 @@ pub fn material(
         out.shown.push(id.clone());
         blocks.push(format!("[#{id}]"));
     }
+    let shown = if low { low_hits } else { resp.hits.len() };
     for Hit {
         item, neighbours, ..
-    } in &resp.hits
+    } in resp.hits.iter().take(shown)
     {
         match item {
             Item::Unit(u) => {
                 push_unit(u, &mut out, &mut blocks, seen);
-                for n in neighbours {
+                for n in neighbours.iter().filter(|_| !low) {
                     push_unit(n, &mut out, &mut blocks, seen);
                 }
             }

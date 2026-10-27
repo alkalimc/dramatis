@@ -165,7 +165,12 @@ impl Agent {
                 let mut resp =
                     self.retrieve(turn.channel, &turn.speaker, &s.query, persons, &seen)?;
                 drop_disabled(&mut resp, &off);
-                let m = assemble::material(&self.ctx(names), &resp, &mut seen, true);
+                let m = assemble::material(
+                    &self.ctx(names),
+                    &resp,
+                    &mut seen,
+                    self.config.agent.retrieve.low_hits as usize,
+                );
                 turn.level = m.level;
                 turn.shown.extend(m.shown);
                 Ok(Ok(m.text))
@@ -525,7 +530,12 @@ impl Agent {
                 let mut seen = self.seen(seg)?;
                 let persons = s.persons.unwrap_or_default();
                 let resp = self.retrieve(turn.channel, &Actor::Host, &s.query, persons, &seen)?;
-                let m = assemble::material(&self.ctx(names), &resp, &mut seen, false);
+                let m = assemble::material(
+                    &self.ctx(names),
+                    &resp,
+                    &mut seen,
+                    self.config.agent.retrieve.low_hits as usize,
+                );
                 turn.shown.extend(m.shown);
                 Ok(Ok(m.text))
             }

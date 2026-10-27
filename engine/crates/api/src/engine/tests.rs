@@ -37,7 +37,7 @@ fn persona(b: &Builder, who: &str, slots: &[&str]) {
     }
 }
 
-const ALL: [&str; 4] = ["system", "tone", "fallback", "capability"];
+const ALL: [&str; 3] = ["system", "tone", "capability"];
 
 /// Three people: `amy` and `kal` have personas, `zed` has half of one.
 fn fixture() -> TempFolio {

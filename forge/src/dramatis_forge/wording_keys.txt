@@ -205,13 +205,13 @@ harness.error.not_found
 harness.error.refused
 harness.error.unavailable
 harness.error.wrapup_only
-harness.fallback
 harness.group_created
 harness.host_offline
 harness.interject
 harness.introduce
-harness.join_available
 harness.joined
+harness.lines
+harness.low_match
 harness.memories
 harness.memories.shared
 harness.must_report

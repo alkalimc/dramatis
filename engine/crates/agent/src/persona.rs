@@ -9,7 +9,7 @@ use folio::Folio;
 use crate::error::Result;
 
 /// The slots a person's persona is made of.
-pub const PERSON_SLOTS: [&str; 4] = ["system", "tone", "fallback", "capability"];
+pub const PERSON_SLOTS: [&str; 3] = ["system", "tone", "capability"];
 
 /// The subject the host's prompts are stored under.
 pub const HOST: &str = "host";
@@ -24,9 +24,9 @@ pub struct Personas {
 impl Personas {
     pub fn load(folio: &Folio) -> Result<Self> {
         let mut stmt = folio.conn().prepare(
-            "SELECT subject FROM prompts WHERE slot IN ('system', 'tone', 'fallback', 'capability')
+            "SELECT subject FROM prompts WHERE slot IN ('system', 'tone', 'capability')
                AND subject <> 'host' AND trim(body) <> ''
-             GROUP BY subject HAVING count(DISTINCT slot) = 4 ORDER BY subject",
+             GROUP BY subject HAVING count(DISTINCT slot) = 3 ORDER BY subject",
         )?;
         let persons = stmt
             .query_map([], |r| r.get::<_, String>(0))?
@@ -65,16 +65,17 @@ impl Personas {
 pub struct Persona {
     pub system: String,
     pub tone: String,
-    pub fallback: String,
+    /// The person's own lines, one per line; empty when the corpus has none.
+    pub lines: String,
 }
 
 pub fn person(folio: &Folio, person: &str) -> Result<Option<Persona>> {
     let get = |slot| folio.prompt(person, slot);
-    Ok(match (get("system")?, get("tone")?, get("fallback")?) {
-        (Some(system), Some(tone), Some(fallback)) => Some(Persona {
+    Ok(match (get("system")?, get("tone")?) {
+        (Some(system), Some(tone)) => Some(Persona {
             system,
             tone,
-            fallback,
+            lines: get("lines")?.unwrap_or_default(),
         }),
         _ => None,
     })

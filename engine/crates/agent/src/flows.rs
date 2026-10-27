@@ -269,8 +269,12 @@ impl Agent {
         let mut seen = self.seen(seg)?;
         let resp = self.retrieve(turn.channel, &turn.speaker, query, persons, &seen)?;
         let names = self.segment_names(seg)?;
-        let offer_join = turn.speaker.person().is_some();
-        let m = assemble::material(&self.ctx(&names), &resp, &mut seen, offer_join);
+        let m = assemble::material(
+            &self.ctx(&names),
+            &resp,
+            &mut seen,
+            self.config.agent.retrieve.low_hits as usize,
+        );
         turn.level = m.level;
         turn.shown.extend(m.shown);
         Ok(vec![m.text])
