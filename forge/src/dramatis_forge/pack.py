@@ -221,6 +221,9 @@ class Route:
     #: per route because what a page may legitimately leave out (gameplay tables,
     #: real-world commentary, other languages) differs by layout.
     min_yield: float = 0.0
+    #: The page yields names (aliases, glossary terms) and no units. It is still a source of
+    #: the corpus, so attribution lists it.
+    names: bool = False
 
     def matches(self, seed: str, title: str) -> bool:
         if seed != self.seed:

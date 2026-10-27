@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from conftest import build, sync
 
+from dramatis_forge import corpus, evals
 from dramatis_forge import text as text_mod
 from dramatis_forge.archive import Archive
 from dramatis_forge.folio import Folio
+from dramatis_forge.pack import Route
 from dramatis_forge.report import attribution, figures, samples
 
 # --------------------------------------------------------------------------- #
@@ -183,6 +187,44 @@ def test_attribution_refuses_when_a_unit_lacks_revid(built, pack, tmp_path):
     assert not data.complete and data.units_without_revid == 1
     with pytest.raises(ValueError, match="no source revision"):
         attribution.render(data, pack, [template], tmp_path / "out")
+
+
+def test_attribution_lists_pages_that_only_supply_names(built, pack):
+    named = dataclasses.replace(pack, routes=(
+        *pack.routes, Route(pack.routes[0].seed, pack.routes[0].parser,
+                            title="Interlude", names=True)))
+    with Archive(built.archive, readonly=True) as a, Folio(built.folio, readonly=True) as f:
+        plain = attribution.collect(a, f, pack)
+        data = attribution.collect(a, f, named)
+    assert "Interlude" not in {p["page"] for p in plain.pages}
+    [entry] = [p for p in data.pages if p["page"] == "Interlude"]
+    assert entry["units"] == 0 and entry["revid"]
+
+
+def test_eval_target_without_page_or_person_resolves_to_a_lore_title(built):
+    with Folio(built.folio, readonly=True) as f:
+        index = evals._Index(f)
+        title, = {r["title"] for r in f.db.execute(
+            "SELECT title FROM chunks WHERE template='lore' AND title LIKE '%Early life'")}
+    assert title.rsplit(" › ", 1)[-1] == "Early life"
+    assert index.chunks_for("Early life") and index.chunks_for(title) == index.chunks_for("Early life")
+    assert not index.chunks_for("No such entry")
+
+
+def test_lore_units_never_share_a_place(built):
+    with Folio(built.folio, readonly=True) as f:
+        shared = f.db.execute(
+            "SELECT span_of, span_from FROM chunks WHERE template='lore' "
+            "GROUP BY span_of, span_from HAVING COUNT(*) > 1").fetchall()
+    assert not shared
+
+
+def test_name_alias_to_an_unmentioned_target_is_dropped(built):
+    rows = [("a", "Alice", "term"), ("b", "lighthouse", "term"), ("c", "Nowhere Land", "term"),
+            ("d", "Nowhere Land", "redirect"), ("e", "Nowhere Land", "realname")]
+    with Folio(built.folio, readonly=True) as f:
+        kept = corpus._drop_unreached_names(corpus.CorpusReport(), f, rows)
+    assert kept == rows[:2] + [rows[3]]
 
 
 def test_say_prefers_pack_text_then_framework_default(pack):
