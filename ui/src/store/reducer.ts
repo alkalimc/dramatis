@@ -1,6 +1,6 @@
 import type { Message, Mode, PersonRef, Roster, Target } from "../api";
 import { makeT } from "../i18n";
-import type { Action, State } from "./state";
+import { typingKey, type Action, type State } from "./state";
 
 function withNames(names: State["names"], persons: PersonRef[]): State["names"] {
   let out = names;
@@ -142,6 +142,23 @@ export function reduce(s: State, a: Action): State {
         pendingActions: { ...s.pendingActions, [e.message]: [...(s.pendingActions[e.message] ?? []), e.action] },
         streams: s.streams[e.message] ? s.streams : { ...s.streams, [e.message]: stream },
         awaiting: answered(s, e.channel),
+      };
+    }
+    case "turnActivity": {
+      const { channel, author, state } = a.event;
+      const key = typingKey(author);
+      const here = s.typing[channel] ?? {};
+      if (state.kind === "done" || state.kind === "failed") {
+        if (!(key in here)) return s;
+        const rest = omit(here, key);
+        return { ...s, typing: Object.keys(rest).length ? { ...s.typing, [channel]: rest } : omit(s.typing, channel) };
+      }
+      const tool = state.kind === "tool";
+      if (here[key]?.tool === tool) return s;
+      return {
+        ...s,
+        typing: { ...s.typing, [channel]: { ...here, [key]: { author, tool } } },
+        awaiting: answered(s, channel),
       };
     }
     case "modeChanged": {

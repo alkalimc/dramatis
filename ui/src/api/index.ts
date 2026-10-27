@@ -25,6 +25,7 @@ export interface Events {
   quotaChanged: EventSource<gen.QuotaChanged>;
   rosterChanged: EventSource<gen.RosterChanged>;
   toolCalled: EventSource<gen.ToolCalled>;
+  turnActivity: EventSource<gen.TurnActivity>;
   worldChanged: EventSource<gen.WorldChanged>;
 }
 

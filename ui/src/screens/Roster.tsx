@@ -7,6 +7,16 @@ import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
 import { ModeSwitch, modeHintKey } from "../ui/ModeSwitch";
 
+/** A small "typing" marker for a channel that is generating. */
+export function TypingMark() {
+  const t = useT();
+  return (
+    <span className="typing-mark muted small" role="status">
+      {t("typing.marker")}
+    </span>
+  );
+}
+
 export function RosterDrawer() {
   const t = useT();
   const roster = useStore((s) => s.roster);
@@ -30,6 +40,8 @@ function GroupList() {
   const t = useT();
   const actions = useActions();
   const groups = useStore((s) => s.channels).filter((c) => c.kind === "group");
+  const typing = useStore((s) => s.typing);
+  const typingIn = new Set(Object.keys(typing));
   return (
     <section className="groups" aria-labelledby="groups-h">
       <h3 id="groups-h">{t("group.list")}</h3>
@@ -42,6 +54,7 @@ function GroupList() {
               <button type="button" className="link name" onClick={() => actions.open(g.id)}>
                 {g.topic ?? t("channel.group.untitled")}
               </button>{" "}
+              {typingIn.has(g.id) && <TypingMark />}
               <span className="muted small">
                 {g.participants.map((p) => p.name).join(" · ")} · {t(`mode.${g.mode}`)}
               </span>
@@ -116,6 +129,10 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
   const off = row.mode === "disabled";
   const ready = hasPersona(row);
   const note = useId();
+  const typing = useStore((s) => {
+    const direct = s.channels.find((c) => c.kind === "direct" && c.participants.some((p) => p.id === row.person.id));
+    return Boolean(direct && s.typing[direct.id]);
+  });
   return (
     <li className={`roster-row${off ? " off" : ""}${ready ? "" : " unavailable"}`}>
       <Avatar person={row.person} />
@@ -123,6 +140,7 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
         <button type="button" className="link name" onClick={() => dispatch({ type: "drawer", drawer: { kind: "person", id: row.person.id } })}>
           {row.person.name}
         </button>
+        {typing && <TypingMark />}
         {!ready && (
           <span className="muted small" id={note}>
             {t("person.unavailable")}

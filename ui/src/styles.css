@@ -1022,6 +1022,9 @@ button.nav.on {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .typing {
+    animation: breathe 1.6s ease-in-out infinite;
+  }
   .streaming .bubble {
     animation: breathe 1.6s ease-in-out infinite;
   }

@@ -21,6 +21,7 @@ import type {
   TaskId,
   ToolAction,
   ToolCalled,
+  TurnActivity,
   WorldChanged,
   Wording,
 } from "../api";
@@ -46,6 +47,17 @@ export interface Stream {
   channel: ChannelId;
   author: Author;
   text: string;
+}
+
+/** Someone generating in a channel: looking something up, or writing/waiting. */
+export interface Typing {
+  author: Author;
+  tool: boolean;
+}
+
+/** Key of a speaker within one channel's typing map. */
+export function typingKey(a: Author): string {
+  return a.kind === "person" ? a.id : a.kind;
 }
 
 /**
@@ -89,6 +101,8 @@ export interface State {
   pendingActions: Record<MessageId, ToolAction[]>;
   /** Channels where the user has spoken and nothing has come back yet. */
   awaiting: Record<ChannelId, true>;
+  /** Per channel, who is generating right now (from the engine's activity events). */
+  typing: Record<ChannelId, Record<string, Typing>>;
   /** Every person name seen in any payload, for labelling authors. */
   names: Record<PersonId, string>;
   /** Bumped on each `WorldChanged`: screens holding fetched facts or tasks refetch. */
@@ -128,6 +142,7 @@ export function initialState(): State {
     streams: {},
     pendingActions: {},
     awaiting: {},
+    typing: {},
     names: {},
     worldVersion: 0,
     peopleVersion: 0,
@@ -160,6 +175,7 @@ export type Action =
   | { type: "messageDelta"; event: MessageDelta }
   | { type: "messageAdded"; event: MessageAdded }
   | { type: "toolCalled"; event: ToolCalled }
+  | { type: "turnActivity"; event: TurnActivity }
   | { type: "modeChanged"; event: ModeChanged }
   | { type: "worldChanged"; event: WorldChanged }
   | { type: "rosterChanged" }

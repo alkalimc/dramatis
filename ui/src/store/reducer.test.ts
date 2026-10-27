@@ -126,3 +126,35 @@ test("opening a channel closes the drawer", () => {
   expect(s.drawer).toBeNull();
   expect(s.channel).toBe("c1");
 });
+
+test("activity tracks who is generating per channel and clears on done or failed", () => {
+  let s: State = initialState();
+  const ann = { kind: "person", id: "p1" } as const;
+  const bo = { kind: "person", id: "p2" } as const;
+  const send = (channel: string, author: typeof ann | typeof bo, state: import("../api").ActivityState) =>
+    (s = reduce(s, { type: "turnActivity", event: { channel, author, state } }));
+  send("c1", ann, { kind: "thinking" });
+  send("c2", bo, { kind: "thinking" });
+  expect(Object.keys(s.typing)).toEqual(["c1", "c2"]);
+  send("c1", ann, { kind: "tool", name: "search" });
+  expect(s.typing.c1.p1.tool).toBe(true);
+  send("c1", ann, { kind: "writing" });
+  expect(s.typing.c1.p1.tool).toBe(false);
+  send("c1", ann, { kind: "done" });
+  expect(s.typing.c1).toBeUndefined();
+  expect(s.typing.c2.p2).toBeDefined();
+  send("c2", bo, { kind: "failed", reason: "error" });
+  expect(s.typing).toEqual({});
+  // Clearing what was never set changes nothing.
+  const same = s;
+  send("c3", ann, { kind: "done" });
+  expect(s).toBe(same);
+});
+
+test("activity ends the user's wait for a first sign", () => {
+  let s: State = initialState();
+  s = reduce(s, { type: "awaiting", channel: "c1", on: true });
+  s = reduce(s, { type: "turnActivity", event: { channel: "c1", author: { kind: "host" }, state: { kind: "thinking" } } });
+  expect(s.awaiting.c1).toBeUndefined();
+  expect(s.typing.c1.host).toBeDefined();
+});
