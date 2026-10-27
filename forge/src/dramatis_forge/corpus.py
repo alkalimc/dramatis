@@ -280,6 +280,7 @@ def run(
             "owners_missing": len(rep.owners_missing), "owner_scenes": rep.scenes_with_owner,
             "markup_residue": sum(rep.markup_residue.values()),
             "skipped": sum(env.skipped.values()),
+            "placeholders": env.placeholders,
             "unresolved_branches": len(env.unresolved_branches),
         })
         folio.set_meta("form_copies", {cid: list(dict.fromkeys(pages))

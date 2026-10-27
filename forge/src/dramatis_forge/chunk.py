@@ -129,6 +129,8 @@ class Env:
     notes: list[str] = field(default_factory=list)
     #: Records a policy chose not to make units of, by template.
     skipped: dict[str, int] = field(default_factory=dict)
+    #: Record fields dropped because title and value were only a placeholder.
+    placeholders: int = 0
     #: Scenes whose branch markers could not name the option they answer (a reply id that
     #: no choice offers): the marker would show the source's bare id.
     unresolved_branches: list[str] = field(default_factory=list)
@@ -485,6 +487,13 @@ def _profile(
     tag = _form_tag(archive, pack)
     named = _person_name(archive, pack)
     placeholders = set(policy.placeholder_values)
+    stand_in = re.compile(policy.placeholder_only) if policy.placeholder_only else None
+
+    def is_stand_in(title: str, value: str) -> bool:
+        """A field whose title and value say nothing but a placeholder."""
+        if stand_in is None or not stand_in.fullmatch(value.strip()):
+            return False
+        return not title.strip() or bool(stand_in.fullmatch(title.strip()))
 
     dossier: dict[str, dict] = {}
     for row in archive.db.execute("SELECT page,fields,sections,items,revid FROM dossiers"):
@@ -514,6 +523,9 @@ def _profile(
             for s in dossier[page]["sections"]:
                 if not s.get("text"):
                     continue
+                if is_stand_in(s.get("title", ""), s["text"]):
+                    env.placeholders += 1
+                    continue
                 if skip is not None and skip.search(s.get("title", "")):
                     env.skipped["profile"] = env.skipped.get("profile", 0) + 1
                     continue
@@ -524,6 +536,9 @@ def _profile(
                         if rec.get("intro"):
                             items.append((page, rec.get("set", memoir), rec["intro"]))
                 elif isinstance(v, str) and v:
+                    if is_stand_in(k, v):
+                        env.placeholders += 1
+                        continue
                     if (k, v) in is_stock:
                         stock_first.setdefault((k, v), page)
                         continue
