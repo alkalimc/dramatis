@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 from ..archive import Archive
-from ..chunk import reply_text
+from ..chunk import options_label, reply_text
 from ..identity import CANONICAL
 from ..pack import Pack
 from ..text import cell, table_head
@@ -237,7 +237,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
                     L += [f"_{reply_text(policy, (c['options'], c['values']) if c else None, refs.split(';'))}_", ""]
                 here = branch
             if "choice" in item:
-                L += [say("inspect.choice", mark=policy.mark(policy.label("options")),
+                L += [say("inspect.choice", mark=policy.mark(policy.label(options_label(item["choice"]["options"]))),
                           options=" / ".join(item["choice"]["options"])), ""]
                 continue
             ln = item["line"]

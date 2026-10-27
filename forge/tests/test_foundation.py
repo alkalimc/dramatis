@@ -131,7 +131,7 @@ def test_a_unit_that_is_half_full_ends_before_a_change_of_scene():
 def test_choices_and_lines_are_one_sequence_and_replies_are_introduced(tmp_path, pack):
     from dramatis_forge.records import Choice, Line, Scene
     policy = replace(pack.chunking, separators={"mark": "[{}]", "quote": "<{}>"},
-                     labels={"options": "reply", "branch": "if", "merge": "all"})
+                     labels={"options": "reply", "reply": "said", "branch": "if", "merge": "all"})
     big = replace(pack.chunking.templates[1], target=12, max_span=18)
     p = replace(pack, chunking=replace(policy, templates=(
         pack.chunking.templates[0], big, pack.chunking.templates[2])))
@@ -146,7 +146,7 @@ def test_choices_and_lines_are_one_sequence_and_replies_are_introduced(tmp_path,
         ])
         [unit] = [c for c in chunk.build(a, p) if c.template == "dialogue"]
     assert unit.text.splitlines() == [
-        "[reply]x", "[reply]p / q", "[if<p>]", "Ann: to p", "[if<q>]", "Ann: to q",
+        "[said]x", "[reply]p / q", "[if<p>]", "Ann: to p", "[if<q>]", "Ann: to q",
         "[all]", "Ann: after"]
     assert (unit.span_from, unit.span_to) == (1, 5)
 
