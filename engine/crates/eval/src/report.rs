@@ -111,7 +111,6 @@ pub fn markdown(config: &Config, outcome: &Outcome, notes: &[String]) -> String 
 /// (from `baseline`, the run without the alias stage, when given) and per family
 /// `eval.family.<family>.{ndcg,negwin,questions}`.
 pub fn keys(config: &Config, outcome: &Outcome, baseline: Option<&Outcome>) -> String {
-    let per_family = by_family(&outcome.scored);
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -124,23 +123,30 @@ From `{}`; nDCG at {}.
         config.label(),
         config.k
     );
-    let _ = writeln!(out, "| `eval.questions` | {} |", outcome.scored.len());
+    for (key, value) in key_values(outcome, baseline) {
+        let shown = if key.ends_with(".negwin") {
+            format!("{:.1}%", value * 100.0)
+        } else if key.ends_with(".ndcg") || key.ends_with(".macro_ndcg") {
+            format!("{value:.3}")
+        } else {
+            format!("{value}")
+        };
+        let _ = writeln!(out, "| `{key}` | {shown} |");
+    }
+    out
+}
+
+/// The values behind `keys`, in the same order, for the machine-readable report.
+pub fn key_values(outcome: &Outcome, baseline: Option<&Outcome>) -> Vec<(String, f64)> {
+    let mut out = vec![("eval.questions".to_string(), outcome.scored.len() as f64)];
     if let Some(baseline) = baseline {
         let macro_avg = macro_average(&by_family(&baseline.scored));
-        let _ = writeln!(
-            out,
-            "| `eval.baseline.macro_ndcg` | {:.3} |",
-            macro_avg.ndcg
-        );
+        out.push(("eval.baseline.macro_ndcg".into(), macro_avg.ndcg));
     }
-    for (family, a) in &per_family {
-        let _ = writeln!(out, "| `eval.family.{family}.ndcg` | {:.3} |", a.ndcg);
-        let _ = writeln!(
-            out,
-            "| `eval.family.{family}.negwin` | {:.1}% |",
-            a.negative_win_rate * 100.0
-        );
-        let _ = writeln!(out, "| `eval.family.{family}.questions` | {} |", a.queries);
+    for (family, a) in &by_family(&outcome.scored) {
+        out.push((format!("eval.family.{family}.ndcg"), a.ndcg));
+        out.push((format!("eval.family.{family}.negwin"), a.negative_win_rate));
+        out.push((format!("eval.family.{family}.questions"), a.queries as f64));
     }
     out
 }

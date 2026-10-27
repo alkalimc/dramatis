@@ -13,6 +13,7 @@ pub mod bond;
 pub mod channel;
 pub mod clock;
 pub mod fact;
+pub mod leakcheck;
 pub mod log;
 pub mod message;
 pub mod params;

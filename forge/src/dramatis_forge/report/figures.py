@@ -23,6 +23,7 @@ found, and leaves the judgement to a reader.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import operator
 import re
@@ -34,7 +35,7 @@ from pathlib import Path
 from ..chunk import engine_meta_test
 from ..config import Paths
 from ..guards import GUARDS, HIGH
-from ..pack import Pack, pack_dir
+from ..pack import FigureSpec, Pack, pack_dir
 from ..text import table_head
 from . import tokens as tokens_mod
 
@@ -612,6 +613,65 @@ def meets(value: object, target: str) -> bool | None:
     return _OPS[m.group(1)](float(value), float(m.group(2)))
 
 
+# ---- figures measured by another tool: its machine-readable output, read as it was left ----
+
+#: source kind -> (where the file is, the object in it that holds `{key: number}`)
+_EXTERNAL = {
+    "report": ("reports", "keys"),
+    "persona": ("persona", "figures"),
+}
+
+
+def _external_file(kind: str, name: str, paths: Paths) -> Path:
+    """`report:<file>` is in the reports folder. `persona:report` is the full persona run's
+    report, or the probe's when only the probe has been run."""
+    if kind == "report":
+        return paths.reports / name
+    folder = paths.pack_dir / "persona"
+    for candidate in (f"{name}.json", f"probe-{name}.json"):
+        if (folder / candidate).exists():
+            return folder / candidate
+    return folder / f"{name}.json"
+
+
+def _shown(value: float) -> str:
+    return f"{int(value):,}" if float(value).is_integer() else f"{round(value, 4):g}"
+
+
+def _external(spec: FigureSpec, paths: Paths, fingerprint: object) -> list[Figure]:
+    """Figures from a tool's JSON output. A key pattern (`a.*.b`) takes every match.
+
+    Output made on another folio is not read: its numbers describe a corpus that is gone.
+    Whatever cannot be read stays a placeholder row that says why.
+    """
+    kind, _, name = spec.source.partition(":")
+    folder, section = _EXTERNAL[kind]
+    path = _external_file(kind, name, paths)
+
+    def missing(why: str) -> list[Figure]:
+        return [Figure(spec.key, None, "\u2b1c", f"{spec.note} ({why})".strip(), "", None)]
+
+    if not path.exists():
+        return missing(f"no {path.relative_to(paths.pack_dir)}; run the tool that writes it")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return missing(f"{path.name} is unreadable")
+    made_on = data.get("folio_fingerprint") if isinstance(data, Mapping) else None
+    if made_on and fingerprint and made_on != fingerprint:
+        return missing(f"{path.name} was made on another folio; run the tool again")
+    values = data.get(section) if isinstance(data, Mapping) else None
+    found = {k: v for k, v in (values or {}).items()
+             if fnmatch.fnmatchcase(k, spec.key) and isinstance(v, (int, float))
+             and not isinstance(v, bool)}
+    if not found:
+        return missing(f"{path.name} has no such key")
+    probe = " (probe run)" if path.name.startswith("probe-") else ""
+    return [Figure(key, value, _shown(value), spec.note + probe, spec.target,
+                   meets(value, spec.target) if spec.target else None)
+            for key, value in sorted(found.items())]
+
+
 def resolve(pack: Pack, paths: Paths) -> list[Figure]:
     """Turn the pack's specs into measured figures. Values come only from artifacts."""
     a, f = _connect(paths.archive), _connect(paths.folio)
@@ -635,6 +695,9 @@ def resolve(pack: Pack, paths: Paths) -> list[Figure]:
                     raw = sum(v for v in raw.values() if isinstance(v, int))
                 if raw is not None:
                     measured = (raw, f"{raw:,}" if isinstance(raw, int) else str(raw))
+            elif kind in _EXTERNAL:
+                out += _external(spec, paths, src.meta["folio"].get("build_fingerprint"))
+                continue
             elif kind == "derived":
                 if name not in DERIVED:
                     raise KeyError(f"figure {spec.key!r}: no derived measurement {name!r}")

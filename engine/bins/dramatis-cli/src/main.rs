@@ -6,6 +6,7 @@
 //!   evaluate   score retrieval against the structural benchmark, per family and per stratum
 //!   calibrate  fit the confidence bands on a slice of that benchmark
 //!   bench      measure latency and resident memory on this machine
+//!   leaks      run the memory-visibility leak checks on a synthetic world and count failures
 //!   chat       talk to the corpus's persons from the terminal
 //!
 //! `bench` is a measurement wearing a CLI: latency and resident memory are budgets that
@@ -141,6 +142,13 @@ enum Command {
         #[arg(long)]
         samples: Option<PathBuf>,
     },
+    /// Run the world crate's memory-visibility leak checks on a synthetic world and count
+    /// the failing ones. Exits non-zero when any fails.
+    Leaks {
+        /// Write the count as JSON here.
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
     /// Measure the lexical path: latency distribution, throughput and resident memory.
     Bench {
         /// Queries to run. Defaults to suite queries when --suite is given, else to unit
@@ -157,20 +165,28 @@ enum Command {
         /// Write BENCH.md here.
         #[arg(long)]
         report: Option<PathBuf>,
+        /// Write the report keys as JSON here.
+        #[arg(long)]
+        json: Option<PathBuf>,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    if let Command::Chat(args) = cli.command {
-        return chat::run(cli.folio, args);
+    match cli.command {
+        Command::Chat(args) => return chat::run(cli.folio, args),
+        // Needs no corpus: the checks run on a synthetic world.
+        Command::Leaks { json } => return leaks(json.as_deref()),
+        _ => {}
     }
     let folio = match cli.folio {
         Some(path) => path,
         None => default_folio()?,
     };
     match cli.command {
-        Command::Chat(_) => unreachable!("handled before the corpus is opened"),
+        Command::Chat(_) | Command::Leaks { .. } => {
+            unreachable!("handled before the corpus is opened")
+        }
         Command::Inspect => inspect(&folio),
         Command::Search {
             query,
@@ -243,6 +259,7 @@ fn main() -> Result<()> {
             suite_queries,
             iterations,
             report,
+            json,
         } => bench(
             &folio,
             query,
@@ -250,8 +267,31 @@ fn main() -> Result<()> {
             suite_queries,
             iterations,
             report.as_deref(),
+            json.as_deref(),
         ),
     }
+}
+
+fn leaks(json_out: Option<&Path>) -> Result<()> {
+    let outcomes = world::leakcheck::run();
+    for o in &outcomes {
+        match &o.failure {
+            None => println!("ok    {}", o.point),
+            Some(why) => println!("FAIL  {}: {why}", o.point),
+        }
+    }
+    let failing = world::leakcheck::leaks(&outcomes);
+    println!(
+        "\nvisibility.leaks {failing} of {} checks failing",
+        outcomes.len()
+    );
+    if let Some(out) = json_out {
+        let payload = serde_json::json!({ "keys": { "visibility.leaks": failing } });
+        std::fs::write(out, serde_json::to_string_pretty(&payload)? + "\n")
+            .with_context(|| format!("writing {}", out.display()))?;
+    }
+    anyhow::ensure!(failing == 0, "{failing} leak check(s) failing");
+    Ok(())
 }
 
 fn suite_path(given: Option<PathBuf>) -> Result<PathBuf> {
@@ -531,6 +571,7 @@ fn bench(
     suite_queries: usize,
     iterations: usize,
     report: Option<&Path>,
+    json_out: Option<&Path>,
 ) -> Result<()> {
     // Queries are read before the corpus is opened, and only their text is kept, so the
     // peak below is the retriever's rather than the suite parser's.
@@ -699,6 +740,20 @@ fn bench(
         std::fs::write(report, &out).with_context(|| format!("writing {}", report.display()))?;
         println!("\nwrote {}", report.display());
     }
+    if let Some(out) = json_out {
+        let payload = serde_json::json!({
+            "folio_fingerprint": index.folio().manifest().build_fingerprint,
+            "keys": {
+                "bench.lexical.p50": ms(lexical.p50),
+                "bench.lexical.p95": ms(lexical.p95),
+                "bench.resident_peak": peak as f64 / 1e6,
+                "bench.throughput": throughput,
+            },
+        });
+        std::fs::write(out, serde_json::to_string_pretty(&payload)? + "\n")
+            .with_context(|| format!("writing {}", out.display()))?;
+        println!("wrote {}", out.display());
+    }
     Ok(())
 }
 
@@ -829,6 +884,10 @@ fn evaluate(
             "folio_fingerprint": manifest.build_fingerprint,
             "queries_scored": suite.queries.len(),
             "queries_in_suite": full,
+            "keys": eval::report::key_values(shipped, baseline)
+                .into_iter()
+                .map(|(key, value)| (key, serde_json::json!(value)))
+                .collect::<serde_json::Map<_, _>>(),
             "runs": reports,
         });
         std::fs::write(out, serde_json::to_string_pretty(&payload)? + "\n")?;

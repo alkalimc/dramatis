@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 
 import pytest
 from conftest import build, sync
@@ -11,7 +12,7 @@ from dramatis_forge import corpus, evals
 from dramatis_forge import text as text_mod
 from dramatis_forge.archive import Archive
 from dramatis_forge.folio import Folio
-from dramatis_forge.pack import Route
+from dramatis_forge.pack import FigureSpec, Route
 from dramatis_forge.report import attribution, figures, samples
 
 # --------------------------------------------------------------------------- #
@@ -167,6 +168,37 @@ def test_v2_figures(built, pack):
         a.set_meta("timings", {"build": 1800, "sync_full": 5400})
     figs = {f.key: f for f in figures.resolve(pack, built)}
     assert figs["pipeline.hours"].value == 2.0
+
+
+def test_figures_read_other_tools_output_and_say_why_one_is_missing(built, pack):
+    specs = (
+        FigureSpec("bench.p50", "report:bench.json", target="< 5"),
+        FigureSpec("eval.family.*.ndcg", "report:results.json"),
+        FigureSpec("persona.meta_leak", "persona:report", target="== 0"),
+        FigureSpec("old.number", "report:stale.json"),
+        FigureSpec("absent.number", "report:nowhere.json"),
+    )
+    pack = dataclasses.replace(pack, figures=pack.figures + specs)
+    built.reports.mkdir(parents=True, exist_ok=True)
+    with Folio(built.folio) as folio:
+        current = folio.get_meta("build_fingerprint")
+    (built.reports / "bench.json").write_text(json.dumps(
+        {"folio_fingerprint": current, "keys": {"bench.p50": 2.5}}))
+    (built.reports / "results.json").write_text(json.dumps(
+        {"folio_fingerprint": current,
+         "keys": {"eval.family.a.ndcg": 0.5, "eval.family.b.ndcg": 21322.0, "eval.questions": 1}}))
+    (built.reports / "stale.json").write_text(json.dumps(
+        {"folio_fingerprint": "sha256:other", "keys": {"old.number": 1}}))
+    (built.pack_dir / "persona").mkdir()
+    (built.pack_dir / "persona" / "probe-report.json").write_text(
+        json.dumps({"figures": {"persona.meta_leak": 0}}))
+    figs = {f.key: f for f in figures.resolve(pack, built)}
+    assert figs["bench.p50"].value == 2.5 and figs["bench.p50"].passed is True
+    assert figs["eval.family.a.ndcg"].shown == "0.5" and figs["eval.family.b.ndcg"].shown == "21,322"
+    assert "eval.questions" not in figs
+    assert figs["persona.meta_leak"].passed is True and "probe run" in figs["persona.meta_leak"].note
+    assert figs["old.number"].shown == "\u2b1c" and "another folio" in figs["old.number"].note
+    assert figs["absent.number"].value is None and "no reports/nowhere.json" in figs["absent.number"].note
 
 
 def test_meets_rejects_unreadable_target():
