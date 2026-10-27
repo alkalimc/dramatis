@@ -117,6 +117,13 @@ def once(protocol: str, model: str, base_url: str, key: str, req: Request,
     return send("POST", base_url, path, key, transport, json=payload)
 
 
+def is_loopback(base_url: str) -> bool:
+    """Whether the endpoint runs on this machine. Such a call must not go through a system
+    proxy: the proxy cannot reach this machine's loopback and answers 404."""
+    host = httpx.URL(base_url).host
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+
+
 def send(method: str, base_url: str, path: str, key: str,
          transport: httpx.BaseTransport | None, *, json: Any = None,
          headers: dict[str, str] | None = None) -> tuple[int, Any]:
@@ -125,7 +132,7 @@ def send(method: str, base_url: str, path: str, key: str,
         all_headers.setdefault("Authorization", f"Bearer {key}")
     with httpx.Client(base_url=base_url.rstrip("/") + "/", headers=all_headers,
                       timeout=httpx.Timeout(30.0, read=READ_TIMEOUT),
-                      transport=transport) as http:
+                      transport=transport, trust_env=not is_loopback(base_url)) as http:
         resp = http.request(method, path, json=json)
     try:
         return resp.status_code, resp.json()
