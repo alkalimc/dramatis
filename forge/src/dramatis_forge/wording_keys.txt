@@ -146,6 +146,8 @@ endpoints.reasoning.low
 endpoints.reasoning.medium
 endpoints.remove
 endpoints.role.chat
+endpoints.role.host
+endpoints.role.host.same
 endpoints.role.none
 endpoints.role.off
 endpoints.role.tts

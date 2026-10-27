@@ -316,7 +316,7 @@ function Roles({ view, fetched }: { view: EndpointsView; fetched: Fetched }) {
     return { profile, model };
   };
 
-  const setRole = async (kind: "chat" | "tts", role: Role | null) => {
+  const setRole = async (kind: "chat" | "host" | "tts", role: Role | null) => {
     if ((await actions.attempt(api.commands.setRole(kind, role))) === undefined) return;
     await actions.refreshEndpoints();
     await actions.refreshStatus();
@@ -360,6 +360,36 @@ function Roles({ view, fetched }: { view: EndpointsView; fetched: Fetched }) {
       <p id={`${id}-reason-h`} className="muted small">
         {t("endpoints.reasoning.hint")}
       </p>
+      <div className="role-row">
+        <label htmlFor={`${id}-host`}>{t("endpoints.role.host")}</label>
+        <select
+          id={`${id}-host`}
+          disabled={!roles}
+          value={key(roles?.host)}
+          onChange={(e) => void setRole("host", e.target.value ? { ...parse(e.target.value), reasoning: roles?.host?.reasoning ?? null } : null)}
+        >
+          <option value="">{t("endpoints.role.host.same")}</option>
+          {withCurrent(roles?.host).map((o) => (
+            <option key={key(o)} value={key(o)}>
+              {o.profile} · {o.model}
+            </option>
+          ))}
+        </select>
+        <label htmlFor={`${id}-host-reason`}>{t("endpoints.reasoning")}</label>
+        <select
+          id={`${id}-host-reason`}
+          disabled={!roles?.host}
+          value={roles?.host?.reasoning ?? ""}
+          onChange={(e) => roles?.host && void setRole("host", { ...roles.host, reasoning: e.target.value || null })}
+        >
+          <option value="">{t("endpoints.reasoning.default")}</option>
+          {REASONING.map((r) => (
+            <option key={r} value={r}>
+              {t(`endpoints.reasoning.${r}`)}
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="role-row">
         <label htmlFor={`${id}-tts`}>{t("endpoints.role.tts")}</label>
         <select

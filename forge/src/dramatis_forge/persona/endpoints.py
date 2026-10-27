@@ -75,6 +75,7 @@ class Role:
 @dataclass(frozen=True)
 class Roles:
     chat: Role
+    host: Role | None = None
     tts: Role | None = None
     persona: Role | None = None
 
@@ -103,14 +104,15 @@ class Endpoints:
         roles = None
         if "roles" in raw:
             r = raw["roles"]
-            _only(r, {"chat", "tts", "persona"}, "[roles]")
+            _only(r, {"chat", "host", "tts", "persona"}, "[roles]")
             if "chat" not in r:
                 raise EndpointsError("[roles] has no `chat` role")
             roles = Roles(chat=_role(r["chat"], "chat"),
+                          host=_role(r["host"], "host") if "host" in r else None,
                           tts=_role(r["tts"], "tts") if "tts" in r else None,
                           persona=_role(r["persona"], "persona") if "persona" in r else None)
-            for name, role in (("chat", roles.chat), ("tts", roles.tts),
-                               ("persona", roles.persona)):
+            for name, role in (("chat", roles.chat), ("host", roles.host),
+                               ("tts", roles.tts), ("persona", roles.persona)):
                 if role is not None and role.profile not in seen:
                     raise EndpointsError(
                         f"role `{name}` names profile `{role.profile}`, which is not defined")
