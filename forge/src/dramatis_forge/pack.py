@@ -389,6 +389,9 @@ class PersonSource:
     facets: Mapping[str, str] = field(default_factory=dict)
     sections: tuple[Mapping[str, str], ...] = ()
     items: Mapping[str, Any] = field(default_factory=dict)
+    #: Each form's own facets, canonical first: for a hook that must look past a merged
+    #: value the canonical page leaves unsaid.
+    forms: tuple[Mapping[str, str], ...] = ()
 
 
 def _no_birthday(_person: PersonSource) -> str | None:

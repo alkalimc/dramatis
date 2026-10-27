@@ -304,18 +304,20 @@ def _person_sources(archive: Archive) -> dict[str, PersonSource]:
         facets: dict[str, str] = {}
         sections: list[dict[str, str]] = []
         items: dict[str, object] = {}
+        own: list[dict[str, str]] = []
         for f in forms:
             row = archive.db.execute(
                 "SELECT fields,sections,items FROM dossiers WHERE page=?", (f["page"],)
             ).fetchone()
             if row is None:
                 continue
-            for k, v in json.loads(row["fields"]).items():
+            own.append(json.loads(row["fields"]))
+            for k, v in own[-1].items():
                 facets.setdefault(k, v)
             sections.extend(json.loads(row["sections"]))
             for k, v in json.loads(row["items"]).items():
                 items.setdefault(k, v)
-        out[person_id] = PersonSource(person_id, facets, tuple(sections), items)
+        out[person_id] = PersonSource(person_id, facets, tuple(sections), items, tuple(own))
     return out
 
 
