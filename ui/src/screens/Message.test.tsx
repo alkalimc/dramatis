@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import type { Message } from "../api";
 import { renderWith } from "../test/render";
-import { MessageView } from "./Message";
+import { MessageView, StreamView } from "./Message";
 
 const base: Message = {
   id: "m1",
@@ -31,4 +31,33 @@ test("angle-bracket markup in a reply is inert text, never an element", () => {
   const { container } = renderWith(<MessageView message={{ ...base, text }} showPlay={false} />);
   expect(container.querySelector("mira")).toBeNull();
   expect(screen.getByText(/Hello there\./)).toBeDefined();
+});
+
+test("a three-paragraph reply is three bubbles with one author label and one sources list", () => {
+  const text = "First thought.\n\nSecond thought.\n\nThird thought.\n\n[#c-ledger-1, #c-ward-1]";
+  const cites: Message["cites"] = [
+    { page: "Ledger", revid: 1, span_from: 0, span_to: 5, chunk_id: "c-ledger-1" },
+    { page: "Ward", revid: 1, span_from: 0, span_to: 5, chunk_id: "c-ward-1" },
+  ];
+  const { container } = renderWith(<MessageView message={{ ...base, text, cites }} showPlay={false} />);
+  const bubbles = [...container.querySelectorAll(".bubble")];
+  expect(bubbles.map((b) => b.querySelector(".speech")!.textContent!.trim())).toEqual([
+    "First thought.",
+    "Second thought.",
+    "Third thought.",
+  ]);
+  expect(container.querySelectorAll(".bubble .author")).toHaveLength(1);
+  expect(container.querySelectorAll(".message-foot")).toHaveLength(1);
+});
+
+test("a trailing marks-only line makes no bubble", () => {
+  const text = "One paragraph only.\n[#c-ledger-1]";
+  const { container } = renderWith(<MessageView message={{ ...base, text }} showPlay={false} />);
+  expect(container.querySelectorAll(".bubble")).toHaveLength(1);
+  expect(container.querySelector(".speech")!.textContent!.trim()).toBe("One paragraph only.");
+});
+
+test("a streamed reply splits into bubbles as paragraphs arrive and hides a half-typed mark", () => {
+  const { container } = renderWith(<StreamView author={base.author} text={"Hello.\n\nSecond one.\n\n[#c-led"} />);
+  expect(container.querySelectorAll(".bubble")).toHaveLength(2);
 });

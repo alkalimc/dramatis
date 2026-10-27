@@ -459,6 +459,10 @@ button.nav.on {
   padding: 0.45rem 0.75rem;
   max-width: 85%;
 }
+/* Later paragraphs of one run of speech: no label, tighter to the bubble above. */
+.bubble.follow {
+  margin-top: -0.1rem;
+}
 .from-user .bubble {
   background: var(--user);
   border-color: transparent;

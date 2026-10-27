@@ -3,7 +3,7 @@ import type { Author, Citation, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
-import { splitScene, withoutCites } from "../lib/scene";
+import { blocks, splitScene, withoutCites } from "../lib/scene";
 import { useActions, useApi, useStore } from "../store";
 import { CitationDetail, CitationList, useCitations } from "./Citation";
 import { SelectionMenu } from "./SelectionMenu";
@@ -43,7 +43,7 @@ function useSources(author: Author, cites: Citation[]) {
 }
 
 function Speech({ text }: { text: string }) {
-  const html = useMemo(() => renderMarkdown(withoutCites(text)), [text]);
+  const html = useMemo(() => renderMarkdown(text), [text]);
   return <div className="speech" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -54,7 +54,7 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
-  const segments = useMemo(() => splitScene(message.text, marker), [message.text, marker]);
+  const parts = useMemo(() => blocks(message.text, marker), [message.text, marker]);
   const { views, own, scope } = useSources(message.author, message.cites);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [selection, setSelection] = useState<string | null>(null);
@@ -63,7 +63,10 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
 
   const mine = message.author.kind === "user";
   const name = authorName(message.author, t, names, user);
-  const speech = segments.filter((s) => s.kind === "speech").map((s) => s.text).join("\n");
+  const speech = useMemo(
+    () => withoutCites(splitScene(message.text, marker).filter((s) => s.kind === "speech").map((s) => s.text).join("\n")).trim(),
+    [message.text, marker],
+  );
 
   const captureSelection = () => {
     const sel = window.getSelection();
@@ -87,18 +90,20 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
     <article className={`message ${mine ? "from-user" : "from-other"}`} aria-label={name}>
       <ActionLines author={message.author} actions={message.actions} />
       <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
-        {segments.map((s, i) =>
+        {parts.map((s, i) =>
           s.kind === "scene" ? (
             <p key={i} className="scene">
               {s.text}
             </p>
           ) : (
-            <div key={i} className="bubble">
-              <p className="author">
-                <span>{t("message.author", { name })}</span>
-                {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
-                {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
-              </p>
+            <div key={i} className={s.first ? "bubble" : "bubble follow"}>
+              {s.first && (
+                <p className="author">
+                  <span>{t("message.author", { name })}</span>
+                  {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
+                  {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
+                </p>
+              )}
               <Speech text={s.text} />
             </div>
           ),
@@ -159,24 +164,24 @@ export function StreamView({ author, text }: { author: Author; text: string }) {
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
-  const segments = useMemo(() => splitScene(text, marker), [text, marker]);
+  const parts = useMemo(() => blocks(text, marker), [text, marker]);
   const name = authorName(author, t, names, user);
   return (
     <article className="message from-other streaming" aria-busy="true" aria-label={name}>
       <div className="message-body">
-        {segments.map((s, i) =>
+        {parts.map((s, i) =>
           s.kind === "scene" ? (
             <p key={i} className="scene">
               {s.text}
             </p>
           ) : (
-            <div key={i} className="bubble">
-              <p className="author">{t("message.author", { name })}</p>
+            <div key={i} className={s.first ? "bubble" : "bubble follow"}>
+              {s.first && <p className="author">{t("message.author", { name })}</p>}
               <Speech text={s.text} />
             </div>
           ),
         )}
-        {segments.length === 0 && (
+        {parts.length === 0 && (
           <p className="author muted">
             {name} · {t("message.streaming")}
           </p>
