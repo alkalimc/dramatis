@@ -666,6 +666,7 @@ class ChunkPolicy:
 LABELS: Mapping[str, str] = {
     "subtitle": "subtitle",      # marks a caption line inside a dialogue unit
     "options": "possible replies",  # marks the player's branch options in a dialogue unit
+    "reply": "the player said",  # marks a choice with one option: the line is certain
     "story": "story",            # a scene whose group and type are both absent
     "voice": "voice",            # a voice line with no title and no known trigger
     "letter": "letter",          # a letter with no title

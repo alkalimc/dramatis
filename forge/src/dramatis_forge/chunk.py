@@ -234,6 +234,11 @@ def _turn_aligned(
     return out
 
 
+def options_label(options: list[str]) -> str:
+    """The label key for a choice: a lone option is certain, several are possible."""
+    return "reply" if len(options) == 1 else "options"
+
+
 def reply_options(
     choice: tuple[list[str], list[str]] | None, refs: list[str],
     after: list[tuple[list[str], list[str]]] = (),
@@ -334,9 +339,10 @@ def _dialogue(
                 by_seq[r["seq"]] = Row(r["seq"], None, r["text"], bool(r["brk"]), r["branch"])
         for seq, (options, _values, branch) in choices.items():
             # Options the player could pick, not words anyone said: labelled as such, so a
-            # reader never takes an unchosen reply for one that happened.
+            # reader never takes an unchosen reply for one that happened. A lone option is
+            # what the player says on every path.
             by_seq[seq] = Row(
-                seq, None, f"{policy.mark(label('options'))}{' / '.join(options)}",
+                seq, None, f"{policy.mark(label(options_label(options)))}{' / '.join(options)}",
                 False, branch)
         rendered = [by_seq[k] for k in sorted(by_seq)]
 
