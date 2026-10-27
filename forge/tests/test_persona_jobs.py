@@ -174,10 +174,10 @@ def test_a_429_in_one_thread_pauses_a_sibling():
 # --------------------------------------------------------------------------- #
 
 
-def snapshot(result, paths):
+def snapshot(result, where):
     rep = result.report
     return ([(o.subject, o.status, o.reasons, o.attempts, o.usage) for o in rep.outcomes],
-            rep.missing, rep.figures(), rows(paths))
+            rep.missing, rep.figures(), rows(where))
 
 
 def test_jobs_report_and_rows_equal_a_serial_run(toy, paths, endpoints_file, tmp_path):  # noqa: F811
