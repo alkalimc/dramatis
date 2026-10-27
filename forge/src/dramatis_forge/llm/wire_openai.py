@@ -110,11 +110,11 @@ def decode(raw: dict, protocol: str) -> Response:
 
 
 def once(protocol: str, model: str, base_url: str, key: str, req: Request,
-         transport: httpx.BaseTransport | None) -> tuple[int, Any]:
-    """One POST: (status, decoded JSON body or {"body": text}). Network failure raises
-    `httpx.TransportError`."""
+         transport: httpx.BaseTransport | None) -> tuple[int, Any, float | None]:
+    """One POST: (status, decoded JSON body or {"body": text}, seconds named by a
+    `Retry-After` header, if any). Network failure raises `httpx.TransportError`."""
     path, payload = body(protocol, model, req)
-    return send("POST", base_url, path, key, transport, json=payload)
+    return send_full("POST", base_url, path, key, transport, json=payload)
 
 
 def is_loopback(base_url: str) -> bool:
@@ -127,6 +127,23 @@ def is_loopback(base_url: str) -> bool:
 def send(method: str, base_url: str, path: str, key: str,
          transport: httpx.BaseTransport | None, *, json: Any = None,
          headers: dict[str, str] | None = None) -> tuple[int, Any]:
+    status, raw, _ = send_full(method, base_url, path, key, transport, json=json,
+                               headers=headers)
+    return status, raw
+
+
+def retry_after(value: str | None) -> float | None:
+    """Seconds named by a `Retry-After` header given as a number; an HTTP date is ignored."""
+    try:
+        seconds = float(value) if value is not None else None
+    except ValueError:
+        return None
+    return seconds if seconds is not None and seconds >= 0 else None
+
+
+def send_full(method: str, base_url: str, path: str, key: str,
+              transport: httpx.BaseTransport | None, *, json: Any = None,
+              headers: dict[str, str] | None = None) -> tuple[int, Any, float | None]:
     all_headers = dict(headers or {})
     if key:
         all_headers.setdefault("Authorization", f"Bearer {key}")
@@ -134,7 +151,8 @@ def send(method: str, base_url: str, path: str, key: str,
                       timeout=httpx.Timeout(30.0, read=READ_TIMEOUT),
                       transport=transport, trust_env=not is_loopback(base_url)) as http:
         resp = http.request(method, path, json=json)
+    wait = retry_after(resp.headers.get("retry-after"))
     try:
-        return resp.status_code, resp.json()
+        return resp.status_code, resp.json(), wait
     except ValueError:
-        return resp.status_code, {"body": resp.text[:2000]}
+        return resp.status_code, {"body": resp.text[:2000]}, wait

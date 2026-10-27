@@ -43,6 +43,10 @@ class Persona:
     example_min_tokens: int = 8
     #: Attempts per endpoint call before the person is reported as failed.
     retries: int = 3
+    #: Total seconds one call may spend waiting out HTTP 429 (a requests-per-hour cap on
+    #: a proxy, say) before the person is reported as an error. Waits are not attempts.
+    #: An hour is one full window of such a cap.
+    rate_limit_wait_s: float = 3600.0
     #: Least number of voice and dialogue units attributed to a person for them to get a
     #: persona at all. Below it they have no words of their own, only a card or a note
     #: about them, and a generator can only invent a voice. 0 turns the rule off.

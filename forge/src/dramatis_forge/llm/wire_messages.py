@@ -15,7 +15,7 @@ import httpx
 import httpx2
 
 from .types import END_TURN, MAX_TOKENS, REFUSAL, TOOL_USE, LlmError, Request, Response, Usage
-from .wire_openai import READ_TIMEOUT, RETRY_STATUS
+from .wire_openai import READ_TIMEOUT, RETRY_STATUS, retry_after
 
 #: Messages requires `max_tokens`; thinking counts against it.
 DEFAULT_MAX_OUTPUT = 32_000
@@ -112,7 +112,8 @@ def once(model: str, base_url: str, key: str, req: Request,
     except anthropic.APIStatusError as exc:
         raise LlmError(f"HTTP {exc.status_code}: {_text(exc)}", status=exc.status_code,
                        raw=exc.body,
-                       retryable=exc.status_code in RETRY_STATUS or exc.status_code >= 500) from exc
+                       retryable=exc.status_code in RETRY_STATUS or exc.status_code >= 500,
+                       retry_after=retry_after(exc.response.headers.get("retry-after"))) from exc
     except anthropic.APIConnectionError as exc:  # includes timeouts
         raise LlmError(f"transport: {exc}", retryable=True) from exc
     return decode(message.model_dump(mode="json"))

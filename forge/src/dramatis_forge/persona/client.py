@@ -4,16 +4,21 @@ The protocols live in `dramatis_forge.llm`; this module adds what the generator 
 top: a fixed output format (one offline call per person, not a cached session), output
 that must parse, and the bookkeeping of retried attempts.
 
-Transport failures, rate limits, server errors, unfinished replies and unparseable output
-are retried up to `persona.retries` attempts with exponential backoff; any other client
-error is final. The transport is injectable so tests never touch the network.
+Transport failures, server errors, unfinished replies and unparseable output are retried
+up to `persona.retries` attempts with exponential backoff; any other client error is
+final. HTTP 429 is different: it says "not now", not "this request is bad", so it is
+waited out (the server's `Retry-After`, else 30 s doubling to 5 min) without using up an
+attempt, until the call has waited `persona.rate_limit_wait_s` in all. The wait is held
+by a gate shared by every thread using the client, so a pool backs off as a whole.
+The transport, the clock and the sleep are injectable so tests never touch the network.
 """
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from time import sleep
 from typing import Any
 
 import httpx
@@ -59,6 +64,34 @@ class _Transient(Exception):
         self.raw = raw
 
 
+#: Wait after the first 429 without a `Retry-After`, doubling up to the cap, in seconds.
+RATE_WAIT_FIRST = 30.0
+RATE_WAIT_CAP = 300.0
+
+
+class Gate:
+    """A pause every thread of a run honours: a 429 for one call holds back all of them."""
+
+    def __init__(self, clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], None] | None = None) -> None:
+        self.clock = clock or time.monotonic
+        self.sleep = sleep or time.sleep
+        self._lock = threading.Lock()
+        self._until = 0.0
+
+    def hold(self, seconds: float) -> None:
+        with self._lock:
+            self._until = max(self._until, self.clock() + seconds)
+
+    def wait(self) -> None:
+        while True:
+            with self._lock:
+                left = self._until - self.clock()
+            if left <= 0:
+                return
+            self.sleep(left)
+
+
 @dataclass
 class Reply:
     output: dict[str, Any]
@@ -94,9 +127,15 @@ def request(wire: str, role: Role, system: str, user: str, schema: dict,
 class Client:
     def __init__(self, target: Target, *, retries: int,
                  transport: httpx.BaseTransport | None = None,
-                 wait: Callable[[Any], float] | None = None) -> None:
+                 wait: Callable[[Any], float] | None = None,
+                 rate_limit_wait_s: float = 0.0, gate: Gate | None = None,
+                 clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], None] | None = None) -> None:
         self.target = target
         self.retries = max(1, retries)
+        self.rate_limit_wait_s = rate_limit_wait_s
+        self.gate = gate or Gate(clock, sleep)
+        self.clock, self.sleep = self.gate.clock, self.gate.sleep
         self.wait = wait
         self.transport = transport
         self.endpoint = llm.Endpoint(target.profile.wire_api, target.profile.base_url,
@@ -123,19 +162,39 @@ class Client:
         wasted = Usage()
         attempts = 0
         last: Exception | None = None
+        limited = 0  # 429s met by this call
+        first_limit = 0.0
+        pause = False  # whether a failed attempt is to be backed off from
         while attempts < self.retries:
-            if attempts:
-                sleep((self.wait or llm.backoff)(attempts))
+            if pause:
+                self.sleep((self.wait or llm.backoff)(attempts))
+            self.gate.wait()
             try:
-                resp = llm.complete(self.endpoint, req, transport=self.transport,
-                                    retries=self.retries - attempts, wait=self.wait)
+                # One attempt at a time: attempts and rate-limit waits are counted here.
+                resp = llm.complete(self.endpoint, req, transport=self.transport, retries=1)
             except llm.LlmError as exc:
-                attempts += exc.attempts
+                if exc.status == 429:
+                    now = self.clock()
+                    if not limited:
+                        first_limit = now
+                    limited += 1
+                    delay = exc.retry_after if exc.retry_after is not None else min(
+                        RATE_WAIT_CAP, RATE_WAIT_FIRST * 2 ** (limited - 1))
+                    if now - first_limit + delay > self.rate_limit_wait_s:
+                        raise CallError(
+                            f"rate limited (HTTP 429) for {now - first_limit:.0f} s, past "
+                            f"persona.rate_limit_wait_s {self.rate_limit_wait_s:.0f}: "
+                            f"{exc.reason}", exc.raw, wasted) from exc
+                    self.gate.hold(delay)
+                    pause = False
+                    continue
+                attempts += 1
                 if not exc.retryable:
                     raise CallError(str(exc), exc.raw, wasted) from exc
-                last = _Transient(exc.reason, exc.raw)
-                break  # the retries were used up inside `complete`
-            attempts += resp.attempts
+                last, pause = _Transient(exc.reason, exc.raw), True
+                continue
+            attempts += 1
+            pause = True
             usage = _usage(resp.usage)
             if resp.stop == llm.REFUSAL:  # final, billed all the same
                 raise CallError(f"refused: {resp.text}", resp.raw, wasted + usage)

@@ -67,7 +67,10 @@ def execute(
     counter: Callable[[str], int] | None = None,
     generator: generator_mod.Generator | None = None,
     progress: Callable[[str], None] | None = None,
+    jobs: int = 1,
 ) -> Result:
+    if jobs < 1:
+        raise UsageError("--jobs must be at least 1")
     if regenerate and not stale:
         raise UsageError("--regenerate goes with --stale", "use --force to redo a subject")
     if not paths.folio.exists():
@@ -99,7 +102,8 @@ def execute(
             target = persona_target(endpoints, lookup)
         except EndpointsError as exc:
             raise UsageError(str(exc), exc.hint) from exc
-        return Client(target, retries=params.retries, transport=transport)
+        return Client(target, retries=params.retries, transport=transport,
+                      rate_limit_wait_s=params.rate_limit_wait_s)
 
     profile = endpoints.profile(role.profile)
     assert profile is not None  # checked when parsing
@@ -123,7 +127,7 @@ def execute(
         ctx = Context(db=db, gen=gen, params=params, version=version, count=count,
                       sep=pack.chunking.sep("label"), cache=RawCache(root / "raw"),
                       connect=connect, placeholder=placeholder, force=force,
-                      progress=progress)
+                      progress=progress, jobs=jobs)
         rep = run(ctx, subjects, counter_name)
         written = listed + report_mod.write(rep, root, probe=probe)
         if probe:
