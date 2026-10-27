@@ -86,7 +86,14 @@ def prepare(cfg: TrainConfig) -> tuple[data.Selection, Windowing | None]:
 
 
 def _input_hashes(cfg: TrainConfig) -> dict[str, str]:
-    names = [data.UNITS, data.PAIRS_TRAIN, data.SYNTH_TRAIN, data.PAIRS_TEST, data.SYNTH_TEST]
+    names = [
+        data.UNITS,
+        data.PAIRS_TRAIN,
+        data.SYNTH_TRAIN,
+        data.PAIRS_TEST,
+        data.SYNTH_TEST,
+        data.SPLIT,
+    ]
     return {n: data.sha256_file(cfg.root / n) for n in names if (cfg.root / n).exists()}
 
 
@@ -117,6 +124,7 @@ def write_run_json(cfg: TrainConfig, selection: data.Selection, run_dir: Path, *
         "data": {
             "inputs": _input_hashes(cfg),
             "selection_digest": selection.digest,
+            "heldout_person_source": selection.person_source,
             "examples": len(selection.examples),
             "by_family": selection.counts,
             "llm_calls_for_data": _llm_calls(cfg),

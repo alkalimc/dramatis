@@ -45,7 +45,7 @@ def test_refuses_when_a_negative_comes_from_a_test_page(root):
     rows = data.read_jsonl(root / "pairs.train.jsonl")
     rows[0]["negatives"] = ["lore:foxtrot0"]
     write_jsonl(root / "pairs.train.jsonl", rows)
-    with pytest.raises(LeakError, match="via unit"):
+    with pytest.raises(LeakError, match="held-out"):
         select(root)
 
 
@@ -65,14 +65,46 @@ def test_leak_is_caught_even_when_limit_would_drop_it(root):
         select(root, limit=1)
 
 
-def test_engine_format_eval_set_also_defines_heldout(root):
-    # A page that only the engine-format eval set touches is still held out.
+def test_engine_format_gold_units_are_heldout_units(root):
+    # A unit that only the engine-format eval set names is still held out, even on a page
+    # that also has training pairs.
     (root / "pairs.test.jsonl").unlink()
     (root / "pairs.synth.test.jsonl").unlink()
     rows = data.read_jsonl(root / "pairs.train.jsonl")
-    rows[0]["page"] = "foxtrot"
+    rows[0]["negatives"] = ["lore:foxtrot0"]
     write_jsonl(root / "pairs.train.jsonl", rows)
+    with pytest.raises(LeakError, match="held-out unit"):
+        select(root)
+
+
+def test_declared_split_defines_persons_when_pairs_list_a_whole_cast(root):
+    # Held-out pairs may name everyone on their page. Strictly, "ann" (a training person)
+    # would then count as held out and every training pair would be refused.
+    rows = data.read_jsonl(root / "pairs.test.jsonl")
+    rows[0]["persons"] = ["dee", "ann"]
+    write_jsonl(root / "pairs.test.jsonl", rows)
     with pytest.raises(LeakError):
+        select(root)
+    (root / "split.json").write_text(
+        json.dumps({"persons": {"test": ["dee", "eli"]}, "pages": {"test": TEST_PAGES}})
+    )
+    sel = select(root)
+    assert sel.person_source == "split.json" and len(sel.examples) == 15
+    # the declared list is still enforced
+    rows = data.read_jsonl(root / "pairs.train.jsonl")
+    rows[0]["persons"] = ["eli"]
+    write_jsonl(root / "pairs.train.jsonl", rows)
+    with pytest.raises(LeakError, match="person"):
+        select(root)
+
+
+def test_gold_unit_on_a_training_page_is_caught(root):
+    # Units are held out individually: a gold unit sitting on a training page is caught when
+    # a training pair uses it, without condemning the whole page.
+    rows = data.read_jsonl(root / "eval.structural.test.jsonl")
+    rows[0]["gold"] = {"lore:alpha0": 1, **rows[0]["gold"]}
+    write_jsonl(root / "eval.structural.test.jsonl", rows)
+    with pytest.raises(LeakError, match="held-out unit"):
         select(root)
 
 

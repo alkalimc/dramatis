@@ -35,6 +35,7 @@ SYNTH_TEST = "pairs.synth.test.jsonl"
 EVAL_STRUCTURAL = "eval.structural.test.jsonl"
 EVAL_VERIFY = "eval.verify.jsonl"
 COST = "cost.json"
+SPLIT = "split.json"
 
 # Family label carried by synthetic pairs when the exporter does not set one.
 SYNTH_FAMILY = "synthetic"
@@ -90,6 +91,7 @@ class Selection:
     pairs: list[Pair]
     counts: dict[str, int] = field(default_factory=dict)
     digest: str = ""
+    person_source: str = ""
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -147,38 +149,40 @@ def load_pairs(path: Path, source: str) -> list[Pair]:
 
 @dataclass(frozen=True)
 class Heldout:
-    """Pages and persons that must never be seen at training time."""
+    """What must never be seen at training time: whole pages, persons, and individual units
+    (the gold and positive units of the held-out sets)."""
 
     pages: frozenset[str]
     persons: frozenset[str]
+    units: frozenset[str] = frozenset()
+    # Where the person set came from: "split.json" (declared by the exporter) or "pairs"
+    # (derived from the held-out files), recorded in every run.
+    person_source: str = "pairs"
 
 
-def heldout_from(
-    units: dict[str, Unit], pairs: Iterable[Pair], gold_ids: Iterable[str] = ()
-) -> Heldout:
-    """Everything the held-out sets touch: pair pages and persons, plus the pages and
-    persons of every gold unit (engine-format eval sets carry unit ids only)."""
+def heldout_from(pairs: Iterable[Pair], gold_ids: Iterable[str] = ()) -> Heldout:
     pages: set[str] = set()
     persons: set[str] = set()
+    units: set[str] = set(gold_ids)
     for p in pairs:
         if p.page:
             pages.add(p.page)
         persons.update(p.persons)
-        u = units.get(p.positive)
-        if u:
-            pages.add(u.page)
-            persons.update(u.persons)
-    for uid in gold_ids:
-        u = units.get(uid)
-        if u:
-            pages.add(u.page)
-            persons.update(u.persons)
-    pages.discard("")
-    return Heldout(frozenset(pages), frozenset(persons))
+        units.add(p.positive)
+    return Heldout(frozenset(pages), frozenset(persons), frozenset(units))
 
 
 def load_heldout(root: Path, units: dict[str, Unit]) -> Heldout:
-    """Union of every held-out file present under `root`."""
+    """Union of every held-out file present under `root`.
+
+    Pages are derived from the held-out pair files, plus any the optional `split.json`
+    declares; units are the gold and positive units of every held-out file. (Pages of gold
+    units are not used: a shared index page can hold both training and held-out units, and
+    the unit-level rule is the one that keeps held-out text out of training.) Persons come from `split.json` (`persons.test`) when it exists, because a
+    held-out pair's `persons` field may list a whole page's cast, which includes people who
+    are legitimately in training. Without it, every person named by a held-out pair counts
+    as held out, which is the strict reading.
+    """
     pairs: list[Pair] = []
     gold: list[str] = []
     for name, source in ((PAIRS_TEST, STRUCTURAL), (SYNTH_TEST, SYNTHETIC)):
@@ -191,7 +195,17 @@ def load_heldout(root: Path, units: dict[str, Unit]) -> Heldout:
                     gold += list(r["gold"])
                 elif "positive" in r:
                     pairs.append(pair_from_row(r, STRUCTURAL))
-    return heldout_from(units, pairs, gold)
+    derived = heldout_from(pairs, gold)
+    split_path = root / SPLIT
+    if not split_path.exists():
+        return derived
+    declared = json.loads(split_path.read_text())
+    return Heldout(
+        derived.pages | frozenset(declared.get("pages", {}).get("test", ())),
+        frozenset(declared.get("persons", {}).get("test", ())),
+        derived.units,
+        "split.json",
+    )
 
 
 def find_leaks(pairs: Sequence[Pair], units: dict[str, Unit], heldout: Heldout) -> list[str]:
@@ -217,9 +231,10 @@ def find_leaks(pairs: Sequence[Pair], units: dict[str, Unit], heldout: Heldout) 
                 if u is None:
                     problems.append(f"unknown unit {uid!r} in pair {p.query!r}")
                     break
-                hit = touches(u.page, u.persons)
+                hit = f"held-out unit {uid!r}" if uid in heldout.units else None
+                hit = hit or touches(u.page, u.persons)
                 if hit:
-                    hit = f"{hit} via unit {uid!r}"
+                    hit = hit if hit.startswith("held-out") else f"{hit} via unit {uid!r}"
                     break
         if hit:
             problems.append(f"{hit}: {p.query!r}")
@@ -312,7 +327,9 @@ def select_training_pairs(
     pool = [
         uid
         for uid, u in sorted(view.items())
-        if u.page not in heldout.pages and not (set(u.persons) & heldout.persons)
+        if uid not in heldout.units
+        and u.page not in heldout.pages
+        and not (set(u.persons) & heldout.persons)
     ]
 
     examples = []
@@ -335,4 +352,4 @@ def select_training_pairs(
     for p in final_pairs:
         key = p.family if p.source == STRUCTURAL else SYNTH_FAMILY
         counts[key] = counts.get(key, 0) + 1
-    return Selection(examples, final_pairs, counts, _digest(final_pairs))
+    return Selection(examples, final_pairs, counts, _digest(final_pairs), heldout.person_source)

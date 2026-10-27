@@ -13,6 +13,10 @@ dependencies = [
     "accelerate==1.15.0",
 ]
 
+[project.optional-dependencies]
+# Low-rank adapters (--lora-rank), the practical way to fine-tune a 0.6B model in 16 GB.
+lora = ["peft==0.21.2"]
+
 [project.scripts]
 dramatis-research = "dramatis_research.cli:main"
 
@@ -24,7 +28,7 @@ build-backend = "hatchling.build"
 packages = ["src/dramatis_research"]
 
 [dependency-groups]
-dev = ["pytest==8.4.2", "ruff==0.13.2"]
+dev = ["pytest==8.4.2", "ruff==0.13.2", "peft==0.21.2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
