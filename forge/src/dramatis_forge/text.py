@@ -85,6 +85,7 @@ TEXT: Mapping[str, str] = {
     # ---- per-page inspection ----
     "inspect.header": "> Archived text. Source {chars:,} characters, revid {revid}.",
     "inspect.header_note": "> This is what every downstream stage sees.",
+    "inspect.form_of": "**Form page**: belongs to {person}; form kind: {kind}.",
     "inspect.forms": "**Forms of one person**: {forms}",
     "inspect.form_item": "{page} ({kind})",
     "inspect.scene_meta": "**Category** {category} · **Group** {group} · **Source** `{source_ref}`",

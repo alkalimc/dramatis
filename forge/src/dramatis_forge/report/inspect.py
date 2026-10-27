@@ -21,6 +21,7 @@ from pathlib import Path
 
 from ..archive import Archive
 from ..chunk import reply_text
+from ..identity import CANONICAL
 from ..pack import Pack
 from ..text import cell, table_head
 
@@ -142,6 +143,10 @@ def collect(archive: Archive, title: str, pack: Pack) -> dict:
             out["aliases"] = rows
             out["_alias_total"] = archive.count("aliases", "kind=?", (kind,))
 
+    own = db.execute("SELECT person_id,kind FROM forms WHERE page=?", (title,)).fetchone()
+    if own is not None and own["kind"] != CANONICAL:
+        out["form_of"] = {"person": own["person_id"], "kind": own["kind"]}
+
     forms = [dict(r) for r in db.execute(
         "SELECT page,kind,ordinal FROM forms WHERE person_id=? ORDER BY ordinal", (title,))]
     if len(forms) > 1:
@@ -184,6 +189,11 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
         "",
     ]
     preamble = len(L)
+
+    if "form_of" in rec:
+        of = rec["form_of"]
+        L += [say("inspect.form_of", person=of["person"],
+                  kind=pack.text.get(f"inspect.form_kind.{of['kind']}", of["kind"])), ""]
 
     if "forms" in rec:
         L += [say("inspect.forms", forms=list_sep.join(

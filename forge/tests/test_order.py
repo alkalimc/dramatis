@@ -89,6 +89,19 @@ def test_a_table_row_never_breaks_across_lines(pack):
     assert all(r.endswith("|") for r in rows)
 
 
+def test_a_form_page_says_whose_form_it_is(tmp_path, pack):
+    with Archive(tmp_path / "t.archive") as a:
+        a.write_identity({"Ann": [("Ann", "canonical", 0), ("Ann(Winter)", "alt", 1)]})
+        a.put_page("Ann", "x", 1, "now")
+        a.put_page("Ann(Winter)", "x", 2, "now")
+        form = inspect.collect(a, "Ann(Winter)", pack)
+        base = inspect.collect(a, "Ann", pack)
+    assert form["form_of"] == {"person": "Ann", "kind": "alt"}
+    assert "form_of" not in base
+    md = inspect.render(pack, "Ann(Winter)", {"wikitext": "x", "revid": 2}, form)
+    assert "Ann" in md.split("\n")[5] and "alt" in md.split("\n")[5]
+
+
 def test_voice_variants_share_a_slot(tmp_path):
     with Archive(tmp_path / "t.archive") as a:
         stored, ignored = a.insert_records([
