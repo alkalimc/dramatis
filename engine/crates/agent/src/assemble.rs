@@ -394,8 +394,8 @@ pub fn text_call(raw: &str) -> Option<(String, String, String)> {
 /// A reply as the user may see it: emulated tool-call blocks the endpoint failed to parse
 /// are dropped. A closed block goes whole. An unclosed one is usually a call whose
 /// arguments carry the words themselves, so its opening line and the `"text": "` lead-in
-/// go and the words stay.
-pub fn visible_text(raw: &str) -> String {
+/// go and the words stay. A line holding only an empty scene marker is dropped too.
+pub fn visible_text(raw: &str, scene: (&str, &str)) -> String {
     let mut out = String::new();
     let mut rest = raw;
     while let Some(i) = rest.find(FENCE) {
@@ -428,7 +428,7 @@ pub fn visible_text(raw: &str) -> String {
     while i < lines.len() {
         let line = lines[i];
         i += 1;
-        if is_markup_line(line) {
+        if is_markup_line(line) || is_empty_scene(line, scene) {
             continue;
         }
         if let Some((name, closed)) = opening_tag_line(line) {
@@ -474,6 +474,16 @@ fn opening_tag_line(line: &str) -> Option<(&str, bool)> {
     (t.ends_with('>') && !t.ends_with("/>") && !after.contains('<')).then_some((name, false))
 }
 
+/// A line that is a scene marker with nothing inside it.
+fn is_empty_scene(line: &str, (open, close): (&str, &str)) -> bool {
+    !open.is_empty()
+        && line
+            .trim()
+            .strip_prefix(open)
+            .and_then(|t| t.strip_suffix(close))
+            .is_some_and(|inner| inner.trim().is_empty())
+}
+
 /// A line that is one self-closing markup tag, such as a chat app's follow-up suggestion
 /// (`<FollowUp label="…"/>`) a proxy passes through. Never speech.
 fn is_markup_line(line: &str) -> bool {
@@ -507,6 +517,10 @@ pub fn resolve_id<'a>(id: &str, known: impl IntoIterator<Item = &'a String>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn visible(raw: &str) -> String {
+        visible_text(raw, ("(", ")"))
+    }
     use std::collections::BTreeMap;
 
     #[test]
@@ -558,31 +572,36 @@ mod tests {
     #[test]
     fn tool_call_blocks_are_not_shown() {
         assert_eq!(
-            visible_text("hi\n```tool_call\n{\"name\": \"search\"}\n```\nbye"),
+            visible("hi\n```tool_call\n{\"name\": \"search\"}\n```\nbye"),
             "hi\n\nbye"
         );
         assert_eq!(
-            visible_text(
-                "```tool_call\n{\"name\": \"report\", \"arguments\": {\"text\": \"words\nmore"
-            ),
+            visible("```tool_call\n{\"name\": \"report\", \"arguments\": {\"text\": \"words\nmore"),
             "words\nmore"
         );
-        assert_eq!(visible_text("plain"), "plain");
+        assert_eq!(visible("plain"), "plain");
         assert_eq!(
-            visible_text("Yes.\n<FollowUp label=\"more\" query=\"q\"/>\nGo."),
+            visible("Yes.\n<FollowUp label=\"more\" query=\"q\"/>\nGo."),
             "Yes.\nGo."
         );
-        assert_eq!(visible_text("a < b and c/>"), "a < b and c/>");
+        assert_eq!(visible("a < b and c/>"), "a < b and c/>");
+    }
+
+    #[test]
+    fn an_empty_scene_line_is_dropped() {
+        assert_eq!(visible("(  )\nHello.\n()\n(waves)"), "Hello.\n(waves)");
+        assert_eq!(visible_text("a\n\u{2a}\u{2a}\nb", ("*", "*")), "a\nb");
+        assert_eq!(visible_text("a ()\nb", ("(", ")")), "a ()\nb");
     }
 
     #[test]
     fn multi_line_ui_elements_are_dropped() {
         let raw = "Next.\n<ElicitationsGroup message=\"\u{63a5}\u{4e0b}\u{6765}\u{ff1f}\">\n</ElicitationsGroup>\nDone.";
-        assert_eq!(visible_text(raw), "Next.\nDone.");
+        assert_eq!(visible(raw), "Next.\nDone.");
         let nested = "A\n<Group title=\"t\">\n  <Choice label=\"x\"/>\n  <Choice label=\"y\">go</Choice>\n</Group>\nB";
-        assert_eq!(visible_text(nested), "A\nB");
-        assert_eq!(visible_text("A\n<Note kind=\"k\">text</Note>\nB"), "A\nB");
-        assert_eq!(visible_text("A\n  <Group>\n  </Group>  "), "A");
+        assert_eq!(visible(nested), "A\nB");
+        assert_eq!(visible("A\n<Note kind=\"k\">text</Note>\nB"), "A\nB");
+        assert_eq!(visible("A\n  <Group>\n  </Group>  "), "A");
     }
 
     #[test]
@@ -596,13 +615,13 @@ mod tests {
             "<Group>\nunclosed block stays",
             "<Groupie>\nnot closed by </Group>",
         ] {
-            assert_eq!(visible_text(keep), keep, "{keep}");
+            assert_eq!(visible(keep), keep, "{keep}");
         }
     }
 
     #[test]
     fn a_block_is_not_closed_by_another_name() {
-        assert_eq!(visible_text("<A>\n</B>\nrest"), "<A>\n</B>\nrest");
+        assert_eq!(visible("<A>\n</B>\nrest"), "<A>\n</B>\nrest");
     }
 
     #[test]
