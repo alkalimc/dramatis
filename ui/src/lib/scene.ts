@@ -59,3 +59,29 @@ export function speechOnly(text: string, marker: SceneMarker): string {
 export function withoutCites(text: string): string {
   return text.replace(/[ \t]*\[#[^\]\s,]{1,128}(?:\s*,\s*#?[^\]\s,]{1,128})*\]/g, "").replace(/[ \t]+$/gm, "");
 }
+
+export type Block = { kind: "scene"; text: string } | { kind: "speech"; text: string; first: boolean };
+
+/**
+ * What a reply shows: scene lines, and each blank-line-separated paragraph of speech as
+ * its own block. `first` marks the opening paragraph of a run of speech, the one that
+ * carries the author label. Citation marks are stripped here, so a closing line holding
+ * only marks leaves no block. A mark still being typed at the end is held back.
+ */
+export function blocks(text: string, marker: SceneMarker): Block[] {
+  const out: Block[] = [];
+  for (const seg of splitScene(text.replace(/\[#[^\]]*$/, ""), marker)) {
+    if (seg.kind === "scene") {
+      out.push(seg);
+      continue;
+    }
+    let first = true;
+    for (const para of withoutCites(seg.text).split(/\n[ \t]*\n/)) {
+      const body = para.replace(/^\s*\n+|\s+$/g, "");
+      if (!body.trim()) continue;
+      out.push({ kind: "speech", text: body, first });
+      first = false;
+    }
+  }
+  return out;
+}

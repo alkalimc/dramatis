@@ -1,4 +1,4 @@
-import { splitScene, speechOnly, withoutCites } from "./scene";
+import { blocks, splitScene, speechOnly, withoutCites } from "./scene";
 
 const star = { open: "*", close: "*" };
 
@@ -73,4 +73,15 @@ test("several ids in one bracket go together", () => {
 
 test("brackets that are not citation marks stay", () => {
   expect(withoutCites("[# a b] and [x]")).toBe("[# a b] and [x]");
+});
+
+test("blocks: paragraphs apart, one label per run, scene lines between, marks-only line dropped", () => {
+  const text = "One.\n\nTwo.\n*Rain.*\nThree.\n\n[#a:1]";
+  expect(blocks(text, star)).toEqual([
+    { kind: "speech", text: "One.", first: true },
+    { kind: "speech", text: "Two.", first: false },
+    { kind: "scene", text: "Rain." },
+    { kind: "speech", text: "Three.", first: true },
+  ]);
+  expect(blocks("[#a:1]", star)).toEqual([]);
 });
