@@ -71,7 +71,6 @@ pub fn person_name(agent: &Agent, id: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Working {
     Typing,
-    #[allow(dead_code)] // set once the engine reports when a turn is searching
     Searching,
 }
 
@@ -81,6 +80,18 @@ pub fn working_line(who: &str, what: Working) -> String {
     match what {
         Working::Typing => format!("{who} is typing..."),
         Working::Searching => format!("{who} is looking things up..."),
+    }
+}
+
+/// The status line in the corpus's own wording when it has one, else the English line.
+pub fn working_text(agent: &Agent, who: &str, what: Working) -> String {
+    let key = match what {
+        Working::Typing => "typing.writing",
+        Working::Searching => "typing.tool",
+    };
+    match agent.wording().get(key) {
+        k if k == key => working_line(who, what),
+        template => template.replace("{name}", who),
     }
 }
 
@@ -122,8 +133,6 @@ struct Live {
 #[derive(Default)]
 struct State {
     live: Option<Live>,
-    /// Whether a "… is typing" line is on screen, to be erased before anything else.
-    status: bool,
     /// The message whose name has been written, so a stream resumed after a tool line
     /// does not repeat it.
     named: Option<MessageId>,
@@ -223,57 +232,19 @@ impl Show {
     }
 }
 
-impl Show {
-    /// Erase the status line, if one is showing, so the next output starts clean.
-    fn clear_status(&self, st: &mut State) {
-        if std::mem::take(&mut st.status) && self.term.style.color {
-            self.term.print("\r\x1b[2K");
-        }
-    }
-
-    /// One dim line saying who is generating, rewritten in place on a terminal.
-    fn show_status(&self, st: &mut State, agent: &Agent, author: &Author, state: &ActivityState) {
-        let key = match state {
-            ActivityState::Thinking | ActivityState::Writing => "typing.writing",
-            ActivityState::Tool { .. } => "typing.tool",
-            _ => return,
-        };
-        let name = author_name(agent, author);
-        let line = agent.wording().get(key).replace("{name}", &name);
-        if self.term.style.color {
-            self.term
-                .print(&format!("\r\x1b[2K{}", self.term.style.dim(&line)));
-            st.status = true;
-        } else if !st.status {
-            // No terminal to rewrite: say it once per turn.
-            self.term.note(&line);
-            st.status = true;
-        }
-    }
-}
-
 impl Sink for Show {
     fn emit(&self, event: Event) {
         let Some(agent) = self.agent() else { return };
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        match &event {
-            Event::TurnActivity(a) if st.live.is_none() => {
-                match a.state {
-                    ActivityState::Done | ActivityState::Failed { .. } => {
-                        self.clear_status(&mut st);
-                        if !self.term.style.color {
-                            st.status = false;
-                        }
-                    }
-                    _ => self.show_status(&mut st, &agent, &a.author, &a.state),
-                }
-                return;
+        if let Event::TurnActivity(a) = &event {
+            // The session already said who is typing; a tool round is the one change worth
+            // a line of its own.
+            if matches!(a.state, ActivityState::Tool { .. }) && st.live.is_none() {
+                let who = author_name(&agent, &a.author);
+                self.term
+                    .note(&working_text(&agent, &who, Working::Searching));
             }
-            Event::TurnActivity(_) => return,
-            Event::MessageDelta(_) | Event::ToolCalled(_) | Event::MessageAdded(_) => {
-                self.clear_status(&mut st);
-            }
-            _ => {}
+            return;
         }
         match event {
             Event::MessageDelta(d) => {
