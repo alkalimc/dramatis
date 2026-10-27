@@ -256,3 +256,9 @@ def test_models_lists_ids_and_reports_the_endpoints_error(protocol):
 
 def test_endpoint_repr_hides_the_key():
     assert "sk-test" not in repr(endpoint("chat"))
+
+
+def test_a_local_endpoint_bypasses_the_system_proxy():
+    from dramatis_forge.llm.wire_openai import is_loopback
+    assert is_loopback("http://localhost:8083/v1") and is_loopback("http://127.0.0.1:9/v1")
+    assert not is_loopback("https://api.example.com/v1")
