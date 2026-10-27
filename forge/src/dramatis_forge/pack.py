@@ -801,6 +801,9 @@ class WikiConfig:
     history_url: str = ""
     #: One exact revision, `{revid}` substituted.
     revision_url: str = ""
+    #: Where a person's avatar image lives, `{page}` substituted with the person's page
+    #: title. Stored in the folio like the other patterns; empty means no avatars.
+    avatar_url: str = ""
     rate: float = 8.0
     #: Namespaces whose changes can matter for incremental update.
     watch_namespaces: tuple[int, ...] = (0,)

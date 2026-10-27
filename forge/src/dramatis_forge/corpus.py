@@ -255,6 +255,7 @@ def run(
         folio.set_meta("source_url_pattern", pack.wiki.source_url)
         folio.set_meta("history_url_pattern", pack.wiki.history_url)
         folio.set_meta("revision_url_pattern", pack.wiki.revision_url)
+        folio.set_meta("avatar_url_pattern", pack.wiki.avatar_url)
         # Query-side stopwords for the engine: a property of the corpus language.
         folio.set_meta("stopwords", list(pack.stopwords))
         # Read from the units that shipped, not from a hand-listed subset of source

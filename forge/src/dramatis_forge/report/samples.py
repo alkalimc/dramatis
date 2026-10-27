@@ -103,12 +103,14 @@ def _records_per_page(archive: Archive) -> tuple[Counter, dict[str, set[str]]]:
 
 
 def unit_pages(archive: Archive, folio: Folio) -> set[str]:
-    """Pages that produced at least one unit: the page a unit cites, the page a scene body
-    was read from, and the form pages whose text is stored once with another form."""
+    """Pages that produced something the folio keeps: a unit (the page a unit cites, the page
+    a scene body was read from, a form page whose text is stored once with another form) or
+    glossary terms, which become aliases rather than units."""
     pages = {r[0] for r in folio.db.execute("SELECT DISTINCT page FROM chunks")}
     pages.update(r[0] for r in archive.db.execute(
         "SELECT source_page FROM scenes WHERE source_page IS NOT NULL AND id IN "
         "(SELECT value FROM json_each(?))", (json.dumps(sorted(pages)),)))
+    pages.update(r[0] for r in archive.db.execute("SELECT DISTINCT page FROM terms"))
     for copies in (folio.get_meta("form_copies") or {}).values():
         pages.update(copies)
     return pages
