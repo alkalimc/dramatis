@@ -608,6 +608,7 @@ impl Agent {
     }
 
     pub(crate) fn emit_quota(&self) -> Result<()> {
+        let _order = self.quota_events.lock().unwrap_or_else(|e| e.into_inner());
         let now = self.now();
         let conn = self.db();
         let tier = world::settings::intensity(&conn)?;
