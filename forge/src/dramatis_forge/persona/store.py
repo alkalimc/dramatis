@@ -8,6 +8,10 @@ The raw cache (`<pack dir>/persona/raw/<subject>.json`) holds each subject's las
 with its version. `forge build` creates the folio afresh, which drops every prompt row;
 the cache lets the next `forge persona` restore rows for the same version without
 calling the endpoint again.
+
+Each entry also records what the reply was generated from (`source`: the ids of the units
+whose text was sent, and of every unit that could have been), which `stale` compares with
+a rebuilt folio.
 """
 
 from __future__ import annotations
@@ -110,13 +114,26 @@ class RawCache:
         output = entry.get("output")
         return output if isinstance(output, dict) else None
 
+    def entry(self, subject: str) -> dict[str, Any] | None:
+        """The stored entry of any version, or None."""
+        path = self.path(subject)
+        if not path.exists():
+            return None
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        return entry if isinstance(entry, dict) and entry.get("subject") == subject else None
+
     def save(self, subject: str, version: str, output: dict[str, Any],
-             raw: dict[str, Any], usage: dict[str, int]) -> Path:
+             raw: dict[str, Any], usage: dict[str, int],
+             source: dict[str, list[str]] | None = None) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.path(subject)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"subject": subject, "generator_version": version,
-                                   "output": output, "usage": usage, "response": raw},
+                                   "source": source, "output": output, "usage": usage,
+                                   "response": raw},
                                   ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
         return path

@@ -56,6 +56,8 @@ class Item:
     title: str
     text: str
     tokens: int
+    #: Id of the folio unit the text comes from.
+    unit: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,7 @@ class Line:
     #: answers (another speaker, narration, a caption, a branch option). A bare line of
     #: dialogue says little about how someone speaks until you see what it replies to.
     before: str = ""
+    unit: str = ""
 
 
 @dataclass
@@ -82,6 +85,8 @@ class Material:
     dropped: dict[str, int] = field(default_factory=dict)
     #: Story lines found before sampling.
     story_found: int = 0
+    #: Ids of every unit that yielded an item or a line before the budget, sent or not.
+    attributed: set[str] = field(default_factory=set)
 
     @property
     def empty(self) -> bool:
@@ -90,6 +95,11 @@ class Material:
     @property
     def tokens(self) -> int:
         return sum(i.tokens for i in self.items) + sum(s.tokens for s in self.story)
+
+    @property
+    def sent(self) -> set[str]:
+        """Ids of the units whose text is in the material as sent."""
+        return {i.unit for i in self.items} | {s.unit for s in self.story}
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -258,19 +268,22 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
     items: list[Item] = []
     story: list[Line] = []
     seen: set[str] = set()
+    attributed: set[str] = set()
     units = db.execute(
-        "SELECT c.template, c.page, c.title, c.text, c.span_of FROM unit_persons u "
+        "SELECT c.id, c.template, c.page, c.title, c.text, c.span_of FROM unit_persons u "
         "JOIN chunks c ON c.id = u.chunk_id WHERE u.person_id=? ORDER BY c.ord", (person_id,))
-    for template, page, title, text, span_of in units:
+    for uid, template, page, title, text, span_of in units:
         shape = shapes.get(template, template)
         if shape == "dialogue":
             for speaker, words, before in _speaker_lines(text, names, sep):
+                attributed.add(uid)
                 words = rules.clean(words)
                 if not words or words in seen:
                     continue
                 seen.add(words)
                 form = speaker if speaker in rank else primary
-                story.append(Line(form, title or page, words, count(before + words), before))
+                story.append(Line(form, title or page, words, count(before + words), before,
+                                  uid))
             continue
         kind = rules.kind(_kind(shape, span_of), title)
         if kind is None:
@@ -280,10 +293,11 @@ def for_person(db: sqlite3.Connection, person_id: str, gen: Generator, p: Person
             continue
         form = span_of.partition("#")[0] if kind in ("voice", "char_ref") and span_of else page
         shown = "" if kind == "card" else (title or "")
-        items.append(Item(kind, form, shown, body, count(shown + body)))
+        attributed.add(uid)
+        items.append(Item(kind, form, shown, body, count(shown + body), uid))
     items.sort(key=lambda i: rank.get(i.form_page, len(rank)))  # canonical form first
 
-    mat = Material(subject=person_id, display=display, forms=forms)
+    mat = Material(subject=person_id, display=display, forms=forms, attributed=attributed)
     _budget(mat, items, story, p)
     return mat
 
@@ -299,24 +313,26 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
     display = src.names[0] if src.names else HOST
     story: list[Line] = []
     seen: set[str] = set()
+    attributed: set[str] = set()
     if dialogue and names:
         marks = ",".join("?" * len(dialogue))
         likes = " OR ".join("instr(text, ?) > 0" for _ in names)
-        for title, page, text in db.execute(
-            f"SELECT title, page, text FROM chunks WHERE template IN ({marks}) "
+        for uid, title, page, text in db.execute(
+            f"SELECT id, title, page, text FROM chunks WHERE template IN ({marks}) "
             f"AND ({likes}) ORDER BY ord", [*dialogue, *(f"{n}{sep}" for n in names)],
         ):
             for _speaker, words, before in _speaker_lines(text, names, sep):
+                attributed.add(uid)
                 words = rules.clean(words)
                 if words and words not in seen:
                     seen.add(words)
                     # Tagged with the host, like a person's lines with their form: the
                     # scene is already the group heading.
                     story.append(Line(display, title or page, words, count(before + words),
-                                      before))
+                                      before, uid))
     items: list[Item] = []
-    for template, page, title, text, span_of in db.execute(
-        "SELECT template, page, title, text, span_of FROM chunks ORDER BY ord"
+    for uid, template, page, title, text, span_of in db.execute(
+        "SELECT id, template, page, title, text, span_of FROM chunks ORDER BY ord"
     ):
         if not title or not any(title == t or title.endswith(f" › {t}") for t in src.titles):
             continue
@@ -325,7 +341,8 @@ def for_host(db: sqlite3.Connection, src: HostSource, gen: Generator, p: Persona
             continue
         body = rules.body(text)
         if body:
-            items.append(Item(kind, page, title, body, count(title + body)))
-    mat = Material(subject=HOST, display=display, forms=list(src.names))
+            attributed.add(uid)
+            items.append(Item(kind, page, title, body, count(title + body), uid))
+    mat = Material(subject=HOST, display=display, forms=list(src.names), attributed=attributed)
     _budget(mat, items, story, p)
     return mat
