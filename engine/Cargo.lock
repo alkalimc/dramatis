@@ -1022,12 +1022,21 @@ dependencies = [
 name = "dramatis-cli"
 version = "0.1.0"
 dependencies = [
+ "agent",
  "anyhow",
+ "api",
+ "async-trait",
  "clap",
  "eval",
  "folio",
+ "futures",
  "index",
+ "llm",
+ "rusqlite",
  "serde_json",
+ "tokio",
+ "toml 1.1.6+spec-1.1.0",
+ "world",
 ]
 
 [[package]]
@@ -4656,6 +4665,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

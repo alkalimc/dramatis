@@ -6,10 +6,12 @@
 //!   evaluate   score retrieval against the structural benchmark, per family and per stratum
 //!   calibrate  fit the confidence bands on a slice of that benchmark
 //!   bench      measure latency and resident memory on this machine
+//!   chat       talk to the corpus's persons from the terminal
 //!
 //! `bench` is a measurement wearing a CLI: latency and resident memory are budgets that
 //! cannot be settled on paper.
 
+mod chat;
 mod mem;
 
 use std::fmt::Write as _;
@@ -53,6 +55,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Talk to the corpus's persons in a line-based REPL (needs an endpoints file and a key).
+    Chat(chat::Args),
     /// What this corpus contains, and what it requires of a reader.
     Inspect,
     /// Search, and show what came back with its confidence and trace.
@@ -158,11 +162,15 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Command::Chat(args) = cli.command {
+        return chat::run(cli.folio, args);
+    }
     let folio = match cli.folio {
         Some(path) => path,
         None => default_folio()?,
     };
     match cli.command {
+        Command::Chat(_) => unreachable!("handled before the corpus is opened"),
         Command::Inspect => inspect(&folio),
         Command::Search {
             query,
