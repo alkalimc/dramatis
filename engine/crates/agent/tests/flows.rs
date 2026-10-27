@@ -330,23 +330,36 @@ async fn a_request_that_runs_out_of_turns_is_closed_with_what_was_said() {
 }
 
 #[tokio::test]
-async fn report_and_wrapup_are_refused_where_they_do_not_belong() {
+async fn wrapup_is_refused_in_an_ordinary_turn() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
-    e.fake.push([
-        call("report", json!({"text": "x"})),
-        call("wrapup", json!({"facts": []})),
-        say("ok"),
-    ]);
+    e.fake
+        .push([call("wrapup", json!({"facts": []})), say("ok")]);
     e.agent.send(ch, "hi", None).await.unwrap();
     let log = log_bytes(&e.agent, ch);
-    assert!(log.contains("There is no request to report on."));
     assert!(log.contains("wrapup is only for closing a conversation."));
     assert!(
         e.agent
             .with_world(|w| fact::all(w, true).unwrap())
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn report_with_nothing_asked_is_the_reply_without_another_call() {
+    // The tool list is part of the cached prefix and fixed per segment, so `report` stays
+    // offered; a call with no request open ends the turn with its text instead of costing
+    // the refusal round trip.
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        call("report", json!({"text": "Cooler water."})),
+        say("never asked"),
+    ]);
+    e.agent.send(ch, "hi", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+    let msgs = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(msgs.last().unwrap().text, "Cooler water.");
 }
 
 #[tokio::test]
@@ -442,6 +455,32 @@ async fn material_past_the_threshold_rolls_over_after_a_wrapup() {
     for wire in WIRES {
         rolls_over(wire).await;
     }
+}
+
+#[tokio::test]
+async fn a_per_request_model_does_not_roll_for_material_and_records_no_points() {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].billing = Some(api::endpoints::Billing::Request);
+    let e = env_with(ep, |c| c.agent.roll.k = 10.0);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("Cooler water."), say("Again: cooler.")]);
+    e.agent
+        .send(ch, "how should I brew jasmine tea?", None)
+        .await
+        .unwrap();
+    e.agent.send(ch, "and once more?", None).await.unwrap();
+    assert_eq!(segments(&e.agent, ch).len(), 1);
+    assert_eq!(e.fake.bodies().len(), 2, "no wrap-up call either");
+    let points: f64 = e.agent.with_world(|w| {
+        w.query_row("SELECT SUM(points) FROM meter", [], |r| r.get(0))
+            .unwrap()
+    });
+    assert_eq!(points, 0.0);
+    let calls: i64 = e.agent.with_world(|w| {
+        w.query_row("SELECT COUNT(*) FROM meter", [], |r| r.get(0))
+            .unwrap()
+    });
+    assert_eq!(calls, 2);
 }
 
 async fn rolls_over(wire: WireApi) {

@@ -201,7 +201,6 @@ harness.digest.messaged
 harness.digest.replied
 harness.done
 harness.error.arguments
-harness.error.no_task
 harness.error.not_asked
 harness.error.not_found
 harness.error.refused

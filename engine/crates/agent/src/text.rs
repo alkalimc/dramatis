@@ -114,7 +114,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.digest.came_by", "- {name} came by."),
     ("harness.digest.birthday", "- Today is {name}'s birthday."),
-    ("harness.error.no_task", "There is no request to report on."),
     (
         "harness.error.wrapup_only",
         "wrapup is only for closing a conversation.",
