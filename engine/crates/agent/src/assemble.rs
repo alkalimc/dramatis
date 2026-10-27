@@ -357,7 +357,38 @@ pub fn visible_text(raw: &str) -> String {
         rest = "";
     }
     out.push_str(rest);
-    out.trim().to_owned()
+    let kept: Vec<&str> = out.lines().filter(|l| !is_markup_line(l)).collect();
+    kept.join("\n").trim().to_owned()
+}
+
+/// A line that is one self-closing markup tag, such as a chat app's follow-up suggestion
+/// (`<FollowUp label="…"/>`) a proxy passes through. Never speech.
+fn is_markup_line(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with('<')
+        && t.ends_with("/>")
+        && t[1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+}
+
+/// The full id a cited id stands for: itself, or the one known id that ends in it after
+/// its kind prefix (a model may write `[#hash]` for `[#kind:hash]`).
+pub fn resolve_id<'a>(id: &str, known: impl IntoIterator<Item = &'a String>) -> Option<String> {
+    let mut hit = None;
+    for k in known {
+        if k == id {
+            return Some(k.clone());
+        }
+        if k.rsplit_once(':').is_some_and(|(_, tail)| tail == id) {
+            if hit.is_some() {
+                return None;
+            }
+            hit = Some(k.clone());
+        }
+    }
+    hit
 }
 
 #[cfg(test)]
@@ -394,6 +425,24 @@ mod tests {
             "words\nmore"
         );
         assert_eq!(visible_text("plain"), "plain");
+        assert_eq!(
+            visible_text("Yes.\n<FollowUp label=\"more\" query=\"q\"/>\nGo."),
+            "Yes.\nGo."
+        );
+        assert_eq!(visible_text("a < b and c/>"), "a < b and c/>");
+    }
+
+    #[test]
+    fn a_bare_hash_resolves_to_the_one_id_that_ends_in_it() {
+        let known = ["dialogue:ab12".to_string(), "voice:cd34".to_string()];
+        assert_eq!(resolve_id("ab12", &known).as_deref(), Some("dialogue:ab12"));
+        assert_eq!(
+            resolve_id("voice:cd34", &known).as_deref(),
+            Some("voice:cd34")
+        );
+        assert_eq!(resolve_id("ef56", &known), None);
+        let twice = ["a:x1".to_string(), "b:x1".to_string()];
+        assert_eq!(resolve_id("x1", &twice), None);
     }
 
     #[test]

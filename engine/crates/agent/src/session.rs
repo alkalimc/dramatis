@@ -847,8 +847,10 @@ impl Agent {
         let mut out: Vec<world::Citation> = Vec::new();
         let ix = self.ix();
         for id in assemble::ids_in(text) {
-            let known = shown.contains(&id) || seen.contains(&id);
-            if !known || out.iter().any(|c| c.chunk_id == id) {
+            let Some(id) = assemble::resolve_id(&id, shown.iter().chain(seen.iter())) else {
+                continue;
+            };
+            if out.iter().any(|c| c.chunk_id == id) {
                 continue;
             }
             if let Some(u) = ix.folio().unit_by_id(&id)? {
