@@ -214,7 +214,7 @@ async fn a_persona_carries_the_rules_and_its_own_lines_and_ignores_the_old_fallb
     assert!(!ann.contains("Not sure"));
     assert!(!system(&json[1]).contains("Lines bo has said"));
     // Reply shape and how not knowing is played.
-    assert!(ann.contains("one to three sentences") && ann.contains("every reply with a question"));
+    assert!(ann.contains("two to five sentences") && ann.contains("every reply with a question"));
     assert!(ann.contains("never talk about whether they have evidence"));
 }
 
