@@ -324,6 +324,46 @@ fn id_list(inside: &str) -> Option<Vec<String>> {
         .collect()
 }
 
+/// Whether a reply is an endpoint's canned refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    Is,
+    /// So far a prefix of a canned refusal: more text decides.
+    Maybe,
+    No,
+}
+
+/// Openings of the stock refusals some endpoints return in English whatever language
+/// the conversation is in. Lower case, straight apostrophes.
+const REFUSALS: &[&str] = &[
+    "i'm having a hard time fulfilling your request",
+    "i can't help with that",
+    "i can't assist with that",
+    "i cannot fulfill this request",
+    "i'm sorry, but i can't",
+];
+
+/// A refusal is a short reply with no CJK text that opens with a stock refusal. A phrase
+/// list alone could mask a persona who really says such a thing in a longer English
+/// reply; a "no CJK" test alone would catch any short English word, so both must hold.
+pub fn refusal(reply: &str) -> Refusal {
+    let norm = reply.trim().to_lowercase().replace('\u{2019}', "'");
+    if norm.chars().count() > 200 || norm.chars().any(is_cjk) {
+        return Refusal::No;
+    }
+    if REFUSALS.iter().any(|r| norm.starts_with(r)) {
+        Refusal::Is
+    } else if REFUSALS.iter().any(|r| r.starts_with(&norm)) {
+        Refusal::Maybe
+    } else {
+        Refusal::No
+    }
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(c, '\u{3000}'..='\u{9fff}' | '\u{ff00}'..='\u{ffef}')
+}
+
 const FENCE: &str = "```tool_call";
 
 /// The call an emulating endpoint wrote as text: `tool_call` on a line of its own
@@ -468,6 +508,36 @@ pub fn resolve_id<'a>(id: &str, known: impl IntoIterator<Item = &'a String>) -> 
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn refusals_are_short_english_stock_phrases() {
+        let canned = "I\u{2019}m having a hard time fulfilling your request. Can I help you with something else instead?";
+        assert_eq!(refusal(canned), Refusal::Is);
+        assert_eq!(refusal("I'm having a har"), Refusal::Maybe);
+        assert_eq!(refusal(""), Refusal::Maybe);
+        assert_eq!(refusal("I can't help laughing."), Refusal::No);
+        assert_eq!(refusal("Fine."), Refusal::No);
+        assert_eq!(
+            refusal("I can't help with that. \u{4f60}\u{597d}"),
+            Refusal::No
+        );
+        let long = format!("I can't help with that. {}", "x".repeat(200));
+        assert_eq!(refusal(&long), Refusal::No);
+    }
+
+    #[test]
+    fn a_text_call_needs_its_marker_on_a_line_of_its_own() {
+        let (name, args, lead) = text_call(
+            "Noted.\n```tool_call\n{\"name\": \"wrapup\", \"arguments\": {\"a\": 1}}\n```",
+        )
+        .unwrap();
+        assert_eq!(
+            (name.as_str(), args.as_str(), lead.as_str()),
+            ("wrapup", "{\"a\":1}", "Noted.")
+        );
+        assert!(text_call("use a tool_call {\"name\": \"x\"}").is_none());
+        assert!(text_call("```tool_call\n{broken").is_none());
+    }
 
     #[test]
     fn ids_are_found_and_nonsense_skipped() {

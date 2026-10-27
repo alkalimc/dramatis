@@ -559,6 +559,59 @@ async fn a_text_block_is_not_a_call_on_a_native_endpoint() {
     );
 }
 
+const REFUSAL: &str =
+    "I'm having a hard time fulfilling your request. Can I help you with something else instead?";
+
+fn shown_text(e: &Env) -> String {
+    format!("{:?}", e.sink.take())
+}
+
+#[tokio::test]
+async fn a_canned_refusal_is_retried_once_and_never_shown_or_kept() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say(REFUSAL), say("Cooler water.")]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.last().unwrap().text, "Cooler water.");
+    assert!(!shown_text(&e).contains("hard time"));
+    assert!(!log_bytes(&e.agent, ch).contains("hard time"));
+    // Both calls were paid.
+    assert_eq!(meter(&e.agent).len(), 2);
+}
+
+#[tokio::test]
+async fn a_repeated_refusal_leaves_the_turn_without_a_reply() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say(REFUSAL), say(REFUSAL)]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.len(), 1);
+    assert!(!shown_text(&e).contains("hard time"));
+    assert!(!log_bytes(&e.agent, ch).contains("hard time"));
+    assert_eq!(meter(&e.agent).len(), 2);
+}
+
+#[tokio::test]
+async fn short_english_replies_that_are_not_refusals_pass() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("I can't help laughing. Tea!")]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.last().unwrap().text, "I can't help laughing. Tea!");
+}
+
 async fn rolls_over(wire: WireApi) {
     let e = env_with(endpoints(wire, true, None), |c| c.agent.roll.k = 10.0);
     let ch = direct(&e, "ann");
