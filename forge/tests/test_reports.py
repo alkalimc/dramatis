@@ -24,17 +24,32 @@ def test_boundary_selection_is_deterministic(built, pack):
         first, second = samples.select(a, pack), samples.select(a, pack)
     assert first.routes == second.routes
     story = reasons(first, "story · dialogue")
-    assert story["Chapter 1"] == ["first", "kind", "kind", "kind"]  # first choice/line/scene
+    assert story["Chapter 1"] == ["first", "smallest", "kind", "kind", "kind"]
     kinds = {f["kind"] for t, why in first.routes["story · dialogue"].items()
              for key, f in why if key == "kind"}
     assert kinds == {"choice", "line", "scene"}
     assert story["Chapter 2"] == ["largest", "most_records"]
-    assert "smallest" in story["Interlude"] and "findings" in story["Interlude"]
-    assert "empty" in story["Interlude"]             # first G3 by title, with its reason
+    # pages that produce nothing are never sampled; they are listed by reason instead
+    assert "Interlude" not in story and "Silent" not in story
+    listed = {t for titles in first.silent.values() for t in titles}
+    assert {"Interlude", "Silent"} <= listed
+    assert ("empty", (("reason", "marked as having no script"),)) in first.silent
     people = reasons(first, "people · prose")
     assert people["Alice"][:2] == ["first", "largest"] and "multi_form" in people["Alice"]
     assert "smallest" in people["Alice (Winter)"]
     assert "Bob" not in people  # no boundary reaches it
+
+
+def test_silent_pages_are_listed_by_reason_and_never_sampled(built, pack):
+    out = built.samples
+    with Archive(built.archive, readonly=True) as a:
+        index, _ = samples.write(a, pack, out, built.folio)
+    doc = index.read_text(encoding="utf-8")
+    assert "## Pages not sampled" in doc
+    assert "### No unit: marked as having no script\n\n- Interlude\n" in doc
+    assert "- Silent\n" in doc
+    assert not list(out.rglob("Interlude.*")) and not list(out.rglob("Silent.*"))
+    assert not any(p.name.endswith("excluded") for p in out.iterdir())
 
 
 def test_samples_include_every_change_and_removed_snapshot(wiki, pack, paths):

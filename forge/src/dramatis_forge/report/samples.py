@@ -9,9 +9,10 @@ yields the same sample, and what changes between two samples is what the sync ch
   page added, and every page removed. Removed pages are read from the snapshot the sync
   took before deleting them (`raw.removed`).
 * **Boundaries, per route** (a seed set and the reader that handles it): the first page by
-  title, the largest source, the smallest non-empty source, the page with most records,
-  the first page with guard findings, and the first page that produced nothing, with its
-  stated reason.
+  title, the largest source, the smallest non-empty source, the page with most records and
+  the first page with guard findings, among the pages that produce units. A page that
+  produces none (an explained empty page, a page whose person left the roster) is never
+  sampled: `INDEX.md` lists those by reason, one page name per line.
 * **Coverage**: the first page yielding each record kind, every alias-producing page, and
   the first person with several forms.
 
@@ -22,12 +23,14 @@ lists every sampled page with why it was chosen and links to its three files
 
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..archive import Archive
+from ..folio import Folio
 from ..guards import HIGH
 from ..normalize import YIELD_DETAIL
 from ..pack import Pack
@@ -75,6 +78,8 @@ class Selection:
     """route -> title -> [(reason key, fields)], rendered via `samples.why.<key>`."""
 
     routes: dict[str, dict[str, list[tuple[str, dict]]]] = field(default_factory=dict)
+    #: (reason key, fields) -> pages held but producing no unit, by title.
+    silent: dict[tuple[str, tuple], list[str]] = field(default_factory=dict)
 
     def add(self, route: str, title: str, why: str, **fields: object) -> None:
         reasons = self.routes.setdefault(route, {}).setdefault(title, [])
@@ -97,12 +102,24 @@ def _records_per_page(archive: Archive) -> tuple[Counter, dict[str, set[str]]]:
     return total, kinds
 
 
-#: The layer of a set's pages that produced no record.
-EXCLUDED_LAYER = "excluded"
+def unit_pages(archive: Archive, folio: Folio) -> set[str]:
+    """Pages that produced at least one unit: the page a unit cites, the page a scene body
+    was read from, and the form pages whose text is stored once with another form."""
+    pages = {r[0] for r in folio.db.execute("SELECT DISTINCT page FROM chunks")}
+    pages.update(r[0] for r in archive.db.execute(
+        "SELECT source_page FROM scenes WHERE source_page IS NOT NULL AND id IN "
+        "(SELECT value FROM json_each(?))", (json.dumps(sorted(pages)),)))
+    for copies in (folio.get_meta("form_copies") or {}).values():
+        pages.update(copies)
+    return pages
 
 
-def select(archive: Archive, pack: Pack) -> Selection:
-    """The boundary and coverage samples. Deterministic for a given archive state."""
+def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> Selection:
+    """The boundary and coverage samples. Deterministic for a given archive state.
+
+    `producing` is the set of pages that made units; without it (no folio yet) a page counts
+    when the archive holds records for it.
+    """
     sel = Selection()
     held = archive.have_pages()
     sizes = {r[0]: r[1] for r in archive.db.execute(
@@ -120,8 +137,19 @@ def select(archive: Archive, pack: Pack) -> Selection:
     layouts = {s.key: s.layout for s in pack.seeds if s.layout is not None}
     stratified: set[str] = set()
     layered: set[str] = set()
-    #: layer of left-out pages -> reason -> first page with it: one sample per reason.
-    why_excluded: dict[str, dict[str, str]] = {}
+    in_roster = set(archive.person_of())
+    dossier_pages = {r[0] for r in archive.db.execute("SELECT page FROM dossiers")}
+
+    def produces(title: str) -> bool:
+        return title in producing if producing is not None else bool(records.get(title))
+
+    def why_silent(title: str) -> tuple[str, tuple]:
+        if title in dossier_pages and title not in in_roster:
+            return ("roster", ())
+        reason = next((d for g, d in findings.get(title, [])
+                       if g == "G3" and not d.startswith(YIELD_DETAIL)), "")
+        return ("empty", (("reason", reason),)) if reason else ("none", ())
+
     for seed in pack.fetch_seeds:
         for title in archive.seed(seed):  # sorted by title
             route = pack.route_for(seed, title)
@@ -129,21 +157,18 @@ def select(archive: Archive, pack: Pack) -> Selection:
                 continue
             label = f"{seed} · {route.label or seed}"
             route_of.setdefault(title, label)
+            if not produces(title):
+                sel.silent.setdefault(why_silent(title), []).append(title)
+                continue
             members.setdefault(label, []).append(title)
             if seed in layouts:
-                # Layers are drawn from pages that produced something; a layer of pages the
-                # pack leaves out would show nothing but the exclusion.
+                # Layers are drawn from pages that produced units.
                 row = archive.page(title)
-                klass = (layouts[seed](title, (row["wikitext"] or "") if row else "")
-                         if records.get(title) else EXCLUDED_LAYER)
+                klass = layouts[seed](title, (row["wikitext"] or "") if row else "")
                 layered.add(label)
                 layer = f"{label} · {klass}"
                 members.setdefault(layer, []).append(title)
                 stratified.add(layer)
-                if klass == EXCLUDED_LAYER:
-                    reason = next((d for g, d in findings.get(title, [])
-                                   if g == "G3" and not d.startswith(YIELD_DETAIL)), "")
-                    why_excluded.setdefault(layer, {}).setdefault(reason, title)
 
     for label, titles in sorted(members.items()):
         if label not in layered:  # the layout classes below stand in for the set's own
@@ -159,31 +184,17 @@ def select(archive: Archive, pack: Pack) -> Selection:
         flagged = next((t for t in titles if t in findings), None)
         if flagged is not None:
             sel.add(label, flagged, "findings")
-        # G3 records the pages that produced nothing, with the stated reason. Counting
-        # records per page cannot tell: a record may be filed under another page's id
-        # (a transcluded body's lines belong to its parent's scene). A yield shortfall is
-        # G3 too, but that page produced records; it counts as a finding, not as empty.
-        for t in titles:
-            reason = next((d for g, d in findings.get(t, [])
-                           if g == "G3" and not d.startswith(YIELD_DETAIL)), None)
-            if reason is not None:
-                sel.add(label, t, "empty", reason=reason)
-                break
-
-    for layer, reasons in sorted(why_excluded.items()):
-        for reason, title in sorted(reasons.items()):
-            sel.add(layer, title, "empty", reason=reason or "no record")
 
     for kind, pages in sorted(by_kind.items()):
-        first = min((p for p in pages if p in route_of), default=None)
+        first = min((p for p in pages if p in route_of and produces(p)), default=None)
         if first is not None:
             sel.add(route_of[first], first, "kind", kind=kind)
     for title in sorted(pack.alias_pages):
-        if title in route_of:
+        if title in route_of and produces(title):
             sel.add(route_of[title], title, "alias")
     person = archive.scalar(
         "SELECT person_id FROM persons WHERE form_count > 1 ORDER BY person_id LIMIT 1")
-    if person in route_of:
+    if person in route_of and produces(person):
         sel.add(route_of[person], person, "multi_form")
     return sel
 
@@ -287,7 +298,8 @@ def _prune(outdir: Path, kept: set[Path]) -> None:
             path.unlink()
 
 
-def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, int]:
+def write(archive: Archive, pack: Pack, outdir: Path,
+          folio_path: Path | None = None) -> tuple[Path, int]:
     """Dump every selected page and write `INDEX.md`, leaving nothing of an earlier run.
 
     Files are overwritten in place and what this run did not write is removed afterwards,
@@ -298,7 +310,11 @@ def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, int]:
     kept: set[Path] = set()
     say = pack.say
     last = _last(archive)
-    sel = select(archive, pack)
+    producing = None
+    if folio_path is not None and folio_path.exists():
+        with Folio(folio_path, readonly=True) as folio:
+            producing = unit_pages(archive, folio)
+    sel = select(archive, pack, producing)
     removed = {r["title"]: r for r in archive.removed()}
     changes = sum(len(last[k]) for k in CHANGE_KINDS)
 
@@ -333,6 +349,13 @@ def write(archive: Archive, pack: Pack, outdir: Path) -> tuple[Path, int]:
             kept.update(written)
             lines.append(_row(pack, title, why, written, outdir))
         lines.append("")
+
+    if sel.silent:
+        lines += [say("samples.silent"), "", say("samples.silent_note"), ""]
+        for (key, fields), titles in sorted(sel.silent.items()):
+            lines += [say(f"samples.silent.{key}", **dict(fields)), ""]
+            lines += [f"- {cell(t)}" for t in sorted(set(titles))]
+            lines.append("")
 
     index = outdir / "INDEX.md"
     index.write_text("\n".join(lines), encoding="utf-8")

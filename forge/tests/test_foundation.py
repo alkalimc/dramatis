@@ -247,8 +247,9 @@ def test_a_set_with_layouts_is_sampled_by_layout(tmp_path, pack):
     # each class is read through its first and its largest page, and nothing else
     assert {r.rsplit(" · ", 1)[1]: ts for r, ts in layer.items()} == {
         "long": {"P2"}, "short": {"P1", "P4"}}
-    assert {r.rsplit(" · ", 1)[1]: ts for r, ts in picked.items()
-            if r.endswith("excluded")} == {"excluded": {"P5"}}
+    # P5 is listed by reason and has no layer
+    assert not any(r.endswith("excluded") for r in picked)
+    assert [t for titles in sel.silent.values() for t in titles] == ["P5"]
 
 
 def test_every_rendering_of_a_term_is_an_alias_for_it():
