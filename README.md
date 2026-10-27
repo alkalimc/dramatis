@@ -99,9 +99,13 @@ The corpus is `--folio`, else `$DRAMATIS_FOLIO`, else the `.folio` in `$DRAMATIS
 `$DRAMATIS_HOME/endpoints.toml`, and keys from the system keychain exactly as in the app. The
 first run of each new build triggers a macOS keychain prompt: choose Always Allow.
 
-The world (channels, memories, usage) lives in `$DRAMATIS_HOME/cli/world.sqlite`, separate
-from the app's. Use `--world <path>` for another file (the app's, for example), `--fresh` for
-a throwaway in-memory world, and `--user <name>` to set the user's name.
+The world (channels, memories, usage) is the app's: `$DRAMATIS_HOME/world.sqlite`, so the
+terminal and the app share conversations, settings and endpoints, and may be open together
+(the database is in WAL mode and writes wait up to 10 seconds for each other). Use
+`--world <path>` for another file, `--fresh` for a throwaway in-memory world, and
+`--user <name>` to set the user's name. On a terminal the line is edited with arrow keys,
+Home/End and Up/Down history, and wide (CJK) characters count by their display width;
+`--plain`, or piped input, reads plain lines with no prompt.
 
 | Command | What it does |
 | --- | --- |
@@ -118,10 +122,11 @@ a throwaway in-memory world, and `--user <name>` to set the user's name.
 
 Anything else is sent to the current channel. Replies stream as they are written; scene lines
 are dimmed, citation marks are hidden and the cited sources are listed after the reply, tool
-actions get one dim line, and a dim line gives the call count and time. Colour is off when
+actions get one dim line, a dim line says who is typing while a turn runs, and another gives
+the call count and time. The prompt shows the channel and then your own name. Colour is off when
 stdout is not a terminal or `NO_COLOR` is set. A failed call prints its error and the session
 goes on. Ctrl-C while a reply is pending cancels the wait (the message you sent stays in the
-history); at the prompt it leaves.
+history); at the prompt it clears the line, and Ctrl-D leaves.
 
 ## Writing a pack
 

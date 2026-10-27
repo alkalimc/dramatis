@@ -23,6 +23,7 @@ agent = { path = "../../crates/agent" }
 world = { path = "../../crates/world" }
 llm = { path = "../../crates/llm" }
 rusqlite.workspace = true
+rustyline = { version = "=19.0.0", default-features = false }
 toml.workspace = true
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 

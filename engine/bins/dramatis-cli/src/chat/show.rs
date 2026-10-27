@@ -5,7 +5,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use agent::{Agent, Event, Sink};
-use api::types::{Author, Confidence, MessageId};
+use api::types::{Author, MessageId};
 use api::views::{Message, ToolAction};
 
 use super::render::{self, Marker, Streamer, Style};
@@ -64,6 +64,23 @@ pub fn person_name(agent: &Agent, id: &str) -> String {
         .ok()
         .flatten()
         .map_or_else(|| id.to_owned(), |p| p.display)
+}
+
+/// What the speaker is doing while a turn runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Working {
+    Typing,
+    #[allow(dead_code)] // set once the engine reports when a turn is searching
+    Searching,
+}
+
+/// The status line for a running turn. One place for the wording, so it can come from the
+/// corpus's manifest once the engine's activity event carries it.
+pub fn working_line(who: &str, what: Working) -> String {
+    match what {
+        Working::Typing => format!("{who} is typing..."),
+        Working::Searching => format!("{who} is looking things up..."),
+    }
 }
 
 /// One tool call as a short English line; the contents are the model's and the corpus's.
@@ -174,20 +191,12 @@ impl Show {
                 seen.push(label);
             }
         }
-        let thin = m.confidence == Some(Confidence::Low);
-        if seen.is_empty() && !thin {
+        // Low confidence is the common case and says nothing a reader can act on, so it
+        // gets no label here.
+        if seen.is_empty() {
             return None;
         }
-        let mut line = String::new();
-        if !seen.is_empty() {
-            line = format!("sources: {}", seen.join("; "));
-        }
-        if thin {
-            if !line.is_empty() {
-                line.push_str(" | ");
-            }
-            line.push_str("thin archive");
-        }
+        let line = format!("sources: {}", seen.join("; "));
         Some(line)
     }
 

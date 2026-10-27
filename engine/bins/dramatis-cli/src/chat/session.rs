@@ -9,7 +9,7 @@ use api::types::{Author, PersonId as ApiPerson};
 use world::{Actor, ChannelId, PersonId};
 
 use super::command::{Command, HELP};
-use super::show::{Show, Term, person_name};
+use super::show::{self, Show, Term, Working, person_name};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -112,10 +112,17 @@ impl Session {
         }
     }
 
-    pub fn prompt(&self) {
-        let label = self.current.as_ref().map_or("-", |c| c.label.as_str());
-        self.term
-            .print(&format!("{}> ", self.term.style.bold(label)));
+    /// The input prompt: the channel in dim type, then the user's own name, since the
+    /// line being typed is theirs and not the channel's.
+    pub fn prompt(&self) -> String {
+        let style = self.term.style;
+        let user = show::author_name(&self.agent, &Author::User);
+        let channel = self.current.as_ref().map_or("-", |c| c.label.as_str());
+        format!(
+            "{} {}> ",
+            style.dim(&format!("[{channel}]")),
+            style.bold(&user)
+        )
     }
 
     /// Set the user's name; a changed name rolls the channels over, as in the app.
@@ -336,6 +343,8 @@ impl Session {
                 .print("no channel yet: /talk <person> or /host first\n");
         };
         let (agent, started, at) = (self.agent.clone(), Instant::now(), now_ms());
+        let who = self.current.as_ref().map_or("", |c| c.label.as_str());
+        self.term.note(&show::working_line(who, Working::Typing));
         let result = self
             .interruptible(async move {
                 let posted = agent.post(channel, text, None)?;
@@ -413,6 +422,8 @@ impl Session {
         }
         let before = self.last_memory();
         let (agent, started, at) = (self.agent.clone(), Instant::now(), now_ms());
+        let who = self.current.as_ref().map_or("", |c| c.label.as_str());
+        self.term.note(&show::working_line(who, Working::Typing));
         let result = self
             .interruptible(async move { agent.wrapup(channel).await })
             .await;
