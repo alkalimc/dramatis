@@ -1,4 +1,4 @@
-import { splitScene, speechOnly } from "./scene";
+import { splitScene, speechOnly, withoutCites } from "./scene";
 
 const star = { open: "*", close: "*" };
 
@@ -56,4 +56,14 @@ test("multi-character markers", () => {
 
 test("read-aloud text leaves the scene lines out", () => {
   expect(speechOnly("*She smiles.*\nHello.\n*Waves.*\nBye.", star)).toBe("Hello.\nBye.");
+});
+
+test("citation marks and the space before them are not shown", () => {
+  expect(withoutCites("I remember the street.[#dialogue:cf4c]\nNext [#voice:1a] line")).toBe(
+    "I remember the street.\nNext line",
+  );
+});
+
+test("brackets that are not citation marks stay", () => {
+  expect(withoutCites("[# a b] and [x]")).toBe("[# a b] and [x]");
 });

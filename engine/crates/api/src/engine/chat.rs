@@ -31,6 +31,27 @@ fn spoken(text: &str, open: &str, close: &str) -> String {
         }
     }
     out.push_str(rest);
+    without_cites(&out)
+}
+
+/// `text` without its `[#id]` citation marks: they name sources, they are not speech.
+fn without_cites(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("[#") {
+        let tail = &rest[i + 2..];
+        match tail.find(']') {
+            Some(end) if end > 0 && end <= 128 && !tail[..end].contains(char::is_whitespace) => {
+                out.push_str(rest[..i].trim_end_matches([' ', '\t']));
+                rest = &tail[end + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..i + 2]);
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
     out
 }
 
@@ -316,5 +337,7 @@ mod tests {
         assert_eq!(spoken("Hi *unclosed", "*", "*"), "Hi ");
         assert_eq!(spoken("(a) b", "(", ")"), " b");
         assert_eq!(spoken("plain", "", ""), "plain");
+        assert_eq!(spoken("Yes. [#voice:ab12] Go.", "*", "*"), "Yes. Go.");
+        assert_eq!(spoken("[# not an id] ok", "*", "*"), "[# not an id] ok");
     }
 }

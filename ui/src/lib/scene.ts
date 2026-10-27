@@ -43,8 +43,18 @@ function sceneInner(line: string, { open, close }: SceneMarker): string | null {
 
 /** The speech of a message without its scene lines: what read-aloud would say. */
 export function speechOnly(text: string, marker: SceneMarker): string {
-  return splitScene(text, marker)
-    .filter((s) => s.kind === "speech")
-    .map((s) => s.text)
-    .join("\n");
+  return withoutCites(
+    splitScene(text, marker)
+      .filter((s) => s.kind === "speech")
+      .map((s) => s.text)
+      .join("\n"),
+  );
+}
+
+/**
+ * Text without its `[#id]` citation marks. The marks tell the engine which passages a
+ * reply drew on; the reader sees those as the message's sources, not inside the speech.
+ */
+export function withoutCites(text: string): string {
+  return text.replace(/[ \t]*\[#[^\]\s]{1,128}\]/g, "").replace(/[ \t]+$/gm, "");
 }

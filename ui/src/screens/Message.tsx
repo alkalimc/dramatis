@@ -3,7 +3,7 @@ import type { Author, Citation, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
-import { splitScene } from "../lib/scene";
+import { splitScene, withoutCites } from "../lib/scene";
 import { useActions, useApi, useStore } from "../store";
 import { CitationDetail, CitationList, useCitations } from "./Citation";
 import { SelectionMenu } from "./SelectionMenu";
@@ -43,7 +43,7 @@ function useSources(author: Author, cites: Citation[]) {
 }
 
 function Speech({ text }: { text: string }) {
-  const html = useMemo(() => renderMarkdown(text), [text]);
+  const html = useMemo(() => renderMarkdown(withoutCites(text)), [text]);
   return <div className="speech" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
