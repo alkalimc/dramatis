@@ -344,7 +344,8 @@ impl Session {
         };
         let (agent, started, at) = (self.agent.clone(), Instant::now(), now_ms());
         let who = self.current.as_ref().map_or("", |c| c.label.as_str());
-        self.term.note(&show::working_line(who, Working::Typing));
+        self.term
+            .note(&show::working_text(&self.agent, who, Working::Typing));
         let result = self
             .interruptible(async move {
                 let posted = agent.post(channel, text, None)?;
@@ -423,7 +424,8 @@ impl Session {
         let before = self.last_memory();
         let (agent, started, at) = (self.agent.clone(), Instant::now(), now_ms());
         let who = self.current.as_ref().map_or("", |c| c.label.as_str());
-        self.term.note(&show::working_line(who, Working::Typing));
+        self.term
+            .note(&show::working_text(&self.agent, who, Working::Typing));
         let result = self
             .interruptible(async move { agent.wrapup(channel).await })
             .await;
