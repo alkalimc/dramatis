@@ -21,8 +21,21 @@ use agent::{Agent, Config, NoSink, Parts, SystemClock};
 use futures::StreamExt;
 use llm::transport::{Http, HttpRequest, HttpResponse, StreamResponse, Transport};
 
-/// Real HTTP that echoes the `usage` part of every reply.
+/// Real HTTP that echoes the `usage` part of every reply and, with
+/// `DRAMATIS_SMOKE_DUMP=<dir>`, writes each request body there as `<n>.json`.
 struct ShowUsage(Http);
+
+fn dump(req: &HttpRequest) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if let Some(dir) = std::env::var_os("DRAMATIS_SMOKE_DUMP") {
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(
+            std::path::Path::new(&dir).join(format!("{n}.json")),
+            &req.body,
+        );
+    }
+}
 
 fn show(bytes: &[u8]) {
     for line in String::from_utf8_lossy(bytes).lines() {
@@ -35,11 +48,13 @@ fn show(bytes: &[u8]) {
 #[async_trait::async_trait]
 impl Transport for ShowUsage {
     async fn send(&self, req: HttpRequest) -> llm::Result<HttpResponse> {
+        dump(&req);
         let r = self.0.send(req).await?;
         show(&r.body);
         Ok(r)
     }
     async fn open(&self, req: HttpRequest) -> llm::Result<StreamResponse> {
+        dump(&req);
         let r = self.0.open(req).await?;
         let chunks = r
             .chunks
