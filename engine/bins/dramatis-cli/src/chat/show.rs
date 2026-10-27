@@ -5,6 +5,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use agent::{Agent, Event, Sink};
+use api::events::ActivityState;
 use api::types::{Author, MessageId};
 use api::views::{Message, ToolAction};
 
@@ -121,6 +122,8 @@ struct Live {
 #[derive(Default)]
 struct State {
     live: Option<Live>,
+    /// Whether a "… is typing" line is on screen, to be erased before anything else.
+    status: bool,
     /// The message whose name has been written, so a stream resumed after a tool line
     /// does not repeat it.
     named: Option<MessageId>,
@@ -220,10 +223,58 @@ impl Show {
     }
 }
 
+impl Show {
+    /// Erase the status line, if one is showing, so the next output starts clean.
+    fn clear_status(&self, st: &mut State) {
+        if std::mem::take(&mut st.status) && self.term.style.color {
+            self.term.print("\r\x1b[2K");
+        }
+    }
+
+    /// One dim line saying who is generating, rewritten in place on a terminal.
+    fn show_status(&self, st: &mut State, agent: &Agent, author: &Author, state: &ActivityState) {
+        let key = match state {
+            ActivityState::Thinking | ActivityState::Writing => "typing.writing",
+            ActivityState::Tool { .. } => "typing.tool",
+            _ => return,
+        };
+        let name = author_name(agent, author);
+        let line = agent.wording().get(key).replace("{name}", &name);
+        if self.term.style.color {
+            self.term
+                .print(&format!("\r\x1b[2K{}", self.term.style.dim(&line)));
+            st.status = true;
+        } else if !st.status {
+            // No terminal to rewrite: say it once per turn.
+            self.term.note(&line);
+            st.status = true;
+        }
+    }
+}
+
 impl Sink for Show {
     fn emit(&self, event: Event) {
         let Some(agent) = self.agent() else { return };
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match &event {
+            Event::TurnActivity(a) if st.live.is_none() => {
+                match a.state {
+                    ActivityState::Done | ActivityState::Failed { .. } => {
+                        self.clear_status(&mut st);
+                        if !self.term.style.color {
+                            st.status = false;
+                        }
+                    }
+                    _ => self.show_status(&mut st, &agent, &a.author, &a.state),
+                }
+                return;
+            }
+            Event::TurnActivity(_) => return,
+            Event::MessageDelta(_) | Event::ToolCalled(_) | Event::MessageAdded(_) => {
+                self.clear_status(&mut st);
+            }
+            _ => {}
+        }
         match event {
             Event::MessageDelta(d) => {
                 if st.live.as_ref().is_some_and(|l| l.id != d.message) {
