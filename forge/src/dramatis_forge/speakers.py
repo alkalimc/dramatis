@@ -76,11 +76,6 @@ class Speakers:
     #: stands in for a script key only through such a loose key: where scripts use several
     #: slugs under one number, the number names no single portrait.
     loose_unique: set[str] = field(init=False, default_factory=set)
-    #: (scene, label) -> person, from the pack's declared exceptions.
-    #: A None person is a label declared to be nobody's in that scene.
-    declared: dict[tuple[str, str], str | None] = field(init=False, default_factory=dict)
-    #: Declared exceptions whose person is on no roster page (the pack went stale).
-    stale_declared: list[tuple[str, str, str]] = field(init=False, default_factory=list)
     #: label -> person, for labels that are not page titles and whose own portraits agree.
     label_person: dict[str, str] = field(init=False, default_factory=dict)
     #: label -> person, from redirects and real names that name one person only.
@@ -96,7 +91,6 @@ class Speakers:
         self.generic = frozenset(self.pack.chunking.generic_speakers)
         self._portraits()
         self._script_keys()
-        self._declared()
         self._aliases()
         self._labels()
         self._segments()
@@ -133,14 +127,6 @@ class Speakers:
             if (lk := loose_of(r["portrait"])) is not None:
                 seen[lk].add(r["portrait"])
         self.loose_unique = {k for k, v in seen.items() if len(v) == 1}
-
-    def _declared(self) -> None:
-        for scene, label, person in self.pack.chunking.speaker_as:
-            resolved = self.person_of.get(person) if person else None
-            if person and resolved is None:
-                self.stale_declared.append((scene, label, person))
-            else:
-                self.declared[(scene, label)] = resolved
 
     def _portrait_person(self, key: str) -> str | None:
         """The person a portrait key shows, by the exact key or else by the loose one."""
@@ -198,9 +184,7 @@ class Speakers:
             "SELECT speaker,scene,COUNT(*) AS n FROM lines WHERE speaker IS NOT NULL "
             "GROUP BY speaker,scene"
         ):
-            # A scene that declares the label nobody's does not count towards the person.
-            if (r["scene"], r["speaker"]) not in self.declared:
-                spoken[r["speaker"]] += r["n"]
+            spoken[r["speaker"]] += r["n"]
         for label, n in spoken.items():
             people = by_segment.get(label)
             if (not people or label in self.person_of or label in self.generic
@@ -224,14 +208,8 @@ class Speakers:
         person, n = votes.most_common(1)[0]
         return person, n, len(keys)
 
-    def owner(self, label: str, scene: str = "") -> str | None:
-        """The person a label stands for in one scene, or None.
-
-        A declared exception comes first: a page-title label that is really a disguise is
-        exactly what an exception is for.
-        """
-        if (scene, label) in self.declared:
-            return self.declared[(scene, label)]
+    def owner(self, label: str) -> str | None:
+        """The person a label stands for, or None. A page-title label always wins."""
         if label in self.person_of:
             return self.person_of[label]
         if label in self.generic:
@@ -246,13 +224,11 @@ class Speakers:
                 by_label[r["speaker"]].append(r["portrait"])
         out: dict[str, str | None] = {}
         for label, portraits in by_label.items():
-            out[label] = self.owner(label, scene)
+            out[label] = self.owner(label)
             own = self.person_of.get(label)
-            if own is not None and self.declared.get((scene, label), own) is not None:
+            if own is not None:
                 shown, n, total = self._shown(portraits)
-                declared = self.declared.get((scene, label))
-                if (shown is not None and shown != own and n == total and n >= 3
-                        and declared != shown):
+                if shown is not None and shown != own and n == total and n >= 3:
                     self.conflicts[(scene, label)] = Conflict(scene, label, own, shown, n)
         return out
 

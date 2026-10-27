@@ -13,7 +13,7 @@ from dramatis_forge.records import Choice, Line, Scene, Voice
 
 @pytest.fixture
 def tuned(pack):
-    """The toy pack with a voice template, a trigger table and a page-part rule."""
+    """The toy pack with a voice template and a page-part rule."""
     policy = pack.chunking
     policy = replace(
         policy,
@@ -21,7 +21,6 @@ def tuned(pack):
                                               sources=("voice",))),
         headers={**policy.headers, "voice": "[voice] {person} · {name}{variant}"},
         labels={"options": "possible replies"},
-        triggers={"HELLO": "greeting"},
         page_part=r"/(?:BEG|END)$",
     )
     return replace(pack, chunking=policy)
@@ -36,14 +35,14 @@ def units(tmp_path, pack, records, template):
 
 def test_voice_header_names_the_line_not_the_engine_key(tmp_path, tuned):
     got = units(tmp_path, tuned, [
-        Voice(page="Ann/voice", subject="Ann", idx=0, text="Hi.", title="", trigger="HELLO"),
+        Voice(page="Ann/voice", subject="Ann", idx=0, text="Hi.", title="Greeting", trigger="HELLO"),
         Voice(page="Ann/voice", subject="Ann", idx=1, text="Bye.", title="Parting",
               trigger="BYE", seq=1),
         Voice(page="Ann/voice", subject="Ann", idx=1, text="Bye!", title="Parting",
               trigger="BYE", variant="outfit", seq=2),
     ], "voice")
     assert [c.header for c in got] == [
-        "[voice] Ann · greeting", "[voice] Ann · Parting", "[voice] Ann · Parting · outfit"]
+        "[voice] Ann · Greeting", "[voice] Ann · Parting", "[voice] Ann · Parting · outfit"]
     assert all("HELLO" not in c.header and "BYE" not in c.header for c in got)
 
 
@@ -67,27 +66,6 @@ def test_engine_metadata_in_a_header_is_detected(tuned):
     assert test("dialogue", "Ch 1/BEG", "[scene] Book · Ch 1/BEG · Ann")
     assert not test("dialogue", "Ch 1/BEG", "[scene] Book · Ch 1 · Ann")
     assert not test("dialogue", "Ch 1", "[scene] Book · Ch 1 · Ann")
-
-
-def test_a_trigger_the_pack_does_not_name_is_reported(built, tuned, tmp_path):
-    with Archive(built.archive) as a:
-        a.insert_records([Voice(page="Alice", subject="Alice", idx=0, text="Hm.",
-                                title="Idle", trigger="IDLE")])
-        a.commit()
-        rep = corpus.run(a, tuned, tmp_path / "f.folio", segmenter="bigram")
-    assert rep.unnamed_triggers == ["IDLE"] and rep.engine_meta_headers == 0
-    assert any("IDLE" in f.detail for f in rep.ledger.findings)
-
-
-def test_split_folds_a_short_tail_back():
-    breaks = ("\n", " ")
-    text = "aaaa bbbb cccc dddd\nsign"
-    assert chunk._split(text, 10, breaks)[-1] == "sign"
-    folded = chunk._split(text, 10, breaks, min_tail=8)
-    assert folded[-1].endswith("dddd\nsign")
-    assert "".join(folded).replace(" ", "").replace("\n", "") == text.replace(" ", "").replace("\n", "")
-    # A tail that is long enough stays its own piece.
-    assert chunk._split(text, 10, breaks, min_tail=4)[-1] == "sign"
 
 
 def test_term_targets_follow_person_names():

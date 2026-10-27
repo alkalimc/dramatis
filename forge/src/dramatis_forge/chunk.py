@@ -78,22 +78,16 @@ class Chunk:
 CARD_SPAN = "#card"
 
 
-def _split(text: str, limit: int, breaks: tuple[str, ...], min_tail: int = 0) -> list[str]:
+def _split(text: str, limit: int, breaks: tuple[str, ...]) -> list[str]:
     """Cut over-long text at the most natural boundary available.
 
     `breaks` is tried in order (paragraph, then sentence, then clause, typically). A
     hard character cut is the last resort rather than the rule: splitting mid-clause
     produces a unit whose first sentence is a fragment, and a fragment embeds as noise.
-
-    A last piece shorter than `min_tail` characters is folded back into the piece before
-    it (0 disables): a few words alone, such as a signature line, embed as noise. The
-    folded piece may exceed `limit` by up to `min_tail - 1` characters.
     """
     if len(text) <= limit:
         return [text]
     out: list[str] = []
-    #: The whitespace stripped at the last cut, restored if the tail folds back.
-    gap = ""
     rest = text
     while len(rest) > limit:
         window = rest[:limit]
@@ -108,16 +102,10 @@ def _split(text: str, limit: int, breaks: tuple[str, ...], min_tail: int = 0) ->
             cut = limit
         piece = rest[:cut]
         out.append(piece.strip())
-        tail = rest[cut:]
-        gap = piece[len(piece.rstrip()):] + tail[:len(tail) - len(tail.lstrip())]
-        rest = tail.lstrip()
+        rest = rest[cut:].lstrip()
     if rest:
         out.append(rest)
-    out = [p for p in out if p]
-    if min_tail and len(out) > 1 and len(out[-1]) < min_tail:
-        tail = out.pop()
-        out[-1] = f"{out[-1]}{gap}{tail}"
-    return out
+    return [p for p in out if p]
 
 
 @dataclass
@@ -129,8 +117,6 @@ class Env:
     notes: list[str] = field(default_factory=list)
     #: Records a policy chose not to make units of, by template.
     skipped: dict[str, int] = field(default_factory=dict)
-    #: Record fields dropped because title and value were only a placeholder.
-    placeholders: int = 0
     #: Scenes whose branch markers could not name the option they answer (a reply id that
     #: no choice offers): the marker would show the source's bare id.
     unresolved_branches: list[str] = field(default_factory=list)
@@ -179,7 +165,7 @@ def _lore(
         body = r["text"]
         if crumbs and body.startswith(f"{crumbs[-1]}{label_sep}") and len(crumbs) > 1:
             body = body[len(crumbs[-1]) + len(label_sep):].lstrip() or body
-        for part in _split(body, t.max_chars, policy.breaks, t.min_tail):
+        for part in _split(body, t.max_chars, policy.breaks):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=" › ".join(path) or r["page"], revid=r["revid"],
@@ -378,7 +364,7 @@ def _dialogue(
             # An over-long unit still splits on characters, but it keeps one span:
             # the parts are the same stretch of conversation, so a reader widening
             # from any of them should get the same neighbours.
-            for part in _split(body, t.max_chars, pack.chunking.breaks, t.min_tail):
+            for part in _split(body, t.max_chars, pack.chunking.breaks):
                 yield Chunk(
                     template=t.name, page=scene["id"], text=part, header=head,
                     title=scene["id"], persons=persons, revid=scene["revid"],
@@ -458,7 +444,7 @@ def _voice(
         person = person_of.get(r["subject"], r["subject"])
         # A variant is the same slot recorded again with other words; naming it in the
         # header keeps the two lines from reading as one line said twice.
-        name = policy.voice_name(r["trigger"] or "", r["title"] or "")
+        name = policy.voice_name(r["title"] or "")
         head = header.format(
             person=f"{named(person)}{tag(r['subject'])}", name=name,
             variant=f" · {r['variant']}" if r["variant"] else "",
@@ -489,19 +475,9 @@ def _profile(
     skip = re.compile("|".join(policy.section_skip)) if policy.section_skip else None
     person_of = archive.person_of()
     forms = archive.persons()
-    kind_of = {f["page"]: f["kind"] for fs in forms.values() for f in fs}
     display = _display_names(archive, pack)
     tag = _form_tag(archive, pack)
     named = _person_name(archive, pack)
-    placeholders = set(policy.placeholder_values)
-    stand_in = re.compile(policy.placeholder_only) if policy.placeholder_only else None
-
-    def is_stand_in(title: str, value: str) -> bool:
-        """A field whose title and value say nothing but a placeholder."""
-        if stand_in is None or not stand_in.fullmatch(value.strip()):
-            return False
-        return not title.strip() or bool(stand_in.fullmatch(title.strip()))
-
     dossier: dict[str, dict] = {}
     for row in archive.db.execute("SELECT page,fields,sections,items,revid FROM dossiers"):
         dossier[row["page"]] = {
@@ -530,9 +506,6 @@ def _profile(
             for s in dossier[page]["sections"]:
                 if not s.get("text"):
                     continue
-                if is_stand_in(s.get("title", ""), s["text"]):
-                    env.placeholders += 1
-                    continue
                 if skip is not None and skip.search(s.get("title", "")):
                     env.skipped["profile"] = env.skipped.get("profile", 0) + 1
                     continue
@@ -543,9 +516,6 @@ def _profile(
                         if rec.get("intro"):
                             items.append((page, rec.get("set", memoir), rec["intro"]))
                 elif isinstance(v, str) and v:
-                    if is_stand_in(k, v):
-                        env.placeholders += 1
-                        continue
                     if (k, v) in is_stock:
                         stock_first.setdefault((k, v), page)
                         continue
@@ -557,13 +527,13 @@ def _profile(
         shown: dict[str, dict[str, str]] = {}
         if base_page is not None:
             base = {k: v for k, v in dossier[base_page]["fields"].items()
-                    if k not in omit and v not in placeholders}
+                    if k not in omit}
             shown = {base_page: dict(base)}
             if base:
                 body = "\n".join(f"{k}{sep('label')}{v}" for k, v in base.items())
                 others = list(dict.fromkeys(
                     display.get(p, p) for p in pages
-                    if p != base_page and kind_of.get(p) not in policy.cardless_forms
+                    if p != base_page
                     and display.get(p, p) != display.get(base_page, base_page)))
                 if others:
                     body += f"\n{label('other_forms')}{sep('label')}" + sep("list").join(others)
@@ -575,10 +545,10 @@ def _profile(
                     span_of=f"{person_id}{CARD_SPAN}", span_from=0, span_to=0,
                 )
             for n, page in enumerate(held, start=1):
-                if page == base_page or kind_of.get(page) in policy.cardless_forms:
+                if page == base_page:
                     continue
                 diff = {k: v for k, v in dossier[page]["fields"].items()
-                        if k not in omit and v not in placeholders and base.get(k) != v}
+                        if k not in omit and base.get(k) != v}
                 if not diff:
                     continue
                 shown[page] = {**base, **diff}
@@ -605,11 +575,11 @@ def _profile(
                     rest.append((page, title, left))
             sections = rest
 
-        for i, (page, title, text) in enumerate(sections + _fold_short(items, policy)):
+        for i, (page, title, text) in enumerate(sections + items):
             head = header.format(
                 person=f"{named(person_id)}{tag(page)}",
                 section=f" · {policy.section_name(title)}" if title else "")
-            for part in _split(text, t.max_chars, policy.breaks, t.min_tail):
+            for part in _split(text, t.max_chars, policy.breaks):
                 yield Chunk(
                     template=t.name, page=page, text=part, header=head,
                     title=title or person_id, persons=(person_id,),
@@ -646,24 +616,6 @@ def _profile(
         )
 
 
-def _fold_short(items: list[tuple[str, str, str]], policy: ChunkPolicy) -> list[tuple[str, str, str]]:
-    """Items too short to be read alone join the item before them on the same page, each
-    under its own name; a unit of a few words is nothing without the entry it belongs to."""
-    if not policy.item_min_chars or not policy.foldable_items:
-        return items
-    foldable = re.compile("|".join(policy.foldable_items))
-    out: list[tuple[str, str, str]] = []
-    for page, title, text in items:
-        if (len(text) < policy.item_min_chars and foldable.search(title)
-                and out and out[-1][0] == page):
-            before = out[-1]
-            joined = f"{before[2]}\n{policy.section_name(title)}{policy.sep('label')}{text}"
-            out[-1] = (page, before[1], joined)
-        else:
-            out.append((page, title, text))
-    return out
-
-
 def _letter(
     archive: Archive, pack: Pack, t: ChunkTemplate, header: str, env: Env
 ) -> Iterator[Chunk]:
@@ -685,7 +637,7 @@ def _letter(
             body = f"{r['date']}\n{body}"
         sender = r["sender"] or ""
         owner = speakers.person_of.get(sender) or speakers.alias_person.get(sender)
-        for part in _split(body, t.max_chars, pack.chunking.breaks, t.min_tail):
+        for part in _split(body, t.max_chars, pack.chunking.breaks):
             yield Chunk(
                 template=t.name, page=r["page"], text=part, header=head,
                 title=r["title"] or label("letter"),

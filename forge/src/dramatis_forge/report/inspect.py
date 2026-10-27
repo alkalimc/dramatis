@@ -254,10 +254,7 @@ def render(pack: Pack, title: str, row, rec: dict) -> str:
         memoir = policy.kind("memoir")
         L += [say("inspect.fields"), ""]
         L += [f"- **{k}**{lsep}{v}" for k, v in d["fields"].items() if v]
-        stand_in = re.compile(policy.placeholder_only) if policy.placeholder_only else None
-        sections = [sec for sec in d["sections"] if not (
-            stand_in and stand_in.fullmatch(sec["text"].strip())
-            and (not sec["title"].strip() or stand_in.fullmatch(sec["title"].strip())))]
+        sections = d["sections"]
         if sections:
             L += ["", say("inspect.dossier_body"), ""]
             for sec in sections:

@@ -56,8 +56,6 @@ class CorpusReport:
     #: Headers that still carry game-engine metadata: a voice trigger key, or a scene's
     #: page-part suffix. Both are noise to retrieval and a model may read them aloud.
     engine_meta_headers: int = 0
-    #: Voice trigger keys the pack gives no words for.
-    unnamed_triggers: list[str] = field(default_factory=list)
     #: Units whose text still carries wiki markup or a comment fragment, by example.
     markup_residue: dict[str, int] = field(default_factory=dict)
     #: Story records (lines, choices) that no unit's span holds, and places where two
@@ -84,7 +82,6 @@ def _repeats_a_segment(header: str) -> bool:
 
 def _engine_meta(archive: Archive, pack: Pack, rep: CorpusReport):
     keys = archive_triggers(archive)
-    rep.unnamed_triggers = [k for k in keys if k not in pack.chunking.triggers]
     return engine_meta_test(pack.chunking, keys)
 
 
@@ -282,7 +279,6 @@ def run(
             "owners_missing": len(rep.owners_missing), "owner_scenes": rep.scenes_with_owner,
             "markup_residue": sum(rep.markup_residue.values()),
             "skipped": sum(env.skipped.values()),
-            "placeholders": env.placeholders,
             "unresolved_branches": len(env.unresolved_branches),
         })
         folio.set_meta("form_copies", {cid: list(dict.fromkeys(pages))
@@ -644,10 +640,6 @@ def _check(
             "G5", "unit text carries wiki markup: "
                   + ", ".join(f"{k!r} x{n}" for k, n in sorted(rep.markup_residue.items())),
             high=True)
-    if rep.unnamed_triggers:
-        rep.ledger.add(
-            "G5", "voice trigger key(s) the pack gives no words for: "
-                  + ", ".join(rep.unnamed_triggers))
 
 
 #: Record kinds that structure other records or become aliases rather than units.
@@ -767,10 +759,6 @@ def _check_attribution(
                 "G4", f"{len(lost_owners)} person(s) own a scene about themselves but have no "
                       "dialogue unit of their own: " + ", ".join(sorted(lost_owners)), high=True)
 
-    for scene, label, person in env.speakers.stale_declared:
-        rep.ledger.add(
-            "G4", f"declared speaker exception ({label!r} as {person!r}) names a person on no "
-                  "roster page; it has no effect", page=scene)
     sp = env.speakers
     if sp.segment_person:
         rep.ledger.add(
