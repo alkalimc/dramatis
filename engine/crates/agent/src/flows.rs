@@ -110,6 +110,15 @@ impl Agent {
     /// Run the replies to a posted message. Errors after the message was stored (the
     /// endpoint failed, the quota ran out) leave it stored.
     pub async fn respond(&self, posted: Posted) -> Result<()> {
+        let result = self.respond_inner(posted).await;
+        if matches!(result, Err(Error::RateLimited { .. })) {
+            // The app shows only events, so the host says it in its own channel.
+            self.host_line("host.rate_limited", &[])?;
+        }
+        result
+    }
+
+    async fn respond_inner(&self, posted: Posted) -> Result<()> {
         let asks = {
             let _turn = self.lock_channel(posted.channel).await;
             let ch = channel::get(&self.db(), posted.channel)?;
@@ -167,15 +176,17 @@ impl Agent {
 
     /// The host's fixed line when the quota is used up: no model call.
     fn exhausted_line(&self, release_at: Option<i64>) -> Result<()> {
+        let when = release_at
+            .map(|ms| world::clock::local_time(self.now().at(ms)))
+            .unwrap_or_default();
+        self.host_line("host.quota_exhausted", &[("when", &when)])
+    }
+
+    /// A fixed line of the host's, from the corpus wording, shown in its channel.
+    fn host_line(&self, key: &str, fields: &[(&str, &str)]) -> Result<()> {
         let now = self.now();
         let names = self.names()?;
-        let when = release_at
-            .map(|ms| world::clock::local_time(now.at(ms)))
-            .unwrap_or_default();
-        let text = self
-            .corpus
-            .wording
-            .fill("host.quota_exhausted", &names, &[("when", &when)]);
+        let text = self.corpus.wording.fill(key, &names, fields);
         let conn = self.db();
         let host = channel::host(&conn)?;
         let id = message::append(&conn, host, &Actor::Host, &text, None, None, now.ms)?;

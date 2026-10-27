@@ -45,6 +45,8 @@ impl fmt::Debug for HttpRequest {
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,
+    /// Seconds from a `Retry-After` header, when it carries a plain number.
+    pub retry_after: Option<u64>,
 }
 
 pub type Chunks = BoxStream<'static, Result<Vec<u8>>>;
@@ -52,6 +54,8 @@ pub type Chunks = BoxStream<'static, Result<Vec<u8>>>;
 pub struct StreamResponse {
     pub status: u16,
     pub chunks: Chunks,
+    /// As in [`HttpResponse`].
+    pub retry_after: Option<u64>,
 }
 
 #[async_trait]
@@ -105,6 +109,7 @@ impl Transport for Http {
     async fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
         let resp = self.start(req).await?;
         let status = resp.status().as_u16();
+        let retry_after = retry_after(&resp);
         let body = resp
             .bytes()
             .await
@@ -112,12 +117,14 @@ impl Transport for Http {
         Ok(HttpResponse {
             status,
             body: body.to_vec(),
+            retry_after,
         })
     }
 
     async fn open(&self, req: HttpRequest) -> Result<StreamResponse> {
         let resp = self.start(req).await?;
         let status = resp.status().as_u16();
+        let retry_after = retry_after(&resp);
         let chunks = futures::stream::unfold(resp, |mut resp| async move {
             match resp.chunk().await {
                 Ok(Some(c)) => Some((Ok(c.to_vec()), resp)),
@@ -126,8 +133,24 @@ impl Transport for Http {
             }
         })
         .boxed();
-        Ok(StreamResponse { status, chunks })
+        Ok(StreamResponse {
+            status,
+            chunks,
+            retry_after,
+        })
     }
+}
+
+/// `Retry-After` in seconds. The date form is not read: the delay it would give is not
+/// worth a date parser here.
+fn retry_after(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// A canned reply: status plus the body, split into the chunks a stream delivers.
@@ -135,6 +158,7 @@ impl Transport for Http {
 pub struct Canned {
     pub status: u16,
     pub chunks: Vec<Vec<u8>>,
+    pub retry_after: Option<u64>,
 }
 
 impl Canned {
@@ -142,6 +166,7 @@ impl Canned {
         Self {
             status: 200,
             chunks: vec![body.as_ref().to_vec()],
+            retry_after: None,
         }
     }
 
@@ -149,7 +174,13 @@ impl Canned {
         Self {
             status,
             chunks: vec![body.as_ref().to_vec()],
+            retry_after: None,
         }
+    }
+
+    pub fn retry_after(mut self, secs: u64) -> Self {
+        self.retry_after = Some(secs);
+        self
     }
 
     /// A stream cut into pieces of `size` bytes, to exercise events split across chunks.
@@ -161,6 +192,7 @@ impl Canned {
                 .chunks(size.max(1))
                 .map(<[u8]>::to_vec)
                 .collect(),
+            retry_after: None,
         }
     }
 }
@@ -205,6 +237,7 @@ impl Transport for MemoryTransport {
         Ok(HttpResponse {
             status: c.status,
             body: c.chunks.concat(),
+            retry_after: c.retry_after,
         })
     }
 
@@ -213,6 +246,7 @@ impl Transport for MemoryTransport {
         Ok(StreamResponse {
             status: c.status,
             chunks: futures::stream::iter(c.chunks.into_iter().map(Ok)).boxed(),
+            retry_after: c.retry_after,
         })
     }
 }

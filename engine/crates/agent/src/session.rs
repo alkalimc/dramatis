@@ -14,7 +14,7 @@ use api::events::{MessageAdded, MessageDelta, QuotaChanged, ToolCalled};
 use api::meta::MessageMeta;
 use api::views::ToolAction;
 use futures::StreamExt;
-use llm::{Event as LlmEvent, Message, Response, ToolChoice};
+use llm::{Event as LlmEvent, Message, Part, Response, ToolChoice};
 use world::log::{self, Role};
 use world::quota;
 use world::wrapup::Summary;
@@ -519,84 +519,136 @@ impl Agent {
             },
             &ep,
         )?;
-        let mut events = self.llm.stream(&ep, &req).await?;
-        let mut done = None;
-        let mut failure = None;
-        let mut streamed = false;
-        while let Some(event) = events.next().await {
-            match event {
-                Ok(LlmEvent::TextDelta(mut delta)) if !turn.wrapup => {
-                    // A later step's text joins the earlier one on a new line, as stored.
-                    if !std::mem::replace(&mut streamed, true) && !turn.text.is_empty() {
-                        delta.insert(0, '\n');
+        let mut retried = false;
+        let (reply, refused) = loop {
+            let mut events = self.llm.stream(&ep, &req).await?;
+            let mut done = None;
+            let mut failure = None;
+            let mut streamed = false;
+            // Text that may still turn out to be a canned refusal is held back, so a
+            // refusal never reaches the screen.
+            let mut held = String::new();
+            let mut holding = true;
+            while let Some(event) = events.next().await {
+                match event {
+                    Ok(LlmEvent::TextDelta(delta)) if !turn.wrapup => {
+                        if holding {
+                            held.push_str(&delta);
+                            if assemble::refusal(&held) == assemble::Refusal::No {
+                                holding = false;
+                                let all = std::mem::take(&mut held);
+                                self.stream_delta(turn, &mut streamed, all)?;
+                            }
+                        } else {
+                            self.stream_delta(turn, &mut streamed, delta)?;
+                        }
                     }
-                    let id = self.message_for(turn)?;
-                    self.emit(Event::MessageDelta(MessageDelta {
-                        channel: crate::view::channel_id(turn.channel),
-                        message: crate::view::message_id(id),
-                        author: crate::view::author(&turn.speaker),
-                        delta,
+                    Ok(LlmEvent::Done(r)) => done = Some(r),
+                    Ok(_) => {}
+                    Err(e) => {
+                        failure = Some(Error::from(e));
+                        break;
+                    }
+                }
+            }
+            drop(events);
+            let reply = match (failure, done) {
+                (None, Some(r)) => r,
+                (failure, _) => {
+                    // Nothing reached the log; a message row with no text yet goes too.
+                    if let Some(id) = turn.message
+                        && turn.text.is_empty()
+                    {
+                        store::discard_message(&self.db(), id)?;
+                        turn.message = None;
+                    }
+                    return Err(failure.unwrap_or_else(|| Error::Endpoint {
+                        detail: "the reply ended before it was complete".into(),
                     }));
                 }
-                Ok(LlmEvent::Done(r)) => done = Some(r),
-                Ok(_) => {}
-                Err(e) => {
-                    failure = Some(Error::from(e));
-                    break;
-                }
+            };
+            let refused = reply.tool_calls().next().is_none()
+                && assemble::refusal(&reply.text()) == assemble::Refusal::Is;
+            if !refused && !held.is_empty() {
+                self.stream_delta(turn, &mut streamed, held)?;
             }
-        }
-        drop(events);
-        let reply = match (failure, done) {
-            (None, Some(r)) => r,
-            (failure, _) => {
-                // Nothing reached the log; a message row with no text yet goes too.
-                if let Some(id) = turn.message
-                    && turn.text.is_empty()
-                {
-                    store::discard_message(&self.db(), id)?;
-                    turn.message = None;
-                }
-                return Err(failure.unwrap_or_else(|| Error::Endpoint {
-                    detail: "the reply ended before it was complete".into(),
-                }));
+            if refused && !retried {
+                // A fresh request, paid like any other; the refusal is not kept.
+                retried = true;
+                self.record_usage(turn, seg, &shape.model, &role, reply.usage)?;
+                continue;
             }
+            break (reply, refused);
         };
-        let now = self.now();
-        {
-            let conn = self.db();
+        let mut reply = if role.model.emulated_tools() && (turn.wrapup || !shape.tools.is_empty()) {
+            adopt_text_call(reply, turn.wrapup, &shape.tools)
+        } else {
+            reply
+        };
+        if refused {
+            // Twice in a row: the turn goes on without a reply, and the log keeps no
+            // words that are not the person's.
+            reply.parts.clear();
+        } else {
             let item = Message::assistant(reply.parts.clone());
             log::append(
-                &conn,
+                &self.db(),
                 seg,
                 Role::Assistant,
                 &request::to_bytes(&item),
-                now.ms,
-            )?;
-            let u = reply.usage;
-            self.filled
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(
-                    seg,
-                    u.uncached_in + u.cached_in + u.cache_write_in + u.output,
-                );
-            meter::record(
-                &conn,
-                now.ms,
-                turn.shape,
-                Some(turn.channel),
-                &shape.model,
-                u,
-                role.prices(),
-                role.cache_write_ratio(),
-                role.per_request(),
-                &self.config.world.cost,
-                &self.config.agent.cost,
+                self.now().ms,
             )?;
         }
-        self.emit_quota()?;
+        self.record_usage(turn, seg, &shape.model, &role, reply.usage)?;
         Ok(reply)
+    }
+
+    /// One call's usage: the segment's fill, the meter row and the quota event.
+    fn record_usage(
+        &self,
+        turn: &Turn,
+        seg: SegmentId,
+        model: &str,
+        role: &ChatRole,
+        u: llm::Usage,
+    ) -> Result<()> {
+        self.filled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                seg,
+                u.uncached_in + u.cached_in + u.cache_write_in + u.output,
+            );
+        meter::record(
+            &self.db(),
+            self.now().ms,
+            turn.shape,
+            Some(turn.channel),
+            model,
+            u,
+            role.prices(),
+            role.cache_write_ratio(),
+            role.per_request(),
+            &self.config.world.cost,
+            &self.config.agent.cost,
+        )?;
+        self.emit_quota()
+    }
+
+    /// Show a piece of the reply as it arrives. A later step's text joins the earlier
+    /// one on a new line, as stored.
+    fn stream_delta(&self, turn: &mut Turn, streamed: &mut bool, mut delta: String) -> Result<()> {
+        if !std::mem::replace(streamed, true) && !turn.text.is_empty() {
+            delta.insert(0, '\n');
+        }
+        let id = self.message_for(turn)?;
+        self.emit(Event::MessageDelta(MessageDelta {
+            channel: crate::view::channel_id(turn.channel),
+            message: crate::view::message_id(id),
+            author: crate::view::author(&turn.speaker),
+            delta,
+        }));
+        Ok(())
     }
 
     /// Whether the protocol of the channel's role lets `tool_choice` differ between calls
@@ -895,6 +947,37 @@ impl Agent {
 pub(crate) struct Log {
     pub system: [String; 3],
     pub items: Vec<Message>,
+}
+
+/// On an endpoint that only emulates tools, a call may arrive as a fenced block in the
+/// text instead of a structured call. When no structured call came, the block becomes
+/// the call, so the loop treats both alike; the stored reply keeps the words before it.
+/// Only a tool the request offered counts (in a wrap-up, only `wrapup`).
+fn adopt_text_call(mut reply: Response, wrapup: bool, tools: &[api::tools::ToolSpec]) -> Response {
+    if reply.tool_calls().next().is_some() {
+        return reply;
+    }
+    let Some((name, args_json, lead)) = assemble::text_call(&reply.text()) else {
+        return reply;
+    };
+    let offered = if wrapup {
+        name == "wrapup"
+    } else {
+        tools.iter().any(|t| t.name == name)
+    };
+    if !offered {
+        return reply;
+    }
+    reply.parts.retain(|p| !matches!(p, Part::Text(_)));
+    if !lead.is_empty() {
+        reply.parts.push(Part::Text(lead));
+    }
+    reply.parts.push(Part::ToolCall {
+        id: "text_call_0".into(),
+        name,
+        args_json,
+    });
+    reply
 }
 
 fn log_role(role: llm::Role) -> Role {

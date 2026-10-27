@@ -507,6 +507,140 @@ async fn emulated_tools_are_left_out_of_ordinary_turns_only() {
     assert!(json[1]["tools"].as_array().is_some_and(|t| !t.is_empty()));
 }
 
+#[tokio::test]
+async fn an_emulated_wrapup_written_as_a_text_block_still_counts() {
+    // The fence opening may be missing, and the block may sit after some words.
+    for block in [
+        "```tool_call\n{BODY}\n```",
+        "tool_call\n{BODY}\n```",
+        "Noted.\n```tool_call\n{BODY}\n```",
+    ] {
+        let mut ep = endpoints(WireApi::Chat, true, None);
+        ep.profiles[0].models[0].native_tools = Some(false);
+        let e = env_with(ep, |_| {});
+        let ch = direct(&e, "ann");
+        let body = json!({"name": "wrapup", "arguments": {"facts": [
+            {"kind": "fact", "text": "The user likes jasmine tea.", "due": null}
+        ], "hurt": null, "summary": null}});
+        e.fake.push([
+            say("Cooler water."),
+            say(&block.replace("{BODY}", &body.to_string())),
+        ]);
+        e.agent
+            .send(ch, "how should I brew tea?", None)
+            .await
+            .unwrap();
+        e.agent.wrapup(ch).await.unwrap();
+        let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+        assert_eq!(facts.len(), 1, "{block}");
+    }
+}
+
+#[tokio::test]
+async fn a_text_block_is_not_a_call_on_a_native_endpoint() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    let body = json!({"name": "wrapup", "arguments": {"facts": [
+        {"kind": "fact", "text": "The user likes jasmine tea.", "due": null}
+    ], "hurt": null, "summary": null}});
+    e.fake.push([
+        say("Cooler water."),
+        say(&format!("```tool_call\n{body}\n```")),
+    ]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    assert!(
+        e.agent
+            .with_world(|w| fact::all(w, false).unwrap())
+            .is_empty()
+    );
+}
+
+const REFUSAL: &str =
+    "I'm having a hard time fulfilling your request. Can I help you with something else instead?";
+
+fn shown_text(e: &Env) -> String {
+    format!("{:?}", e.sink.take())
+}
+
+#[tokio::test]
+async fn a_canned_refusal_is_retried_once_and_never_shown_or_kept() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say(REFUSAL), say("Cooler water.")]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.last().unwrap().text, "Cooler water.");
+    assert!(!shown_text(&e).contains("hard time"));
+    assert!(!log_bytes(&e.agent, ch).contains("hard time"));
+    // Both calls were paid.
+    assert_eq!(meter(&e.agent).len(), 2);
+}
+
+#[tokio::test]
+async fn a_repeated_refusal_leaves_the_turn_without_a_reply() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say(REFUSAL), say(REFUSAL)]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.len(), 1);
+    assert!(!shown_text(&e).contains("hard time"));
+    assert!(!log_bytes(&e.agent, ch).contains("hard time"));
+    assert_eq!(meter(&e.agent).len(), 2);
+}
+
+#[tokio::test]
+async fn short_english_replies_that_are_not_refusals_pass() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("I can't help laughing. Tea!")]);
+    e.agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.last().unwrap().text, "I can't help laughing. Tea!");
+}
+
+#[tokio::test]
+async fn a_rate_limit_keeps_the_message_and_the_host_says_so() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake
+        .push([Reply::Limited(Some(3600)), say("Cooler water.")]);
+    let posted = e.agent.post(ch, "how should I brew tea?", None).unwrap();
+    let err = e.agent.respond(posted.clone()).await.unwrap_err();
+    assert!(matches!(
+        err,
+        agent::Error::RateLimited {
+            retry_after: Some(3600)
+        }
+    ));
+    assert!(err.to_string().contains("rate limited"));
+    // The message stays, and the host says why nothing came back.
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.len(), 1);
+    assert!(
+        e.sink
+            .take()
+            .iter()
+            .any(|ev| format!("{ev:?}").contains("rate limited"))
+    );
+    // Asking again goes through.
+    e.agent.respond(posted).await.unwrap();
+    assert_eq!(e.agent.history(ch, None, 10).unwrap().len(), 2);
+}
+
 async fn rolls_over(wire: WireApi) {
     let e = env_with(endpoints(wire, true, None), |c| c.agent.roll.k = 10.0);
     let ch = direct(&e, "ann");

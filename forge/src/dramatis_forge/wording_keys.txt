@@ -240,6 +240,7 @@ harness.wrapup
 harness.wrapup.summary
 host.name
 host.quota_exhausted
+host.rate_limited
 host.role
 library.configure
 library.later

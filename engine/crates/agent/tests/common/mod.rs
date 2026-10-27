@@ -28,6 +28,8 @@ pub enum Reply {
     /// A recorded SSE body, replayed as is.
     Raw(String),
     Fail(String),
+    /// HTTP 429 with an optional `Retry-After`.
+    Limited(Option<u64>),
 }
 
 pub fn say(t: &str) -> Reply {
@@ -303,6 +305,7 @@ impl Transport for Fake {
             body: json!({"data": [{"id": "model-a"}]})
                 .to_string()
                 .into_bytes(),
+            retry_after: None,
         })
     }
 
@@ -340,6 +343,16 @@ impl Transport for Fake {
         if let Some(h) = hold {
             h.pass().await;
         }
+        if let Reply::Limited(retry_after) = reply {
+            return Ok(StreamResponse {
+                status: 429,
+                chunks: futures::stream::iter(vec![Ok(
+                    br#"{"error":{"message":"all slots full"}}"#.to_vec(),
+                )])
+                .boxed(),
+                retry_after,
+            });
+        }
         let n = self.n.fetch_add(1, Ordering::SeqCst);
         let text = render(wire, &reply, usage, n);
         // Cut mid-event, to exercise events split across chunks.
@@ -348,6 +361,7 @@ impl Transport for Fake {
         Ok(StreamResponse {
             status: 200,
             chunks: futures::stream::iter(chunks).boxed(),
+            retry_after: None,
         })
     }
 }

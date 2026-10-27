@@ -33,6 +33,11 @@ pub enum Error {
     #[error("no chat endpoint configured")]
     NoEndpoint,
 
+    /// The endpoint refused for now (HTTP 429). The posted message is kept, so asking
+    /// again later works. `retry_after` is the endpoint's hint in seconds.
+    #[error("{}", rate_limited_text(*.retry_after))]
+    RateLimited { retry_after: Option<u64> },
+
     /// The endpoint answered with an error, or the stream broke. `detail` is the
     /// endpoint's own text; it never contains the key.
     #[error("endpoint: {detail}")]
@@ -63,12 +68,21 @@ impl From<llm::Error> for Error {
             llm::Error::Keychain(d) => Error::Keychain(d),
             llm::Error::Unsupported(what) => Error::Unsupported(what),
             llm::Error::ForcedToolNotAllowed => Error::ForcedToolNotAllowed,
+            llm::Error::RateLimited { retry_after, .. } => Error::RateLimited { retry_after },
             // The endpoint's own text, as before.
             other => Error::Endpoint {
                 detail: other.to_string(),
             },
         }
     }
+}
+
+fn rate_limited_text(retry_after: Option<u64>) -> String {
+    let mut s = "the endpoint is rate limited; try again later".to_owned();
+    if let Some(n) = retry_after {
+        s.push_str(&format!(" (it asks for {n} s)"));
+    }
+    s
 }
 
 /// RFC 3339 with the user's offset, as every timestamp crosses the seam.
@@ -120,6 +134,10 @@ impl From<Error> for ApiError {
             Error::Unsupported(what) => ApiError::Endpoint {
                 detail: format!("{what} is not supported by this build"),
             },
+            // No code of its own: the UI shows the sentence under the endpoint error.
+            e @ Error::RateLimited { .. } => ApiError::Endpoint {
+                detail: e.to_string(),
+            },
             Error::Endpoint { detail } => ApiError::Endpoint { detail },
             Error::ForcedToolNotAllowed => ApiError::Endpoint {
                 detail: "a forced tool choice is not allowed on this endpoint".into(),
@@ -149,11 +167,21 @@ mod tests {
     #[test]
     fn llm_errors_keep_their_text() {
         let e: Error = llm::Error::Http {
-            status: 429,
+            status: 503,
             message: "slow down".into(),
         }
         .into();
-        assert!(matches!(&e, Error::Endpoint { detail } if detail == "HTTP 429: slow down"));
+        assert!(matches!(&e, Error::Endpoint { detail } if detail == "HTTP 503: slow down"));
+        let e: Error = llm::Error::RateLimited {
+            retry_after: Some(90),
+            message: "full".into(),
+        }
+        .into();
+        assert_eq!(
+            e.to_string(),
+            "the endpoint is rate limited; try again later (it asks for 90 s)"
+        );
+        assert!(matches!(ApiError::from(e), ApiError::Endpoint { .. }));
         assert!(matches!(
             Error::from(llm::Error::ForcedToolNotAllowed),
             Error::ForcedToolNotAllowed
