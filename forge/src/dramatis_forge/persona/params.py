@@ -30,9 +30,11 @@ class Persona:
     story_tokens: int = 1500
     #: The same two budgets when the persona model is billed per request, whatever the
     #: size of the call (`billing = "request"` in the endpoints file): one call carries
-    #: a person's whole material instead of a sample of it.
-    request_material_tokens: int = 60000
-    request_story_tokens: int = 30000
+    #: far more of a person's material than a sample. Still bounded: a request-billed proxy
+    #: may cap the request in bytes (the local Gemini one takes 128,000), and Chinese
+    #: material runs about five bytes per counted token with the prompt around it.
+    request_material_tokens: int = 18000
+    request_story_tokens: int = 9000
     #: Own lines of a person kept as tone references: how many, the budget for all of
     #: them together (a line may take at most a quarter of it), and the shortest line
     #: worth keeping, in tokens. They are picked from the material, not generated.
