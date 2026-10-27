@@ -497,7 +497,17 @@ impl Agent {
             .ok_or_else(|| Error::Invalid(format!("channel {} has no log", turn.channel)))?
             .id;
         let names = self.segment_names(seg)?;
-        let shape = self.shape_for(&role, kind, &names);
+        let mut shape = self.shape_for(&role, kind, &names);
+        // The stored shape keeps the full list; only this call's request leaves it out.
+        if role.model.emulated_tools()
+            && kind == LogKind::Person
+            && matches!(
+                turn.shape,
+                Shape::Direct | Shape::Group | Shape::Interject | Shape::Opening
+            )
+        {
+            shape.tools.clear();
+        }
         let log = self.log(seg)?;
         let req = request::build(
             &Call {
@@ -670,7 +680,7 @@ impl Agent {
                 ToolChoice::Auto
             };
             let reply = self.call(turn, choice).await?;
-            let text = reply.text();
+            let text = assemble::visible_text(&reply.text());
             if !text.is_empty() {
                 if !turn.text.is_empty() {
                     turn.text.push('\n');

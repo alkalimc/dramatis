@@ -56,6 +56,8 @@ class Model:
     price_out: float | None = None
     #: "token" (default) or "request": a flat fee per call whatever its size.
     billing: str | None = None
+    #: False: the endpoint emulates function calling (the engine reads it; forge ignores it).
+    native_tools: bool | None = None
 
 
 BILLINGS = ("token", "request")
@@ -195,6 +197,7 @@ def _profile(raw: Any) -> Profile:
             price_in_cache_write=_opt(m, "price_in_cache_write", (int, float), where),
             price_out=_opt(m, "price_out", (int, float), where),
             billing=_billing(m, where),
+            native_tools=_opt(m, "native_tools", bool, where),
         ))
     return Profile(name=name, base_url=_need(raw, "base_url", str, where), wire_api=wire,
                    models=tuple(models))

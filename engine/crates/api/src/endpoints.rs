@@ -22,6 +22,7 @@
 //! price_in_cache_write = 1.25          # messages only: writing a cache entry
 //! price_out = 4.0
 //! billing = "token"                    # "token" (default) | "request": a flat fee per call
+//! native_tools = true                  # false: the endpoint emulates function calling
 //!
 //! [roles]                              # absent = no chat model: the app runs as a library
 //! chat = { profile = "example", model = "model-a" }
@@ -36,6 +37,12 @@
 //! rolls a segment for token cost, records no quota points for its calls (a request is not
 //! a token price), and the offline persona generator sends its larger material budget.
 //! The key is edited in the file only.
+//!
+//! `native_tools = false` marks a model behind an endpoint that emulates function calling
+//! in prose. Ordinary person turns (direct, group, interjection, opening) are then sent
+//! with no tools, since retrieval is attached to every turn anyway and the emulation's
+//! instructions pull the model out of its role; requests keep `report` and the wrap-up
+//! keeps the forced `wrapup`. Edited in the file only.
 //!
 //! Absent optional keys stay absent when written back (TOML has no null).
 //!
@@ -124,6 +131,9 @@ pub struct Model {
     /// How the model is charged. Absent: per token.
     #[serde(default)]
     pub billing: Option<Billing>,
+    /// `false`: function calling is emulated by the endpoint. Absent: native.
+    #[serde(default)]
+    pub native_tools: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -139,6 +149,11 @@ impl Model {
     /// Whether a call costs the same whatever it carries.
     pub fn per_request(&self) -> bool {
         self.billing == Some(Billing::Request)
+    }
+
+    /// Whether the endpoint only emulates function calling.
+    pub fn emulated_tools(&self) -> bool {
+        self.native_tools == Some(false)
     }
 }
 
@@ -376,6 +391,7 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
                         price_in_cache_write: Some(1.25),
                         price_out: Some(4.0),
                         billing: Some(Billing::Request),
+                        native_tools: Some(false),
                     });
                     p
                 })

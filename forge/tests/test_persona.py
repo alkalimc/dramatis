@@ -622,6 +622,15 @@ def test_request_billing_selects_the_larger_budgets():
             "forced_tool = true", "billing = \"free\""))
 
 
+def test_endpoints_accept_emulated_tools():
+    e = Endpoints.from_toml(ENDPOINTS.format(wire="chat").replace(
+        "forced_tool = true", "forced_tool = true\nnative_tools = false"))
+    assert e.profiles[0].models[0].native_tools is False
+    with pytest.raises(EndpointsError):
+        Endpoints.from_toml(ENDPOINTS.format(wire="chat").replace(
+            "forced_tool = true", "native_tools = \"no\""))
+
+
 def test_probe_writes_readable_files(toy, paths, endpoints_file):
     ep = FakeEndpoint(recorded("chat_ok.json"))
     result = run(toy, paths, endpoints_file, ep, wire="chat", probe=True)

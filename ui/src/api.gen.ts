@@ -402,6 +402,8 @@ export type Model = {
 	price_out?: number | null,
 	/**  How the model is charged. Absent: per token. */
 	billing?: Billing | null,
+	/**  `false`: function calling is emulated by the endpoint. Absent: native. */
+	native_tools?: boolean | null,
 };
 
 export type MonthDay = {

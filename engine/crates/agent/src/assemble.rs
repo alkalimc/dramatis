@@ -293,20 +293,71 @@ pub fn entry(parts: &[&str]) -> String {
         .join("\n\n")
 }
 
-/// Every `[#id]` in a text, in order.
+/// Every id cited in a text, in order. A bracket holds one id or a comma-separated list
+/// (`[#a]`, `[#a, #b]`, `[#a,b]`); a bracket with any malformed item cites nothing.
 pub fn ids_in(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(i) = rest.find("[#") {
         rest = &rest[i + 2..];
         let Some(end) = rest.find(']') else { break };
-        let id = &rest[..end];
-        if !id.is_empty() && id.len() <= 128 && !id.contains(char::is_whitespace) {
-            out.push(id.to_owned());
+        if let Some(ids) = id_list(&rest[..end]) {
+            out.extend(ids);
             rest = &rest[end + 1..];
         }
     }
     out
+}
+
+/// The ids of one bracket's inside (after its first `#`).
+fn id_list(inside: &str) -> Option<Vec<String>> {
+    if inside.starts_with(char::is_whitespace) {
+        return None;
+    }
+    inside
+        .split(',')
+        .map(|item| {
+            let id = item.trim().trim_start_matches('#');
+            (!id.is_empty() && id.len() <= 128 && !id.contains(char::is_whitespace))
+                .then(|| id.to_owned())
+        })
+        .collect()
+}
+
+const FENCE: &str = "```tool_call";
+
+/// A reply as the user may see it: emulated tool-call blocks the endpoint failed to parse
+/// are dropped. A closed block goes whole. An unclosed one is usually a call whose
+/// arguments carry the words themselves, so its opening line and the `"text": "` lead-in
+/// go and the words stay.
+pub fn visible_text(raw: &str) -> String {
+    let mut out = String::new();
+    let mut rest = raw;
+    while let Some(i) = rest.find(FENCE) {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + FENCE.len()..];
+        if let Some(end) = after.find("```") {
+            rest = &after[end + 3..];
+            continue;
+        }
+        let after = after.trim_start();
+        let line_end = after.find('\n').unwrap_or(after.len());
+        let first = &after[..line_end];
+        const LEAD: &str = "\"text\"";
+        let kept = match first.find(LEAD) {
+            Some(k) => {
+                let tail = first[k + LEAD.len()..].trim_start();
+                let tail = tail.strip_prefix(':').unwrap_or(tail).trim_start();
+                let tail = tail.strip_prefix('"').unwrap_or(tail);
+                format!("{tail}{}", &after[line_end..])
+            }
+            None => after[line_end..].to_owned(),
+        };
+        out.push_str(&kept);
+        rest = "";
+    }
+    out.push_str(rest);
+    out.trim().to_owned()
 }
 
 #[cfg(test)]
@@ -320,6 +371,29 @@ mod tests {
             ids_in("a [#u1] b [#m12] c [# x] [#] [#u1]"),
             ["u1", "m12", "u1"]
         );
+    }
+
+    #[test]
+    fn lists_in_one_bracket_are_read() {
+        assert_eq!(
+            ids_in("a [#x:1,#y:2] b [#p:3, #q:4] c [#r:5, s:6] [#bad, ] [#z:7]"),
+            ["x:1", "y:2", "p:3", "q:4", "r:5", "s:6", "z:7"]
+        );
+    }
+
+    #[test]
+    fn tool_call_blocks_are_not_shown() {
+        assert_eq!(
+            visible_text("hi\n```tool_call\n{\"name\": \"search\"}\n```\nbye"),
+            "hi\n\nbye"
+        );
+        assert_eq!(
+            visible_text(
+                "```tool_call\n{\"name\": \"report\", \"arguments\": {\"text\": \"words\nmore"
+            ),
+            "words\nmore"
+        );
+        assert_eq!(visible_text("plain"), "plain");
     }
 
     #[test]
