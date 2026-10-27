@@ -293,23 +293,10 @@ fn render(wire: WireApi, reply: &Reply, usage: (u64, u64, u64), n: i64) -> Strin
     }
 }
 
-#[async_trait]
-impl Transport for Fake {
-    async fn send(&self, req: HttpRequest) -> llm::Result<HttpResponse> {
-        assert!(
-            req.url.ends_with("/models"),
-            "only the model list is a plain call"
-        );
-        Ok(HttpResponse {
-            status: 200,
-            body: json!({"data": [{"id": "model-a"}]})
-                .to_string()
-                .into_bytes(),
-            retry_after: None,
-        })
-    }
-
-    async fn open(&self, req: HttpRequest) -> llm::Result<StreamResponse> {
+impl Fake {
+    /// The next scripted reply for a request, which is recorded, with the protocol it was
+    /// rendered for and its simulated usage.
+    async fn take(&self, req: &HttpRequest) -> (WireApi, Reply, (u64, u64, u64)) {
         let wire = if req.url.ends_with("/chat/completions") {
             WireApi::Chat
         } else if req.url.ends_with("/responses") {
@@ -338,11 +325,78 @@ impl Transport for Fake {
             _ => 0,
         };
         let usage = self.usage(&req.body, out);
-        self.bodies.lock().unwrap().push(req.body);
+        self.bodies.lock().unwrap().push(req.body.clone());
         let hold = self.hold.lock().unwrap().clone();
         if let Some(h) = hold {
             h.pass().await;
         }
+        (wire, reply, usage)
+    }
+}
+
+#[async_trait]
+impl Transport for Fake {
+    async fn send(&self, req: HttpRequest) -> llm::Result<HttpResponse> {
+        if req.url.ends_with("/models") {
+            return Ok(HttpResponse {
+                status: 200,
+                body: json!({"data": [{"id": "model-a"}]})
+                    .to_string()
+                    .into_bytes(),
+                retry_after: None,
+            });
+        }
+        // A whole reply: only a structured-output request is sent this way.
+        let (wire, reply, usage) = self.take(&req).await;
+        let (input, cached, output) = usage;
+        let (text, call) = match &reply {
+            Reply::Say(t) => (t.clone(), None),
+            Reply::Call(n, a) => (String::new(), Some((n.clone(), a.to_string()))),
+            other => unreachable!("{other:?} is not a whole reply"),
+        };
+        let body = match wire {
+            WireApi::Chat => {
+                let mut msg = json!({"role": "assistant", "content": text});
+                if let Some((n, a)) = &call {
+                    msg["tool_calls"] = json!([{"id": format!("call_{n}"), "type": "function",
+                        "function": {"name": n, "arguments": a}}]);
+                }
+                json!({"choices": [{"index": 0, "finish_reason": "stop", "message": msg}],
+                    "usage": {"prompt_tokens": input, "completion_tokens": output,
+                        "prompt_tokens_details": {"cached_tokens": cached}}})
+            }
+            WireApi::Responses => {
+                let item = match &call {
+                    Some((n, a)) => json!({"type": "function_call",
+                        "call_id": format!("call_{n}"), "name": n, "arguments": a}),
+                    None => json!({"type": "message", "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}]}),
+                };
+                json!({"status": "completed", "output": [item],
+                    "usage": {"input_tokens": input,
+                        "input_tokens_details": {"cached_tokens": cached},
+                        "output_tokens": output}})
+            }
+            WireApi::Messages => {
+                let block = match &call {
+                    Some((n, a)) => json!({"type": "tool_use", "id": format!("call_{n}"),
+                        "name": n, "input": serde_json::from_str::<Value>(a).unwrap()}),
+                    None => json!({"type": "text", "text": text}),
+                };
+                json!({"type": "message", "stop_reason": "end_turn", "content": [block],
+                    "usage": {"input_tokens": input - cached, "cache_read_input_tokens": cached,
+                        "output_tokens": output}})
+            }
+        };
+        Ok(HttpResponse {
+            status: 200,
+            body: body.to_string().into_bytes(),
+            retry_after: None,
+        })
+    }
+
+    async fn open(&self, req: HttpRequest) -> llm::Result<StreamResponse> {
+        let (wire, reply, usage) = self.take(&req).await;
         if let Reply::Limited(retry_after) = reply {
             return Ok(StreamResponse {
                 status: 429,
