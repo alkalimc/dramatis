@@ -92,12 +92,18 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.wrapup",
-        "The conversation is closing. Call wrapup with what is worth remembering from it.",
+        "The conversation is closing. Step out of the scene and do not answer as the \
+         character. Give only the wrap-up: what happened that is worth remembering, and any \
+         promises with their dates. Use the wrapup call if it is available; otherwise reply \
+         with just the JSON object the schema describes.",
     ),
     (
         "harness.wrapup.summary",
-        "The conversation moves to a new log. Call wrapup with what is worth remembering, \
-         and a summary of the conversation so far.",
+        "The conversation moves to a new log. Step out of the scene and do not answer as the \
+         character. Give only the wrap-up: what happened that is worth remembering, any \
+         promises with their dates, and a summary of the conversation so far. Use the wrapup \
+         call if it is available; otherwise reply with just the JSON object the schema \
+         describes.",
     ),
     ("harness.opening", "{name} speaks first."),
     ("harness.opening.commitment", "A promise is due: {text}"),
