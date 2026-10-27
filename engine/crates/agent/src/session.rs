@@ -964,21 +964,19 @@ pub(crate) struct Log {
     pub items: Vec<Message>,
 }
 
-/// The reply to a structured wrap-up request: the JSON document becomes the `wrapup`
+/// The reply to a structured wrap-up request (a JSON object, possibly in a code fence,
+/// keeping only the schema's own top-level keys): the JSON document becomes the `wrapup`
 /// call, so the loop treats it like a tool call. A reply that is not a JSON object is
 /// still read as a fenced call block; with neither it stays text, and nothing is recorded.
 fn adopt_json_call(mut reply: Response) -> Response {
-    let text = reply.text();
-    let doc = text.trim();
-    let is_object = serde_json::from_str::<serde_json::Value>(doc).is_ok_and(|v| v.is_object());
-    if !is_object {
+    let Some(doc) = crate::wrapup_json::document(&reply.text()) else {
         return adopt_text_call(reply, true, &[]);
-    }
+    };
     reply.parts.retain(|p| !matches!(p, Part::Text(_)));
     reply.parts.push(Part::ToolCall {
         id: "json_call_0".into(),
         name: "wrapup".into(),
-        args_json: doc.to_owned(),
+        args_json: doc,
     });
     reply
 }

@@ -21,6 +21,7 @@ mod session;
 pub mod store;
 pub mod text;
 pub mod view;
+mod wrapup_json;
 
 pub use agent::{Agent, Clock, Config, Event, NoSink, Parts, Sink, SystemClock};
 pub use error::{Error, Result};

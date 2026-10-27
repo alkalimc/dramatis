@@ -30,6 +30,7 @@ use crate::request::{self, Image};
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
+use crate::wrapup_json;
 use llm::ToolChoice;
 
 /// A user message stored and waiting for its replies.
@@ -738,7 +739,20 @@ impl Agent {
         } else {
             "harness.wrapup"
         };
-        let line = self.corpus.wording.fill(key, &names, &[]);
+        let mut line = self.corpus.wording.fill(key, &names, &[]);
+        if emulated {
+            // The endpoint may not enforce the response schema, so the request text
+            // shows the shape itself, built from the schema.
+            let tools = api::tools::shared_tools(&self.corpus.descriptions);
+            if let Some(t) = tools.iter().find(|t| t.name == "wrapup") {
+                let shape = wrapup_json::example(&t.parameters);
+                let shape =
+                    self.corpus
+                        .wording
+                        .fill("harness.wrapup.shape", &names, &[("shape", &shape)]);
+                line = format!("{line}\n\n{shape}");
+            }
+        }
         self.append_user(seg.id, &line, None)?;
         let mut turn = Turn::new(ch, Actor::Person(author.clone()), Shape::Wrapup);
         turn.wrapup = true;
@@ -756,9 +770,10 @@ impl Agent {
         if !results.is_empty() {
             self.append(seg.id, &request::tool_results(results))?;
         }
-        let Some(args) = turn.wrapped else {
+        let Some(mut args) = turn.wrapped else {
             return Ok(None);
         };
+        wrapup_json::keep_undated(&mut args, self.now());
         let outcome = world::wrapup::apply(
             &self.db(),
             ch,
