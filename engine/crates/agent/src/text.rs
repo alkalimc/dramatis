@@ -32,8 +32,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.output",
         "A line wrapped in {open} and {close} describes only the speaker's own expression or \
-         action, in the third person, and calls the other side {user}; every other line is \
-         speech. Speak as in person: usually one to \
+         action, in the third person, writing {user} wherever the user is meant; every other \
+         line is speech. Speak as in person: usually one to \
          three sentences, longer only when the moment needs it. Add a scene line only when \
          it adds something. Do not end every reply with a question. The speaker's name is \
          never written before a reply.",
@@ -114,7 +114,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.digest.came_by", "- {name} came by."),
     ("harness.digest.birthday", "- Today is {name}'s birthday."),
-    ("harness.error.no_task", "There is no request to report on."),
     (
         "harness.error.wrapup_only",
         "wrapup is only for closing a conversation.",

@@ -16,7 +16,8 @@ use crate::store;
 /// they are as far as the cache-hit share goes.
 ///
 /// `write_ratio` is the model's configured cache-write price over its input price; absent,
-/// the `cost.w` parameter stands in.
+/// the `cost.w` parameter stands in. A per-request model records its tokens but no points:
+/// the quota windows are token-priced, and every row is still one counted request.
 #[allow(clippy::too_many_arguments)]
 pub fn record(
     conn: &Connection,
@@ -27,6 +28,7 @@ pub fn record(
     usage: llm::Usage,
     prices: Option<Prices>,
     write_ratio: Option<f64>,
+    per_request: bool,
     cost: &world::params::Cost,
     agent_cost: &Cost,
 ) -> world::Result<f64> {
@@ -36,7 +38,11 @@ pub fn record(
         output: usage.output,
     };
     let w = write_ratio.unwrap_or(agent_cost.w);
-    let points = quota::points(base, prices, cost) + w * usage.cache_write_in as f64;
+    let points = if per_request {
+        0.0
+    } else {
+        quota::points(base, prices, cost) + w * usage.cache_write_in as f64
+    };
     let n =
         |v: u64| i64::try_from(v).map_err(|_| world::Error::Invalid("token count overflow".into()));
     conn.execute(

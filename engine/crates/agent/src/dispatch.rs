@@ -245,7 +245,14 @@ impl Agent {
                     })
                 };
                 let Some(task) = task else {
-                    return Ok(Err(self.refuse(names, "harness.error.no_task", "")));
+                    // Nothing was asked of him: the text is what he meant to say. Refusing
+                    // would cost the model another call to say it again.
+                    if !turn.text.is_empty() {
+                        turn.text.push('\n');
+                    }
+                    turn.text.push_str(&r.text);
+                    turn.closed = true;
+                    return Ok(Ok(self.say(names, "harness.done", &[])));
                 };
                 self.show_action(turn, ToolAction::Report)?;
                 let mut shown = turn.shown.clone();

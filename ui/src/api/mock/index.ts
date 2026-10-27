@@ -46,10 +46,14 @@ import { PASSAGES, PERSONS, passage, type MockPerson } from "./data";
 
 type Result<T> = Promise<{ status: "ok"; data: T } | { status: "error"; error: ApiError }>;
 
-const localWording = import.meta.glob<Record<string, string>>("/wording.local.json", {
-  eager: true,
-  import: "default",
-});
+// Tests expect the English defaults, so they never read the local file.
+const localWording: Record<string, Record<string, string>> =
+  import.meta.env.MODE === "test"
+    ? {}
+    : import.meta.glob<Record<string, string>>("/wording.local.json", {
+        eager: true,
+        import: "default",
+      });
 
 const ok = <T>(data: T): Result<T> => Promise.resolve({ status: "ok", data });
 const fail = <T>(error: ApiError): Result<T> => Promise.resolve({ status: "error", error });

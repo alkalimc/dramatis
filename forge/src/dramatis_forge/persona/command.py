@@ -82,6 +82,7 @@ def execute(
                          'add under [roles]: persona = { profile = "<name>", '
                          'model = "<id>", reasoning = "high" }')
     params = Persona.load(params_path if params_path is not None else paths.home / "params.toml")
+    params = params.billed(endpoints.per_request(role))
     gen = generator or generator_mod.load(pack)
     placeholder = user_placeholder(paths.folio)
     version = gen.version(model=role.model, reasoning=role.reasoning, params=params,

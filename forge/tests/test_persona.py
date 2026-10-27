@@ -607,6 +607,21 @@ def test_endpoints_accept_messages_and_cache_write_price():
     assert e.profiles[0].models[0].price_in_cache_write == 1.25
 
 
+def test_request_billing_selects_the_larger_budgets():
+    e = Endpoints.from_toml(ENDPOINTS.format(wire="chat").replace(
+        "forced_tool = true", "forced_tool = true\nbilling = \"request\""))
+    role = e.roles.persona
+    assert e.profiles[0].models[0].billing == "request" and e.per_request(role)
+    p = Persona().billed(e.per_request(role))
+    assert (p.material_tokens, p.story_tokens) == (60000, 30000)
+    assert Persona().billed(False) == Persona()
+    token = Endpoints.from_toml(ENDPOINTS.format(wire="chat"))
+    assert not token.per_request(token.roles.persona)
+    with pytest.raises(EndpointsError):
+        Endpoints.from_toml(ENDPOINTS.format(wire="chat").replace(
+            "forced_tool = true", "billing = \"free\""))
+
+
 def test_probe_writes_readable_files(toy, paths, endpoints_file):
     ep = FakeEndpoint(recorded("chat_ok.json"))
     result = run(toy, paths, endpoints_file, ep, wire="chat", probe=True)

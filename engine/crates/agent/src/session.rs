@@ -342,7 +342,8 @@ impl Agent {
             .sum();
         let (c, _) = quota::ratios(role.prices(), &self.config.world.cost);
         let roll = &self.config.agent.roll;
-        if roll.tokens(material) as f64 > roll.threshold(c) {
+        // A per-call fee makes a long segment free to keep: only the window limits it.
+        if !role.per_request() && roll.tokens(material) as f64 > roll.threshold(c) {
             return Ok(Some(Roll::Material));
         }
         if let Some(window) = role.model.context_window {
@@ -579,6 +580,7 @@ impl Agent {
                 u,
                 role.prices(),
                 role.cache_write_ratio(),
+                role.per_request(),
                 &self.config.world.cost,
                 &self.config.agent.cost,
             )?;
