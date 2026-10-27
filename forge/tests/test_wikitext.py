@@ -188,3 +188,9 @@ def test_list_markers_are_layout_and_definitions_fold_into_their_term():
     cleaner = Cleaner(InlineRules(qualifier_sep=": ", list_sep=" | "))
     got = cleaner.text("Boss\n:Tall\nCrew\n:Ann\n:Bob\n* plain item\n** nested\n# numbered")
     assert got == "Boss: Tall\nCrew: Ann | Bob\nplain item\nnested\nnumbered"
+
+
+def test_a_script_line_keeps_a_leading_star_when_lists_are_off():
+    cleaner = Cleaner(InlineRules(qualifier_sep=": ", list_sep=" | "))
+    assert cleaner.text("*sigh* fine", lists=False) == "*sigh* fine"
+    assert cleaner.text("*sigh* fine") == "sigh* fine"

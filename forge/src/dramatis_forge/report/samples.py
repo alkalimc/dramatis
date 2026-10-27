@@ -176,7 +176,8 @@ def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> S
                 members.setdefault(layer, []).append(title)
                 stratified.add(layer)
 
-    for label, titles in sorted(members.items()):
+    # A layered set's own entry goes last: it takes only pages its layers did not already pick.
+    for label, titles in sorted(members.items(), key=lambda kv: (kv[0] in layered, kv[0])):
         if label not in layered:  # the layout classes below stand in for the set's own
             sel.add(label, titles[0], "first")
             sel.add(label, max(titles, key=lambda t: (sizes.get(t, 0), t)), "largest")
@@ -184,10 +185,13 @@ def select(archive: Archive, pack: Pack, producing: set[str] | None = None) -> S
             continue  # a layout class is read through its first and largest page
         if label not in layered:
             sel.add(label, min(titles, key=lambda t: (sizes.get(t, 0), t)), "smallest")
-        busiest = max(titles, key=lambda t: (records.get(t, 0), t))
-        if records.get(busiest):
+        taken = {t for layer in stratified if layer.startswith(f"{label} · ")
+                 for t in sel.routes.get(layer, {})}
+        rest = [t for t in titles if t not in taken]
+        busiest = max(rest, key=lambda t: (records.get(t, 0), t), default=None)
+        if busiest is not None and records.get(busiest):
             sel.add(label, busiest, "most_records")
-        flagged = next((t for t in titles if t in findings), None)
+        flagged = next((t for t in rest if t in findings), None)
         if flagged is not None:
             sel.add(label, flagged, "findings")
 
@@ -321,6 +325,9 @@ def write(archive: Archive, pack: Pack, outdir: Path,
         with Folio(folio_path, readonly=True) as folio:
             producing = unit_pages(archive, folio)
     sel = select(archive, pack, producing)
+    #: Pages that made units before the last sync and make none now: a parse gone quietly
+    #: wrong looks like this, so they keep their files.
+    lost = set(archive.get_meta("unit_pages_previous") or []) - (producing or set())
     removed = {r["title"]: r for r in archive.removed()}
     changes = sum(len(last[k]) for k in CHANGE_KINDS)
 
@@ -339,10 +346,17 @@ def write(archive: Archive, pack: Pack, outdir: Path,
                     snap = removed.get(title)
                     written = (inspect_mod.dump_snapshot(pack, snap, outdir / CHANGES)
                                if snap is not None else [])
-                else:
+                elif producing is None or title in producing or title in lost:
                     written = inspect_mod.dump(archive, pack, title, outdir / CHANGES)
+                else:  # nothing to read: one line, no files
+                    written = []
+                why = say(f"samples.why.{kind}")
+                if kind != "removed" and title in lost:
+                    why += "; " + say("samples.why.lost")
+                elif kind != "removed" and not written:
+                    why += "; " + say("samples.why.no_units")
                 kept.update(written)
-                lines.append(_row(pack, title, say(f"samples.why.{kind}"), written, outdir))
+                lines.append(_row(pack, title, why, written, outdir))
         lines.append("")
 
     lines += [say("samples.boundaries"), ""]
@@ -363,6 +377,9 @@ def write(archive: Archive, pack: Pack, outdir: Path,
             lines += [f"- {cell(t)}" for t in sorted(set(titles))]
             lines.append("")
 
+    if producing is not None and not archive.readonly:
+        archive.set_meta("unit_pages", sorted(producing))
+        archive.commit()
     index = outdir / "INDEX.md"
     index.write_text("\n".join(lines), encoding="utf-8")
     kept.add(index)

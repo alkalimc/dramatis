@@ -144,6 +144,8 @@ TEXT: Mapping[str, str] = {
     "samples.why.changed": "changed",
     "samples.why.added": "added",
     "samples.why.removed": "removed (as it was before removal)",
+    "samples.why.lost": "had units before the last sync, has none now",
+    "samples.why.no_units": "no units, so no files",
     "samples.why.first": "first by title",
     "samples.why.largest": "largest source",
     "samples.why.smallest": "smallest non-empty source",

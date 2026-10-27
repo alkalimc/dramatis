@@ -313,8 +313,11 @@ class Cleaner:
         prefix = " ".join(pos[i] for i in spec.prefix if i < len(pos) and pos[i]).strip()
         return f"{prefix}{self.rules.qualifier_sep}{body}" if prefix else body
 
-    def text(self, s: str, warn: list[str] | None = None) -> str:
+    def text(self, s: str, warn: list[str] | None = None, *, lists: bool = True) -> str:
         """Flatten one span of wikitext to plain text.
+
+        `lists=False` keeps a leading `*`, `#`, `:` or `;`: for a source that is not
+        wikitext prose (a script line), where the character is part of the text.
 
         Order matters: comments before tables (a comment can contain `{|`), tables
         before the template walk (a table cell can contain a template we would
@@ -406,7 +409,8 @@ class Cleaner:
         # Character references are markup too; after the tag pass so a decoded `&lt;` can
         # never be mistaken for a tag. A non-breaking space is just a space in prose.
         s = html.unescape(s).replace("\xa0", " ")
-        s = self._lists(s)
+        if lists:
+            s = self._lists(s)
         s = re.sub(r"[ \t]+", " ", s)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
