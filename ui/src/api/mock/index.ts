@@ -416,28 +416,23 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   }
 
   function quotaStatus(): QuotaStatus {
-    if (tier === "ultra") return { tier, band: "open", windows: [], binding: null, spent: spend() };
-    const used = band === "open" ? [0.42, 0.18] : band === "quiet" ? [0.86, 0.21] : [1.0, 0.44];
+    if (tier === "ultra") return { tier, band: "open", window: null, spent: spend() };
+    const used = band === "open" ? 0.42 : band === "quiet" ? 0.86 : 1.0;
     return {
       tier,
       band,
-      windows: [
-        { span: "five_hours", used: used[0], release_at: band === "open" ? null : later(band === "quiet" ? 50 : 125) },
-        { span: "seven_days", used: used[1], release_at: null },
-        { span: "one_hour", used: 0.35, release_at: null },
-      ],
-      binding: band === "open" ? null : "five_hours",
+      window: { used, release_at: band === "open" ? null : later(band === "quiet" ? 20 : 45) },
       spent: spend(),
     };
   }
   function spend() {
     return [
-      { shape: "direct" as const, points: 41000 },
-      { shape: "group" as const, points: 18500 },
-      { shape: "ask" as const, points: 22000 },
-      { shape: "host" as const, points: 9000 },
-      { shape: "opening" as const, points: 3000 },
-      { shape: "wrapup" as const, points: 4200 },
+      { shape: "direct" as const, calls: 14 },
+      { shape: "group" as const, calls: 6 },
+      { shape: "ask" as const, calls: 7 },
+      { shape: "host" as const, calls: 3 },
+      { shape: "opening" as const, calls: 1 },
+      { shape: "wrapup" as const, calls: 2 },
     ];
   }
 

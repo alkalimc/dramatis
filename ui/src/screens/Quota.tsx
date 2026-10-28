@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import type { QuietHours, QuotaStatus, Settings, Tier, WindowSpan } from "../api";
+import type { QuietHours, QuotaStatus, Settings, Tier } from "../api";
 import { useT, userTitle } from "../i18n";
 import { when } from "../lib/format";
 import { quotaExhaustedLine } from "../lib/quota";
@@ -7,15 +7,13 @@ import { useActions, useApi, useStore } from "../store";
 
 export const TIERS: Tier[] = ["low", "middle", "high", "extra_high", "max", "ultra"];
 
-/** The one quota control, the two rolling windows, and which band they put us in. */
+/** The one quota control, the rolling hour, and which band they put us in. */
 export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tier: Tier) => void }) {
   const t = useT();
   const id = useId();
   const index = TIERS.indexOf(quota.tier);
-  const windowName = (span: WindowSpan | null) => t(`quota.window.${span ?? "five_hours"}`);
-  const binding = quota.windows.find((w) => w.span === quota.binding);
   const exhaustedLine = quotaExhaustedLine(quota, t);
-  const total = quota.spent.reduce((n, s) => n + (s.points ?? 0), 0);
+  const total = quota.spent.reduce((n, s) => n + (s.calls ?? 0), 0);
 
   return (
     <section className="quota" aria-labelledby={`${id}-h`}>
@@ -45,26 +43,22 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
         <p className="band">{t("quota.ultra")}</p>
       ) : (
         <>
-          <dl className="windows">
-            {quota.windows.map((w) => {
-              const used = w.used ?? 0;
-              const pct = Math.round(used * 100);
-              return (
-                <div key={w.span} className="window">
-                  <dt>{windowName(w.span)}</dt>
-                  <dd>
-                    <meter min={0} max={1} low={0.8} high={0.99} optimum={0} value={Math.min(used, 1)} aria-label={windowName(w.span)} />
-                    <span>{t("quota.used", { percent: pct })}</span>
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
+          {quota.window && (
+            <dl className="windows">
+              <div className="window">
+                <dt>{t("quota.window")}</dt>
+                <dd>
+                  <meter min={0} max={1} low={0.8} high={0.99} optimum={0} value={Math.min(quota.window.used ?? 0, 1)} aria-label={t("quota.window")} />
+                  <span>{t("quota.used", { percent: Math.round((quota.window.used ?? 0) * 100) })}</span>
+                </dd>
+              </div>
+            </dl>
+          )}
           <p className={`band band-${quota.band}`} data-band={quota.band}>
-            {t(`quota.band.${quota.band}`, { window: windowName(quota.binding) })}
+            {t(`quota.band.${quota.band}`)}
           </p>
           {exhaustedLine && <p className="host-line">{exhaustedLine}</p>}
-          {quota.band !== "open" && binding?.release_at && <p className="muted">{t("quota.release", { when: when(binding.release_at) })}</p>}
+          {quota.band !== "open" && quota.window?.release_at && <p className="muted">{t("quota.release", { when: when(quota.window.release_at) })}</p>}
         </>
       )}
 
@@ -76,7 +70,7 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
           {quota.spent.map((s) => (
             <li key={s.shape}>
               <span>{t(`quota.shape.${s.shape}`)}</span>
-              <span className="muted">{Math.round(((s.points ?? 0) / total) * 100)}%</span>
+              <span className="muted">{Math.round(((s.calls ?? 0) / total) * 100)}%</span>
             </li>
           ))}
         </ul>

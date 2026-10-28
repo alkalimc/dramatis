@@ -475,19 +475,9 @@ pub enum QuotaBand {
     Exhausted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum WindowSpan {
-    /// Request-billed calls, counted rather than priced.
-    OneHour,
-    FiveHours,
-    SevenDays,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct QuotaWindow {
-    pub span: WindowSpan,
-    /// Fraction of the window's limit used, 0 and up.
+    /// Fraction of the limit used, 0 and up.
     pub used: f64,
     /// When enough usage rolls out of the window to leave the current band.
     pub release_at: Option<Timestamp>,
@@ -508,18 +498,16 @@ pub enum CallShape {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct ShapeSpend {
     pub shape: CallShape,
-    /// Quota points in the tighter window.
-    pub points: f64,
+    /// Calls in the window.
+    pub calls: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct QuotaStatus {
     pub tier: Tier,
     pub band: QuotaBand,
-    /// Empty on the tier without windows.
-    pub windows: Vec<QuotaWindow>,
-    /// The window deciding the band, when not open.
-    pub binding: Option<WindowSpan>,
+    /// The rolling hour; `None` on the tier without a window.
+    pub window: Option<QuotaWindow>,
     pub spent: Vec<ShapeSpend>,
 }
 

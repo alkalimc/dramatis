@@ -313,6 +313,26 @@ mod tests {
         assert_eq!(st.band, quota::Band::Open);
     }
 
+    /// A schema-3 meter keeps its rows; both kinds count in calls from the first status.
+    #[test]
+    fn schema_3_meter_rows_count_as_calls() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for m in &MIGRATIONS[..3] {
+            conn.execute_batch(m).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute_batch(
+            "INSERT INTO meter(at, shape, model, uncached, cached, output, points, requests)
+                 VALUES (1, 'direct', 'm', 6000, 0, 0, 6000.0, 0),
+                        (2, 'direct', 'r', 0, 0, 0, 0.0, 1);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let st = quota::status(&conn, Tier::Middle, 3, &params::Quota::default()).unwrap();
+        assert_eq!(st.window.unwrap().calls, 3.0);
+    }
+
     #[test]
     fn migrating_again_is_a_no_op() {
         let mut conn = migrated();

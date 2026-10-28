@@ -45,38 +45,27 @@ macro_rules! per_tier {
 }
 
 per_tier! {
-    /// `quota.window_5h[tier]`.
-    Window5h [150_000.0, 400_000.0, 1_000_000.0, 2_500_000.0, 6_000_000.0]
+    /// `quota.window_1h[tier]`: calls per rolling hour.
+    Window1h [40.0, 80.0, 160.0, 320.0, 640.0]
 }
 
-per_tier! {
-    /// `quota.window_7d[tier]`.
-    Window7d [750_000.0, 2_000_000.0, 5_000_000.0, 12_000_000.0, 30_000_000.0]
-}
-
-per_tier! {
-    /// `quota.window_1h_requests[tier]`: calls on request-billed models per rolling hour.
-    Window1hRequests [40.0, 80.0, 160.0, 320.0, 640.0]
-}
-
-/// `quota.*`: rolling windows in quota points (uncached-input-token equivalents), and for
-/// request-billed models in requests.
+/// `quota.*`: the rolling hour of calls. A request-billed call is one call; a token-billed
+/// call is its points over `call_points`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Quota {
-    pub window_5h: Window5h,
-    pub window_7d: Window7d,
-    pub window_1h_requests: Window1hRequests,
-    /// Use fraction of the tighter window at which unprompted speech stops.
+    pub window_1h: Window1h,
+    /// Quota points that make one call.
+    pub call_points: f64,
+    /// Use fraction of the window at which unprompted speech stops.
     pub quiet_at: f64,
 }
 
 impl Default for Quota {
     fn default() -> Self {
         Self {
-            window_5h: Window5h::default(),
-            window_7d: Window7d::default(),
-            window_1h_requests: Window1hRequests::default(),
+            window_1h: Window1h::default(),
+            call_points: 3000.0,
             quiet_at: 0.8,
         }
     }
@@ -254,17 +243,17 @@ mod tests {
     #[test]
     fn missing_keys_fall_back_to_defaults() {
         let p: Params = serde_json::from_str(
-            r#"{"quota": {"quiet_at": 0.5, "window_5h": {"low": 10}}, "trust": {"h": 3}}"#,
+            r#"{"quota": {"quiet_at": 0.5, "window_1h": {"low": 10}}, "trust": {"h": 3}}"#,
         )
         .unwrap();
         assert_eq!(p.quota.quiet_at, 0.5);
-        assert_eq!(p.quota.window_5h.low, 10.0);
-        assert_eq!(p.quota.window_5h.middle, Window5h::default().middle);
-        assert_eq!(p.quota.window_7d, Window7d::default());
+        assert_eq!(p.quota.window_1h.low, 10.0);
+        assert_eq!(p.quota.window_1h.middle, Window1h::default().middle);
+        assert_eq!(p.quota.call_points, 3000.0);
         assert_eq!(p.trust.h, 3.0);
         assert_eq!(p.trust.g1, Trust::default().g1);
         assert_eq!(p.seed, Seed::default());
-        assert_eq!(p.quota.window_5h.get(Tier::Ultra), None);
+        assert_eq!(p.quota.window_1h.get(Tier::Ultra), None);
         assert_eq!(p.ask.turns.get(Tier::Ultra), 48);
     }
 }

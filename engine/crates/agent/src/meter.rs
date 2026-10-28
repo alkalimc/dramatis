@@ -4,7 +4,7 @@
 //! register's `cost.turn.*` estimates are in, so the two can be compared directly.
 
 use rusqlite::Connection;
-use world::quota::{self, Prices, Span};
+use world::quota::{self, Prices};
 use world::{ChannelId, Shape};
 
 use crate::params::Cost;
@@ -17,8 +17,7 @@ use crate::store;
 ///
 /// `write_ratio` is the model's configured cache-write price over its input price; absent,
 /// the `cost.w` parameter stands in. A per-request model records its tokens but no points:
-/// the token windows have nothing to count, and the row is flagged as one request for
-/// the hourly request window.
+/// the row is flagged as one request, which the window counts as one call.
 #[allow(clippy::too_many_arguments)]
 pub fn record(
     conn: &Connection,
@@ -78,23 +77,23 @@ pub fn key(shape: Shape) -> &'static str {
 }
 
 /// `(key, value)` over `(until - span, until]`: mean points per call for each shape that
-/// had calls, the cached share of all input, and the tighter window's use.
+/// had calls, the cached share of all input, and the window's use.
 pub fn report(
     conn: &Connection,
     until: i64,
-    span: Span,
+    span_ms: i64,
     status: Option<&quota::Status>,
 ) -> world::Result<Vec<(String, f64)>> {
     let mut out = Vec::new();
-    for (shape, t) in store::totals_by_shape(conn, until - span.ms(), until)? {
+    for (shape, t) in store::totals_by_shape(conn, until - span_ms, until)? {
         if t.calls > 0 {
             out.push((key(shape).to_owned(), t.points / t.calls as f64));
         }
     }
-    if let Some(hit) = quota::cache_hit(conn, until, span)? {
+    if let Some(hit) = quota::cache_hit(conn, until, span_ms)? {
         out.push(("inject.cache_hit".to_owned(), hit));
     }
-    if let Some(s) = status.filter(|s| !s.windows.is_empty()) {
+    if let Some(s) = status.filter(|s| s.window.is_some()) {
         out.push(("quota.window_use".to_owned(), s.u));
     }
     Ok(out)
