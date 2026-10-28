@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import type { ChannelSummary } from "../api";
 import { useT } from "../i18n";
 import { unreadOf } from "../lib/chats";
-import { useActions, useApi, useStore } from "../store";
+import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Menu, type MenuItem } from "../ui/Menu";
 
 /**
@@ -14,6 +14,7 @@ export function useChatMenu() {
   const t = useT();
   const api = useApi();
   const actions = useActions();
+  const dispatch = useDispatch();
   const pinned = useStore((s) => s.pinned);
   const unread = useStore((s) => s.unread);
   const digest = useStore((s) => s.digest);
@@ -31,6 +32,13 @@ export function useChatMenu() {
         out.push({ label: t(archived ? "chatmenu.unarchive" : "chatmenu.archive"), icon: "archive", onSelect: () => void actions.archive(c.id, !archived) });
       }
       if (c.kind === "group") {
+        // Both open the group's panel, where the name and the picture are edited.
+        const panel = (rename: boolean) => async () => {
+          await actions.open(c.id);
+          dispatch({ type: "drawer", drawer: { kind: "channel", id: c.id, rename } });
+        };
+        out.push({ label: t("group.rename"), icon: "pencil", separated: true, onSelect: panel(true) });
+        out.push({ label: t("picture.change"), icon: "camera", onSelect: panel(false) });
         out.push({
           label: t("channel.delete"),
           icon: "trash",
@@ -45,7 +53,7 @@ export function useChatMenu() {
       }
       return out;
     },
-    [t, api, actions, pinned, unread, digest],
+    [t, api, actions, dispatch, pinned, unread, digest],
   );
 
   const close = useCallback(() => setOpen(null), []);

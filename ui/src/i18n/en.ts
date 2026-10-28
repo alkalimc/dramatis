@@ -124,6 +124,7 @@ export const en = {
   "message.relayed": "relayed",
   "message.note": "Note",
   "message.sources": "Sources ({count})",
+  "message.copy": "Copy text",
   "message.resend": "Send again",
   "message.resend.confirm": "Take this message back? The {count} messages after it in this chat go with it, and so does what was remembered from them.",
   "message.play": "Read aloud",

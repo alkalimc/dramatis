@@ -65,6 +65,26 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
       row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 140 }));
       return;
     }
+    case "ctx-group": {
+      await wait(400);
+      const row = [...document.querySelectorAll<HTMLElement>("button.chat-row:not(.archived-row)")].find((r) => r.querySelector(".chat-name svg"));
+      row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+      return;
+    }
+    case "ctx-msg": {
+      if (direct) await actions.open(direct.id);
+      await wait(400);
+      const mine = document.querySelector<HTMLElement>(".message.from-user .bubble");
+      mine?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 1200, clientY: 140 }));
+      return;
+    }
+    case "ctx-person": {
+      if (direct) await actions.open(direct.id);
+      await wait(400);
+      const other = document.querySelectorAll<HTMLElement>(".message.from-other .bubble")[1];
+      other?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 500, clientY: 400 }));
+      return;
+    }
     case "sources": {
       const withCites = Object.entries(s.messages).find(([, list]) => list.some((m) => m.cites.length > 0));
       if (!withCites) return;

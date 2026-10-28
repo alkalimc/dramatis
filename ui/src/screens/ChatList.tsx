@@ -270,7 +270,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
         <span className="chat-main">
           <span className="chat-top">
             <span className="chat-name">
-              {channel.kind === "group" && <Icon name="group" size={16} />}
+              {channel.kind === "group" && <Icon name="people" size={18} />}
               <span className="chat-title">{title}</span>
             </span>
             {pinned && (
