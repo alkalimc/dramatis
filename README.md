@@ -8,7 +8,7 @@ Everything specific to one wiki (which pages to take, how to parse them, identit
 wording, language rules) lives in a **pack** that you supply. This repository ships none.
 
 ```
-forge/    Python 3.13   sync · build · baseline · report · persona
+forge/    Python 3.13   sync · build · wording · baseline · report · persona
 engine/   Rust 2024     crates/folio · crates/index · crates/eval · crates/world
                         crates/agent · crates/api · crates/runtime
                         bins/dramatis-cli · bins/dramatis (desktop app, Tauri 2)
@@ -68,12 +68,22 @@ written three ways: as fetched, as records, as archived text. Read it, then:
 ./forge persona --only <name> --force
 ```
 
-Generation uses the `chat` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another
-file). Models billed per request run 3 calls at once by default (`--jobs`); on HTTP 429 every
+Generation uses the `persona` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another
+file); there is no fallback to `chat`, a missing role is an error. Models billed per request run 3 calls at once by default (`--jobs`); on HTTP 429 every
 worker waits together. A persona that fails a gate is not written. Reports go to
 `<workspace>/artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
 cached under `persona/raw/`; rebuilding the folio drops the personas, and running
 `./forge persona` again restores them from that cache with no model calls.
+
+## Refresh the wording
+
+```sh
+./forge wording        # offline: stamp the pack's current wording into the existing folio
+```
+
+A rebuild empties the persona table; wording is only text, so changing a pack's wording (UI
+and in-world strings, pronoun forms) does not need one. `wording` rewrites the folio's
+manifest in place and recomputes its fingerprint; personas stay.
 
 ## Reports
 
@@ -100,6 +110,41 @@ export DRAMATIS_FOLIO=/path/to/artifacts/<pack>/<pack>.folio
 ./target/release/dramatis-cli bench
 ```
 
+## Endpoints and keys
+
+`$DRAMATIS_HOME/endpoints.toml` lists profiles (an address, a wire protocol, models with prices)
+and roles that point at them. The app, the terminal client and `forge persona` read the same file.
+Keys are never in it: each profile's key is in the login keychain (service `dramatis`, account
+`profile.<name>`), added in the app's settings.
+
+```toml
+[[profile]]
+name = "example"
+base_url = "https://api.example.com/v1"
+wire_api = "chat"                # "chat" | "responses" | "messages" (Anthropic-style)
+
+[[profile.model]]
+id = "model-a"
+forced_tool = true               # honours a forced tool_choice
+context_window = 128000          # tokens; second trigger for rolling a segment
+price_in = 1.0                   # only the ratios to price_in are used
+price_out = 4.0
+billing = "request"              # "token" (default) | "request": a flat fee per call
+native_tools = false             # true (default) | false: the endpoint emulates function calling
+vision = false                   # false: pictures are described in words, never sent
+max_image_bytes = 90000          # a picture over this many base64 bytes is shrunk first
+
+[roles]
+chat = { profile = "example", model = "model-a" }       # person turns
+host = { profile = "example", model = "model-a" }       # optional: the host; else chat
+persona = { profile = "example", model = "model-a" }    # forge persona
+```
+
+Pictures pasted into a chat are scaled to a longest side and sent to the model. Leave `vision`
+out and an endpoint that refuses a picture is remembered until the next start; set
+`vision = false` for a model or proxy that cannot take images. Set `max_image_bytes` for an
+endpoint that caps the size of a request.
+
 ## Terminal
 
 Talk to the persons of a corpus from a shell. The terminal and the desktop app are two front ends
@@ -120,14 +165,20 @@ that is used; with an ad-hoc signed build the first run of each new build trigge
 keychain prompt (choose Always Allow). To stop the prompts coming back after every rebuild, sign
 with a stable identity, see [Keychain prompts](#keychain-prompts).
 
-The world (channels, memories, usage) is a save: `$DRAMATIS_HOME/saves/<name>.sqlite`, and
-`current_save` in the home directory names the one a process opens when it starts (an older
-`world.sqlite` is moved there as `default` on first start). The terminal and the app share the
-saves, settings and endpoints, and may be open together (the database is in WAL mode and writes
-wait for each other). Each process keeps the save it started with: switching in one does not move
-the other until it is restarted, and deleting a save another process has open loses what that
-process writes after. Use `--home <dir>` for another
-home directory, `--fresh` for a throwaway world (a temporary home that keeps your endpoints and
+The world (channels, memories, usage, and your profile: name, birthday, bio, avatar) is a save,
+one file: `$DRAMATIS_HOME/saves/<name>.sqlite`, and `current_save` in the home directory names the
+one a process opens when it starts (an older `world.sqlite` is moved there as `default` on first
+start). A save can be encrypted with a password (`/password on` here, Settings in the app). The
+password lives only in memory: it is not written anywhere and cannot be recovered, so a forgotten
+one means the save cannot be opened. Only the save is encrypted; `endpoints.toml`, the folio, the
+media cache and group avatars are not, and API keys stay in the keychain. Turn encryption on, change
+it or off while no other process has the save open. When the current save is encrypted the
+terminal asks for the password with hidden input (three tries), the app shows a lock screen. The
+terminal and the app share the saves, settings and endpoints, and may be open together (writes wait
+for each other, and each sees the other's new messages within a couple of seconds). Each process
+keeps the save it started with: switching in one does not move the other until it is restarted,
+and deleting a save another process has open loses what that process writes after. Use
+`--home <dir>` for another home directory, `--fresh` for a throwaway world (a temporary home that keeps your endpoints and
 parameters and is deleted at exit), and `--user <name>` to set the user's name. On a terminal
 the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK) characters count by their display width;
 `--plain`, or piped input, reads plain lines with no prompt.
@@ -140,6 +191,8 @@ the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK)
 | `/host` | switch to the host's channel |
 | `/go <n>` (`/open`) | after the host found people or made a group, a numbered list follows its reply; this switches to choice n |
 | `/name <new name>` | set the name you are called by (`--user` sets it at start) |
+| `/bio [text\|clear]` | show, set or clear what the people are told about you (200 characters) |
+| `/password [on\|change\|off]` | encrypt the open save, change the password, or remove it |
 | `/wrapup` | end the conversation and show the memories it wrote |
 | `/memories [person]` | numbered memories and who can see them, or those about or recalled by a person; deleted ones follow |
 | `/forget <n>`, `/restore <n>`, `/edit <n> <text>` | delete, bring back or rewrite memory n of the last list |
@@ -147,12 +200,16 @@ the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK)
 | `/quiet [on\|off\|HH:MM-HH:MM]` | show or set the hours when nobody comes to you unprompted |
 | `/save` | list saves; `new <name>`, `switch <name>`, `copy <from> <to>`, `rename <from> <to>`, `delete <name>` (asks first), `export <name> <path>`, `import <path> [name]` |
 | `/history [n]` | reprint the last n messages (default 10) |
+| `/resend [n]` | take back your n-th last message and everything after it, and put its text in the input line |
+| `/sources [n]` | list in full the sources of the n-th last reply that has any |
 | `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
 | `/stats` | one row per model call of this session: shape, model, tokens, seconds (read from the meter, not part of the app's interface) |
 | `/help`, `/quit` | Ctrl-D also leaves |
 
-Anything else is sent to the current channel. Enter starts a new line and Alt-Enter (Option set as
-Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
+Tab completes command names, person names (`/talk`, `/group`) and save names (`/save`).
+
+Anything else is sent to the current channel (`//text` sends a message that starts with a slash).
+Enter starts a new line and Alt-Enter (Option set as Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
 chat opens and after each message the terminal runs what the app runs on a timer (idle
 conversations are wrapped up, due openings written), so a person who has something to say shows up
 then; there is no background loop. Replies stream as they are written; scene lines
@@ -162,6 +219,13 @@ the call count and time. The prompt shows the channel and then your own name. Co
 stdout is not a terminal or `NO_COLOR` is set. A failed call prints its error and the session
 goes on. Ctrl-C while a reply is pending cancels the wait (the message you sent stays in the
 history); at the prompt it clears the line, and Ctrl-D leaves.
+
+## Usage limits
+
+Calls are counted in one rolling one-hour window. A call billed per request counts 1; a call
+billed per token counts by its size. The intensity tier (`/tier`, or the system drawer in the app)
+sets how many calls an hour are allowed, and `ultra` has no window. When the window is full new
+calls wait until it releases; a turn you start yourself is never refused before then.
 
 ## Writing a pack
 
@@ -189,6 +253,14 @@ cd engine && cargo run -p dramatis           # terminal 2: debug app, loads the 
 A debug build loads the UI from the dev server; nothing needs to exist in `ui/dist`. A build
 that embeds the UI (`--features custom-protocol`, which `pnpm tauri build` enables) needs
 `pnpm build` in `ui/` first.
+
+The app follows a chat client's layout: a conversation list on the left (search, pinned and
+archived conversations, unread counts, a right-click menu per row) and the conversation on the
+right, with a side panel for a person's or a group's profile. You can set your own name, birthday,
+bio and avatar, give a group a name and an avatar, paste pictures into the input line, and open a
+reply's sources to see the original passage and its page. Enter inserts a new line and Cmd-Enter
+sends. Saves are managed on the saves page (new, switch, copy, rename, delete, export) and the password
+setting is under privacy and security.
 
 The browser preview (`pnpm dev` without the app) shows the neutral English text. To preview a
 corpus's own wording, export it once and reload; the file is git-ignored:
@@ -244,6 +316,32 @@ cd ../.. && xattr -cr target/release/bundle/macos/dramatis.app
 codesign --force --deep --sign dramatis target/release/bundle/macos/dramatis.app
 ```
 
+To build the app with another icon than the neutral default, point `bundle.icon` at your own
+files with `--config`; the default build is unchanged:
+
+```sh
+cd engine/bins/dramatis && npx --prefix ../../../ui tauri build --bundles app \
+  --config '{"bundle":{"icon":["/path/32x32.png","/path/128x128.png","/path/128x128@2x.png","/path/icon.icns"]}}'
+```
+
+`tauri icon <square-png> -o <dir>` generates such a set from one image of at least 1024 pixels.
+
 The first run of each signed program asks once more; choose Always Allow and it holds across
 rebuilds. A key saved before signing keeps its old access list, so save it again (profile
 settings, or delete and add it) if a prompt keeps coming back.
+
+## Maintain
+
+Routine upkeep, in the order it usually happens:
+
+- Update the corpus: `./forge sync`, read `samples/INDEX.md`, then `./forge baseline accept`.
+- Restore personas after any rebuild: `./forge persona` (no model calls while the cache in
+  `persona/raw/` is current); `./forge persona --stale` lists those whose material changed.
+- Change only the pack's wording: `./forge wording`, no rebuild.
+- Back up or move a save: with the app and terminal closed, copy the one file in
+  `$DRAMATIS_HOME/saves/`, or use `/save export <name> <path>` while they are open. An encrypted
+  save stays encrypted and keeps its password. To start over, move `saves/` and `current_save`
+  aside (do not delete them); the next start creates an empty save.
+- Checks: `cd forge && make test lint && make contract`; `cd engine && cargo fmt --check && cargo
+  clippy --workspace --all-targets -- -D warnings && cargo test --workspace`; `cd ui && pnpm exec
+  tsc --noEmit && pnpm exec vitest run`.
