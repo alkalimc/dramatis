@@ -231,3 +231,37 @@ test("messages from others count as unread unless their channel is the one shown
   s = reduce(s, { type: "open", channel: "c2" });
   expect(s.unread).toEqual({});
 });
+
+test("a reload merges into what is shown: new messages join in time order, known ones are replaced", () => {
+  let s = initialState();
+  s = reduce(s, { type: "history", channel: "c1", messages: [message("a", "2026-01-01T10:00:00Z"), message("c", "2026-01-01T12:00:00Z")], older: false, done: true });
+  s = reduce(s, {
+    type: "history",
+    channel: "c1",
+    messages: [message("b", "2026-01-01T11:00:00Z"), message("c", "2026-01-01T12:00:00Z", { text: "edited" })],
+    older: false,
+    done: true,
+    merge: true,
+  });
+  expect(s.messages.c1.map((m) => m.id)).toEqual(["a", "b", "c"]);
+  expect(s.messages.c1[2].text).toBe("edited");
+});
+
+test("pinning, marking unread and the temporary row", () => {
+  let s = initialState();
+  s = reduce(s, { type: "pin", channel: "c1", on: true });
+  s = reduce(s, { type: "pin", channel: "c2", on: true });
+  s = reduce(s, { type: "pin", channel: "c1", on: false });
+  expect(s.pinned).toEqual(["c2"]);
+
+  s = reduce(s, { type: "unread", channel: "c1", count: 1 });
+  expect(s.unread.c1).toBe(1);
+  s = reduce(s, { type: "unread", channel: "c1", count: 0 });
+  expect(s.unread.c1).toBeUndefined();
+
+  const row = { id: "t1", kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null } as const;
+  s = reduce(s, { type: "temp", row: { ...row, participants: [] } });
+  // Opening it keeps the row; opening anything else drops it.
+  expect(reduce(s, { type: "open", channel: "t1" }).temp?.id).toBe("t1");
+  expect(reduce(s, { type: "open", channel: "c9" }).temp).toBeNull();
+});

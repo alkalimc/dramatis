@@ -2,11 +2,13 @@ import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { Api } from "../api";
 import { createMock } from "../api/mock";
+import { withExtras } from "../api/mock/extra";
 import { App } from "../App";
 import { createActions, createStore, Provider, type Store } from "../store";
 
 export function mockApi(query = ""): Api {
-  return { ...createMock(new URLSearchParams(query), { delay: 0 }), mediaUrl: (p) => p, mock: true };
+  const mock = createMock(new URLSearchParams(query), { delay: 0 });
+  return { ...mock, commands: withExtras(mock.commands), mediaUrl: (p) => p, mock: true };
 }
 
 /** The whole app on the mock api. */

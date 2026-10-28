@@ -4,6 +4,7 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import * as gen from "../api.gen";
 import { createMock, type MockOptions } from "./mock";
+import { withExtras } from "./mock/extra";
 
 export type * from "../api.gen";
 
@@ -37,7 +38,8 @@ export function tauriApi(): Api {
 }
 
 export function mockApi(params: URLSearchParams, opts?: MockOptions): Api {
-  return { ...createMock(params, opts), mediaUrl: (p) => p, mock: true };
+  const mock = createMock(params, opts);
+  return { ...mock, commands: withExtras(mock.commands), mediaUrl: (p) => p, mock: true };
 }
 
 function inTauri(): boolean {

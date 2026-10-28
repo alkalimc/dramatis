@@ -5,7 +5,8 @@ import { renderApp } from "./test/render";
 test("full form: header clock, waiting panel, host channel with action lines", async () => {
   renderApp();
   expect(await screen.findByRole("heading", { name: "Who's waiting" })).toBeDefined();
-  expect(screen.getByLabelText("In-world date and local time")).toBeDefined();
+  // The in-world date and time is one quiet line under the chat list.
+  expect(screen.getByLabelText("In-world date and local time").closest("footer")).not.toBeNull();
   const panel = screen.getByRole("heading", { name: "Who's waiting" }).closest("section")!;
   expect(await within(panel).findByText("Mira Vale")).toBeDefined();
   expect(within(panel).getByText("birthday today")).toBeDefined();
@@ -26,15 +27,18 @@ test("a direct channel renders scene lines apart from speech, with sources and r
   expect(scene.closest(".speech")).toBeNull();
   expect(screen.getAllByText("Mira Vale").length).toBeGreaterThan(0);
   expect(screen.getByText(/Mira Vale ▸ asking Oren Lark to take a look/)).toBeDefined();
-  // Sources start folded: her own material as a list, the other passage as a quote card.
+  // Sources start folded; the button opens a panel with the cited original text and a link.
   const toggle = await screen.findByRole("button", { name: "Sources (2)" });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(screen.queryByText("From the archive")).toBeNull();
+  expect(screen.queryByRole("complementary", { name: "Sources" })).toBeNull();
   await user.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByText("From the archive")).toBeDefined();
-  await user.click(toggle);
-  expect(screen.queryByText("From the archive")).toBeNull();
+  const sources = screen.getByRole("complementary", { name: "Sources" });
+  expect(within(sources).getByText("Harbor Ledger · Flood Years")).toBeDefined();
+  expect(await within(sources).findByText(/The east corridor was sealed in the first month after the tide gates failed/)).toBeDefined();
+  expect(within(sources).getAllByRole("link", { name: "View original" })[0].getAttribute("href")).toMatch(/^https?:/);
+  await user.click(within(sources).getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("complementary", { name: "Sources" })).toBeNull();
   expect(screen.getAllByRole("button", { name: "Read aloud" }).length).toBeGreaterThan(0);
 });
 

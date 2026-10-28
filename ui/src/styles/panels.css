@@ -1,0 +1,407 @@
+/* Right-panel pages: info, modes, roster, requests, world, system. */
+
+/* ---- info panels (a person, a group) ---- */
+.info-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-1);
+  text-align: center;
+  padding: var(--s-3) 0;
+}
+.info-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-lg);
+}
+.info-head .rename {
+  width: 100%;
+  margin-top: var(--s-2);
+}
+.info-section {
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+.info-section h3 {
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  text-transform: none;
+}
+.info-actions,
+.info-buttons {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.back {
+  align-self: flex-start;
+  font-size: var(--fs-sm);
+}
+.member-list {
+  display: flex;
+  flex-direction: column;
+}
+button.member {
+  justify-content: flex-start;
+  width: 100%;
+  gap: var(--s-3);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  padding: var(--s-2);
+}
+button.member:hover {
+  background: var(--raised);
+  filter: none;
+}
+.picture-buttons {
+  margin-top: var(--s-2);
+  justify-content: center;
+}
+.profile-pic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding-bottom: var(--s-3);
+}
+.voice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+/* ---- choice pills: the mode switch and the intensity use the same control ---- */
+.mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+.mode-all .mode-options {
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.mode-option {
+  display: flex;
+  flex-direction: column;
+}
+.mode-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  cursor: pointer;
+  padding: 0 var(--s-3);
+  font-size: var(--fs-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--field);
+}
+.mode-choice:hover {
+  background: var(--raised);
+}
+.mode .mode-choice input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.mode .mode-choice:has(input:checked) {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-ink);
+}
+.mode-choice:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.mode-all .mode-choice {
+  align-self: flex-start;
+  font-weight: 600;
+}
+.mode-all .mode-hint {
+  margin: 2px 0 0 var(--s-3);
+}
+.mode-hint {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.mode-legend dl {
+  margin: var(--s-1) 0;
+}
+.mode-legend dt {
+  font-weight: 600;
+  display: inline;
+}
+.mode-legend dd {
+  display: inline;
+  margin: 0 0 0 var(--s-2);
+  color: var(--muted);
+}
+.mode-legend dl div {
+  margin: var(--s-1) 0;
+}
+
+/* ---- roster ---- */
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.band summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+.band summary h3 {
+  display: inline;
+}
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.roster-row .who {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 10rem;
+}
+.roster-row.off {
+  opacity: 0.6;
+}
+.find {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.more summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+
+/* ---- requests and world ---- */
+.tasks li,
+.trail li,
+.facts li {
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.tasks li {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-1) var(--s-3);
+}
+.tasks .name {
+  text-align: left;
+}
+.reactions li {
+  padding: var(--s-1) 0;
+}
+.fact.retracted .fact-text {
+  color: var(--muted);
+}
+.fact-meta {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.fact-actions button {
+  padding: 0 var(--s-3);
+  font-size: var(--fs-sm);
+}
+
+/* ---- system: tabs, intensity, quiet hours, you ---- */
+.tabs {
+  display: flex;
+  gap: var(--s-1);
+  border-bottom: 1px solid var(--line);
+}
+.tabs [role="tab"] {
+  background: none;
+  color: var(--muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.tabs [aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+[role="tabpanel"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-top: var(--s-3);
+}
+[role="tabpanel"] > section + section {
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+[role="tabpanel"] section > h3,
+.drawer-body > section > h3 {
+  font-size: var(--fs-sm);
+  color: var(--accent);
+}
+[role="tabpanel"] section > h4 {
+  margin-top: var(--s-3);
+  color: var(--muted);
+}
+.windows {
+  margin: var(--s-2) 0;
+}
+.window {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.window dt {
+  min-width: 4rem;
+}
+.window dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1;
+}
+.window meter {
+  flex: 1;
+  height: 0.8rem;
+}
+.band-quiet,
+.band-exhausted {
+  color: var(--warn);
+}
+.spend li {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--s-1) 0;
+  border-bottom: 1px solid var(--line);
+}
+.birthday {
+  display: flex;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.birthday legend {
+  width: 100%;
+}
+.birthday input {
+  width: 4.5rem;
+}
+.you form,
+.first-open form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.profiles {
+  display: flex;
+  flex-direction: column;
+}
+.profile.active {
+  border-color: var(--accent);
+}
+.profile header h4 {
+  margin: 0;
+}
+.url {
+  word-break: break-all;
+}
+.fetch-error p {
+  color: var(--warn);
+}
+.key-stored {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.add .chip input {
+  position: absolute;
+}
+.roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.role-row {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin: var(--s-1) 0;
+}
+.save-list {
+  margin: var(--s-2) 0 var(--s-4);
+}
+.save {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.save .badge {
+  font-size: var(--fs-xs);
+  background: none;
+  color: var(--accent);
+  padding: 0;
+}
+
+/* ---- first open, library, search results ---- */
+.first-open {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--s-4);
+}
+.first-open .card {
+  width: min(28rem, 100%);
+}
+.notice {
+  margin-top: var(--s-4);
+}
+.search {
+  margin: var(--s-3) 0;
+}
+.hits {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.passage-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+}
+.passage-card h3 {
+  margin-bottom: var(--s-1);
+}

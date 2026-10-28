@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import { api as defaultApi, type Api } from "./api";
 import { useT } from "./i18n";
-import { createActions, createStore, Provider, subscribe, useActions, useApi, useDispatch, useStore, type Drawer, type Store } from "./store";
+import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Store } from "./store";
 import { ErrorBar, InlineError } from "./ui/ErrorBar";
 import { unreadOf } from "./lib/chats";
+import { isDark } from "./lib/prefs";
 import { Icon, type IconName } from "./ui/Icon";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { ChatList } from "./screens/ChatList";
@@ -11,8 +12,10 @@ import { AskCard } from "./screens/Ask";
 import { CaseDrawer, CasesDrawer } from "./screens/Cases";
 import { FirstOpen } from "./screens/FirstOpen";
 import { GroupDialog } from "./screens/Group";
+import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
 import { PersonDrawer } from "./screens/Person";
+import { LeftDrawer } from "./screens/Profile";
 import { RosterDrawer } from "./screens/Roster";
 import { SystemDrawer } from "./screens/System";
 import { WorldDrawer } from "./screens/World";
@@ -30,6 +33,8 @@ export function App({ api = defaultApi, store: given }: { api?: Api; store?: Sto
       else unsub();
     });
     void actions.boot();
+    const view = import.meta.env.DEV && api.mock ? new URLSearchParams(location.search).get("view") : null;
+    if (view) void import("./dev").then((m) => m.applyDevView(view, store, actions));
     return () => {
       live = false;
       off?.();
@@ -62,8 +67,10 @@ function Shell() {
   const statusError = useStore((s) => s.loadErrors.status);
   const wordingError = useStore((s) => s.loadErrors.wording);
   const full = useStore((s) => s.status?.form === "full" && Boolean(s.hostChannel));
+  const menuOpen = useStore((s) => s.menuOpen);
   const actions = useActions();
   usePresence();
+  useTheme();
 
   if (!status) {
     return statusError ? (
@@ -104,6 +111,7 @@ function Shell() {
         </div>
       </div>
       <ErrorBar />
+      {menuOpen && <LeftDrawer />}
       {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
     </div>
@@ -124,6 +132,22 @@ function usePresence() {
   }, [actions, full]);
 }
 
+/** The stored light/dark choice (or the system's) onto the page, following the system live. */
+function useTheme() {
+  const theme = useStore((s) => s.theme);
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = () => {
+      root.dataset.theme = isDark(theme) ? "dark" : "light";
+    };
+    apply();
+    if (theme !== "system" || typeof matchMedia !== "function") return;
+    const query = matchMedia("(prefers-color-scheme: light)");
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, [theme]);
+}
+
 const NAV: { key: "roster" | "cases" | "world" | "system"; icon: IconName; drawer: Drawer }[] = [
   { key: "roster", icon: "people", drawer: { kind: "roster" } },
   { key: "cases", icon: "cases", drawer: { kind: "cases" } },
@@ -131,20 +155,17 @@ const NAV: { key: "roster" | "cases" | "world" | "system"; icon: IconName; drawe
   { key: "system", icon: "system", drawer: { kind: "system", tab: "quota" } },
 ];
 
-function drawerKey(d: Drawer | null): string | null {
-  if (!d) return null;
+function drawerKey(d: Drawer | null): "roster" | "cases" | "world" | "system" | null {
+  if (!d || d.kind === "channel") return null;
   if (d.kind === "person") return "roster";
   if (d.kind === "case") return "cases";
   return d.kind;
 }
 
-/** The narrow left rail: the main sections as icon and short label, the clock at the foot. */
+/** The narrow left rail: the main sections as icon and short label. */
 function Rail() {
   const t = useT();
-  const actions = useActions();
-  const { mock } = useApi();
   const dispatch = useDispatch();
-  const clock = useStore((s) => s.clock);
   const drawer = useStore((s) => s.drawer);
   const unreadChats = useStore((s) => {
     const ids = new Set([...s.channels.map((c) => c.id), ...(s.hostChannel ? [s.hostChannel] : [])]);
@@ -154,13 +175,6 @@ function Rail() {
   });
   const current = drawerKey(drawer);
 
-  // The clock is pure data; refresh it on the minute.
-  useEffect(() => {
-    const timer = setInterval(() => void actions.refreshClock(), 30_000);
-    return () => clearInterval(timer);
-  }, [actions]);
-
-  const pad = (n: number) => String(n).padStart(2, "0");
   return (
     <header className="rail">
       <h1 className="sr-only">{t("host.name")}</h1>
@@ -188,21 +202,6 @@ function Rail() {
           ))}
         </ul>
       </nav>
-      <div className="rail-foot">
-        {mock && <span className="tag">{t("app.mock")}</span>}
-        {clock && (
-          <p className="clock" aria-label={t("clock.label")}>
-            <time>
-              {t("clock.in_world", {
-                year: clock.in_world.year,
-                month: pad(clock.in_world.month),
-                day: pad(clock.in_world.day),
-                time: clock.local_time,
-              })}
-            </time>
-          </p>
-        )}
-      </div>
     </header>
   );
 }
@@ -220,7 +219,7 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       ref={ref}
       className="drawer"
       tabIndex={-1}
-      aria-label={t(`nav.${drawerKey(drawer) as "roster"}`)}
+      aria-label={drawer.kind === "channel" ? t("channel.group_info") : t(`nav.${drawerKey(drawer) as "roster"}`)}
       onKeyDown={(e) => e.key === "Escape" && dispatch({ type: "drawer", drawer: null })}
     >
       <button type="button" className="icon close" aria-label={t("drawer.close")} onClick={() => dispatch({ type: "drawer", drawer: null })}>
@@ -228,6 +227,7 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       </button>
       {drawer.kind === "roster" && <RosterDrawer />}
       {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}
+      {drawer.kind === "channel" && <GroupInfo id={drawer.id} />}
       {drawer.kind === "cases" && <CasesDrawer />}
       {drawer.kind === "case" && <CaseDrawer id={drawer.id} />}
       {drawer.kind === "world" && <WorldDrawer />}

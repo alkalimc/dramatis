@@ -1,6 +1,8 @@
-import { asFailure, settle, type Api, type ChannelId, type Mode, type Result, type Settings, type Target } from "../api";
+import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ImagePart, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
+import { ext } from "../api/ext";
+import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Store } from ".";
-import type { LoadKey } from "./state";
+import type { LoadKey, Theme } from "./state";
 
 const PAGE = 50;
 
@@ -37,6 +39,10 @@ export function createActions(api: Api, store: Store) {
   async function refreshChannels() {
     const channels = await attempt(c.channels(), "channels");
     if (channels) d({ type: "channels", channels });
+  }
+  async function refreshUserAvatar() {
+    const r = await settle(ext(api).userAvatar());
+    d({ type: "userAvatar", avatar: r.ok ? r.data : null });
   }
   async function refreshQuota() {
     const quota = await attempt(c.quota(), "quota");
@@ -87,7 +93,9 @@ export function createActions(api: Api, store: Store) {
     if (wording) d({ type: "wording", wording });
     if (settings) d({ type: "settings", settings });
     if (coldstart) d({ type: "coldstart", candidates: coldstart });
-    await Promise.all([refreshEndpoints(), refreshRoster(), refreshChannels(), refreshQuota(), refreshClock()]);
+    const prefs = loadPrefs();
+    d({ type: "prefs", pinned: prefs.pinned, theme: prefs.theme });
+    await Promise.all([refreshEndpoints(), refreshRoster(), refreshChannels(), refreshQuota(), refreshClock(), refreshUserAvatar()]);
     await refreshStatus();
   }
 
@@ -100,13 +108,24 @@ export function createActions(api: Api, store: Store) {
     d({ type: "history", channel, messages: page, older, done: page.length < PAGE });
   }
 
+  /** Fetch the newest page again and fold it in: another process may have written. */
+  async function reloadHistory(channel: ChannelId) {
+    const page = await attempt(c.history(channel, null, PAGE));
+    if (page) d({ type: "history", channel, messages: page, older: false, done: store.getState().historyDone[channel] ?? page.length < PAGE, merge: true });
+  }
+
   async function markRead(channel: ChannelId) {
     const list = store.getState().messages[channel];
     const last = list?.[list.length - 1];
     if (last) await attempt(c.markRead(channel, last.id));
   }
 
-  async function open(channel: ChannelId | null) {
+  /** `who` is the one the conversation is with, so a not yet spoken-in channel can show a row. */
+  async function open(channel: ChannelId | null, who?: PersonRef) {
+    const s = store.getState();
+    if (channel && who && !s.channels.some((ch) => ch.id === channel)) {
+      d({ type: "temp", row: { id: channel, kind: "direct", origin: "system", participants: [who], topic: null, mode: "enabled", last_at: null } satisfies ChannelSummary });
+    }
     d({ type: "open", channel });
     const target = channel ?? store.getState().hostChannel;
     if (!target) return;
@@ -117,8 +136,8 @@ export function createActions(api: Api, store: Store) {
   async function openDirect(person: string) {
     const channel = await attempt(c.openDirect(person));
     if (!channel) return;
-    if (!store.getState().channels.some((ch) => ch.id === channel)) await refreshChannels();
-    await open(channel);
+    const name = store.getState().names[person] ?? person;
+    await open(channel, { id: person, name });
   }
 
   /** Open a channel that may be newer than the list (a group the host just made). */
@@ -136,6 +155,44 @@ export function createActions(api: Api, store: Store) {
     if (text === undefined) return;
     d({ type: "rewound", event: { channel, from: message } });
     d({ type: "restore", restore: { channel, text } });
+  }
+
+  /** Mark a channel read by hand (the badge, the context menu). */
+  async function clearUnread(channel: ChannelId) {
+    await loadHistory(channel);
+    d({ type: "unread", channel, count: 0 });
+    await markRead(channel);
+    await refreshDigest();
+  }
+
+  function markUnread(channel: ChannelId) {
+    d({ type: "unread", channel, count: 1 });
+  }
+
+  function pin(channel: ChannelId, on: boolean) {
+    d({ type: "pin", channel, on });
+    const s = store.getState();
+    savePrefs({ pinned: s.pinned, theme: s.theme });
+  }
+
+  function setTheme(theme: Theme) {
+    d({ type: "theme", theme });
+    savePrefs({ pinned: store.getState().pinned, theme });
+  }
+
+  async function archive(channel: ChannelId, archived: boolean) {
+    if ((await attempt(ext(api).archiveChannel(channel, archived))) === undefined) return;
+    await refreshChannels();
+    if (archived && (store.getState().channel ?? store.getState().hostChannel) === channel) await open(null);
+  }
+  async function rename(channel: ChannelId, name: string | null) {
+    if ((await attempt(ext(api).renameChannel(channel, name))) !== undefined) await refreshChannels();
+  }
+  async function setChannelAvatar(channel: ChannelId, image: ImagePart | null) {
+    if ((await attempt(ext(api).setChannelAvatar(channel, image))) !== undefined) await refreshChannels();
+  }
+  async function setUserAvatar(image: ImagePart | null) {
+    if ((await attempt(ext(api).setUserAvatar(image))) !== undefined) await refreshUserAvatar();
   }
 
   async function setMode(target: Target, mode: Mode) {
@@ -163,7 +220,16 @@ export function createActions(api: Api, store: Store) {
     refreshEndpoints,
     refreshClock,
     loadHistory,
+    reloadHistory,
     markRead,
+    clearUnread,
+    markUnread,
+    pin,
+    setTheme,
+    archive,
+    rename,
+    setChannelAvatar,
+    setUserAvatar,
     open,
     openDirect,
     openChannel,
@@ -223,7 +289,13 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
       d({ type: "worldChanged", event: payload });
       const kinds = new Set(payload.changes.map((ch) => ch.kind));
       if (kinds.has("digest") || kinds.has("task")) void actions.refreshDigest();
-      if (kinds.has("channel")) void actions.refreshChannels();
+      if (kinds.has("channel")) {
+        // Another process (the terminal) may have written: the list and what is on screen.
+        void actions.refreshChannels();
+        const s = store.getState();
+        const shown = s.channel ?? s.hostChannel;
+        if (shown) void actions.reloadHistory(shown).then(() => (document.hidden ? undefined : actions.markRead(shown)));
+      }
       if (kinds.has("trust")) {
         d({ type: "rosterChanged" });
         void actions.refreshRoster();

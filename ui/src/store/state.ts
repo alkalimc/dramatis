@@ -9,6 +9,7 @@ import type {
   Digest,
   EndpointsView,
   Failure,
+  MediaFile,
   Message,
   MessageAdded,
   MessageDelta,
@@ -35,7 +36,14 @@ export type Drawer =
   | { kind: "cases" }
   | { kind: "case"; id: TaskId }
   | { kind: "world" }
-  | { kind: "system"; tab: "quota" | "endpoints" | "saves" };
+  | { kind: "system"; tab: "quota" | "endpoints" | "saves" }
+  /** A group's info panel (a person's is `person`). */
+  | { kind: "channel"; id: ChannelId };
+
+export type Theme = "system" | "light" | "dark";
+
+/** Which list the chat column shows: the live chats, or the archived ones. */
+export type ListView = "chats" | "archived";
 
 /** What the ask card starts with; every field optional. */
 export interface AskDraft {
@@ -115,6 +123,16 @@ export interface State {
   failures: Record<ChannelId, TurnFailure>;
   /** Messages that arrived in a channel while another was shown, until it is opened. */
   unread: Record<ChannelId, number>;
+  /** The user's picture (uploaded, else the default); `null` while unknown. */
+  userAvatar: MediaFile | null;
+  /** A conversation opened before it has any message: shown in the list while it is open. */
+  temp: ChannelSummary | null;
+  /** Chats kept at the top of the list; local to this window. */
+  pinned: ChannelId[];
+  theme: Theme;
+  listView: ListView;
+  /** The left drawer (profile, settings shortcuts). */
+  menuOpen: boolean;
   /** Every person name seen in any payload, for labelling authors. */
   names: Record<PersonId, string>;
   /** Messages whose sources are unfolded; all start folded, and it lasts the session. */
@@ -161,6 +179,12 @@ export function initialState(): State {
     typing: {},
     failures: {},
     unread: {},
+    userAvatar: null,
+    temp: null,
+    pinned: [],
+    theme: "system",
+    listView: "chats",
+    menuOpen: false,
     names: {},
     sourcesOpen: {},
     restore: null,
@@ -190,7 +214,16 @@ export type Action =
   | { type: "hostChannel"; id: ChannelId }
   | { type: "channels"; channels: ChannelSummary[] }
   /** A page of history: `older` pages go in front of what is loaded. */
-  | { type: "history"; channel: ChannelId; messages: Message[]; older: boolean; done: boolean }
+  | { type: "history"; channel: ChannelId; messages: Message[]; older: boolean; done: boolean; merge?: boolean }
+  | { type: "userAvatar"; avatar: MediaFile | null }
+  | { type: "temp"; row: ChannelSummary | null }
+  | { type: "prefs"; pinned: ChannelId[]; theme: Theme }
+  | { type: "pin"; channel: ChannelId; on: boolean }
+  | { type: "theme"; theme: Theme }
+  | { type: "listView"; view: ListView }
+  | { type: "menu"; open: boolean }
+  /** Set a channel's unread count by hand: 0 = read, 1 = marked unread. */
+  | { type: "unread"; channel: ChannelId; count: number }
   | { type: "names"; persons: PersonRef[] }
   | { type: "messageDelta"; event: MessageDelta }
   | { type: "messageAdded"; event: MessageAdded }

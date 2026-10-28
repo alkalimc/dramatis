@@ -34,30 +34,33 @@ export function PersonDrawer({ id }: { id: PersonId }) {
   const ready = hasPersona(page);
 
   return (
-    <div className="drawer-body person-page">
-      <button type="button" className="link" onClick={() => dispatch({ type: "drawer", drawer: { kind: "roster" } })}>
+    <div className="drawer-body info-panel person-page">
+      <button type="button" className="link back" onClick={() => dispatch({ type: "drawer", drawer: { kind: "roster" } })}>
         ← {t("person.back")}
       </button>
-      <header className="person-head">
-        <Avatar person={page.person} size="l" />
-        <div>
-          <h2>{page.person.name}</h2>
-          {page.summary && <p className="muted">{page.summary}</p>}
-        </div>
-        <p className="trust">{t("person.trust", { trust: page.trust })}</p>
+      <header className="info-head">
+        <Avatar person={page.person} size="xl" />
+        <h2 className="info-name">{page.person.name}</h2>
+        {page.summary && <p className="muted">{page.summary}</p>}
+        <p className="tag trust">{t("person.trust", { trust: page.trust })}</p>
       </header>
-      <ModeSwitch
-        mode={page.mode}
-        hints="all"
-        label={t("mode.label", { name: page.person.name })}
-        onChange={(m) => actions.setMode({ kind: "person", id }, m)}
-      />
-      <p>
-        {page.last_seen ? t("person.last_seen", { when: when(page.last_seen) }) : t("person.never")}
-        {" · "}
-        {t("person.tasks", { count: page.tasks_done })}
-      </p>
-      {page.companions.length > 0 && <p>{t("roster.companions", { names: page.companions.map((c) => c.name).join(" · ") })}</p>}
+      <section className="info-section">
+        <h3>{t("person.mode")}</h3>
+        <ModeSwitch
+          mode={page.mode}
+          hints="all"
+          label={t("mode.label", { name: page.person.name })}
+          onChange={(m) => actions.setMode({ kind: "person", id }, m)}
+        />
+      </section>
+      <section className="info-section">
+        <p>
+          {page.last_seen ? t("person.last_seen", { when: when(page.last_seen) }) : t("person.never")}
+          {" · "}
+          {t("person.tasks", { count: page.tasks_done })}
+        </p>
+        {page.companions.length > 0 && <p>{t("roster.companions", { names: page.companions.map((c) => c.name).join(" · ") })}</p>}
+      </section>
       {error && <InlineError error={error} onRetry={reload} />}
       {!ready && (
         <p className="muted unavailable" id="unavailable-note">
@@ -65,7 +68,7 @@ export function PersonDrawer({ id }: { id: PersonId }) {
         </p>
       )}
       {!off && (
-        <p className="row">
+        <p className="row info-buttons">
           <button type="button" disabled={!ready} aria-describedby={ready ? undefined : "unavailable-note"} onClick={() => actions.openDirect(id)}>
             {t("person.talk")}
           </button>

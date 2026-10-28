@@ -93,7 +93,9 @@ export function reduce(s: State, a: Action): State {
       const cur = s.messages[a.channel] ?? [];
       const known = new Set(cur.map((m) => m.id));
       const fresh = a.messages.filter((m) => !known.has(m.id));
-      const merged = a.older ? [...fresh, ...cur] : [...cur, ...fresh];
+      let merged = a.older ? [...fresh, ...cur] : [...cur, ...fresh];
+      // A reload after a write elsewhere can bring messages older than ones already shown.
+      if (a.merge) merged = merged.map((m) => a.messages.find((x) => x.id === m.id) ?? m).sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
       return {
         ...s,
         messages: { ...s.messages, [a.channel]: merged },
@@ -228,7 +230,30 @@ export function reduce(s: State, a: Action): State {
         loadErrors: a.error ? { ...s.loadErrors, [a.key]: a.error } : omit(s.loadErrors, a.key),
       };
     case "open":
-      return { ...s, channel: a.channel, drawer: null, unread: omit(s.unread, a.channel ?? s.hostChannel ?? "") };
+      return {
+        ...s,
+        channel: a.channel,
+        drawer: null,
+        menuOpen: false,
+        temp: s.temp && s.temp.id === a.channel ? s.temp : null,
+        unread: omit(s.unread, a.channel ?? s.hostChannel ?? ""),
+      };
+    case "userAvatar":
+      return { ...s, userAvatar: a.avatar };
+    case "temp":
+      return { ...s, temp: a.row };
+    case "prefs":
+      return { ...s, pinned: a.pinned, theme: a.theme };
+    case "pin":
+      return { ...s, pinned: a.on ? [...s.pinned.filter((c) => c !== a.channel), a.channel] : s.pinned.filter((c) => c !== a.channel) };
+    case "theme":
+      return { ...s, theme: a.theme };
+    case "listView":
+      return { ...s, listView: a.view, menuOpen: false };
+    case "menu":
+      return { ...s, menuOpen: a.open };
+    case "unread":
+      return { ...s, unread: a.count > 0 ? { ...s.unread, [a.channel]: a.count } : omit(s.unread, a.channel) };
     case "drawer":
       return { ...s, drawer: a.drawer };
     case "ask":

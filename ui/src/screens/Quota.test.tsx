@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import type { QuotaBand, QuotaStatus, Tier } from "../api";
 import { renderWith } from "../test/render";
 import { QuotaPanel } from "./Quota";
@@ -46,12 +46,11 @@ test("ultra: no bars at all, one sentence", () => {
   expect(screen.getByText("No hourly limit. The daily limits on speaking up still apply.")).toBeDefined();
 });
 
-test("the slider is labelled, announces the tier name and picks a tier", () => {
+test("the intensity is a labelled choice that shows the tier and picks another", () => {
   const picked: Tier[] = [];
   renderWith(<QuotaPanel quota={status("open")} onTier={(t) => picked.push(t)} />);
-  const slider = screen.getByRole("slider", { name: "Intensity" });
-  expect(slider.getAttribute("aria-valuetext")).toBe("Middle");
-  // jsdom does not step range inputs on arrow keys; a native range does.
-  fireEvent.change(slider, { target: { value: "5" } });
+  const group = screen.getByRole("group", { name: "Intensity" });
+  expect((within(group).getByRole("radio", { name: "Middle" }) as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(within(group).getByRole("radio", { name: "Ultra" }));
   expect(picked).toEqual(["ultra"]);
 });

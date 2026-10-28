@@ -1,12 +1,12 @@
 import { memo, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Author, Citation, Message, ToolAction } from "../api";
+import type { Author, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { bubbles, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { CitationDetail, CitationList, useCitations } from "./Citation";
-import { Avatar } from "../ui/Avatar";
+import { SourcesPanel } from "./Citation";
+import { Avatar, UserAvatar } from "../ui/Avatar";
 import { SelectionMenu } from "./SelectionMenu";
 
 export function ActionLines({ author, actions }: { author: Author; actions: ToolAction[] }) {
@@ -46,24 +46,6 @@ function Choices({ actions }: { actions: ToolAction[] }) {
       )}
     </div>
   );
-}
-
-/**
- * Split a message's citations: the speaker's own material (a plain bubble with sources
- * folded underneath) and material from the archive at large (shown as quote cards).
- */
-function useSources(author: Author, cites: Citation[]) {
-  const views = useCitations(cites);
-  return useMemo(() => {
-    const own: number[] = [];
-    const scope: number[] = [];
-    cites.forEach((_, i) => {
-      const passage = views?.[i]?.passage;
-      const mine = author.kind === "person" && passage?.persons.some((p) => p.id === author.id);
-      (mine || !passage ? own : scope).push(i);
-    });
-    return { views, own, scope };
-  }, [author, cites, views]);
 }
 
 function Speech({ text }: { text: string }) {
@@ -135,7 +117,6 @@ export const MessageView = memo(function MessageView({
   // A direct chat has one other speaker; the name only helps where several can talk.
   const direct = useStore((s) => s.channels.find((c) => c.id === message.channel)?.kind === "direct");
   const parts = useMemo(() => bubbles(message.text, marker), [message.text, marker]);
-  const { views, own, scope } = useSources(message.author, message.cites);
   const sourcesOpen = useStore((s) => Boolean(s.sourcesOpen[message.id]));
   const dispatch = useDispatch();
   const after = useStore((s) => {
@@ -250,23 +231,10 @@ export const MessageView = memo(function MessageView({
 
         {message.author.kind === "host" && <Choices actions={message.actions} />}
 
-        {sourcesOpen && (
-          <>
-            {scope.length > 0 && (
-              <div className="quote-cards">
-                {scope.map((i) => (
-                  <figure key={i} className="quote-card">
-                    <figcaption>{t("citation.label")}</figcaption>
-                    <CitationDetail citation={message.cites[i]} view={views ? views[i] : null} />
-                  </figure>
-                ))}
-              </div>
-            )}
-            {own.length > 0 && <CitationList cites={own.map((i) => message.cites[i])} />}
-          </>
-        )}
+        {sourcesOpen && <SourcesPanel cites={message.cites} onClose={() => dispatch({ type: "sources", message: message.id })} />}
         {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
       </div>
+      {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}
     </article>
   );
 });

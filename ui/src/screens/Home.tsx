@@ -26,7 +26,7 @@ export function WaitingPanel() {
         <ul>
           {items.map((w, i) => (
             <li key={`${w.person.id}-${w.activity.kind}-${i}`}>
-              <button type="button" className="waiting-row" onClick={() => actions.open(w.channel)}>
+              <button type="button" className="waiting-row" onClick={() => actions.open(w.channel, w.person)}>
                 <Avatar person={w.person} size="s" />
                 <span className="name">{w.person.name}</span>
                 <span className="what">{activityText(w.activity, t)}</span>

@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import type { Candidate, RosterGroup } from "../api";
 import { useT } from "../i18n";
 import { activityText } from "../lib/format";
+import { groupTitle } from "../lib/chats";
 import { hasPersona } from "../lib/persona";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
@@ -52,7 +53,7 @@ function GroupList() {
           {groups.map((g) => (
             <li key={g.id}>
               <button type="button" className="link name" onClick={() => actions.open(g.id)}>
-                {g.topic ?? t("channel.group.untitled")}
+                {groupTitle(g, t)}
               </button>{" "}
               {typingIn.has(g.id) && <TypingMark />}
               <span className="muted small">

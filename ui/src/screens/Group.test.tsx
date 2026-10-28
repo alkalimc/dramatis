@@ -2,20 +2,29 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../test/render";
 
+const TITLE = "Oren Lark, Mira Vale, Tess Arden";
+
 async function openGroup(user: ReturnType<typeof userEvent.setup>) {
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "Roster" }));
-  const drawer = await screen.findByRole("complementary");
-  await user.click(await within(drawer).findByRole("button", { name: "Ward rota" }));
-  return screen.findByRole("heading", { name: "Ward rota" });
+  const drawer = await screen.findByRole("complementary", { name: "Roster" });
+  await user.click(await within(drawer).findByRole("button", { name: TITLE }));
+  return screen.findByRole("heading", { name: TITLE });
+}
+
+/** The group's info panel, opened from the header icon. */
+async function openInfo(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Group info" }));
+  return screen.findByRole("complementary", { name: "Group info" });
 }
 
 test("group channel: members in the header, speakers in order, scene lines apart", async () => {
   const user = userEvent.setup();
   const title = await openGroup(user);
   const header = title.closest("header")!;
-  expect(within(header).getByText(/Members: Oren Lark · Mira Vale · Tess Arden/)).toBeDefined();
+  // Named after its members, with how many are in it.
+  expect(within(header).getByText("3 members")).toBeDefined();
 
   const log = await screen.findByRole("log");
   await within(log).findByText("It did. I'm on nights this week.");
@@ -32,28 +41,52 @@ test("group channel: members in the header, speakers in order, scene lines apart
   expect(within(log).getByText("Thin archive")).toBeDefined();
 });
 
-test("group mode switch: new groups are frozen, the sentence follows the state", async () => {
+test("group mode switch lives in the info panel: new groups are frozen, the sentence follows the state", async () => {
   const user = userEvent.setup();
-  const title = await openGroup(user);
-  const header = title.closest("header")!;
-  const frozen = within(header).getByRole("radio", { name: "Frozen" }) as HTMLInputElement;
+  await openGroup(user);
+  const panel = await openInfo(user);
+  const frozen = within(panel).getByRole("radio", { name: "Frozen" }) as HTMLInputElement;
   expect(frozen.checked).toBe(true);
-  expect(header.querySelector(".mode-hint")!.textContent).toBe("Frozen: someone answers only when you speak.");
+  expect(panel.querySelector(".mode-hint")).not.toBeNull();
+  expect(within(panel).getByText("Frozen: someone answers only when you speak.")).toBeDefined();
 
-  await user.click(within(header).getByRole("radio", { name: "Enabled" }));
-  await waitFor(() => expect(header.querySelector(".mode-hint")!.textContent).toBe("Enabled: members may speak up on their own."));
-  expect((within(header).getByRole("radio", { name: "Enabled" }) as HTMLInputElement).checked).toBe(true);
+  await user.click(within(panel).getByRole("radio", { name: "Enabled" }));
+  await waitFor(() => expect((within(panel).getByRole("radio", { name: "Enabled" }) as HTMLInputElement).checked).toBe(true));
+});
+
+test("the same header icon closes the info panel again", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  await openInfo(user);
+  const icon = screen.getByRole("button", { name: "Group info" });
+  expect(icon.getAttribute("aria-pressed")).toBe("true");
+  await user.click(icon);
+  expect(screen.queryByRole("complementary", { name: "Group info" })).toBeNull();
+});
+
+test("a group can be renamed in the info panel, and goes back to its members' names when emptied", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  await user.click(within(panel).getByRole("button", { name: "Rename" }));
+  await user.type(within(panel).getByRole("textbox", { name: "Rename" }), "Night shift");
+  await user.click(within(panel).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Night shift" }).length).toBe(2));
+  await user.click(within(panel).getByRole("button", { name: "Rename" }));
+  await user.clear(within(panel).getByRole("textbox", { name: "Rename" }));
+  await user.click(within(panel).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: TITLE }).length).toBeGreaterThan(0));
 });
 
 test("enabled group: one person answers and at most one more adds a line like a normal message", async () => {
   const user = userEvent.setup();
-  const title = await openGroup(user);
-  const header = title.closest("header")!;
+  await openGroup(user);
+  const panel = await openInfo(user);
   const log = await screen.findByRole("log");
   await within(log).findByText("It did. I'm on nights this week.");
 
-  await user.click(within(header).getByRole("radio", { name: "Enabled" }));
-  await waitFor(() => expect(header.querySelector(".mode-hint")!.textContent).toMatch(/^Enabled/));
+  await user.click(within(panel).getByRole("radio", { name: "Enabled" }));
+  await waitFor(() => expect((within(panel).getByRole("radio", { name: "Enabled" }) as HTMLInputElement).checked).toBe(true));
   const before = within(log).getAllByRole("article").length;
 
   await user.type(screen.getByRole("textbox", { name: "Message" }), "Tess, what do you know about the tide?{Meta>}{Enter}{/Meta}");
@@ -97,8 +130,9 @@ test("group dialog: topic may stay empty and says so; no member cap; frozen by d
 
   await user.click(start);
   // Topic left empty: the group opens untitled and frozen.
-  const header = (await screen.findByRole("heading", { name: "Group" })).closest("header")!;
-  expect((within(header).getByRole("radio", { name: "Frozen" }) as HTMLInputElement).checked).toBe(true);
+  await screen.findByRole("heading", { name: /Mira Vale, Oren Lark|Mira Vale/ });
+  const panel = await openInfo(user);
+  expect((within(panel).getByRole("radio", { name: "Frozen" }) as HTMLInputElement).checked).toBe(true);
 });
 
 test("group menu: deleting asks first and removes the group", async () => {
@@ -107,9 +141,10 @@ test("group menu: deleting asks first and removes the group", async () => {
   const header = title.closest("header")!;
   const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
   await user.click(within(header).getByRole("button", { name: "More" }));
-  await user.click(within(header).getByRole("button", { name: "Delete group" }));
-  expect(screen.getByRole("heading", { name: "Ward rota" })).toBeDefined();
-  await user.click(within(header).getByRole("button", { name: "Delete group" }));
-  await waitFor(() => expect(screen.queryByRole("heading", { name: "Ward rota" })).toBeNull());
+  await user.click(await screen.findByRole("menuitem", { name: "Delete group" }));
+  expect(screen.getByRole("heading", { name: TITLE })).toBeDefined();
+  await user.click(within(header).getByRole("button", { name: "More" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Delete group" }));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: TITLE })).toBeNull());
   expect(confirm).toHaveBeenCalledTimes(2);
 });

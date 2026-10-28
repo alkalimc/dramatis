@@ -181,3 +181,14 @@ test("consecutive messages by one speaker form a run: one name, one avatar slot 
   const slots = [...container.querySelectorAll(".message-avatar")];
   expect(slots.map((s) => s.children.length)).toEqual([0, 1]);
 });
+
+test("the user's own messages sit on the right with their picture, others on the left", () => {
+  const mine = renderWith(<MessageView message={{ ...base, author: { kind: "user" }, text: "Hello." }} showPlay={false} />).container.querySelector("article")!;
+  expect(mine.className).toContain("from-user");
+  // The picture slot comes after the bubbles; for others it comes before.
+  expect(mine.lastElementChild!.className).toBe("message-avatar");
+  expect(mine.firstElementChild!.className).toBe("message-stack");
+  const theirs = renderWith(<MessageView message={{ ...base, text: "Hello." }} showPlay={false} />).container.querySelector("article")!;
+  expect(theirs.className).toContain("from-other");
+  expect(theirs.firstElementChild!.className).toBe("message-avatar");
+});

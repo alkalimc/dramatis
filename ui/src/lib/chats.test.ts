@@ -1,5 +1,6 @@
 import type { ChannelSummary, Message } from "../api";
-import { byActivity, previewOf, unreadOf } from "./chats";
+import { makeT } from "../i18n";
+import { byActivity, channelTitle, groupTitle, previewOf, unreadOf } from "./chats";
 
 function channel(id: string, kind: ChannelSummary["kind"], last_at: string | null): ChannelSummary {
   return { id, kind, origin: "user", participants: [], topic: null, mode: "enabled", last_at };
@@ -52,4 +53,32 @@ test("the preview is the speech on one line, without citation marks; a scene-onl
   const star = { open: "*", close: "*" };
   expect(previewOf(message("a", "c", "2026-01-01T10:00:00Z", "*Rain.*\nFirst line.[#c-1]\nSecond line."), star)).toBe("First line. Second line.");
   expect(previewOf(message("b", "c", "2026-01-01T10:00:00Z", "*She waves.*"), star)).toBe("She waves.");
+});
+
+describe("group titles", () => {
+  const t = makeT({ entries: {} });
+  const people = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: String.fromCharCode(65 + i) }));
+  const group = (n: number, extra: object = {}): ChannelSummary => ({ ...channel("g", "group", null), participants: people(n), ...extra });
+
+  test("up to three members are all named, then the rest are counted", () => {
+    expect(groupTitle(group(1), t)).toBe("A");
+    expect(groupTitle(group(3), t)).toBe("A, B, C");
+    expect(groupTitle(group(5), t)).toBe("A, B (5 in all)");
+  });
+
+  test("the pack's separator and wording apply", () => {
+    const pack = makeT({ entries: { "group.name.separator": " / ", "group.name.more": "{names} (+{count})" } });
+    expect(groupTitle(group(3), pack)).toBe("A / B / C");
+    expect(groupTitle(group(5), pack)).toBe("A / B (+5)");
+  });
+
+  test("a name the user gave wins; an empty one does not", () => {
+    expect(groupTitle(group(3, { name: " Night shift " }), t)).toBe("Night shift");
+    expect(groupTitle(group(3, { name: "  " }), t)).toBe("A, B, C");
+  });
+
+  test("direct chats and the host are named for who they are", () => {
+    expect(channelTitle({ ...channel("d", "direct", null), participants: people(1) }, t)).toBe("A");
+    expect(channelTitle(channel("h", "host", null), t)).toBe("Host");
+  });
 });

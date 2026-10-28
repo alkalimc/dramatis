@@ -75,3 +75,29 @@ test("a send that fails leaves nothing waiting, and keeps the draft", async () =
   expect(store.getState().awaiting.host).toBeUndefined();
   expect(box().value).toBe("hello");
 });
+
+test("a picture pasted into the box becomes a removable preview and is sent with the text", async () => {
+  const user = userEvent.setup();
+  const { api } = await mounted();
+  const sent = vi.spyOn(api.commands, "sendMessage");
+  const file = new File([new Uint8Array([137, 80, 78, 71])], "shot.png", { type: "image/png" });
+  fireEvent.paste(box(), { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }], files: [file] } });
+  const preview = await screen.findByRole("img", { name: "Attached image" });
+  expect(preview.getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+  await user.click(screen.getByRole("button", { name: "Remove image" }));
+  expect(screen.queryByRole("img", { name: "Attached image" })).toBeNull();
+
+  fireEvent.paste(box(), { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }], files: [file] } });
+  await screen.findByRole("img", { name: "Attached image" });
+  await user.type(box(), "look");
+  await user.keyboard("{Meta>}{Enter}{/Meta}");
+  await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+  expect(sent.mock.calls[0][2]).toMatchObject({ mime: "image/png" });
+});
+
+test("pasting plain text is left alone", async () => {
+  await mounted();
+  const ev = fireEvent.paste(box(), { clipboardData: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }], files: [] } });
+  expect(ev).toBe(true);
+  expect(screen.queryByRole("img", { name: "Attached image" })).toBeNull();
+});
