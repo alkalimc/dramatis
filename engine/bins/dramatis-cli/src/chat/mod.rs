@@ -41,7 +41,7 @@ pub struct Args {
     person: Option<String>,
     /// Home directory: the world database, endpoints file and parameters. Defaults to
     /// $DRAMATIS_HOME (else ~/.dramatis). It is safe to have the app open on the same
-    /// directory at once (WAL, busy timeout).
+    /// directory at once (rollback journal, busy timeout).
     #[arg(long)]
     home: Option<PathBuf>,
     /// Use a throwaway world: a temporary home that keeps the real home's endpoints and
