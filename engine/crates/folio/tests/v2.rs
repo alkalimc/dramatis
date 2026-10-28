@@ -48,6 +48,8 @@ fn reads_the_per_person_tables() -> anyhow::Result<()> {
     let ann = folio.person("ann")?.unwrap();
     assert_eq!(ann.birthday.as_deref(), Some("03-14"));
     assert_eq!(folio.persons()?.len(), 2);
+    assert!(folio.facets("ann")?.is_empty());
+    assert!(folio.facets("nobody")?.is_empty());
 
     assert_eq!(folio.cooccur("ann")?, [("ben".to_string(), 4)]);
     assert_eq!(folio.cooccur("ben")?, [("ann".to_string(), 4)]);

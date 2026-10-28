@@ -8,6 +8,9 @@ export const en = {
   "host.role": "Assistant",
   "user.title": "{name}",
   "user.you": "You",
+  "pronoun.female": "her",
+  "pronoun.male": "him",
+  "pronoun.other": "them",
   "person.noun": "person",
   "person.noun_plural": "people",
   "org.name": "the team",
@@ -175,7 +178,7 @@ export const en = {
   "select.close": "Close",
   "select.relay.pick": "Pass this to",
   "select.relay.search": "Filter by name",
-  "select.relay.sent": "Passed to {name}. Their answer is in your conversation with them.",
+  "select.relay.sent": "Passed to {name}. The answer is in your conversation with {pronoun}.",
   "select.relay.open": "Open",
   "select.check.prefill": "Two accounts differ. Check this one: \"{excerpt}\"",
   "select.who.empty": "Nobody on the roster matches this.",
@@ -258,7 +261,7 @@ export const en = {
   "person.voice.custom": "Or a voice id",
   "person.voice.save": "Save voice",
   "person.unavailable": "Not available yet",
-  "person.unavailable.hint": "The archive holds too little of their own words for them to speak yet.",
+  "person.unavailable.hint": "The archive holds too little to let {pronoun} speak yet.",
 
   // ---- case files ----
   "cases.title": "Requests",

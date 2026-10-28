@@ -32,6 +32,7 @@ pub struct Person {
     pub primary_page: String,
     pub birthday: Option<world::MonthDay>,
     pub persona_confidence: f64,
+    pub pronoun: Option<crate::types::Pronoun>,
 }
 
 pub struct Corpus {
@@ -85,6 +86,7 @@ impl Corpus {
         let mut persons = Vec::new();
         for p in folio.persons()? {
             persons.push(Person {
+                pronoun: crate::types::Pronoun::of(&manifest.wording, &folio.facets(&p.person_id)?),
                 birthday: p.birthday.as_deref().and_then(world::MonthDay::parse),
                 id: p.person_id,
                 display: p.display,

@@ -43,9 +43,11 @@ pub fn person_ref(folio: &Folio, p: &str) -> Result<t::PersonRef> {
         .person(p)?
         .map(|x| x.display)
         .unwrap_or_else(|| p.to_owned());
+    let pronoun = t::Pronoun::of(&folio.manifest().wording, &folio.facets(p)?);
     Ok(t::PersonRef {
         id: t::PersonId(p.to_owned()),
         name,
+        pronoun,
     })
 }
 

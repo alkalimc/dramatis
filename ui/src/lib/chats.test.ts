@@ -43,10 +43,23 @@ test("the badge counts unseen messages or waiting people, whichever is more", ()
       { person, channel: "c1", activity: { kind: "came_by", at: "2026-01-01T10:00:00Z" } as const },
     ],
   };
-  expect(unreadOf("c1", {}, digest)).toBe(2);
+  expect(unreadOf("c1", {}, digest)).toBe(1);
   expect(unreadOf("c1", { c1: 5 }, digest)).toBe(5);
   expect(unreadOf("c2", { c2: 1 }, digest)).toBe(1);
   expect(unreadOf("c3", {}, digest)).toBe(0);
+});
+
+test("reminders (a birthday, a due commitment) never make a chat unread", () => {
+  const person = { id: "p1", name: "Ann" };
+  const digest = {
+    items: [
+      { person, channel: "c1", activity: { kind: "birthday" } as const },
+      { person, channel: "c1", activity: { kind: "commitment_due", fact: 1, text: "rest", due: "2026-01-01T10:00:00Z" } as const },
+    ],
+  };
+  expect(unreadOf("c1", {}, digest)).toBe(0);
+  // A manual mark still counts, and opening the chat clears it.
+  expect(unreadOf("c1", { c1: 1 }, digest)).toBe(1);
 });
 
 test("the preview is the speech on one line, without citation marks; a scene-only reply shows the scene", () => {

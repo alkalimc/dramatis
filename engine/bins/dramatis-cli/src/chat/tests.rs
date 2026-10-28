@@ -395,6 +395,7 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
     let person = |id: &str| api::types::PersonRef {
         id: PersonId(id.into()),
         name: id.into(),
+        pronoun: None,
     };
     let group = r
         .engine

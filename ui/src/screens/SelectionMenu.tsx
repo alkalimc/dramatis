@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { Candidate, ChannelId, Message } from "../api";
-import { useT } from "../i18n";
+import type { Candidate, ChannelId, Message, PersonRef } from "../api";
+import { pronounOf, useT } from "../i18n";
 import { useActions, useApi, useDispatch } from "../store";
 import { CitationList } from "./Citation";
 import { PersonPicker } from "./PersonPicker";
@@ -18,7 +18,7 @@ export function SelectionMenu({ excerpt, message, onClose }: { excerpt: string; 
   const dispatch = useDispatch();
   const [pane, setPane] = useState<Pane>("menu");
   const [who, setWho] = useState<Candidate[] | null>(null);
-  const [relayed, setRelayed] = useState<{ name: string; channel: ChannelId } | null>(null);
+  const [relayed, setRelayed] = useState<{ who: PersonRef; channel: ChannelId } | null>(null);
 
   const findWho = async () => {
     setPane("who");
@@ -26,10 +26,10 @@ export function SelectionMenu({ excerpt, message, onClose }: { excerpt: string; 
     setWho(found ?? []);
   };
 
-  const relay = async (to: { id: string; name: string }) => {
+  const relay = async (to: PersonRef) => {
     const channel = await actions.attempt(api.commands.relay(excerpt, message.id, to.id));
     if (channel) {
-      setRelayed({ name: to.name, channel });
+      setRelayed({ who: to, channel });
       void actions.refreshChannels();
     }
   };
@@ -69,7 +69,7 @@ export function SelectionMenu({ excerpt, message, onClose }: { excerpt: string; 
       {pane === "relay" &&
         (relayed ? (
           <p>
-            {t("select.relay.sent", { name: relayed.name })}{" "}
+            {t("select.relay.sent", { name: relayed.who.name, ...pronounOf(t, relayed.who) })}{" "}
             <button type="button" className="link" onClick={() => actions.open(relayed.channel)}>
               {t("select.relay.open")}
             </button>
@@ -94,7 +94,7 @@ export function SelectionMenu({ excerpt, message, onClose }: { excerpt: string; 
                 <span className="name">{c.person.name}</span>
                 <span className="reason">{c.reason}</span>
                 <button type="button" className="link" onClick={() => dispatch({ type: "ask", draft: { question: excerpt, person: c.person.id } })}>
-                  {t("person.ask")}
+                  {t("person.ask", pronounOf(t, c.person))}
                 </button>
               </li>
             ))}
