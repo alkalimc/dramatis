@@ -8,9 +8,6 @@ use folio::Folio;
 
 use crate::error::Result;
 
-/// The slots a person's persona is made of.
-pub const PERSON_SLOTS: [&str; 3] = ["system", "tone", "capability"];
-
 /// The subject the host's prompts are stored under.
 pub const HOST: &str = "host";
 
