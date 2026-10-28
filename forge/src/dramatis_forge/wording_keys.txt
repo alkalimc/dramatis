@@ -20,9 +20,11 @@ activity.replied
 app.corpus.missing
 app.corpus.requirement
 app.corpus.unsupported
+app.crash
 app.dismiss
 app.loading
 app.mock
+app.reload
 app.retry
 app.wording.failed
 ask.cancel
@@ -72,6 +74,11 @@ channel.group.untitled
 channel.host
 channel.more
 channel.person_page
+chatlist.empty
+chatlist.label
+chatlist.preview.author
+chatlist.preview.you
+chatlist.unread
 choice.group
 choice.person
 citation.gone
@@ -186,6 +193,10 @@ error.no_persona
 error.not_found
 error.not_implemented
 error.quota_exhausted
+error.turn.cancelled
+error.turn.error
+error.turn.quota_exhausted
+error.turn.rate_limited
 error.unknown
 first.birthday
 first.name
@@ -300,7 +311,7 @@ mode.group.frozen.hint
 mode.label
 mode.label.group
 nav.cases
-nav.home
+nav.chats
 nav.label
 nav.roster
 nav.system

@@ -1,11 +1,12 @@
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Author, Citation, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
-import { blocks, splitScene, withoutCites } from "../lib/scene";
+import { bubbles, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { CitationDetail, CitationList, useCitations } from "./Citation";
+import { Avatar } from "../ui/Avatar";
 import { SelectionMenu } from "./SelectionMenu";
 
 export function ActionLines({ author, actions }: { author: Author; actions: ToolAction[] }) {
@@ -70,14 +71,70 @@ function Speech({ text }: { text: string }) {
   return <div className="speech" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export const MessageView = memo(function MessageView({ message, showPlay }: { message: Message; showPlay: boolean }) {
+/** A stable accent per speaker, so a name keeps its colour across the conversation. */
+const HUES = 8;
+function hueOf(a: Author): number {
+  const key = a.kind === "person" ? a.id : a.kind;
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  return h % HUES;
+}
+
+/** The speaker's round avatar, shown beside the last bubble of a run. */
+function SpeakerAvatar({ author, name }: { author: Author; name: string }) {
+  if (author.kind === "user") return null;
+  return <Avatar person={{ id: author.kind === "person" ? author.id : "host", name }} size="m" plain={author.kind !== "person"} />;
+}
+
+function SceneLines({ lines }: { lines: string[] }) {
+  return (
+    <>
+      {lines.map((l, i) => (
+        <p key={i} className="scene">
+          {l}
+        </p>
+      ))}
+    </>
+  );
+}
+
+function BubbleView({ b, label, foot }: { b: ReturnType<typeof bubbles>[number]; label: ReactNode; foot: ReactNode }) {
+  return (
+    <div className="bubble">
+      {label}
+      <SceneLines lines={b.before} />
+      {b.text !== null && <Speech text={b.text} />}
+      <SceneLines lines={b.after} />
+      {foot}
+    </div>
+  );
+}
+
+/**
+ * One message: a run of bubbles (a paragraph each) with the speaker's avatar beside the
+ * last one of the run. `first` and `last` say where this message sits in a run by the same
+ * speaker; only the first carries the name, only the last the avatar.
+ */
+export const MessageView = memo(function MessageView({
+  message,
+  showPlay,
+  first = true,
+  last = true,
+}: {
+  message: Message;
+  showPlay: boolean;
+  first?: boolean;
+  last?: boolean;
+}) {
   const t = useT();
   const api = useApi();
   const { attempt, resend } = useActions();
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
-  const parts = useMemo(() => blocks(message.text, marker), [message.text, marker]);
+  // A direct chat has one other speaker; the name only helps where several can talk.
+  const direct = useStore((s) => s.channels.find((c) => c.id === message.channel)?.kind === "direct");
+  const parts = useMemo(() => bubbles(message.text, marker), [message.text, marker]);
   const { views, own, scope } = useSources(message.author, message.cites);
   const sourcesOpen = useStore((s) => Boolean(s.sourcesOpen[message.id]));
   const dispatch = useDispatch();
@@ -94,10 +151,7 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
 
   const mine = message.author.kind === "user";
   const name = authorName(message.author, t, names, user);
-  const speech = useMemo(
-    () => withoutCites(splitScene(message.text, marker).filter((s) => s.kind === "speech").map((s) => s.text).join("\n")).trim(),
-    [message.text, marker],
-  );
+  const speech = useMemo(() => speechOnly(message.text, marker).trim(), [message.text, marker]);
 
   const captureSelection = () => {
     const sel = window.getSelection();
@@ -117,38 +171,31 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
     audio.play().catch(() => setPlaying(false));
   };
 
-  return (
-    <article className={`message ${mine ? "from-user" : "from-other"}`} aria-label={name}>
-      <ActionLines author={message.author} actions={message.actions} />
-      <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
-        {parts.map((s, i) =>
-          s.kind === "scene" ? (
-            <p key={i} className="scene">
-              {s.text}
-            </p>
-          ) : (
-            <div key={i} className={s.first ? "bubble" : "bubble follow"}>
-              {s.first && (
-                <p className="author">
-                  <span>{t("message.author", { name })}</span>
-                  {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
-                  {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
-                </p>
-              )}
-              <Speech text={s.text} />
-            </div>
-          ),
-        )}
-        {message.attachment && <img className="attachment" src={api.mediaUrl(message.attachment.path)} alt="" />}
-      </div>
+  const label =
+    first && !mine && !direct ? (
+      <p className={`author hue-${hueOf(message.author)}`}>
+        <span>{t("message.author", { name })}</span>
+        {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
+        {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
+      </p>
+    ) : (
+      (message.relayed || message.confidence === "low") && (
+        <p className="author">
+          {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
+          {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
+        </p>
+      )
+    );
 
-      <div className="message-foot">
-        <time dateTime={message.at}>{when(message.at)}</time>
-        {message.cites.length > 0 && (
-          <button type="button" className="link" aria-expanded={sourcesOpen} onClick={() => dispatch({ type: "sources", message: message.id })}>
-            {t("message.sources", { count: message.cites.length })}
-          </button>
-        )}
+  const foot = (
+    <div className="message-foot">
+      {message.cites.length > 0 && (
+        <button type="button" className="link sources-toggle" aria-expanded={sourcesOpen} onClick={() => dispatch({ type: "sources", message: message.id })}>
+          {t("message.sources", { count: message.cites.length })}
+        </button>
+      )}
+      <span className="spacer" />
+      <span className="hover-actions">
         {mine && (
           <button
             type="button"
@@ -183,58 +230,74 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
             ⋯
           </button>
         )}
-      </div>
+      </span>
+      <time dateTime={message.at}>{when(message.at)}</time>
+    </div>
+  );
 
-      {message.author.kind === "host" && <Choices actions={message.actions} />}
+  return (
+    <article className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}>
+      {!mine && <div className="message-avatar">{last && <SpeakerAvatar author={message.author} name={name} />}</div>}
+      <div className="message-stack">
+        <ActionLines author={message.author} actions={message.actions} />
+        <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
+          {parts.map((b, i) => (
+            <BubbleView key={i} b={b} label={i === 0 ? label : null} foot={i === parts.length - 1 ? foot : null} />
+          ))}
+          {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} foot={foot} />}
+          {message.attachment && <img className="attachment" src={api.mediaUrl(message.attachment.path)} alt="" />}
+        </div>
 
-      {sourcesOpen && (
-        <>
-        {scope.length > 0 && (
-          <div className="quote-cards">
-            {scope.map((i) => (
-              <figure key={i} className="quote-card">
-                <figcaption>{t("citation.label")}</figcaption>
-                <CitationDetail citation={message.cites[i]} view={views ? views[i] : null} />
-              </figure>
-            ))}
-          </div>
+        {message.author.kind === "host" && <Choices actions={message.actions} />}
+
+        {sourcesOpen && (
+          <>
+            {scope.length > 0 && (
+              <div className="quote-cards">
+                {scope.map((i) => (
+                  <figure key={i} className="quote-card">
+                    <figcaption>{t("citation.label")}</figcaption>
+                    <CitationDetail citation={message.cites[i]} view={views ? views[i] : null} />
+                  </figure>
+                ))}
+              </div>
+            )}
+            {own.length > 0 && <CitationList cites={own.map((i) => message.cites[i])} />}
+          </>
         )}
-          {own.length > 0 && <CitationList cites={own.map((i) => message.cites[i])} />}
-        </>
-      )}
-      {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
+        {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
+      </div>
     </article>
   );
 });
 
 /** A reply still being written: same layout, text so far. */
-export function StreamView({ author, text }: { author: Author; text: string }) {
+export function StreamView({ author, text, channel, first = true }: { author: Author; text: string; channel?: string; first?: boolean }) {
   const t = useT();
+  const direct = useStore((s) => s.channels.find((c) => c.id === channel)?.kind === "direct");
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
-  const parts = useMemo(() => blocks(text, marker), [text, marker]);
+  const parts = useMemo(() => bubbles(text, marker), [text, marker]);
   const name = authorName(author, t, names, user);
   return (
-    <article className="message from-other streaming" aria-busy="true" aria-label={name}>
-      <div className="message-body">
-        {parts.map((s, i) =>
-          s.kind === "scene" ? (
-            <p key={i} className="scene">
-              {s.text}
-            </p>
-          ) : (
-            <div key={i} className={s.first ? "bubble" : "bubble follow"}>
-              {s.first && <p className="author">{t("message.author", { name })}</p>}
-              <Speech text={s.text} />
+    <article className={`message from-other streaming last${first ? " first" : ""}`} aria-busy="true" aria-label={name}>
+      <div className="message-avatar">
+        <SpeakerAvatar author={author} name={name} />
+      </div>
+      <div className="message-stack">
+        <div className="message-body">
+          {parts.map((b, i) => (
+            <BubbleView key={i} b={b} label={i === 0 && first && !direct ? <p className={`author hue-${hueOf(author)}`}>{t("message.author", { name })}</p> : null} foot={null} />
+          ))}
+          {parts.length === 0 && (
+            <div className="bubble">
+              <p className="author muted">
+                {name} · {t("message.streaming")}
+              </p>
             </div>
-          ),
-        )}
-        {parts.length === 0 && (
-          <p className="author muted">
-            {name} · {t("message.streaming")}
-          </p>
-        )}
+          )}
+        </div>
       </div>
     </article>
   );

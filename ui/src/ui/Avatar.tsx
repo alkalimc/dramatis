@@ -5,11 +5,13 @@ import { useApi } from "../store";
 // Fetched on demand, once per person per session; `null` = none, fall back to a letter.
 const cache = new Map<string, Promise<string | null>>();
 
-export function Avatar({ person, size = "m" }: { person: PersonRef; size?: "s" | "m" | "l" }) {
+/** `plain` skips the portrait lookup: the initial only (the host, a group). */
+export function Avatar({ person, size = "m", plain = false }: { person: PersonRef; size?: "s" | "m" | "l" | "xl"; plain?: boolean }) {
   const api = useApi();
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
+    if (plain) return;
     let live = true;
     let p = cache.get(person.id);
     if (!p) {
@@ -20,7 +22,7 @@ export function Avatar({ person, size = "m" }: { person: PersonRef; size?: "s" |
     return () => {
       live = false;
     };
-  }, [api, person.id]);
+  }, [api, person.id, plain]);
 
   const initial = Array.from(person.name.trim())[0] ?? "?";
   return (

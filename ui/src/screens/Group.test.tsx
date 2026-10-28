@@ -26,7 +26,8 @@ test("group channel: members in the header, speakers in order, scene lines apart
 
   const scene = within(log).getByText("Tess drops a parcel on the table.");
   expect(scene.className).toBe("scene");
-  expect(scene.closest(".bubble")).toBeNull();
+  expect(scene.closest(".bubble")).not.toBeNull();
+  expect(scene.closest(".speech")).toBeNull();
   // A thin answer carries the low-confidence tag, same as in a direct channel.
   expect(within(log).getByText("Thin archive")).toBeDefined();
 });

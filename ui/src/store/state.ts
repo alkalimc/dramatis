@@ -1,4 +1,5 @@
 import type {
+  ActivityFailure,
   AppStatus,
   Author,
   Candidate,
@@ -56,6 +57,12 @@ export interface Typing {
   tool: boolean;
 }
 
+/** Why the last turn in a channel ended without a reply. */
+export interface TurnFailure {
+  author: Author;
+  reason: ActivityFailure;
+}
+
 /** Key of a speaker within one channel's typing map. */
 export function typingKey(a: Author): string {
   return a.kind === "person" ? a.id : a.kind;
@@ -104,6 +111,10 @@ export interface State {
   awaiting: Record<ChannelId, true>;
   /** Per channel, who is generating right now (from the engine's activity events). */
   typing: Record<ChannelId, Record<string, Typing>>;
+  /** Per channel, the last turn that failed; cleared by the next send or activity there. */
+  failures: Record<ChannelId, TurnFailure>;
+  /** Messages that arrived in a channel while another was shown, until it is opened. */
+  unread: Record<ChannelId, number>;
   /** Every person name seen in any payload, for labelling authors. */
   names: Record<PersonId, string>;
   /** Messages whose sources are unfolded; all start folded, and it lasts the session. */
@@ -148,6 +159,8 @@ export function initialState(): State {
     pendingActions: {},
     awaiting: {},
     typing: {},
+    failures: {},
+    unread: {},
     names: {},
     sourcesOpen: {},
     restore: null,
