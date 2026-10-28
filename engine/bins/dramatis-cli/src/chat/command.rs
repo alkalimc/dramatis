@@ -17,6 +17,11 @@ pub enum Command {
     Wrapup,
     Memories(Option<String>),
     History(usize),
+    /// Take back the n-th last message of the user in this channel (1 = the last) and
+    /// put its text in the input line.
+    Resend(usize),
+    /// Show in full the sources of the n-th last reply that has any (1 = the last).
+    Sources(usize),
     Search(String),
     Stats,
     Help,
@@ -38,11 +43,18 @@ pub const HELP: &str = "\
 /wrapup                end the current conversation and show the memories it wrote
 /memories [person]     stored memories, or those a person may recall
 /history [n]           reprint the last n messages of this channel (default 10)
+/resend [n]            take back your n-th last message (default 1) and everything after it,
+                       and put its text back in the input line to edit and send again
+/sources [n]           list in full the sources of the n-th last reply that has any (default 1)
 /search <query>        retrieval only, as the current speaker would see it
 /stats                 model calls made in this session
 /help, /quit           this text; leave (Ctrl-D also works)
 //text                 send a message that starts with a slash
-anything else is sent to the current channel";
+anything else is sent to the current channel
+
+Typing: Enter starts a new line; Ctrl-J or Alt-Enter sends (Alt is Option set as Meta in
+macOS Terminal and iTerm). A line that starts with a slash is a command and Enter runs it.
+With --plain each input line is one message.";
 
 pub fn parse(line: &str) -> Command {
     let line = line.trim();
@@ -88,6 +100,20 @@ pub fn parse(line: &str) -> Command {
                 _ => Command::Invalid("usage: /history [n]".into()),
             },
         },
+        "resend" | "r" => match args {
+            "" => Command::Resend(1),
+            n => match n.parse::<usize>() {
+                Ok(n) if n > 0 => Command::Resend(n),
+                _ => Command::Invalid("usage: /resend [n]".into()),
+            },
+        },
+        "sources" | "src" => match args {
+            "" => Command::Sources(1),
+            n => match n.parse::<usize>() {
+                Ok(n) if n > 0 => Command::Sources(n),
+                _ => Command::Invalid("usage: /sources [n]".into()),
+            },
+        },
         "search" | "s" if args.is_empty() => Command::Invalid("usage: /search <query>".into()),
         "search" | "s" => Command::Search(args.to_owned()),
         "stats" => Command::Stats,
@@ -127,6 +153,10 @@ mod tests {
             Command::Search("two words".into())
         );
         assert_eq!(parse("/memories x"), Command::Memories(Some("x".into())));
+        assert_eq!(parse("/resend"), Command::Resend(1));
+        assert_eq!(parse("/resend 3"), Command::Resend(3));
+        assert_eq!(parse("/sources"), Command::Sources(1));
+        assert_eq!(parse("/sources 2"), Command::Sources(2));
         assert_eq!(parse("/quit"), Command::Quit);
         assert_eq!(parse("/host"), Command::Host);
         assert_eq!(parse("/go 2"), Command::Go(2));
@@ -141,6 +171,9 @@ mod tests {
             "/group solo",
             "/history 0",
             "/history x",
+            "/resend 0",
+            "/resend x",
+            "/sources 0",
             "/search",
             "/go",
             "/go 0",

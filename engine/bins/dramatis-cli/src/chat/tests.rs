@@ -249,7 +249,10 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
         "{first:?}"
     );
     assert!(!first.contains("[#"), "{first:?}");
-    assert!(first.contains("sources: Tea page"), "{first:?}");
+    assert!(
+        first.contains("sources: 1  (/sources to show)") && !first.contains("Tea page"),
+        "{first:?}"
+    );
     assert!(!first.contains("thin archive"), "{first:?}");
     // The prompt carries the user's own name, not the channel's speaker.
     let prompt = r.session.prompt();
@@ -265,8 +268,30 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
     let again = r.run("thanks").await;
     assert!(again.contains("ann: Better now."), "{again:?}");
 
+    // The sources unfold on request.
+    let unfolded = r.run("/sources").await;
+    assert!(
+        unfolded.contains("sources (1):\n  Tea page"),
+        "{unfolded:?}"
+    );
+    assert!(r.run("/sources 2").await.contains("no reply with sources"));
+
     let history = r.run("/history 2").await;
     assert!(history.contains("ann: Better now."), "{history:?}");
+    // Taking the last message back drops it and its reply and returns its text.
+    let resent = r.run("/resend").await;
+    assert!(resent.contains("took back 2 messages"), "{resent:?}");
+    assert_eq!(r.session.take_prefill().as_deref(), Some("thanks"));
+    let after = r.run("/history 10").await;
+    assert!(!after.contains("Better now."), "{after:?}");
+    assert!(
+        after.contains("Cooler water, Doc. Always.") && after.contains("and the water?"),
+        "{after:?}"
+    );
+    assert!(!after.contains("thanks"), "{after:?}");
+    assert!(r.run("/resend 9").await.contains("no message of yours"));
+    assert!(r.session.take_prefill().is_none());
+
     let stats = r.run("/stats").await;
     assert!(
         stats.contains("direct") && stats.contains("model-a") && stats.contains("total"),
