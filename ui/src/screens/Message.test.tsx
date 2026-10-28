@@ -109,6 +109,37 @@ test("a host message that found people or made a group offers them, and a click 
   expect(store.getState().channel).toBe("dm:mira");
 });
 
+test("a host message that listed conversations offers each one", async () => {
+  const { store } = renderWith(
+    <MessageView
+      showPlay={false}
+      message={{
+        ...base,
+        channel: "host",
+        author: { kind: "host" },
+        text: "These are open.",
+        actions: [
+          {
+            tool: "list_channels",
+            channels: [
+              { id: "grp:2", kind: "group", members: [{ id: "mira", name: "Mira" }, { id: "oren", name: "Oren" }] },
+              { id: "dm:mira", kind: "direct", members: [{ id: "mira", name: "Mira" }] },
+            ],
+          },
+        ],
+      }}
+    />,
+  );
+  await act(async () => {
+    screen.getByRole("button", { name: "Open the group with Mira, Oren" }).click();
+  });
+  expect(store.getState().channel).toBe("grp:2");
+  await act(async () => {
+    screen.getByRole("button", { name: "Talk to Mira" }).click();
+  });
+  expect(store.getState().channel).toBe("dm:mira");
+});
+
 test("older rows without a group id or found people offer nothing", () => {
   const { container } = renderWith(
     <MessageView

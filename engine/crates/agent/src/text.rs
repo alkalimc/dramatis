@@ -176,6 +176,89 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Could not read the arguments: {detail}",
     ),
     ("harness.error.refused", "Refused: {detail}"),
+    (
+        "harness.channels",
+        "The conversations {user} has, most recent first:",
+    ),
+    ("harness.channels.none", "No conversation yet."),
+    ("harness.channels.direct", "- with {names}, last at {when}"),
+    (
+        "harness.channels.group",
+        "- group of {names}, last at {when}",
+    ),
+    (
+        "harness.guide.terminal",
+        "How {user} operates this place from the terminal, for explaining it. /help lists every command. Name the commands as written.",
+    ),
+    (
+        "harness.guide.terminal.channels",
+        "Switching conversation: /talk <person> opens a person, /host comes back here, and /go <n> takes a choice from the numbered list you showed by listing the conversations.",
+    ),
+    (
+        "harness.guide.terminal.group",
+        "A group: /group <p1> <p2> ... with two or more people.",
+    ),
+    (
+        "harness.guide.terminal.resend",
+        "Say it again: /resend [n] takes back {user}'s n-th last message and puts its text back to edit.",
+    ),
+    (
+        "harness.guide.terminal.sources",
+        "Sources of a reply: /sources [n] lists them in full.",
+    ),
+    (
+        "harness.guide.terminal.name",
+        "The name {user} is called by: /name <name>.",
+    ),
+    (
+        "harness.guide.terminal.intensity",
+        "Intensity: /tier [level] shows or sets it.",
+    ),
+    (
+        "harness.guide.terminal.saves",
+        "Saves: /save lists them; /save new, switch, copy, rename, delete, export or import followed by what it needs.",
+    ),
+    (
+        "harness.guide.terminal.memories",
+        "Memories: /memories [person] lists them, /forget <n> deletes one, /restore <n> brings it back, /edit <n> <text> rewrites it, /wrapup closes the conversation and writes them.",
+    ),
+    (
+        "harness.guide.app",
+        "How {user} operates this place from the app, for explaining it. Name the buttons and places as they read on screen.",
+    ),
+    (
+        "harness.guide.app.channels",
+        "Switching conversation: open it from Home, or press the choice you offer.",
+    ),
+    (
+        "harness.guide.app.group",
+        "A group: New group on Roster, or Bring people in inside a conversation.",
+    ),
+    (
+        "harness.guide.app.resend",
+        "Say it again: Send again on {user}'s own message.",
+    ),
+    (
+        "harness.guide.app.sources",
+        "Sources of a reply: Sources under it.",
+    ),
+    (
+        "harness.guide.app.name",
+        "The name {user} is called by: System, tab Quota and quiet.",
+    ),
+    (
+        "harness.guide.app.intensity",
+        "Intensity: System, tab Quota and quiet.",
+    ),
+    ("harness.guide.app.saves", "Saves: System."),
+    (
+        "harness.guide.app.memories",
+        "Memories: World lists what was remembered.",
+    ),
+    (
+        "harness.guide.limits",
+        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, scheduled, chased or followed up; that is {user}'s to do.",
+    ),
     ("harness.done", "Done."),
     ("harness.asked", "{name} is looking into it."),
     ("harness.group_created", "Group {id} created."),

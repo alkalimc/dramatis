@@ -87,9 +87,18 @@ impl Clock for SystemClock {
     }
 }
 
+/// The front end the user is on. The host's usage guide covers only that one's operations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Frontend {
+    #[default]
+    App,
+    Terminal,
+}
+
 /// The parameter groups the agent reads, and where request notes go.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
+    pub frontend: Frontend,
     pub world: world::params::Params,
     pub find_people: index::params::FindPeople,
     pub agent: params::Params,

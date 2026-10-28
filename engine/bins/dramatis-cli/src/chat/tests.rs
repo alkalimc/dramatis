@@ -15,12 +15,15 @@ use llm::transport::{HttpRequest, HttpResponse, StreamResponse};
 use runtime::{Options, Runtime};
 use serde_json::json;
 
+use super::command::{Command, parse};
 use super::render::{Marker, Style};
 use super::session::Session;
 use super::show::{Names, Show, Term};
 
 enum Reply {
     Say(&'static str),
+    /// A tool call with its JSON arguments.
+    Tool(&'static str, serde_json::Value),
     Fail(&'static str),
     /// The endpoint never answers.
     Hang,
@@ -53,6 +56,16 @@ impl Transport for Scripted {
                     delta(&text[mid..]),
                     json!({"choices": [], "usage": {"prompt_tokens": 40,
                         "completion_tokens": 7, "prompt_tokens_details": {"cached_tokens": 8}}}),
+                ])
+            }
+            Reply::Tool(name, args) => {
+                let chunk = |d: serde_json::Value| json!({"choices": [{"index": 0, "delta": d}]});
+                sse(&[
+                    chunk(json!({"tool_calls": [{"index": 0, "id": "call_1",
+                        "function": {"name": name, "arguments": ""}}]})),
+                    chunk(json!({"tool_calls": [{"index": 0,
+                        "function": {"arguments": args.to_string()}}]})),
+                    json!({"choices": [], "usage": {"prompt_tokens": 40, "completion_tokens": 7}}),
                 ])
             }
             Reply::Fail(message) => sse(&[json!({"error": {"message": message}})]),
@@ -88,7 +101,7 @@ impl Buf {
 
 const WORDING: &str = r#"{"user.you": "Doc", "host.name": "Hostess"}"#;
 
-fn corpus(wording: &str) -> TempFolio {
+fn corpus(wording: &str, host: bool) -> TempFolio {
     let mut b = Builder::new()
         .manifest("user_placeholder", r#""<U>""#)
         .manifest("wording", wording)
@@ -132,6 +145,14 @@ fn corpus(wording: &str) -> TempFolio {
                 .unwrap();
         }
     }
+    if host {
+        b.conn()
+            .execute(
+                "INSERT INTO prompts(subject, slot, body) VALUES ('host', 'in_world', 'You run the desk.')",
+                [],
+            )
+            .unwrap();
+    }
     b.finish()
 }
 
@@ -171,7 +192,11 @@ async fn rig() -> Rig {
 }
 
 async fn rig_wording(wording: &str) -> Rig {
-    let folio = corpus(wording);
+    rig_with(wording, false).await
+}
+
+async fn rig_with(wording: &str, host: bool) -> Rig {
+    let folio = corpus(wording, host);
     let home = TempHome::new();
     std::fs::write(
         home.0.join("endpoints.toml"),
@@ -195,6 +220,7 @@ async fn rig_wording(wording: &str) -> Rig {
                 llm::Secret::new("sk-test"),
             )]))),
             quiet: true,
+            frontend: runtime::Frontend::Terminal,
         },
     )
     .unwrap();
@@ -379,6 +405,75 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
         "{}",
         r.session.prompt()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_hosts_channel_list_becomes_choices_that_switch_to_existing_conversations() {
+    let mut r = rig_with(WORDING, true).await;
+    r.script.0.lock().unwrap().extend([
+        Reply::Say("Hello."),
+        Reply::Say("Present."),
+        Reply::Say("Here too."),
+    ]);
+    r.run("/talk ann").await;
+    r.run("hi").await;
+    r.run("/group ann cy").await;
+    // Speaking to everyone settles who answers without a model call.
+    r.run("good morning everyone").await;
+
+    r.run("/host").await;
+    r.script.0.lock().unwrap().extend([
+        Reply::Tool("list_channels", json!({})),
+        Reply::Say("Two are open. Choose one from the list."),
+    ]);
+    let out = r.run("how do I get back to a conversation?").await;
+    assert!(
+        out.contains("1 open group: ann, cy") && out.contains("2 talk to ann"),
+        "{out}"
+    );
+    assert!(out.contains("/go <n> takes you there"), "{out}");
+    assert!(r.run("/go 2").await.contains("talking to ann"));
+    assert!(r.session.prompt().starts_with("[ann]"));
+    assert!(r.run("/go 1").await.contains("group with ann, cy"));
+    assert!(r.session.prompt().starts_with("[ann, cy]"));
+}
+
+/// Every command the host's terminal guide names. The pack's own guide test keeps the same
+/// list; the parser must know them all.
+const GUIDE_COMMANDS: [&str; 15] = [
+    "talk", "group", "host", "go", "resend", "sources", "name", "memories", "forget", "edit",
+    "restore", "tier", "save", "wrapup", "help",
+];
+
+#[test]
+fn the_terminal_guide_names_only_commands_the_parser_knows() {
+    use agent::assemble::{Ctx, guide};
+    use agent::text::{Names as Text, Wording};
+    let wording = Wording::new(&Default::default());
+    let names = Text::new("<U>", None, &wording);
+    let ctx = Ctx {
+        wording: &wording,
+        names: &names,
+        scene: ("(", ")"),
+    };
+    let text = guide(&ctx, agent::Frontend::Terminal);
+    let mut named: Vec<&str> = text
+        .split_whitespace()
+        .filter_map(|w| w.strip_prefix('/'))
+        .map(|w| w.trim_end_matches(|c: char| !c.is_ascii_lowercase()))
+        .filter(|w| !w.is_empty())
+        .collect();
+    named.sort_unstable();
+    named.dedup();
+    let mut expected = GUIDE_COMMANDS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(named, expected);
+    for c in GUIDE_COMMANDS {
+        let unknown = matches!(parse(&format!("/{c}")), Command::Invalid(m) if m.starts_with("unknown command"));
+        assert!(!unknown, "/{c} is in the guide but not a command");
+    }
+    // The app's guide carries none of them.
+    assert!(!guide(&ctx, agent::Frontend::App).contains("/talk"));
 }
 
 fn activity(who: &str, state: api::events::ActivityState) -> api::port::Event {

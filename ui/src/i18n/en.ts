@@ -101,6 +101,7 @@ export const en = {
   "action.create_group": "starting a group with {names}",
   "action.set_mode": "setting {target} to {mode}",
   "action.forget": "forgetting a note",
+  "action.list_channels": "looking through your conversations",
   "action.target.group": "a group",
   "choice.person": "Talk to {name}",
   "choice.group": "Open the group with {names}",

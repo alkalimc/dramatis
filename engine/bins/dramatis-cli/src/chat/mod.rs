@@ -98,6 +98,7 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
     tokio.block_on(async move {
         let options = Options {
             quiet: true,
+            frontend: runtime::Frontend::Terminal,
             ..Options::default()
         };
         let runtime = Runtime::open(home.clone(), Some(folio.clone()), show.clone(), options)

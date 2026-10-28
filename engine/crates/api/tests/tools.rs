@@ -79,7 +79,8 @@ fn every_parsed_name_is_offered() {
             "set_mode",
             "search",
             "remember",
-            "forget"
+            "forget",
+            "list_channels"
         ]
     );
     for name in &shared {

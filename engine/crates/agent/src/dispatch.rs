@@ -5,7 +5,7 @@
 //! mode and memory changes need the user's own turn.
 
 use api::tools::{self, HostCall, SharedCall, TargetKind};
-use api::views::ToolAction;
+use api::views::{ChannelKind, ChannelRef, ToolAction};
 use index::{Filters, SearchRequest};
 use world::fact::{self, About, Audience, NewFact};
 use world::wrapup::{Args, Hurt, Memory, MemoryKind};
@@ -17,6 +17,10 @@ use crate::error::{Error, Result};
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
+
+/// Most conversations `list_channels` returns: enough to find one, few enough to offer
+/// as buttons.
+const LISTED_CHANNELS_MAX: usize = 12;
 
 /// A refused call: its text goes back to the model as the tool's output.
 struct Refusal(String);
@@ -616,7 +620,70 @@ impl Agent {
                 }]);
                 Ok(Ok(self.say(names, "harness.done", &[])))
             }
+            HostCall::ListChannels(_) => {
+                let (refs, lines) = self.channel_lines(names)?;
+                self.show_action(turn, ToolAction::ListChannels { channels: refs })?;
+                if lines.is_empty() {
+                    return Ok(Ok(self.say(names, "harness.channels.none", &[])));
+                }
+                Ok(Ok(format!(
+                    "{}\n{}",
+                    self.say(names, "harness.channels", &[]),
+                    lines.join("\n")
+                )))
+            }
         }
+    }
+
+    /// The user's conversations with something in them, newest first (the host's own
+    /// channel left out): what the front ends offer and the lines the host reads.
+    fn channel_lines(&self, names: &Names) -> Result<(Vec<ChannelRef>, Vec<String>)> {
+        let now = self.now();
+        let mut refs = Vec::new();
+        let mut lines = Vec::new();
+        // The connection lock is released before the loop takes it again.
+        let all = channel::list(&self.db())?;
+        for ch in all {
+            if refs.len() >= LISTED_CHANNELS_MAX {
+                break;
+            }
+            let Some(last) = world::message::last(&self.db(), ch.id)? else {
+                continue;
+            };
+            if ch.is_host_channel() {
+                continue;
+            }
+            let members = ch
+                .persons()
+                .iter()
+                .map(|p| view::person_ref(self.ix().folio(), p.as_str()))
+                .collect::<Result<Vec<_>>>()?;
+            let (kind, key) = match ch.kind {
+                world::ChannelKind::Direct => (ChannelKind::Direct, "harness.channels.direct"),
+                world::ChannelKind::Group => (ChannelKind::Group, "harness.channels.group"),
+            };
+            let at = now.at(last.at);
+            let d = world::clock::in_world_date(at, self.corpus.year_offset);
+            let when = format!(
+                "{:04}-{:02}-{:02} {}",
+                d.year,
+                d.month,
+                d.day,
+                world::clock::local_time(at)
+            );
+            let who = members
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(self.say(names, key, &[("names", &who), ("when", &when)]));
+            refs.push(ChannelRef {
+                id: view::channel_id(ch.id),
+                kind,
+                members,
+            });
+        }
+        Ok((refs, lines))
     }
 
     /// Change a person's mode. Enabling someone without a persona is refused: he could
