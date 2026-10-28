@@ -70,7 +70,8 @@ test("the channel shows who is typing, a lookup wording for tools, and clears on
     store.dispatch({ type: "names", persons: [{ id: "mira", name: "Mira" }] });
     store.dispatch({ type: "turnActivity", event: { channel: "dm:mira", author, state: { kind: "thinking" } } });
   });
-  expect(screen.getByText("Mira is typing…")).toBeDefined();
+  // Like a chat client: in the header's subtitle, not as a line in the log.
+  expect(screen.getByText("Mira is typing…").closest("header")).not.toBeNull();
   await act(async () => {
     store.dispatch({ type: "turnActivity", event: { channel: "dm:mira", author, state: { kind: "tool", name: "search" } } });
   });
@@ -120,4 +121,32 @@ test("older rows without a group id or found people offer nothing", () => {
     />,
   );
   expect(container.querySelector(".choices")).toBeNull();
+});
+
+test("a failed turn is shown inline, with its reason, until the next send", async () => {
+  const { store } = renderWith(<ChannelView channel="dm:mira" />);
+  const author = { kind: "person", id: "mira" } as const;
+  await act(async () => {
+    store.dispatch({ type: "names", persons: [{ id: "mira", name: "Mira" }] });
+    store.dispatch({ type: "turnActivity", event: { channel: "dm:mira", author, state: { kind: "failed", reason: "rate_limited" } } });
+  });
+  expect(screen.getByRole("alert").textContent).toMatch(/Mira could not reply: the endpoint is rate limiting/);
+  await act(async () => {
+    store.dispatch({ type: "awaiting", channel: "dm:mira", on: true });
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("consecutive messages by one speaker form a run: one name, one avatar slot filled, at the end", () => {
+  const first = { ...base, id: "a" };
+  const last = { ...base, id: "b" };
+  const { container } = renderWith(
+    <>
+      <MessageView message={first} showPlay={false} first last={false} />
+      <MessageView message={last} showPlay={false} first={false} last />
+    </>,
+  );
+  expect(container.querySelectorAll(".bubble .author")).toHaveLength(1);
+  const slots = [...container.querySelectorAll(".message-avatar")];
+  expect(slots.map((s) => s.children.length)).toEqual([0, 1]);
 });

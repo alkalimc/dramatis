@@ -85,3 +85,33 @@ export function blocks(text: string, marker: SceneMarker): Block[] {
   }
   return out;
 }
+
+/** One bubble: a paragraph of speech with the scene lines that lead into or close it. */
+export interface Bubble {
+  before: string[];
+  text: string | null;
+  after: string[];
+}
+
+/**
+ * The bubbles of a reply: one per speech paragraph, scene lines folded into the bubble
+ * they lead into. Scene lines after the last paragraph close it; a reply of scene lines
+ * only is one bubble with no speech.
+ */
+export function bubbles(text: string, marker: SceneMarker): Bubble[] {
+  const out: Bubble[] = [];
+  let pending: string[] = [];
+  for (const b of blocks(text, marker)) {
+    if (b.kind === "scene") {
+      pending.push(b.text);
+    } else {
+      out.push({ before: pending, text: b.text, after: [] });
+      pending = [];
+    }
+  }
+  if (pending.length) {
+    if (out.length) out[out.length - 1].after = pending;
+    else out.push({ before: pending, text: null, after: [] });
+  }
+  return out;
+}

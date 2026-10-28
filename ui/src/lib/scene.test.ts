@@ -1,4 +1,4 @@
-import { blocks, splitScene, speechOnly, withoutCites } from "./scene";
+import { blocks, bubbles, splitScene, speechOnly, withoutCites } from "./scene";
 
 const star = { open: "*", close: "*" };
 
@@ -98,4 +98,13 @@ test("blocks: paragraphs apart, one label per run, scene lines between, marks-on
     { kind: "speech", text: "Three.", first: true },
   ]);
   expect(blocks("[#a:1]", star)).toEqual([]);
+});
+
+test("scene lines fold into the bubble they lead into; trailing ones close the last", () => {
+  expect(bubbles("*Rain.*\nHello.\n\nSecond.\n*She leaves.*", star)).toEqual([
+    { before: ["Rain."], text: "Hello.", after: [] },
+    { before: [], text: "Second.", after: ["She leaves."] },
+  ]);
+  expect(bubbles("*Only a scene.*", star)).toEqual([{ before: ["Only a scene."], text: null, after: [] }]);
+  expect(bubbles("", star)).toEqual([]);
 });

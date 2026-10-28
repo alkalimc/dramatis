@@ -17,18 +17,11 @@ export interface EventSource<T> {
   listen(cb: (event: { payload: T }) => void): Promise<() => void>;
 }
 
-export interface Events {
-  messageAdded: EventSource<gen.MessageAdded>;
-  messageDelta: EventSource<gen.MessageDelta>;
-  modeChanged: EventSource<gen.ModeChanged>;
-  notification: EventSource<gen.Notification>;
-  quotaChanged: EventSource<gen.QuotaChanged>;
-  rewound: EventSource<gen.Rewound>;
-  rosterChanged: EventSource<gen.RosterChanged>;
-  toolCalled: EventSource<gen.ToolCalled>;
-  turnActivity: EventSource<gen.TurnActivity>;
-  worldChanged: EventSource<gen.WorldChanged>;
-}
+/** The payload a generated event delivers to its listener. */
+type PayloadOf<E> = E extends { listen(cb: (event: { payload: infer P }) => void): unknown } ? P : never;
+
+/** One entry per generated event, so a new event fails to compile until it is handled. */
+export type Events = { [K in keyof typeof gen.events]: EventSource<PayloadOf<(typeof gen.events)[K]>> };
 
 export interface Api {
   commands: Commands;

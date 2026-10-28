@@ -123,6 +123,7 @@ export function reduce(s: State, a: Action): State {
         pendingActions: omit(s.pendingActions, m.id),
         // The user's own turn echoed back is not an answer.
         awaiting: m.author.kind === "user" ? s.awaiting : answered(s, m.channel),
+        unread: m.author.kind === "user" || m.channel === (s.channel ?? s.hostChannel) ? s.unread : { ...s.unread, [m.channel]: (s.unread[m.channel] ?? 0) + 1 },
       };
     }
     case "toolCalled": {
@@ -156,16 +157,20 @@ export function reduce(s: State, a: Action): State {
                 Object.entries(s.streams).filter(([, v]) => v.channel !== channel || typingKey(v.author) !== key),
               )
             : s.streams;
-        if (!(key in here) && streams === s.streams) return s;
+        const failures =
+          state.kind === "failed" ? { ...s.failures, [channel]: { author, reason: state.reason } } : omit(s.failures, channel);
+        if (state.kind === "done" && !(key in here) && !s.failures[channel] && !s.awaiting[channel]) return s;
         const rest = omit(here, key);
         const typing = Object.keys(rest).length ? { ...s.typing, [channel]: rest } : omit(s.typing, channel);
-        return { ...s, typing, streams };
+        // Nothing more is coming for a turn that ended: the user's wait is over too.
+        return { ...s, typing: key in here ? typing : s.typing, streams, failures, awaiting: answered(s, channel) };
       }
       const tool = state.kind === "tool";
-      if (here[key]?.tool === tool) return s;
+      if (here[key]?.tool === tool && !s.failures[channel]) return s;
       return {
         ...s,
         typing: { ...s.typing, [channel]: { ...here, [key]: { author, tool } } },
+        failures: omit(s.failures, channel),
         awaiting: answered(s, channel),
       };
     }
@@ -201,6 +206,7 @@ export function reduce(s: State, a: Action): State {
         sourcesOpen: keep(s.sourcesOpen),
         awaiting: answered(s, channel),
         typing: omit(s.typing, channel),
+        failures: omit(s.failures, channel),
         worldVersion: s.worldVersion + 1,
       };
     }
@@ -209,7 +215,10 @@ export function reduce(s: State, a: Action): State {
     case "sources":
       return { ...s, sourcesOpen: s.sourcesOpen[a.message] ? omit(s.sourcesOpen, a.message) : { ...s.sourcesOpen, [a.message]: true } };
     case "awaiting":
-      return { ...s, awaiting: a.on ? { ...s.awaiting, [a.channel]: true } : answered(s, a.channel) };
+      // Sending starts afresh: last time's failure no longer applies.
+      return a.on
+        ? { ...s, awaiting: { ...s.awaiting, [a.channel]: true }, failures: omit(s.failures, a.channel) }
+        : { ...s, awaiting: answered(s, a.channel) };
     case "loading":
       return { ...s, loading: { ...s.loading, [a.key]: true } };
     case "loaded":
@@ -219,7 +228,7 @@ export function reduce(s: State, a: Action): State {
         loadErrors: a.error ? { ...s.loadErrors, [a.key]: a.error } : omit(s.loadErrors, a.key),
       };
     case "open":
-      return { ...s, channel: a.channel, drawer: null };
+      return { ...s, channel: a.channel, drawer: null, unread: omit(s.unread, a.channel ?? s.hostChannel ?? "") };
     case "drawer":
       return { ...s, drawer: a.drawer };
     case "ask":

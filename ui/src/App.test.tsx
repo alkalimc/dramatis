@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "./test/render";
 
@@ -20,8 +20,10 @@ test("a direct channel renders scene lines apart from speech, with sources and r
   const panel = (await screen.findByRole("heading", { name: "Who's waiting" })).closest("section")!;
   await user.click(await within(panel).findByText("Mira Vale"));
   const scene = await screen.findByText("She runs a finger down the index.");
+  // The scene line sits inside a bubble, apart from the spoken text.
   expect(scene.className).toBe("scene");
-  expect(scene.closest(".bubble")).toBeNull();
+  expect(scene.closest(".bubble")).not.toBeNull();
+  expect(scene.closest(".speech")).toBeNull();
   expect(screen.getAllByText("Mira Vale").length).toBeGreaterThan(0);
   expect(screen.getByText(/Mira Vale ▸ asking Oren Lark to take a look/)).toBeDefined();
   // Sources start folded: her own material as a list, the other passage as a quote card.
@@ -50,7 +52,7 @@ test("selection menu: where from, and who knows this", async () => {
   renderApp();
   const panel = (await screen.findByRole("heading", { name: "Who's waiting" })).closest("section")!;
   await user.click(await within(panel).findByText("Tess Arden"));
-  await screen.findByText(/Take the stairs by the fish market/);
+  await within(await screen.findByRole("log")).findByText(/Take the stairs by the fish market/);
   const actions = screen.getAllByRole("button", { name: "Actions for this message" });
   await user.click(actions[actions.length - 1]);
   const menu = screen.getByRole("region", { name: "About the selected text" });
@@ -135,7 +137,7 @@ test("first open: name, then the host introduces itself with the coldstart card"
   await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
   expect(await screen.findByRole("heading", { name: "You could start with them" })).toBeDefined();
-  await waitFor(() => expect(screen.getByText(/Hello, Rowan\./)).toBeDefined());
+  expect(await within(await screen.findByRole("log")).findByText(/Hello, Rowan\./)).toBeDefined();
   expect(screen.getByText("They are all frozen now: they answer when you reach out.")).toBeDefined();
 });
 

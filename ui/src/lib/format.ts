@@ -118,3 +118,14 @@ export function audienceText(a: Audience, t: T): string {
       return t("world.audience.own", { name: a.person.name });
   }
 }
+
+/** "<name> is typing…" for everyone generating in a channel, or `null` when nobody is. */
+export function typingText(who: Record<string, { author: Author; tool: boolean }> | undefined, t: T, names: Names, userName: string | null): string | null {
+  const lines = Object.values(who ?? {}).map((w) => t(w.tool ? "typing.tool" : "typing.writing", { name: authorName(w.author, t, names, userName) }));
+  return lines.length ? lines.join(t("list.separator")) : null;
+}
+
+/** Whether two authors are the same speaker (one run of bubbles). */
+export function sameAuthor(a: Author, b: Author): boolean {
+  return a.kind === b.kind && (a.kind !== "person" || (b.kind === "person" && a.id === b.id));
+}

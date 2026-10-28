@@ -24,11 +24,13 @@ export const en = {
   "app.mock": "Demo data",
   "app.retry": "Try again",
   "app.dismiss": "Dismiss",
+  "app.crash": "Something broke while drawing this screen:",
+  "app.reload": "Reload",
   "app.wording.failed": "The corpus wording could not be loaded, so default text is shown.",
 
   // ---- header and navigation ----
-  "nav.label": "Drawers",
-  "nav.home": "Home",
+  "nav.label": "Sections",
+  "nav.chats": "Chats",
   "nav.roster": "Roster",
   "nav.cases": "Requests",
   "nav.world": "World",
@@ -47,6 +49,11 @@ export const en = {
   "activity.birthday": "birthday today",
 
   // ---- channels and messages ----
+  "chatlist.label": "Chats",
+  "chatlist.empty": "No chats yet.",
+  "chatlist.unread": "{count} unread",
+  "chatlist.preview.you": "You: {text}",
+  "chatlist.preview.author": "{name}: {text}",
   "channel.host": "{host}",
   "channel.group.untitled": "Group",
   "channel.group.members": "Members: {names}",
@@ -421,6 +428,10 @@ export const en = {
   "error.endpoint": "The endpoint answered with an error:",
   "error.keychain": "The keychain refused:",
   "error.busy": "A reply is being written. Try again when it ends.",
+  "error.turn.rate_limited": "{name} could not reply: the endpoint is rate limiting. Try again in a moment.",
+  "error.turn.quota_exhausted": "{name} could not reply: the quota for now is used up.",
+  "error.turn.cancelled": "{name}'s reply was cut off before it finished.",
+  "error.turn.error": "{name} could not reply. Send again to retry.",
   "error.exists": "That name is already taken.",
   "error.io": "A file error occurred:",
   "error.unknown": "Something went wrong:",

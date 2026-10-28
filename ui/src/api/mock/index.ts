@@ -4,7 +4,8 @@
 //
 // Demo switches (query string): `form=library` (no endpoint yet), `first=1` (first open),
 // `tts=0` (no read-aloud role), `tier=ultra`, `band=quiet|exhausted`, `marker=paren`
-// (scene lines in `(...)` instead of `*...*`).
+// (scene lines in `(...)` instead of `*...*`). Sending a message that contains the word
+// `fail` ends the turn in a rate-limit failure instead of a reply.
 //
 // `ui/wording.local.json` (git-ignored; exported by the forge) supplies a corpus's wording
 // when present, so the preview shows that corpus's language.
@@ -321,6 +322,14 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     return id;
   }
 
+  /** A turn that starts and then fails, as an endpoint refusing the call would. */
+  async function failTurn(ch: Chan) {
+    const author: Author = ch.kind === "host" ? HOST : person(ch.participants[0].id);
+    bus.turnActivity.emit({ channel: ch.id, author, state: { kind: "thinking" } });
+    await wait(400);
+    bus.turnActivity.emit({ channel: ch.id, author, state: { kind: "failed", reason: "rate_limited" } });
+  }
+
   function knows(p: MockPerson, topic: string): string | null {
     for (const [re, reason] of p.knows) if (re.source !== ".*" && re.test(topic)) return reason;
     return null;
@@ -608,7 +617,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const m = msg(channel, USER, text, 0, image ? { attachment: { path: `data:${image.mime};base64,${image.data_base64}` } } : {});
       setTimeout(() => {
         bus.messageAdded.emit({ message: m });
-        void (ch.kind === "host" ? replyHost(text) : replyChannel(ch, text));
+        void (/\bfail\b/i.test(text) ? failTurn(ch) : ch.kind === "host" ? replyHost(text) : replyChannel(ch, text));
       });
       return ok(m.id);
     },

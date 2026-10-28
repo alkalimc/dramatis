@@ -199,3 +199,35 @@ test("sources start folded and toggle per message", () => {
   s = reduce(s, { type: "sources", message: "m1" });
   expect(s.sourcesOpen).toEqual({ m2: true });
 });
+
+test("a failed turn is remembered per channel and cleared by the next send or activity", () => {
+  const author = { kind: "person", id: "p1" } as const;
+  let s = reduce(initialState(), { type: "turnActivity", event: { channel: "c1", author, state: { kind: "failed", reason: "quota_exhausted" } } });
+  expect(s.failures.c1).toEqual({ author, reason: "quota_exhausted" });
+  expect(s.failures.c2).toBeUndefined();
+  const sent = reduce(s, { type: "awaiting", channel: "c1", on: true });
+  expect(sent.failures.c1).toBeUndefined();
+  const again = reduce(s, { type: "turnActivity", event: { channel: "c1", author, state: { kind: "thinking" } } });
+  expect(again.failures.c1).toBeUndefined();
+});
+
+test("a turn that ends, done or failed, ends the user's wait too", () => {
+  const author = { kind: "host" } as const;
+  for (const state of [{ kind: "done" }, { kind: "failed", reason: "error" }] as const) {
+    let s = reduce(initialState(), { type: "awaiting", channel: "c1", on: true });
+    s = reduce(s, { type: "turnActivity", event: { channel: "c1", author, state } });
+    expect(s.awaiting.c1).toBeUndefined();
+  }
+});
+
+test("messages from others count as unread unless their channel is the one shown; opening clears", () => {
+  let s: State = { ...initialState(), hostChannel: "host", channel: "c1" };
+  s = reduce(s, { type: "messageAdded", event: { message: message("m1", "2026-01-01T10:00:00Z") } });
+  expect(s.unread).toEqual({});
+  s = reduce(s, { type: "messageAdded", event: { message: message("m2", "2026-01-01T10:01:00Z", { channel: "c2" }) } });
+  s = reduce(s, { type: "messageAdded", event: { message: message("m3", "2026-01-01T10:02:00Z", { channel: "c2" }) } });
+  s = reduce(s, { type: "messageAdded", event: { message: message("m4", "2026-01-01T10:03:00Z", { channel: "c2", author: { kind: "user" } }) } });
+  expect(s.unread).toEqual({ c2: 2 });
+  s = reduce(s, { type: "open", channel: "c2" });
+  expect(s.unread).toEqual({});
+});

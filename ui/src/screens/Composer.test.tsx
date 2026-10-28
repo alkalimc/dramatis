@@ -64,3 +64,14 @@ test("Send again takes a message and what followed back, and puts its text in th
   expect(within(log).queryByText("Who can help with ledgers?")).toBeNull();
   expect(store.getState().restore).toBeNull();
 });
+
+test("a send that fails leaves nothing waiting, and keeps the draft", async () => {
+  const user = userEvent.setup();
+  const { api, store } = await mounted();
+  vi.spyOn(api.commands, "sendMessage").mockResolvedValue({ status: "error", error: { code: "no_endpoint" } });
+  await user.type(box(), "hello");
+  await user.keyboard("{Control>}{Enter}{/Control}");
+  await waitFor(() => expect(store.getState().error?.code).toBe("no_endpoint"));
+  expect(store.getState().awaiting.host).toBeUndefined();
+  expect(box().value).toBe("hello");
+});

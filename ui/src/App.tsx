@@ -3,6 +3,10 @@ import { api as defaultApi, type Api } from "./api";
 import { useT } from "./i18n";
 import { createActions, createStore, Provider, subscribe, useActions, useApi, useDispatch, useStore, type Drawer, type Store } from "./store";
 import { ErrorBar, InlineError } from "./ui/ErrorBar";
+import { unreadOf } from "./lib/chats";
+import { Icon, type IconName } from "./ui/Icon";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { ChatList } from "./screens/ChatList";
 import { AskCard } from "./screens/Ask";
 import { CaseDrawer, CasesDrawer } from "./screens/Cases";
 import { FirstOpen } from "./screens/FirstOpen";
@@ -34,8 +38,18 @@ export function App({ api = defaultApi, store: given }: { api?: Api; store?: Sto
 
   return (
     <Provider store={store} api={api} actions={actions}>
-      <Shell />
+      <Guarded />
     </Provider>
+  );
+}
+
+/** A crash inside the app shows the error in the corpus wording once that has loaded. */
+function Guarded() {
+  const t = useT();
+  return (
+    <ErrorBoundary t={t}>
+      <Shell />
+    </ErrorBoundary>
   );
 }
 
@@ -47,6 +61,7 @@ function Shell() {
   const drawer = useStore((s) => s.drawer);
   const statusError = useStore((s) => s.loadErrors.status);
   const wordingError = useStore((s) => s.loadErrors.wording);
+  const full = useStore((s) => s.status?.form === "full" && Boolean(s.hostChannel));
   const actions = useActions();
   usePresence();
 
@@ -79,11 +94,14 @@ function Shell() {
 
   return (
     <div className="app">
-      <Header />
-      {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
-      <div className="body">
-        <Main />
-        {drawer && <DrawerPane drawer={drawer} />}
+      <Rail />
+      {full && <ChatList />}
+      <div className="stage">
+        {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
+        <div className="body">
+          <Main />
+          {drawer && <DrawerPane drawer={drawer} />}
+        </div>
       </div>
       <ErrorBar />
       {ask && <AskCard draft={ask} />}
@@ -106,11 +124,11 @@ function usePresence() {
   }, [actions, full]);
 }
 
-const NAV: { key: "roster" | "cases" | "world" | "system"; drawer: Drawer }[] = [
-  { key: "roster", drawer: { kind: "roster" } },
-  { key: "cases", drawer: { kind: "cases" } },
-  { key: "world", drawer: { kind: "world" } },
-  { key: "system", drawer: { kind: "system", tab: "quota" } },
+const NAV: { key: "roster" | "cases" | "world" | "system"; icon: IconName; drawer: Drawer }[] = [
+  { key: "roster", icon: "people", drawer: { kind: "roster" } },
+  { key: "cases", icon: "cases", drawer: { kind: "cases" } },
+  { key: "world", icon: "world", drawer: { kind: "world" } },
+  { key: "system", icon: "system", drawer: { kind: "system", tab: "quota" } },
 ];
 
 function drawerKey(d: Drawer | null): string | null {
@@ -120,13 +138,20 @@ function drawerKey(d: Drawer | null): string | null {
   return d.kind;
 }
 
-function Header() {
+/** The narrow left rail: the main sections as icon and short label, the clock at the foot. */
+function Rail() {
   const t = useT();
   const actions = useActions();
   const { mock } = useApi();
   const dispatch = useDispatch();
   const clock = useStore((s) => s.clock);
   const drawer = useStore((s) => s.drawer);
+  const unreadChats = useStore((s) => {
+    const ids = new Set([...s.channels.map((c) => c.id), ...(s.hostChannel ? [s.hostChannel] : [])]);
+    let n = 0;
+    for (const id of ids) if (unreadOf(id, s.unread, s.digest) > 0) n += 1;
+    return n;
+  });
   const current = drawerKey(drawer);
 
   // The clock is pure data; refresh it on the minute.
@@ -137,47 +162,47 @@ function Header() {
 
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
-    <header className="app-header">
-      <h1>
-        <button type="button" className="link title" onClick={() => actions.open(null)}>
-          {t("host.name")}
-        </button>
-      </h1>
-      <p className="role">{t("host.role")}</p>
-      {mock && <span className="tag">{t("app.mock")}</span>}
-      {clock && (
-        <p className="clock" aria-label={t("clock.label")}>
-          <time>
-            {t("clock.in_world", {
-              year: clock.in_world.year,
-              month: pad(clock.in_world.month),
-              day: pad(clock.in_world.day),
-              time: clock.local_time,
-            })}
-          </time>
-        </p>
-      )}
+    <header className="rail">
+      <h1 className="sr-only">{t("host.name")}</h1>
       <nav aria-label={t("nav.label")}>
         <ul>
           <li>
-            <button type="button" className="nav" aria-label={t("nav.home")} onClick={() => actions.open(null)}>
-              ⌂
+            <button type="button" className={`rail-item${current === null ? " on" : ""}`} aria-pressed={current === null} onClick={() => dispatch({ type: "drawer", drawer: null })}>
+              <Icon name="chats" />
+              <span>{t("nav.chats")}</span>
+              {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
             </button>
           </li>
           {NAV.map((n) => (
             <li key={n.key}>
               <button
                 type="button"
-                className={`nav${current === n.key ? " on" : ""}`}
+                className={`rail-item${current === n.key ? " on" : ""}`}
                 aria-pressed={current === n.key}
                 onClick={() => dispatch({ type: "drawer", drawer: current === n.key ? null : n.drawer })}
               >
-                {t(`nav.${n.key}`)}
+                <Icon name={n.icon} />
+                <span>{t(`nav.${n.key}`)}</span>
               </button>
             </li>
           ))}
         </ul>
       </nav>
+      <div className="rail-foot">
+        {mock && <span className="tag">{t("app.mock")}</span>}
+        {clock && (
+          <p className="clock" aria-label={t("clock.label")}>
+            <time>
+              {t("clock.in_world", {
+                year: clock.in_world.year,
+                month: pad(clock.in_world.month),
+                day: pad(clock.in_world.day),
+                time: clock.local_time,
+              })}
+            </time>
+          </p>
+        )}
+      </div>
     </header>
   );
 }
