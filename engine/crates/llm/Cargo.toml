@@ -22,3 +22,8 @@ keyring = { version = "=3.6.3", features = ["apple-native"] }
 
 [dev-dependencies]
 tokio = { version = "=1.53.1", features = ["rt", "macros", "time"] }
+
+# Existence check by attributes only (no data read, no prompt); keyring has no such call.
+# Same version keyring already pulls in.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "=2.11.1"

@@ -32,7 +32,7 @@ impl KeyStore for Keys {
     }
 
     fn has(&self, profile: &str) -> bool {
-        llm::keychain::get(profile).is_ok_and(|k| k.is_some())
+        llm::keychain::has(profile).unwrap_or(false)
     }
 
     fn delete(&self, profile: &str) -> ApiResult<()> {

@@ -98,8 +98,10 @@ printf '/talk <person>\nhello\n/wrapup\n' | ./target/release/dramatis-cli chat
 
 The corpus is `--folio`, else `$DRAMATIS_FOLIO`, else the `.folio` in `$DRAMATIS_HOME`
 (default `~/.dramatis`). Endpoints come from `$DRAMATIS_HOME/endpoints.toml` and keys from the
-system keychain exactly as in the app. The first run of each new build triggers a macOS keychain
-prompt: choose Always Allow.
+system keychain exactly as in the app. A key is read once per process and only for a profile
+that is used; with an ad-hoc signed build the first run of each new build triggers a macOS
+keychain prompt (choose Always Allow). To stop the prompts coming back after every rebuild, sign
+with a stable identity, see [Keychain prompts](#keychain-prompts).
 
 The world (channels, memories, usage) is the app's: `$DRAMATIS_HOME/world.sqlite`, so the
 terminal and the app share conversations, settings and endpoints, and may be open together
@@ -178,3 +180,34 @@ The model-facing tool schemas are snapshotted in `engine/crates/api/tests/tools.
 after an intended change run `UPDATE_SNAPSHOTS=1 cargo test -p api --test tools`.
 
 UI checks: `cd ui && pnpm exec tsc --noEmit && pnpm exec vitest run`.
+
+## Keychain prompts
+
+Profile keys live in the login keychain (service `dramatis`, account `profile.<name>`). macOS
+lets an app read an item without asking only if the item's access list names that app. An
+ad-hoc signed build (the default for `cargo build`) has an identity that changes with every
+build, and the app and the terminal client are two different apps, so each new build asks again.
+Signing both with one stable certificate makes the identity survive rebuilds.
+
+One time, create a local code-signing certificate: Keychain Access, menu Certificate Assistant,
+Create a Certificate; name `dramatis-local`, Identity Type Self Signed Root, Certificate Type
+Code Signing. Check it is usable:
+
+```sh
+security find-identity -p codesigning        # lists "dramatis-local"
+```
+
+After every build, sign the binaries (the identifier is fixed so it does not carry a build hash):
+
+```sh
+cd engine && cargo build --release -p dramatis-cli
+codesign --force --sign dramatis-local --identifier dramatis.cli target/release/dramatis-cli
+# the desktop binary the same way (a Tauri bundle signs with the identity in this variable)
+codesign --force --sign dramatis-local --identifier dramatis.app target/release/dramatis
+# bundled: APPLE_SIGNING_IDENTITY=dramatis-local pnpm tauri build
+codesign -dv target/release/dramatis-cli 2>&1 | grep -E 'Identifier|Signature'
+```
+
+The first run of each signed binary asks once more; choose Always Allow and it holds across
+rebuilds. A key saved before signing keeps its old access list, so save it again (profile
+settings, or delete and add it) if a prompt keeps coming back.
