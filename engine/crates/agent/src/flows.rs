@@ -121,7 +121,8 @@ impl Agent {
     }
 
     async fn respond_inner(&self, posted: Posted) -> Result<()> {
-        let asks = {
+        let mut asks = Vec::new();
+        let first = {
             let _turn = self.lock_channel(posted.channel).await;
             // Taken back between the post and now: nothing to answer.
             if message::get(&self.db(), posted.message).is_err() {
@@ -133,25 +134,60 @@ impl Agent {
                 return Err(Error::QuotaExhausted { release_at });
             }
             if ch.is_host_channel() {
-                self.host_turn(&posted).await?
+                // Requests made before a failure are kept: they exist in the world and
+                // must end in a state, not stay open with nothing running.
+                let (made, result) = self.host_turn(&posted).await;
+                asks = made;
+                result
             } else if ch.kind == ChannelKind::Group {
-                self.group_turn(&posted).await?;
-                Vec::new()
+                self.group_turn(&posted).await
             } else {
                 let person = ch.person().cloned().ok_or_else(|| {
                     Error::Invalid(format!("channel {} has no owner", posted.channel))
                 })?;
-                self.direct_turn(&posted, &person).await?;
-                Vec::new()
+                self.direct_turn(&posted, &person).await
             }
         };
         // Requests the host made run in the asked person's channel, after the host's own
-        // lock is released: no flow holds two channel locks.
+        // lock is released: no flow holds two channel locks. After a failed host turn
+        // they are not run (the endpoint is likely still failing); they end as failed and
+        // the host sees that on its next turn.
+        let ran = self.run_asks(asks, first.is_err()).await;
+        first.and(ran)
+    }
+
+    /// Run the requests of one host turn in order. Every one ends in a state: after the
+    /// first failure (or with `skip`) the rest are marked failed without a call.
+    async fn run_asks(&self, asks: Vec<world::task::Asked>, skip: bool) -> Result<()> {
+        let mut stop = skip;
+        let mut first: Result<()> = Ok(());
         for asked in asks {
-            let _turn = self.lock_channel(asked.channel).await;
-            self.run_ask(asked.task, asked.channel).await?;
+            if stop {
+                self.fail_request(asked.task, world::task::Failure::Failed);
+                continue;
+            }
+            let ran = {
+                let _turn = self.lock_channel(asked.channel).await;
+                self.run_ask(asked.task, asked.channel).await
+            };
+            if let Err(e) = ran {
+                self.fail_request(asked.task, world::task::Failure::Failed);
+                stop = true;
+                first = Err(e);
+            }
         }
-        Ok(())
+        first
+    }
+
+    /// A request ended without an answer: it stops being open, and the UI and the host
+    /// see that. Does nothing to one that was answered.
+    pub(crate) fn fail_request(&self, task: TaskId, why: world::task::Failure) {
+        let changed = world::task::fail(&self.db(), task, why, self.now().ms);
+        if matches!(changed, Ok(true)) {
+            self.changed(vec![WorldChange::Task {
+                id: view::task_id(task),
+            }]);
+        }
     }
 
     /// Take back the user's `message` and everything after it in `ch` ([`world::rewind`]),
@@ -244,17 +280,74 @@ impl Agent {
         self.append_user(seg, &text, posted.image.as_ref())
     }
 
-    /// Returns the requests the host made; the caller runs them.
-    async fn host_turn(&self, posted: &Posted) -> Result<Vec<world::task::Asked>> {
+    /// Returns the requests the host made, even when the turn failed after making them;
+    /// the caller runs them.
+    async fn host_turn(&self, posted: &Posted) -> (Vec<world::task::Asked>, Result<()>) {
+        let mut turn = Turn::new(posted.channel, Actor::Host, Shape::Host);
+        turn.authorized = posted.authorized;
+        let result = self.host_turn_run(posted, &mut turn).await;
+        (std::mem::take(&mut turn.asks), result)
+    }
+
+    async fn host_turn_run(&self, posted: &Posted, turn: &mut Turn) -> Result<()> {
         let seg = self
             .ensure_segment(posted.channel, Some(posted.message))
             .await?;
-        self.user_entry(seg, posted, &[], None)?;
-        let mut turn = Turn::new(posted.channel, Actor::Host, Shape::Host);
-        turn.authorized = posted.authorized;
-        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
-            .await?;
-        Ok(std::mem::take(&mut turn.asks))
+        let (lines, told) = self.request_lines(seg)?;
+        self.user_entry(seg, posted, &lines, None)?;
+        for t in told {
+            world::task::mark_told(&self.db(), t)?;
+        }
+        self.run(turn, self.config.agent.turn_loop.max_steps).await
+    }
+
+    /// One line per open request, and per request that ended without an answer (once),
+    /// so the host answers about what is really happening. Also returns the failures
+    /// shown, to be marked told once the entry is stored.
+    fn request_lines(&self, seg: world::SegmentId) -> Result<(Vec<String>, Vec<TaskId>)> {
+        let names = self.segment_names(seg)?;
+        let (open, failed) = {
+            let conn = self.db();
+            (
+                world::task::open_requests(&conn)?,
+                world::task::untold_failures(&conn)?,
+            )
+        };
+        let mut lines = Vec::new();
+        let mut told = Vec::new();
+        for t in open.iter().chain(&failed) {
+            let Some(person) = &t.assignee else { continue };
+            let name = self.display(person.as_str())?;
+            let state = match t.failure {
+                None => self.corpus.wording.fill(
+                    "harness.task.active",
+                    &names,
+                    &[("turns", &t.turns_left.to_string())],
+                ),
+                Some(world::task::Failure::Failed) => {
+                    self.corpus.wording.fill("harness.task.failed", &names, &[])
+                }
+                Some(world::task::Failure::Interrupted) => {
+                    self.corpus
+                        .wording
+                        .fill("harness.task.interrupted", &names, &[])
+                }
+            };
+            if t.failure.is_some() {
+                told.push(t.id);
+            }
+            lines.push(self.corpus.wording.fill(
+                "harness.task",
+                &names,
+                &[
+                    ("id", &t.id.0.to_string()),
+                    ("name", &name),
+                    ("question", &t.question),
+                    ("state", &state),
+                ],
+            ));
+        }
+        Ok((lines, told))
     }
 
     async fn direct_turn(&self, posted: &Posted, person: &PersonId) -> Result<()> {
@@ -799,11 +892,18 @@ impl Agent {
 
     /// Work on a request until it is answered or its turns run out.
     pub async fn run_request(&self, asked: world::task::Asked) -> Result<()> {
-        let _turn = self.lock_channel(asked.channel).await;
-        if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
-            return Err(Error::QuotaExhausted { release_at });
+        let ran = async {
+            let _turn = self.lock_channel(asked.channel).await;
+            if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
+                return Err(Error::QuotaExhausted { release_at });
+            }
+            self.run_ask(asked.task, asked.channel).await
         }
-        self.run_ask(asked.task, asked.channel).await
+        .await;
+        if ran.is_err() {
+            self.fail_request(asked.task, world::task::Failure::Failed);
+        }
+        ran
     }
 
     async fn run_ask(&self, task: TaskId, ch: ChannelId) -> Result<()> {
