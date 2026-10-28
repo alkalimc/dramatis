@@ -31,6 +31,7 @@ use index::Index;
 use world::clock::Now;
 use world::{ChannelId, SegmentId, World};
 
+use crate::assemble;
 use crate::endpoint::{self, ChatRole, Keys};
 use crate::error::{Error, Result};
 use crate::params;
@@ -128,6 +129,8 @@ pub(crate) struct Corpus {
     pub host_name: String,
     pub host: HostLayers,
     pub year_offset: i32,
+    /// The corpus is written in CJK text: a reply with none is not the person's.
+    pub cjk: bool,
     pub descriptions: Descriptions,
 }
 
@@ -154,9 +157,6 @@ pub struct Agent {
     /// Held while the quota status is read and sent, so a stale status never overtakes
     /// a fresher one at the UI.
     pub(crate) quota_events: Mutex<()>,
-    /// The last harness context line appended per segment. Lost on restart, which costs
-    /// one repeated line.
-    pub(crate) contexts: Mutex<HashMap<SegmentId, String>>,
     /// Input plus output tokens of the last call per segment: how full the context is.
     /// Lost on restart, when the segment's bytes are estimated instead.
     pub(crate) filled: Mutex<HashMap<SegmentId, u64>>,
@@ -180,6 +180,11 @@ impl Agent {
             personas: Personas::load(folio)?,
             host: persona::host(folio)?,
             year_offset: manifest.year_offset as i32,
+            cjk: manifest.segmenter_name() == "jieba"
+                || manifest
+                    .wording
+                    .values()
+                    .any(|v| v.chars().any(assemble::is_cjk)),
             descriptions,
             wording,
         };
@@ -199,7 +204,6 @@ impl Agent {
             locks: Mutex::new(HashMap::new()),
             planner: tokio::sync::Mutex::new(()),
             quota_events: Mutex::new(()),
-            contexts: Mutex::new(HashMap::new()),
             filled: Mutex::new(HashMap::new()),
         })
     }

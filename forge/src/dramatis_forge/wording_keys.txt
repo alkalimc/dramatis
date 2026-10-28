@@ -134,6 +134,11 @@ composer.label
 composer.placeholder
 composer.send
 confidence.low
+daypart.afternoon
+daypart.evening
+daypart.morning
+daypart.night
+daypart.noon
 drawer.close
 endpoints.add
 endpoints.edit
@@ -251,6 +256,7 @@ harness.chorus
 harness.citation
 harness.collective
 harness.context
+harness.context.gap
 harness.context.turns
 harness.digest
 harness.digest.birthday
@@ -483,6 +489,8 @@ select.who
 select.who.empty
 select.whole
 sources.title
+span.days
+span.hours
 system.tab.endpoints
 system.tab.quota
 system.tab.saves
@@ -509,6 +517,13 @@ user.title
 user.you
 waiting.empty
 waiting.title
+weekday.fri
+weekday.mon
+weekday.sat
+weekday.sun
+weekday.thu
+weekday.tue
+weekday.wed
 world.audience.own
 world.audience.participants
 world.audience.world

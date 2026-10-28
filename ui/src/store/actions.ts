@@ -1,5 +1,4 @@
 import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ImagePart, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
-import { ext } from "../api/ext";
 import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Store } from ".";
 import type { LoadKey, Theme } from "./state";
@@ -41,7 +40,7 @@ export function createActions(api: Api, store: Store) {
     if (channels) d({ type: "channels", channels });
   }
   async function refreshUserAvatar() {
-    const r = await settle(ext(api).userAvatar());
+    const r = await settle(c.userAvatar());
     d({ type: "userAvatar", avatar: r.ok ? r.data : null });
   }
   async function refreshQuota() {
@@ -124,7 +123,7 @@ export function createActions(api: Api, store: Store) {
   async function open(channel: ChannelId | null, who?: PersonRef) {
     const s = store.getState();
     if (channel && who && !s.channels.some((ch) => ch.id === channel)) {
-      d({ type: "temp", row: { id: channel, kind: "direct", origin: "system", participants: [who], topic: null, mode: "enabled", last_at: null } satisfies ChannelSummary });
+      d({ type: "temp", row: { id: channel, kind: "direct", origin: "system", participants: [who], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary });
     }
     d({ type: "open", channel });
     const target = channel ?? store.getState().hostChannel;
@@ -181,18 +180,18 @@ export function createActions(api: Api, store: Store) {
   }
 
   async function archive(channel: ChannelId, archived: boolean) {
-    if ((await attempt(ext(api).archiveChannel(channel, archived))) === undefined) return;
+    if ((await attempt(c.archiveChannel(channel, archived))) === undefined) return;
     await refreshChannels();
     if (archived && (store.getState().channel ?? store.getState().hostChannel) === channel) await open(null);
   }
   async function rename(channel: ChannelId, name: string | null) {
-    if ((await attempt(ext(api).renameChannel(channel, name))) !== undefined) await refreshChannels();
+    if ((await attempt(c.renameChannel(channel, name))) !== undefined) await refreshChannels();
   }
   async function setChannelAvatar(channel: ChannelId, image: ImagePart | null) {
-    if ((await attempt(ext(api).setChannelAvatar(channel, image))) !== undefined) await refreshChannels();
+    if ((await attempt(c.setChannelAvatar(channel, image))) !== undefined) await refreshChannels();
   }
   async function setUserAvatar(image: ImagePart | null) {
-    if ((await attempt(ext(api).setUserAvatar(image))) !== undefined) await refreshUserAvatar();
+    if ((await attempt(c.setUserAvatar(image))) !== undefined) await refreshUserAvatar();
   }
 
   async function setMode(target: Target, mode: Mode) {
@@ -294,7 +293,8 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
         void actions.refreshChannels();
         const s = store.getState();
         const shown = s.channel ?? s.hostChannel;
-        if (shown) void actions.reloadHistory(shown).then(() => (document.hidden ? undefined : actions.markRead(shown)));
+        const touched = payload.changes.some((ch) => ch.kind === "channel" && ch.id === shown);
+        if (shown && touched) void actions.reloadHistory(shown).then(() => (document.hidden ? undefined : actions.markRead(shown)));
       }
       if (kinds.has("trust")) {
         d({ type: "rosterChanged" });

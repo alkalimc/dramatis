@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { channelArchived } from "../api/ext";
 import { useT, userTitle } from "../i18n";
 import { readAvatar } from "../lib/image";
 import { isDark } from "../lib/prefs";
@@ -107,7 +106,7 @@ export function LeftDrawer() {
   const actions = useActions();
   const name = useStore((s) => s.settings?.user_name ?? null);
   const theme = useStore((s) => s.theme);
-  const archivedCount = useStore((s) => s.channels.filter(channelArchived).length);
+  const archivedCount = useStore((s) => s.channels.filter((c) => c.archived).length);
   const [profile, setProfile] = useState(false);
   const ref = useRef<HTMLElement>(null);
   const version = useAppVersion();

@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import type { ChannelSummary } from "../api";
-import { channelArchived } from "../api/ext";
 import { useT } from "../i18n";
 import { unreadOf } from "../lib/chats";
 import { useActions, useApi, useStore } from "../store";
@@ -28,7 +27,7 @@ export function useChatMenu() {
       if (unreadOf(c.id, unread, digest) > 0) out.push({ label: t("chatmenu.read"), icon: "check", onSelect: () => void actions.clearUnread(c.id) });
       else out.push({ label: t("chatmenu.unread"), icon: "unread", onSelect: () => actions.markUnread(c.id) });
       if (c.kind !== "host") {
-        const archived = channelArchived(c);
+        const archived = c.archived;
         out.push({ label: t(archived ? "chatmenu.unarchive" : "chatmenu.archive"), icon: "archive", onSelect: () => void actions.archive(c.id, !archived) });
       }
       if (c.kind === "group") {

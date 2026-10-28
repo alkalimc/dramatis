@@ -272,7 +272,13 @@ impl Agent {
         lines: &[String],
         turns: Option<u32>,
     ) -> Result<()> {
-        let context = self.context_line(seg, turns)?.unwrap_or_default();
+        let before = message::history(&self.db(), posted.channel, Some(posted.message), 50)?;
+        let since = before
+            .iter()
+            .rev()
+            .find(|m| m.author == Actor::User)
+            .map(|m| m.at);
+        let context = self.context_line(seg, turns, since)?;
         let mut parts: Vec<&str> = vec![&posted.text];
         parts.extend(lines.iter().map(String::as_str));
         parts.push(&context);
@@ -922,9 +928,7 @@ impl Agent {
             &[("name", &name), ("question", &t.question)],
         )];
         lines.extend(self.attachment(seg, &mut turn, &t.question, Vec::new())?);
-        if let Some(c) = self.context_line(seg, Some(t.turns_left))? {
-            lines.push(c);
-        }
+        lines.push(self.context_line(seg, Some(t.turns_left), None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -1322,9 +1326,7 @@ impl Agent {
             Some(d) => self.digest_text(d, &names)?,
             None => self.corpus.wording.fill("harness.introduce", &names, &[]),
         }];
-        if let Some(c) = self.context_line(seg, None)? {
-            lines.push(c);
-        }
+        lines.push(self.context_line(seg, None, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -1417,9 +1419,7 @@ impl Agent {
             turn.shown.extend(m.shown);
             lines.push(m.text);
         }
-        if let Some(c) = self.context_line(seg, None)? {
-            lines.push(c);
-        }
+        lines.push(self.context_line(seg, None, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),

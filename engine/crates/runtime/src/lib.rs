@@ -73,6 +73,13 @@ impl Runtime {
         sink: Arc<dyn Sink>,
         options: Options,
     ) -> ApiResult<Self> {
+        // One record of what the window has been told, shared by every event source, so
+        // the engine can tell another process's messages from its own agent's.
+        let seen = Arc::new(port::Seen::default());
+        let sink: Arc<dyn Sink> = Arc::new(port::Tracking {
+            inner: sink,
+            seen: seen.clone(),
+        });
         let params = Params::load(&home.params()).map_err(|detail| api::ApiError::Io { detail })?;
         let http: Arc<dyn Transport> = match options.transport {
             Some(t) => t,
@@ -84,6 +91,7 @@ impl Runtime {
             keys: Arc::new(ports::Keys),
             net: Arc::new(ports::Net(http)),
             sink: sink.clone(),
+            seen,
             ..Ports::default()
         };
         let bridge = folio.as_ref().map(|path| {

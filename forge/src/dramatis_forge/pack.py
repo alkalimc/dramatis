@@ -790,6 +790,10 @@ class WikiConfig:
     #: `https://media.example/{md5_1}/{md5_2}/avatar_{page}.png`. The engine percent-encodes
     #: the segment, so write it unencoded.
     avatar_url: str = ""
+    #: The player's own default picture: a full URL in the same form as `avatar_url`
+    #: (the hash placeholders work, there is no `{page}`). Empty means the player has none.
+    #: Stored in the folio as `player_avatar_url`.
+    player_avatar_url: str = ""
     rate: float = 8.0
     #: Namespaces whose changes can matter for incremental update.
     watch_namespaces: tuple[int, ...] = (0,)

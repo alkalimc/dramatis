@@ -466,12 +466,19 @@ pub const IN_WORLD: &str = "In-world layer of the host.";
 /// Four people: `ann`, `bo` and `dee` have personas, `cy` has none. The placeholder is `<U>`
 /// and the corpus's word for "you" is `Doc`.
 pub fn corpus() -> TempFolio {
+    corpus_in(false)
+}
+
+/// The same, with the pack's own wording in CJK text when `cjk` is set.
+pub fn corpus_in(cjk: bool) -> TempFolio {
+    let wording = if cjk {
+        r#"{"user.you": "Doc", "host.name": "Hostess", "tool.search": "Search the archive.", "daypart.night": "\u591c\u91cc"}"#
+    } else {
+        r#"{"user.you": "Doc", "host.name": "Hostess", "tool.search": "Search the archive."}"#
+    };
     let mut b = Builder::new()
         .manifest("user_placeholder", r#""<U>""#)
-        .manifest(
-            "wording",
-            r#"{"user.you": "Doc", "host.name": "Hostess", "tool.search": "Search the archive."}"#,
-        )
+        .manifest("wording", wording)
         .manifest("scene_marker", r#"["(", ")"]"#);
     b.person("ann", Some("03-10"))
         .person("bo", None)
@@ -646,7 +653,17 @@ pub fn env_on(
     retrieve: index::params::Retrieve,
     tune: impl FnOnce(&mut Config),
 ) -> Env {
-    let folio_file = corpus();
+    env_in(corpus(), world, endpoints, retrieve, tune)
+}
+
+/// The same, over a corpus file of the caller's.
+pub fn env_in(
+    folio_file: TempFolio,
+    world: World,
+    endpoints: Endpoints,
+    retrieve: index::params::Retrieve,
+    tune: impl FnOnce(&mut Config),
+) -> Env {
     let index = index::Index::open(folio_file.path(), retrieve).unwrap();
     let office = tempdir::Dir::new();
     let mut config = Config {
@@ -681,6 +698,17 @@ pub fn env_on(
         _folio: folio_file,
         _office: office,
     }
+}
+
+/// An environment over a corpus written in CJK text.
+pub fn env_cjk(wire: WireApi) -> Env {
+    env_in(
+        corpus_in(true),
+        World::in_memory().unwrap(),
+        endpoints(wire, true, None),
+        retrieve(),
+        |_| {},
+    )
 }
 
 pub fn env(wire: WireApi) -> Env {

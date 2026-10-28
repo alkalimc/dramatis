@@ -3,7 +3,7 @@ import { makeT } from "../i18n";
 import { byActivity, channelTitle, groupTitle, previewOf, unreadOf } from "./chats";
 
 function channel(id: string, kind: ChannelSummary["kind"], last_at: string | null): ChannelSummary {
-  return { id, kind, origin: "user", participants: [], topic: null, mode: "enabled", last_at };
+  return { id, kind, origin: "user", participants: [], topic: null, mode: "enabled", last_at, name: null, avatar: null, archived: false };
 }
 
 function message(id: string, channel: string, at: string, text = "hi"): Message {

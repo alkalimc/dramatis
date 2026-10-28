@@ -1,5 +1,4 @@
 import type { ChannelId, ChannelSummary, Digest, Message, SceneMarker } from "../api";
-import { channelName } from "../api/ext";
 import type { T } from "../i18n";
 import { splitScene, withoutCites } from "./scene";
 
@@ -8,7 +7,7 @@ const TITLE_NAMES = 3;
 
 /** A group's own name, else its members: "A, B, C", or "A, B (5 in all)" once there are many. */
 export function groupTitle(c: ChannelSummary, t: T): string {
-  const own = channelName(c)?.trim();
+  const own = c.name?.trim();
   if (own) return own;
   const names = c.participants.map((p) => p.name);
   const sep = t("group.name.separator");

@@ -220,6 +220,12 @@ pub struct ChannelSummary {
     pub origin: Origin,
     pub participants: Vec<PersonRef>,
     pub topic: Option<String>,
+    /// The title the user gave it; `None`: derive one from the members.
+    pub name: Option<String>,
+    /// The picture the user gave it; `None`: compose one from the members' avatars.
+    pub avatar: Option<MediaFile>,
+    /// Out of the main list. Still fully working; a person's new message clears it.
+    pub archived: bool,
     pub mode: Mode,
     pub last_at: Option<Timestamp>,
 }

@@ -136,6 +136,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   const band: QuotaBand =
     params.get("band") === "quiet" ? "quiet" : params.get("band") === "exhausted" ? "exhausted" : "open";
 
+  let userAvatar: MediaFile | null = null;
   let seq = 0;
   const nextId = (prefix: string) => `${prefix}-${++seq}`;
 
@@ -143,12 +144,15 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     log: Message[];
   }
   const channels = new Map<ChannelId, Chan>();
-  const addChannel = (c: Omit<Chan, "log" | "last_at">) => {
-    const ch: Chan = { ...c, last_at: null, log: [] };
+  const addChannel = (c: Omit<Chan, "log" | "last_at" | "name" | "avatar" | "archived">) => {
+    const ch: Chan = { ...c, name: null, avatar: null, archived: false, last_at: null, log: [] };
     channels.set(c.id, ch);
     return ch;
   };
   const msg = (channel: ChannelId, author: Author, text: string, minutesAgo: number, extra: Partial<Message> = {}): Message => {
+    // A person speaking brings an archived channel back, as the engine does.
+    const home = channels.get(channel);
+    if (home && author.kind === "person") home.archived = false;
     const m: Message = {
       id: nextId("m"),
       channel,
@@ -668,6 +672,28 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       setTimeout(() => announceWorld({ kind: "channel", id: channel }));
       return ok(null);
     },
+    renameChannel: (channel, name) => {
+      const ch = channels.get(channel);
+      if (!ch) return fail({ code: "not_found" });
+      ch.name = name?.trim() || null;
+      setTimeout(() => announceWorld({ kind: "channel", id: channel }));
+      return ok(null);
+    },
+    setChannelAvatar: (channel, image) => {
+      const ch = channels.get(channel);
+      if (!ch) return fail({ code: "not_found" });
+      ch.avatar = image ? { path: `data:${image.mime};base64,${image.data_base64}` } : null;
+      setTimeout(() => announceWorld({ kind: "channel", id: channel }));
+      return ok(ch.avatar);
+    },
+    archiveChannel: (channel, archived) => {
+      const ch = channels.get(channel);
+      if (!ch) return fail({ code: "not_found" });
+      if (archived && ch.kind === "host") return fail({ code: "invalid", field: "channel" });
+      ch.archived = archived;
+      setTimeout(() => announceWorld({ kind: "channel", id: channel }));
+      return ok(null);
+    },
     ask: (id, question, _turns, parent) => {
       const p = persons.get(id);
       if (!p) return fail({ code: "not_found" });
@@ -804,6 +830,11 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       });
     },
     avatar: () => ok(null),
+    userAvatar: () => ok(userAvatar),
+    setUserAvatar: (image) => {
+      userAvatar = image ? { path: `data:${image.mime};base64,${image.data_base64}` } : null;
+      return ok(userAvatar);
+    },
     ttsPlay: (_message): Result<MediaFile> => (tts ? ok({ path: silentWav() }) : fail({ code: "no_endpoint" })),
     ttsVoices: () => ok(tts ? ["alloy", "ember", "verse"] : []),
     setVoice: (id, voice) => {

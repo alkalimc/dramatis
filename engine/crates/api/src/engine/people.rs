@@ -323,14 +323,24 @@ impl Engine {
     pub(crate) async fn avatar_impl(&self, person: &PersonId) -> ApiResult<Option<MediaFile>> {
         let c = self.corpus()?;
         let p = c.person(&person.0).ok_or(ApiError::NotFound)?;
-        let stem = media::stem(&["avatar", &p.primary_page]);
+        self.cached_avatar(&p.primary_page, c.avatar_url(&p.primary_page))
+            .await
+    }
+
+    /// An avatar for the page `page`: cached, else fetched from `url` (when there is one).
+    pub(crate) async fn cached_avatar(
+        &self,
+        page: &str,
+        url: Option<String>,
+    ) -> ApiResult<Option<MediaFile>> {
+        let stem = media::stem(&["avatar", page]);
         let file = |path: std::path::PathBuf| MediaFile {
             path: path.to_string_lossy().into_owned(),
         };
         if let Some(path) = self.media.get("avatar", &stem) {
             return Ok(Some(file(path)));
         }
-        let Some(url) = c.avatar_url(&p.primary_page) else {
+        let Some(url) = url else {
             return Ok(None);
         };
         let Ok(_slot) = self.fetches.acquire().await else {

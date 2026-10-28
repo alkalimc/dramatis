@@ -288,7 +288,7 @@ export function ChannelHeader({ channel, finding = false, onFind }: { channel: C
   const menu = useChatMenu();
   const typing = typingText(who, t, names, user);
 
-  const summary: ChannelSummary | undefined = listed ?? (isHost ? ({ id: channel, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null } as ChannelSummary) : undefined);
+  const summary: ChannelSummary | undefined = listed ?? (isHost ? ({ id: channel, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary) : undefined);
   if (!summary) return typing ? <header className="channel-header"><p className="subtitle typing" role="status">{typing}</p></header> : null;
 
   const person = summary.kind === "direct" ? summary.participants[0] : undefined;

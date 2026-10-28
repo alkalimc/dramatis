@@ -1,6 +1,5 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { ChannelSummary } from "../api";
-import { channelArchived } from "../api/ext";
 import { useT } from "../i18n";
 import { activityText, authorName, typingText, when } from "../lib/format";
 import { byActivity, channelTitle, lastActivity, previewOf, unreadOf } from "../lib/chats";
@@ -64,16 +63,16 @@ export function ChatList() {
   const [query, setQuery] = useState("");
 
   const all = useMemo(() => {
-    const list: ChannelSummary[] = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null } as ChannelSummary, ...channels] : channels;
+    const list: ChannelSummary[] = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary, ...channels] : channels;
     // A conversation opened before anyone spoke has no row yet; it gets one while it is open.
     return temp && temp.id === open && !list.some((c) => c.id === temp.id) ? [...list, temp] : list;
   }, [channels, host, temp, open]);
 
-  const archivedCount = all.filter(channelArchived).length;
+  const archivedCount = all.filter((c) => c.archived).length;
   const q = query.trim().toLowerCase();
   const rows = useMemo(() => {
     // Searching looks everywhere, archived chats included; otherwise one list at a time.
-    const scope = q ? all.filter((c) => channelTitle(c, t).toLowerCase().includes(q)) : all.filter((c) => channelArchived(c) === (view === "archived"));
+    const scope = q ? all.filter((c) => channelTitle(c, t).toLowerCase().includes(q)) : all.filter((c) => c.archived === (view === "archived"));
     const sorted = byActivity(scope, messages);
     return [...sorted.filter((c) => pinned.includes(c.id)), ...sorted.filter((c) => !pinned.includes(c.id))];
   }, [all, messages, pinned, view, q, t]);

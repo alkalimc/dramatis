@@ -125,6 +125,7 @@ PACK = Pack(
         history_url="https://toy.invalid/history/{page}",
         revision_url="https://toy.invalid/rev/{revid}",
         avatar_url="https://toy.invalid/file/avatar_{page}.png",
+        player_avatar_url="https://toy.invalid/file/player.png",
     ),
     seeds=(
         SeedSet("story", "Stories", "category members",

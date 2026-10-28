@@ -69,6 +69,22 @@ export const commands = {
 	markRead: (channel: ChannelId, upTo: MessageId) => typedError<null, ApiError>(__TAURI_INVOKE("mark_read", { channel, upTo })),
 	createGroup: (members: PersonId[], topic: string | null) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("create_group", { members, topic })),
 	deleteGroup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_group", { channel })),
+	/**  Title a channel. `None` or blank returns to the derived title. */
+	renameChannel: (channel: ChannelId, name: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("rename_channel", { channel, name })),
+	/**  Set (or, with `None`, clear) a channel's picture. Returns the stored file. */
+	setChannelAvatar: (channel: ChannelId, image: {
+	/**  `image/png`, `image/jpeg`, ... */
+	mime: string,
+	data_base64: string,
+} | null) => typedError<{
+	path: string,
+} | null, ApiError>(__TAURI_INVOKE("set_channel_avatar", { channel, image })),
+	/**
+	 *  Move a channel out of or back into the main list. The host's channel cannot be
+	 *  archived (`Invalid`). A message from a person in an archived channel un-archives
+	 *  it (`WorldChanged`); the user's own messages do not.
+	 */
+	archiveChannel: (channel: ChannelId, archived: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("archive_channel", { channel, archived })),
 	/**
 	 *  Ask a person to look into a question. `turns` absent: the tier's default.
 	 *  `parent`: file it under a pinned question.
@@ -93,6 +109,24 @@ export const commands = {
 	avatar: (person: PersonId) => typedError<{
 	path: string,
 } | null, ApiError>(__TAURI_INVOKE("avatar", { person })),
+	/**
+	 *  The user's picture: the one they set, else the corpus's player portrait (fetched
+	 *  and cached like a person's avatar), else `None`.
+	 */
+	userAvatar: () => typedError<{
+	path: string,
+} | null, ApiError>(__TAURI_INVOKE("user_avatar")),
+	/**
+	 *  Set the user's picture; `None` returns to the default. Returns what `user_avatar`
+	 *  now answers. Per save.
+	 */
+	setUserAvatar: (image: {
+	/**  `image/png`, `image/jpeg`, ... */
+	mime: string,
+	data_base64: string,
+} | null) => typedError<{
+	path: string,
+} | null, ApiError>(__TAURI_INVOKE("set_user_avatar", { image })),
 	/**  Synthesize (or reuse the cached audio for) one message's speech. */
 	ttsPlay: (message: MessageId) => typedError<MediaFile, ApiError>(__TAURI_INVOKE("tts_play", { message })),
 	ttsVoices: () => typedError<string[], ApiError>(__TAURI_INVOKE("tts_voices")),
@@ -284,6 +318,12 @@ export type ChannelSummary = {
 	origin: Origin,
 	participants: PersonRef[],
 	topic: string | null,
+	/**  The title the user gave it; `None`: derive one from the members. */
+	name: string | null,
+	/**  The picture the user gave it; `None`: compose one from the members' avatars. */
+	avatar: MediaFile | null,
+	/**  Out of the main list. Still fully working; a person's new message clears it. */
+	archived: boolean,
 	mode: Mode,
 	last_at: Timestamp | null,
 };

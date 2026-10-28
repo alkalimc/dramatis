@@ -410,44 +410,44 @@ pub fn shown_len(pending: &str, mark: &str) -> usize {
     }
 }
 
-/// Whether a reply is an endpoint's canned refusal.
+/// Whether a reply is an endpoint's canned boilerplate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
     Is,
-    /// So far a prefix of a canned refusal: more text decides.
+    /// Not yet, but more text could make it so.
     Maybe,
     No,
 }
 
-/// Openings of the stock refusals some endpoints return in English whatever language
-/// the conversation is in. Lower case, straight apostrophes.
-const REFUSALS: &[&str] = &[
-    "i'm having a hard time fulfilling your request",
-    "i can't help with that",
-    "i can't assist with that",
-    "i cannot fulfill this request",
-    "i'm sorry, but i can't",
-    "i seem to be encountering an error",
-];
+/// ASCII words from which a reply with no CJK text counts as boilerplate: a short "OK."
+/// or a name alone stays a reply.
+const BOILERPLATE_WORDS: usize = 3;
 
-/// A refusal is a short reply with no CJK text that opens with a stock refusal. A phrase
-/// list alone could mask a persona who really says such a thing in a longer English
-/// reply; a "no CJK" test alone would catch any short English word, so both must hold.
-pub fn refusal(reply: &str) -> Refusal {
-    let norm = reply.trim().to_lowercase().replace('\u{2019}', "'");
-    if norm.chars().count() > 200 || norm.chars().any(is_cjk) {
+/// Longest reply, in characters, that is judged; a longer one is a real answer and
+/// streams without being held.
+const BOILERPLATE_CHARS: usize = 200;
+
+/// Some endpoints answer with a canned error in English, worded differently each time.
+/// In a corpus written in CJK text the persona never replies without any, so a whole
+/// reply with no CJK character and at least [`BOILERPLATE_WORDS`] ASCII words is that
+/// boilerplate. In any other corpus nothing can be told apart, so nothing is refused.
+pub fn refusal(reply: &str, cjk: bool) -> Refusal {
+    let text = reply.trim();
+    if !cjk || text.chars().count() > BOILERPLATE_CHARS || text.chars().any(is_cjk) {
         return Refusal::No;
     }
-    if REFUSALS.iter().any(|r| norm.starts_with(r)) {
+    let words = text
+        .split_whitespace()
+        .filter(|w| w.chars().any(|c| c.is_ascii_alphabetic()))
+        .count();
+    if words >= BOILERPLATE_WORDS {
         Refusal::Is
-    } else if REFUSALS.iter().any(|r| r.starts_with(&norm)) {
-        Refusal::Maybe
     } else {
-        Refusal::No
+        Refusal::Maybe
     }
 }
 
-fn is_cjk(c: char) -> bool {
+pub(crate) fn is_cjk(c: char) -> bool {
     matches!(c, '\u{3000}'..='\u{9fff}' | '\u{ff00}'..='\u{ffef}')
 }
 
@@ -745,21 +745,39 @@ mod tests {
     }
 
     #[test]
-    fn refusals_are_short_english_stock_phrases() {
-        let canned = "I\u{2019}m having a hard time fulfilling your request. Can I help you with something else instead?";
-        assert_eq!(refusal(canned), Refusal::Is);
-        let error = "I seem to be encountering an error. Can I try something else for you?";
-        assert_eq!(refusal(error), Refusal::Is);
-        assert_eq!(refusal("I'm having a har"), Refusal::Maybe);
-        assert_eq!(refusal(""), Refusal::Maybe);
-        assert_eq!(refusal("I can't help laughing."), Refusal::No);
-        assert_eq!(refusal("Fine."), Refusal::No);
+    fn a_reply_without_cjk_text_in_a_cjk_corpus_is_boilerplate() {
+        // However the endpoint words it.
+        for canned in [
+            "I\u{2019}m having a hard time fulfilling your request.",
+            "I seem to be encountering an error. Can I try something else for you?",
+            "I encountered an error doing what you asked. Could you try again?",
+            "Something went wrong with that one",
+        ] {
+            assert_eq!(refusal(canned, true), Refusal::Is, "{canned}");
+        }
+        // Short replies and names stay replies, though more text could still change that.
+        assert_eq!(refusal("OK.", true), Refusal::Maybe);
+        assert_eq!(refusal("Doctor Amiya", true), Refusal::Maybe);
+        assert_eq!(refusal("", true), Refusal::Maybe);
+        // Any CJK character, anywhere, makes it a reply.
         assert_eq!(
-            refusal("I can't help with that. \u{4f60}\u{597d}"),
+            refusal("I can't help with that. \u{4f60}\u{597d}", true),
             Refusal::No
         );
+        assert_eq!(refusal("\u{597d}\u{7684}", true), Refusal::No);
+        // A long reply is not judged.
         let long = format!("I can't help with that. {}", "x".repeat(200));
-        assert_eq!(refusal(&long), Refusal::No);
+        assert_eq!(refusal(&long, true), Refusal::No);
+        // Digits and symbols are not words.
+        assert_eq!(refusal("12 34 56 !!", true), Refusal::Maybe);
+    }
+
+    #[test]
+    fn nothing_is_boilerplate_in_a_corpus_that_is_not_cjk() {
+        assert_eq!(
+            refusal("I seem to be encountering an error.", false),
+            Refusal::No
+        );
     }
 
     #[test]

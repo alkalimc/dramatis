@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type { ChannelSummary, PersonRef } from "../api";
-import { channelAvatar } from "../api/ext";
 import { useT } from "../i18n";
 import { channelTitle } from "../lib/chats";
 import { useApi, useStore } from "../store";
@@ -38,7 +37,7 @@ export function Avatar({ person, size = "m", plain = false }: { person: PersonRe
   );
 }
 
-/** The user's own picture: uploaded, else the default; the initial while none is known. */
+/** The user's own picture: uploaded, else the corpus's default; the initial only when the engine has neither. */
 export function UserAvatar({ size = "m" }: { size?: Size }) {
   const api = useApi();
   const t = useT();
@@ -57,7 +56,7 @@ export function UserAvatar({ size = "m" }: { size?: Size }) {
 function GroupAvatar({ channel, size }: { channel: ChannelSummary; size: Size }) {
   const api = useApi();
   const t = useT();
-  const custom = channelAvatar(channel);
+  const custom = channel.avatar;
   const members = channel.participants.slice(0, 4);
   if (custom) {
     return (

@@ -19,6 +19,11 @@ pub struct Channel {
     /// Whose direct channel this is; `None` for a group.
     pub owner: Option<Actor>,
     pub deleted_at: Option<i64>,
+    /// A title the user gave it.
+    pub name: Option<String>,
+    /// File name of the user's picture for it (under the home's uploads directory).
+    pub avatar: Option<String>,
+    pub archived: bool,
     /// Persons and possibly the host, by id.
     pub participants: Vec<Actor>,
 }
@@ -54,8 +59,7 @@ impl Channel {
     }
 }
 
-const COLUMNS: &str =
-    "id, kind, origin, topic, mode, log_segment, read_up_to, direct_with, deleted_at";
+const COLUMNS: &str = "id, kind, origin, topic, mode, log_segment, read_up_to, direct_with, deleted_at, name, avatar, archived";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Channel> {
     let owner: Option<String> = row.get("direct_with")?;
@@ -69,6 +73,9 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Channel> {
         read_up_to: row.get("read_up_to")?,
         owner: owner.as_deref().map(Actor::parse),
         deleted_at: row.get("deleted_at")?,
+        name: row.get("name")?,
+        avatar: row.get("avatar")?,
+        archived: row.get::<_, i64>("archived")? != 0,
         participants: Vec::new(),
     })
 }
@@ -236,6 +243,40 @@ pub fn set_mode(conn: &Connection, channel: ChannelId, mode: Mode) -> Result<()>
     conn.execute(
         "UPDATE channel SET mode = ?2 WHERE id = ?1",
         (channel, mode),
+    )?;
+    Ok(())
+}
+
+/// The user's title for a channel; `None` or blank clears it.
+pub fn set_name(conn: &Connection, channel: ChannelId, name: Option<&str>) -> Result<()> {
+    let name = name.map(str::trim).filter(|n| !n.is_empty());
+    get(conn, channel)?;
+    conn.execute(
+        "UPDATE channel SET name = ?2 WHERE id = ?1",
+        (channel, name),
+    )?;
+    Ok(())
+}
+
+/// The user's picture for a channel (a file name), or back to none.
+pub fn set_avatar(conn: &Connection, channel: ChannelId, file: Option<&str>) -> Result<()> {
+    get(conn, channel)?;
+    conn.execute(
+        "UPDATE channel SET avatar = ?2 WHERE id = ?1",
+        (channel, file),
+    )?;
+    Ok(())
+}
+
+/// Move a channel out of, or back into, the main list. The host's channel stays.
+pub fn set_archived(conn: &Connection, channel: ChannelId, archived: bool) -> Result<()> {
+    let ch = get(conn, channel)?;
+    if archived && ch.is_host_channel() {
+        return Err(Error::Invalid("the host channel cannot be archived".into()));
+    }
+    conn.execute(
+        "UPDATE channel SET archived = ?2 WHERE id = ?1",
+        (channel, archived),
     )?;
     Ok(())
 }
@@ -439,6 +480,30 @@ mod tests {
         let h = host(&w).unwrap();
         assert!(get(&w, h).unwrap().is_host_channel());
         assert_eq!(host(&w).unwrap(), h);
+    }
+
+    #[test]
+    fn name_avatar_and_archive_are_kept_and_a_person_unarchives() {
+        let w = world();
+        let g = create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        set_name(&w, g, Some("  Night shift ")).unwrap();
+        set_avatar(&w, g, Some("x.png")).unwrap();
+        set_archived(&w, g, true).unwrap();
+        let ch = get(&w, g).unwrap();
+        assert_eq!(ch.name.as_deref(), Some("Night shift"));
+        assert_eq!(ch.avatar.as_deref(), Some("x.png"));
+        assert!(ch.archived);
+        // The user's own message leaves it archived; a person's brings it back.
+        crate::message::append(&w, g, &Actor::User, "hi", None, None, 1).unwrap();
+        assert!(get(&w, g).unwrap().archived);
+        crate::message::append(&w, g, &Actor::Person(p("a")), "yo", None, None, 2).unwrap();
+        assert!(!get(&w, g).unwrap().archived);
+        set_name(&w, g, Some("   ")).unwrap();
+        set_avatar(&w, g, None).unwrap();
+        let ch = get(&w, g).unwrap();
+        assert!(ch.name.is_none() && ch.avatar.is_none());
+        let h = host(&w).unwrap();
+        assert!(set_archived(&w, h, true).is_err());
     }
 
     #[test]

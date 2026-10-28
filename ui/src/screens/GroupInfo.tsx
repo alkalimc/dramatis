@@ -1,5 +1,4 @@
 import { useEffect, useId, useState } from "react";
-import { channelArchived, channelAvatar, channelName } from "../api/ext";
 import { useT } from "../i18n";
 import { groupTitle } from "../lib/chats";
 import { readAvatar } from "../lib/image";
@@ -24,7 +23,7 @@ export function GroupInfo({ id }: { id: string }) {
 
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
   const title = groupTitle(group, t);
-  const named = Boolean(channelName(group)?.trim());
+  const named = Boolean(group.name?.trim());
 
   const save = async () => {
     setEditing(false);
@@ -74,7 +73,7 @@ export function GroupInfo({ id }: { id: string }) {
           </h2>
         )}
         <p className="muted">{t("group.members.count", { count: group.participants.length })}</p>
-        <PictureButtons onPick={async (f) => actions.setChannelAvatar(id, await readAvatar(f))} onClear={() => void actions.setChannelAvatar(id, null)} clearable={Boolean(channelAvatar(group))} />
+        <PictureButtons onPick={async (f) => actions.setChannelAvatar(id, await readAvatar(f))} onClear={() => void actions.setChannelAvatar(id, null)} clearable={Boolean(group.avatar)} />
       </header>
 
       <section className="info-section">
@@ -104,8 +103,8 @@ export function GroupInfo({ id }: { id: string }) {
       </section>
 
       <section className="info-actions">
-        <button type="button" className="ghost" onClick={() => void actions.archive(id, !channelArchived(group))}>
-          <Icon name="archive" size={18} /> {t(channelArchived(group) ? "chatmenu.unarchive" : "chatmenu.archive")}
+        <button type="button" className="ghost" onClick={() => void actions.archive(id, !group.archived)}>
+          <Icon name="archive" size={18} /> {t(group.archived ? "chatmenu.unarchive" : "chatmenu.archive")}
         </button>
         <button type="button" className="ghost danger" onClick={remove}>
           <Icon name="trash" size={18} /> {t("channel.delete")}
