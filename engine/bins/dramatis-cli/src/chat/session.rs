@@ -266,15 +266,15 @@ impl Session {
             .collect();
         // Aliases are the corpus's own dictionary: keep those that name a talkable person.
         if let Some(corpus) = self.names.corpus() {
-            let aliases = corpus.with_folio(|f| f.exact_aliases()).unwrap_or_default();
-            for alias in aliases {
-                let who = corpus
-                    .with_folio(|f| f.persons_for_alias(&alias))
-                    .unwrap_or_default();
-                if talkable.iter().any(|e| who.contains(&e.id)) {
-                    names.push(alias);
-                }
-            }
+            let pairs = corpus
+                .with_folio(|f| f.aliases_for_persons())
+                .unwrap_or_default();
+            names.extend(
+                pairs
+                    .into_iter()
+                    .filter(|(_, id)| talkable.iter().any(|e| &e.id == id))
+                    .map(|(alias, _)| alias),
+            );
         }
         let ids = talkable.iter().map(|e| e.id.clone()).collect();
         let saves = self.engine.saves().await.unwrap_or_default();

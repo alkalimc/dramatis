@@ -108,6 +108,8 @@ fn corpus(wording: &str, host: bool) -> TempFolio {
         .manifest("scene_marker", r#"["(", ")"]"#);
     b.person("ann", None).person("bo", None).person("cy", None);
     b.alias("Annie", "ann", "term_exact");
+    b.alias("Lady A", "ann", "redirect");
+    b.alias("Lady B", "bo", "redirect");
     for (id, page, text, persons) in [
         (
             "u1",
@@ -792,6 +794,8 @@ async fn tab_completes_persons_with_a_persona_and_follows_the_saves() {
         "{all:?}"
     );
     assert_eq!(names(&r, "/talk Ann").len(), 2, "display name and alias");
+    // Any alias kind completes, but only for talkable persons.
+    assert_eq!(names(&r, "/talk Lady"), ["Lady A"]);
     // A new save is offered at once, and one that was deleted no longer is.
     assert_eq!(names(&r, "/save switch sec"), Vec::<String>::new());
     r.run("/save new second").await;

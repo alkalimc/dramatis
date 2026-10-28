@@ -210,6 +210,18 @@ impl Folio {
             .map_err(Into::into)
     }
 
+    /// Every alias term that resolves to a person, with that person's id, in one query.
+    /// Terms pointing at pages that are not persons are left out.
+    pub fn aliases_for_persons(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT a.alias, p.person_id FROM aliases a \
+             JOIN persons p ON p.person_id = a.target ORDER BY a.alias, p.person_id",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
     /// The people an alias names, as roster ids.
     ///
     /// Separate from `resolve_alias` because the two answer different questions. An alias
