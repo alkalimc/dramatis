@@ -48,6 +48,7 @@ pub struct Corpus {
     coldstart: Vec<(String, String)>,
     revision_url_pattern: String,
     avatar_url_pattern: String,
+    player_avatar_pattern: String,
 }
 
 impl std::fmt::Debug for Corpus {
@@ -136,6 +137,7 @@ impl Corpus {
             .collect();
         let revision_url_pattern = optional_key(folio.conn(), "revision_url_pattern");
         let avatar_url_pattern = optional_key(folio.conn(), "avatar_url_pattern");
+        let player_avatar_pattern = optional_key(folio.conn(), "player_avatar_url");
 
         Ok(Self {
             manifest,
@@ -151,6 +153,7 @@ impl Corpus {
             coldstart,
             revision_url_pattern,
             avatar_url_pattern,
+            player_avatar_pattern,
         })
     }
 
@@ -234,6 +237,14 @@ impl Corpus {
     /// percent-encoded after hashing.
     pub fn avatar_url(&self, page: &str) -> Option<String> {
         (!self.avatar_url_pattern.is_empty()).then(|| expand_avatar(&self.avatar_url_pattern, page))
+    }
+
+    /// Where the player's default picture lives, from the optional manifest key
+    /// `player_avatar_url`: a full URL in the same form as `avatar_url_pattern` (the hash
+    /// placeholders work; there is no page title). `None` without one.
+    pub fn player_avatar_url(&self) -> Option<String> {
+        (!self.player_avatar_pattern.is_empty())
+            .then(|| expand_avatar(&self.player_avatar_pattern, ""))
     }
 
     /// The first line of a person's profile text, if the corpus has a profile unit for them.

@@ -6,10 +6,12 @@
 
 mod chat;
 mod endpoints;
+mod external;
 mod library;
 mod people;
 mod saves;
 mod tasks;
+mod uploads;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,7 +33,7 @@ use crate::media::MediaCache;
 use crate::params::Params;
 use crate::port::{
     AgentPort, Clock, Event, KeyStore, LlmPort, LocalClock, MemoryKeys, NetPort, NoSink, Offline,
-    Sink, Unwired,
+    Seen, Sink, Unwired,
 };
 use crate::types::*;
 use crate::views::*;
@@ -45,6 +47,9 @@ pub struct Ports {
     pub net: Arc<dyn NetPort>,
     pub sink: Arc<dyn Sink>,
     pub clock: Arc<dyn Clock>,
+    /// What `sink` has announced; see [`Seen`]. Wire the same one into a [`Tracking`]
+    /// sink that every event source shares.
+    pub seen: Arc<Seen>,
 }
 
 impl Default for Ports {
@@ -57,6 +62,7 @@ impl Default for Ports {
             net: Arc::new(Offline),
             sink: Arc::new(NoSink),
             clock: Arc::new(LocalClock),
+            seen: Arc::default(),
         }
     }
 }
@@ -80,6 +86,8 @@ pub struct Engine {
     fetches: tokio::sync::Semaphore,
     /// The last reachability probe of the chat endpoint; assumed up until one says otherwise.
     online: AtomicBool,
+    /// What other processes have written since the last poll; see `external.rs`.
+    watch: Mutex<external::Watch>,
 }
 
 fn io(e: impl std::fmt::Display) -> ApiError {
@@ -127,6 +135,7 @@ impl Engine {
             media,
             fetches: tokio::sync::Semaphore::new(AVATAR_FETCHES),
             online: AtomicBool::new(true),
+            watch: Mutex::default(),
         })
     }
 
@@ -484,6 +493,19 @@ impl Api for Engine {
     async fn delete_group(&self, channel: ChannelId) -> ApiResult<()> {
         self.delete_group_impl(&channel)
     }
+    async fn rename_channel(&self, channel: ChannelId, name: Option<String>) -> ApiResult<()> {
+        self.rename_channel_impl(&channel, name)
+    }
+    async fn set_channel_avatar(
+        &self,
+        channel: ChannelId,
+        image: Option<ImagePart>,
+    ) -> ApiResult<Option<MediaFile>> {
+        self.set_channel_avatar_impl(&channel, image)
+    }
+    async fn archive_channel(&self, channel: ChannelId, archived: bool) -> ApiResult<()> {
+        self.archive_channel_impl(&channel, archived)
+    }
     async fn ask(
         &self,
         person: PersonId,
@@ -535,6 +557,12 @@ impl Api for Engine {
     }
     async fn avatar(&self, person: PersonId) -> ApiResult<Option<MediaFile>> {
         self.avatar_impl(&person).await
+    }
+    async fn user_avatar(&self) -> ApiResult<Option<MediaFile>> {
+        self.user_avatar_impl().await
+    }
+    async fn set_user_avatar(&self, image: Option<ImagePart>) -> ApiResult<Option<MediaFile>> {
+        self.set_user_avatar_impl(image).await
     }
     async fn tts_play(&self, message: MessageId) -> ApiResult<MediaFile> {
         self.tts_play_impl(&message).await

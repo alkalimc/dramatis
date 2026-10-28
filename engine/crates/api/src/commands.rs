@@ -142,6 +142,14 @@ commands! {
     fn mark_read(channel: ChannelId, up_to: MessageId) -> ();
     fn create_group(members: Vec<PersonId>, topic: Option<String>) -> ChannelId;
     fn delete_group(channel: ChannelId) -> ();
+    /// Title a channel. `None` or blank returns to the derived title.
+    fn rename_channel(channel: ChannelId, name: Option<String>) -> ();
+    /// Set (or, with `None`, clear) a channel's picture. Returns the stored file.
+    fn set_channel_avatar(channel: ChannelId, image: Option<ImagePart>) -> Option<MediaFile>;
+    /// Move a channel out of or back into the main list. The host's channel cannot be
+    /// archived (`Invalid`). A message from a person in an archived channel un-archives
+    /// it (`WorldChanged`); the user's own messages do not.
+    fn archive_channel(channel: ChannelId, archived: bool) -> ();
 
     // ---- requests and case files ----
 
@@ -172,6 +180,12 @@ commands! {
     fn search_corpus(query: String, persons: Vec<PersonId>) -> SearchResults;
     fn resolve_citation(citation: Citation) -> CitationView;
     fn avatar(person: PersonId) -> Option<MediaFile> = Ok(None);
+    /// The user's picture: the one they set, else the corpus's player portrait (fetched
+    /// and cached like a person's avatar), else `None`.
+    fn user_avatar() -> Option<MediaFile> = Ok(None);
+    /// Set the user's picture; `None` returns to the default. Returns what `user_avatar`
+    /// now answers. Per save.
+    fn set_user_avatar(image: Option<ImagePart>) -> Option<MediaFile>;
 
     // ---- read-aloud ----
 

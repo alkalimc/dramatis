@@ -78,7 +78,13 @@ pub fn append(
         )?;
         let id = MessageId(conn.last_insert_rowid());
         match author {
-            Actor::Person(p) => bond::touch_user(conn, p, at)?,
+            Actor::Person(p) => {
+                bond::touch_user(conn, p, at)?;
+                // Someone speaking brings an archived channel back, as in a chat app.
+                if ch.archived {
+                    conn.execute("UPDATE channel SET archived = 0 WHERE id = ?1", [channel])?;
+                }
+            }
             Actor::User if ch.kind == ChannelKind::Direct => {
                 if let Some(p) = ch.person() {
                     bond::touch_user(conn, p, at)?;
@@ -128,6 +134,15 @@ pub fn since(
         "SELECT {COLUMNS} FROM message WHERE channel = ?1 AND (?2 IS NULL OR id > ?2) ORDER BY id"
     ))?;
     let rows = stmt.query_map((channel, after), read)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Messages of any channel with an id above `after`, oldest first, at most `limit`.
+pub fn all_since(conn: &Connection, after: i64, limit: u32) -> Result<Vec<Message>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM message WHERE id > ?1 ORDER BY id LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map((after, limit), read)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 

@@ -69,6 +69,7 @@ def test_manifest_shape(built, pack):
     assert m["clock.year_offset"] == 100
     assert m["user_placeholder"] == "{user}"
     assert m["avatar_url_pattern"] == pack.wiki.avatar_url == "https://toy.invalid/file/avatar_{page}.png"
+    assert m["player_avatar_url"] == pack.wiki.player_avatar_url == "https://toy.invalid/file/player.png"
 
 
 def test_v2_tables_exist_and_enforce_their_checks(built):

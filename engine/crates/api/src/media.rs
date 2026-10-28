@@ -54,6 +54,35 @@ pub fn image_ext(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// Largest picture a user may set; the UI downsizes first, so this only stops abuse.
+pub const UPLOAD_MAX: usize = 8 << 20;
+
+/// Standard base64, padding optional, whitespace ignored. `None` on any other byte.
+pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for b in text.bytes() {
+        let v = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b' ' | b'\n' | b'\r' | b'\t' => continue,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
 impl MediaCache {
     pub fn new(root: impl Into<PathBuf>, limit_bytes: u64) -> Self {
         Self {
@@ -155,6 +184,15 @@ mod tests {
         assert!(!b.exists(), "b was the least recently used");
         assert_eq!(cache.get("avatar", "b"), None);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn base64_round_trips() {
+        assert_eq!(base64_decode("aGk=").unwrap(), b"hi");
+        assert_eq!(base64_decode("aGk").unwrap(), b"hi");
+        assert_eq!(base64_decode("aG\nVsbG8=").unwrap(), b"hello");
+        assert_eq!(base64_decode("").unwrap(), b"");
+        assert!(base64_decode("a*b").is_none());
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! saves/<name>.sqlite  one world per save: everything that changes with play
 //! current_save     the name of the save a process opens when it starts
 //! office/          notes written by people looking into a request
+//! uploads/         pictures the user chose (theirs, a group's), named by content hash
 //! media/           avatars and read-aloud audio: a bounded cache, never archived
 //! prompts/         optional local overrides, `<subject>.yaml` = { slot: body }
 //! <pack>.folio     the corpus, unless `DRAMATIS_FOLIO` points elsewhere
@@ -46,6 +47,7 @@ impl Home {
         for dir in [
             self.office(),
             self.avatars(),
+            self.uploads(),
             self.tts(),
             self.prompts(),
             self.saves(),
@@ -132,6 +134,12 @@ impl Home {
 
     pub fn media(&self) -> PathBuf {
         self.root.join("media")
+    }
+
+    /// Pictures the user chose (their own, a group's). Not under `media/`: that is a cache
+    /// that evicts, and these cannot be fetched again.
+    pub fn uploads(&self) -> PathBuf {
+        self.root.join("uploads")
     }
 
     pub fn avatars(&self) -> PathBuf {

@@ -159,6 +159,47 @@ impl Sink for NoSink {
     fn emit(&self, _: Event) {}
 }
 
+/// The ids of the messages already announced to the window (`MessageAdded`), newest
+/// last and bounded. Lets the engine tell a message its own agent wrote, which the
+/// window knows, from one another process wrote, which it does not.
+#[derive(Debug, Default)]
+pub struct Seen(Mutex<std::collections::VecDeque<String>>);
+
+impl Seen {
+    const KEEP: usize = 1024;
+
+    pub fn record(&self, event: &Event) {
+        if let Event::MessageAdded(e) = event {
+            let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            ids.push_back(e.message.id.0.clone());
+            if ids.len() > Self::KEEP {
+                ids.pop_front();
+            }
+        }
+    }
+
+    pub fn has(&self, id: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|i| i == id)
+    }
+}
+
+/// A sink that notes what it forwards in a [`Seen`].
+pub struct Tracking {
+    pub inner: std::sync::Arc<dyn Sink>,
+    pub seen: std::sync::Arc<Seen>,
+}
+
+impl Sink for Tracking {
+    fn emit(&self, event: Event) {
+        self.seen.record(&event);
+        self.inner.emit(event);
+    }
+}
+
 /// Keeps every event, for tests.
 #[derive(Debug, Default)]
 pub struct Recorder(pub Mutex<Vec<Event>>);
