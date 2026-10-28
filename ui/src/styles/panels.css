@@ -82,7 +82,8 @@ button.member:hover {
 }
 .mode-all .mode-options {
   flex-direction: column;
-  gap: var(--s-2);
+  flex-wrap: nowrap;
+  gap: 0;
 }
 .mode-option {
   display: flex;
@@ -117,11 +118,55 @@ button.member:hover {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+/* The list form (hints for every state): rows with an icon, the name, a muted line, a check. */
+.mode-all .mode-option {
+  position: relative;
+  padding: var(--s-2) 0;
+}
+.mode-all .mode-option:hover {
+  background: var(--raised);
+}
 .mode-all .mode-choice {
-  align-self: flex-start;
-  font-weight: 600;
+  gap: var(--s-4);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+.mode-all .mode-choice::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.mode-all .mode-choice svg {
+  color: var(--muted);
+}
+.mode-all .mode .mode-choice:has(input:checked),
+.mode.mode-all .mode-choice:has(input:checked) {
+  background: none;
+  border: none;
+  color: var(--ink);
+}
+.mode-all .mode-name {
+  flex: 1;
+}
+.mode-all .mode-check {
+  display: none;
+  color: var(--accent);
+}
+.mode-all .mode-check svg {
+  color: var(--accent);
+}
+.mode-all .mode-choice:has(input:checked) .mode-check {
+  display: inline-flex;
 }
 .mode-all .mode-hint {
+  margin: 0 0 0 calc(22px + var(--s-4));
+  padding-right: var(--s-5);
+}
+.mode-hint {
   margin: 2px 0 0 var(--s-3);
 }
 .mode-hint {
@@ -601,4 +646,10 @@ button.info-row:hover {
 
 .info-panel .info-head {
   padding-top: var(--s-5);
+}
+.member-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.3;
 }

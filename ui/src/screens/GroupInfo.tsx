@@ -16,12 +16,14 @@ export function GroupInfo({ id }: { id: string }) {
   const dispatch = useDispatch();
   const nameId = useId();
   const group = useStore((s) => s.channels.find((c) => c.id === id));
+  const roster = useStore((s) => s.roster);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 
   useEffect(() => setEditing(false), [id]);
 
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
+  const modeOf = new Map((roster?.groups ?? []).flatMap((g) => g.rows).map((r) => [r.person.id, r.mode] as const));
   const title = groupTitle(group, t);
   const named = Boolean(group.name?.trim());
 
@@ -106,7 +108,10 @@ export function GroupInfo({ id }: { id: string }) {
             <li key={p.id}>
               <button type="button" className="member" onClick={() => dispatch({ type: "drawer", drawer: { kind: "person", id: p.id } })}>
                 <Avatar person={p} size="m" />
-                <span>{p.name}</span>
+                <span className="member-text">
+                  <span>{p.name}</span>
+                  {modeOf.get(p.id) && <span className="muted small">{t(`mode.${modeOf.get(p.id)!}`)}</span>}
+                </span>
               </button>
             </li>
           ))}

@@ -1,8 +1,12 @@
 import { useId } from "react";
 import type { Mode } from "../api";
 import { useT, type Key } from "../i18n";
+import { Icon, type IconName } from "./Icon";
 
 const MODES: Mode[] = ["enabled", "frozen", "disabled"];
+
+// Drawn on the rows of the list form, which reads like the settings lists.
+const ICONS: Record<Mode, IconName> = { enabled: "bell", frozen: "snow", disabled: "mute" };
 
 export function modeHintKey(mode: Mode, kind: "person" | "group"): Key {
   return kind === "group" ? `mode.group.${mode}.hint` : `mode.${mode}.hint`;
@@ -49,7 +53,13 @@ export function ModeSwitch({
                   aria-describedby={hintId}
                   onChange={() => onChange(m)}
                 />
-                <span>{t(`mode.${m}`)}</span>
+                {hints === "all" && <Icon name={ICONS[m]} size={22} />}
+                <span className="mode-name">{t(`mode.${m}`)}</span>
+                {hints === "all" && (
+                  <span className="mode-check" aria-hidden="true">
+                    <Icon name="check" size={20} />
+                  </span>
+                )}
               </label>
               <span id={hintId} className={hints === "all" ? "mode-hint" : "sr-only"}>
                 {hint}

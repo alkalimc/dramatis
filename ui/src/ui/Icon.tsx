@@ -33,6 +33,7 @@ const PATHS = {
   leave: "M10 4H5v16h5M14 8l4 4-4 4M18 12H9",
   chevronRight: "M9 6l6 6-6 6",
   down: "M6 9l6 6 6-6",
+  snow: "M12 3v18M4.5 7.5l15 9M19.5 7.5l-15 9M9.5 4.5L12 7l2.5-2.5M9.5 19.5L12 17l2.5 2.5",
   chevron: "M6 9l6 6 6-6",
   calendar: "M5 6h14v14H5zM5 10h14M9 4v4M15 4v4",
   profile: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6.5 18c1-2.3 3-3.5 5.5-3.5s4.5 1.2 5.5 3.5",
