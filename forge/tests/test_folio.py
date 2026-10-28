@@ -205,4 +205,5 @@ def test_a_failed_build_keeps_the_previous_folio(built, pack, paths, monkeypatch
     with Archive(paths.archive) as archive, pytest.raises(RuntimeError):
         corpus.run(archive, pack, paths.folio, segmenter="bigram")
     assert paths.folio.read_bytes() == before
-    assert not paths.folio.with_name(paths.folio.name + ".building").exists()
+    for suffix in ("", "-wal", "-shm"):
+        assert not paths.folio.with_name(paths.folio.name + ".building" + suffix).exists()

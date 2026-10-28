@@ -97,7 +97,8 @@ def run(archive: Archive, pack: Pack, folio_path: Path, **kwargs) -> CorpusRepor
         rep = _run(archive, pack, tmp, **kwargs)
         tmp.replace(folio_path)
     finally:
-        tmp.unlink(missing_ok=True)
+        for suffix in ("", "-wal", "-shm"):
+            tmp.with_name(tmp.name + suffix).unlink(missing_ok=True)
     return rep
 
 
