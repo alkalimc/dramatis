@@ -16,12 +16,14 @@ export function GroupInfo({ id }: { id: string }) {
   const dispatch = useDispatch();
   const nameId = useId();
   const group = useStore((s) => s.channels.find((c) => c.id === id));
+  const roster = useStore((s) => s.roster);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 
   useEffect(() => setEditing(false), [id]);
 
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
+  const modeOf = new Map((roster?.groups ?? []).flatMap((g) => g.rows).map((r) => [r.person.id, r.mode] as const));
   const title = groupTitle(group, t);
   const named = Boolean(group.name?.trim());
 
@@ -76,6 +78,17 @@ export function GroupInfo({ id }: { id: string }) {
         <PictureButtons onPick={async (f) => actions.setChannelAvatar(id, await readAvatar(f))} onClear={() => void actions.setChannelAvatar(id, null)} clearable={Boolean(group.avatar)} />
       </header>
 
+      <div className="info-squares">
+        <button type="button" className="square" onClick={() => void actions.archive(id, !group.archived)}>
+          <Icon name="archive" size={24} />
+          <span>{t(group.archived ? "chatmenu.unarchive" : "chatmenu.archive")}</span>
+        </button>
+        <button type="button" className="square danger" onClick={remove}>
+          <Icon name="trash" size={24} />
+          <span>{t("channel.delete")}</span>
+        </button>
+      </div>
+
       <section className="info-section">
         <h3>{t("group.mode")}</h3>
         <ModeSwitch kind="group" mode={group.mode} hints="all" label={t("mode.label.group")} onChange={(m) => actions.setMode({ kind: "channel", id }, m)} />
@@ -95,21 +108,16 @@ export function GroupInfo({ id }: { id: string }) {
             <li key={p.id}>
               <button type="button" className="member" onClick={() => dispatch({ type: "drawer", drawer: { kind: "person", id: p.id } })}>
                 <Avatar person={p} size="m" />
-                <span>{p.name}</span>
+                <span className="member-text">
+                  <span>{p.name}</span>
+                  {modeOf.get(p.id) && <span className="muted small">{t(`mode.${modeOf.get(p.id)!}`)}</span>}
+                </span>
               </button>
             </li>
           ))}
         </ul>
       </section>
 
-      <section className="info-actions">
-        <button type="button" className="ghost" onClick={() => void actions.archive(id, !group.archived)}>
-          <Icon name="archive" size={18} /> {t(group.archived ? "chatmenu.unarchive" : "chatmenu.archive")}
-        </button>
-        <button type="button" className="ghost danger" onClick={remove}>
-          <Icon name="trash" size={18} /> {t("channel.delete")}
-        </button>
-      </section>
     </div>
   );
 }

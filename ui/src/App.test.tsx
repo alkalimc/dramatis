@@ -9,6 +9,12 @@ test("full form: header clock, waiting panel, host channel with action lines", a
   expect(screen.getByLabelText("In-world date and local time").closest("footer")).not.toBeNull();
   const panel = screen.getByRole("heading", { name: "Who's waiting" }).closest("section")!;
   expect(await within(panel).findByText("Mira Vale")).toBeDefined();
+  // One pinned line at first; the list opens with two rows and the rest are one click away.
+  expect(within(panel).queryByText("birthday today")).toBeNull();
+  const user = userEvent.setup();
+  await user.click(within(panel).getByRole("button", { name: "Show the list" }));
+  expect(within(panel).queryByText("birthday today")).toBeNull();
+  await user.click(within(panel).getByRole("button", { name: "Show 2 more" }));
   expect(within(panel).getByText("birthday today")).toBeDefined();
   expect(await screen.findByText(/Host ▸ finding who knows/)).toBeDefined();
   // No unread badges or counts on the panel.
@@ -55,6 +61,8 @@ test("selection menu: where from, and who knows this", async () => {
   const user = userEvent.setup();
   renderApp();
   const panel = (await screen.findByRole("heading", { name: "Who's waiting" })).closest("section")!;
+  await user.click(await within(panel).findByRole("button", { name: "Show the list" }));
+  await user.click(await within(panel).findByRole("button", { name: "Show 2 more" }));
   await user.click(await within(panel).findByText("Tess Arden"));
   await within(await screen.findByRole("log")).findByText(/Take the stairs by the fish market/);
   const actions = screen.getAllByRole("button", { name: "Actions for this message" });
@@ -73,7 +81,8 @@ test("ask card: candidates with reasons, turns hidden under more", async () => {
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getAllByRole("button", { name: /Ask someone/ })[0]);
+  await user.click(screen.getByRole("button", { name: "Attach" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Ask someone" }));
   const dialog = await screen.findByRole("dialog", { name: "Ask someone" });
   await user.type(within(dialog).getByLabelText("What do you want to know?"), "the tide gates repair");
   expect(await within(dialog).findByText("Her own reports describe the gate repairs.")).toBeDefined();
@@ -149,8 +158,9 @@ test("endpoints: a failed model fetch shows the endpoint's own text and a manual
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getByRole("button", { name: "System" }));
-  await user.click(await screen.findByRole("tab", { name: "Endpoints" }));
+  await user.click(screen.getByRole("button", { name: "Menu" }));
+  await user.click(within(await screen.findByRole("complementary", { name: "Menu" })).getByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByRole("button", { name: "Endpoints" }));
   const card = (await screen.findByRole("heading", { name: "deepseek" })).closest("li")!;
   await user.click(within(card).getByRole("button", { name: "Fetch models" }));
   expect(await within(card).findByText(/401 Unauthorized/)).toBeDefined();

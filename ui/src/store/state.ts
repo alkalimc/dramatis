@@ -32,13 +32,20 @@ import { makeT, type T } from "../i18n";
 
 export type Drawer =
   | { kind: "roster" }
+  /** The contacts list, a card over the app. */
+  | { kind: "contacts" }
   | { kind: "person"; id: PersonId }
   | { kind: "cases" }
   | { kind: "case"; id: TaskId }
   | { kind: "world" }
-  | { kind: "system"; tab: "quota" | "endpoints" | "saves" }
+  | { kind: "system"; tab: SystemPage }
   /** A group's info panel (a person's is `person`). */
   | { kind: "channel"; id: ChannelId };
+
+export type ProfileMode = "view" | "edit";
+
+/** The pages of the settings card; `root` is its list. */
+export type SystemPage = "root" | "quota" | "quiet" | "endpoints" | "saves";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -133,6 +140,10 @@ export interface State {
   listView: ListView;
   /** The left drawer (profile, settings shortcuts). */
   menuOpen: boolean;
+  /** The user's own profile card: reading it, or editing it; `null` = closed. */
+  profile: ProfileMode | null;
+  /** Search inside the open conversation: `null` = off, else the text typed so far. */
+  find: string | null;
   /** Every person name seen in any payload, for labelling authors. */
   names: Record<PersonId, string>;
   /** Messages whose sources are unfolded; all start folded, and it lasts the session. */
@@ -185,6 +196,8 @@ export function initialState(): State {
     theme: "system",
     listView: "chats",
     menuOpen: false,
+    profile: null,
+    find: null,
     names: {},
     sourcesOpen: {},
     restore: null,
@@ -222,6 +235,8 @@ export type Action =
   | { type: "theme"; theme: Theme }
   | { type: "listView"; view: ListView }
   | { type: "menu"; open: boolean }
+  | { type: "profile"; mode: ProfileMode | null }
+  | { type: "find"; query: string | null }
   /** Set a channel's unread count by hand: 0 = read, 1 = marked unread. */
   | { type: "unread"; channel: ChannelId; count: number }
   | { type: "names"; persons: PersonRef[] }

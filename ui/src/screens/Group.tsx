@@ -1,11 +1,13 @@
-import { useId, useState } from "react";
-import type { Candidate, PersonRef } from "../api";
+import { useId, useRef, useState } from "react";
+import type { Candidate, ImagePart, PersonRef } from "../api";
 import { useT } from "../i18n";
+import { readAvatar } from "../lib/image";
+import { Icon } from "../ui/Icon";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
 import { modeHintKey } from "../ui/ModeSwitch";
 
-/** Start a group: who (by name or by topic), and optionally what about. */
+/** Start a group: first its name and picture, then who (by name or by topic) and what about. */
 export function GroupDialog() {
   const t = useT();
   const api = useApi();
@@ -19,6 +21,11 @@ export function GroupDialog() {
   const [byTopic, setByTopic] = useState<Candidate[] | null>(null);
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<"name" | "people">("name");
+  const [name, setName] = useState("");
+  const [picture, setPicture] = useState<ImagePart | null>(null);
+  const nameId = useId();
+  const file = useRef<HTMLInputElement>(null);
 
   const close = () => dispatch({ type: "groupDialog", open: false });
   const add = (p: PersonRef) => setMembers((m) => (m.some((x) => x.id === p.id) ? m : [...m, p]));
@@ -43,9 +50,57 @@ export function GroupDialog() {
     setBusy(false);
     if (!channel) return;
     close();
+    // The name and picture were chosen first; they attach to the group once it exists.
+    if (name.trim()) await actions.rename(channel, name.trim());
+    if (picture) await actions.setChannelAvatar(channel, picture);
     await actions.refreshChannels();
     await actions.open(channel);
   };
+
+  if (step === "name") {
+    return (
+      <Dialog title={t("group.new")} onClose={close} className="group-card" hideTitle>
+        <form
+          className="group-name-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setStep("people");
+          }}
+        >
+          <div className="group-name-row">
+            <input
+              ref={file}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) setPicture(await readAvatar(f));
+              }}
+            />
+            <button type="button" className="camera-big" aria-label={t("picture.change")} title={t("picture.change")} onClick={() => file.current?.click()}>
+              {picture ? <img src={`data:${picture.mime};base64,${picture.data_base64}`} alt="" /> : <Icon name="camera" size={34} />}
+            </button>
+            <div className="underline-field">
+              <label htmlFor={nameId}>{t("group.name.label")}</label>
+              <input id={nameId} value={name} autoFocus autoComplete="off" onChange={(e) => setName(e.target.value)} />
+            </div>
+          </div>
+          <p className="text-actions">
+            <button type="button" className="text-btn" onClick={close}>
+              {t("group.cancel")}
+            </button>
+            <button type="submit" className="text-btn">
+              {t("group.next")}
+            </button>
+          </p>
+        </form>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog title={t("group.title")} onClose={close}>
@@ -107,8 +162,8 @@ export function GroupDialog() {
         <p className="muted small">{t(modeHintKey("frozen", "group"))}</p>
 
         <p className="row end">
-          <button type="button" className="ghost" onClick={close}>
-            {t("group.cancel")}
+          <button type="button" className="ghost" onClick={() => setStep("name")}>
+            {t("chatlist.back")}
           </button>
           <button type="submit" disabled={busy || members.length === 0}>
             {t("group.start")}

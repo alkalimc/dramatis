@@ -46,6 +46,13 @@ a {
   outline-offset: 2px;
   border-radius: var(--r-xs);
 }
+/* A container that takes focus on open (a dialog) shows no ring; its controls do. */
+[tabindex="-1"]:focus {
+  outline: none;
+}
+button.icon:focus-visible {
+  border-radius: 50%;
+}
 
 .sr-only {
   position: absolute;

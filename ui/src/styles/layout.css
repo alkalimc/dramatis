@@ -35,20 +35,33 @@
   padding: var(--s-5);
 }
 
-/* ---- rail: tabs touch, no gaps ---- */
+/* ---- rail: the menu button on top, then tabs that touch, no gaps ---- */
 .rail {
   flex: none;
   width: var(--rail-w);
   background: var(--rail);
-  border-right: 1px solid var(--line);
-  padding-top: var(--s-2);
 }
 .rail ul {
   display: flex;
   flex-direction: column;
 }
+button.rail-menu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--head-h);
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  padding: 0;
+}
+button.rail-menu:hover {
+  color: var(--ink);
+  filter: none;
+}
 button.rail-item {
-  position: relative;
   width: 100%;
   flex-direction: column;
   gap: 2px;
@@ -57,7 +70,8 @@ button.rail-item {
   border-radius: 0;
   color: var(--muted);
   font-size: var(--fs-xs);
-  padding: var(--s-3) var(--s-1);
+  padding: var(--s-3) var(--s-1) var(--s-2);
+  min-height: 5.4rem;
 }
 button.rail-item:hover {
   background: var(--panel);
@@ -66,13 +80,29 @@ button.rail-item:hover {
 button.rail-item.on {
   color: var(--accent);
   background: var(--panel);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
-.rail-item .badge {
+.rail-icon {
+  position: relative;
+  display: inline-flex;
+}
+.rail-icon .badge {
   position: absolute;
-  top: var(--s-2);
-  left: 50%;
-  margin-left: 0.3rem;
+  top: -0.5rem;
+  left: 58%;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  line-height: 1.2rem;
+  padding: 0 0.3rem;
+  box-shadow: 0 0 0 2px var(--rail);
+}
+.rail-item.on .rail-icon .badge {
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.rail-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- chat list ---- */
@@ -82,14 +112,15 @@ button.rail-item.on {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border-right: 1px solid var(--line);
   min-height: 0;
 }
 .list-head {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
+  height: var(--head-h);
+  padding: 0 var(--s-3);
+  flex: none;
 }
 .search-field {
   flex: 1;
@@ -142,6 +173,7 @@ button.chat-row {
   align-items: center;
   gap: var(--s-3);
   width: 100%;
+  min-height: var(--row-h);
   text-align: left;
   background: none;
   border: none;
@@ -169,13 +201,19 @@ button.chat-row.selected {
   align-items: center;
   gap: var(--s-2);
 }
+.chat-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-name {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chat-time,
 .chat-pin {
@@ -211,6 +249,8 @@ button.chat-row.selected {
   position: absolute;
   right: var(--s-3);
   bottom: var(--s-3);
+  background: var(--pill);
+  color: var(--ink);
 }
 .chat-row.selected + .badge {
   background: var(--select-ink);
@@ -236,9 +276,8 @@ button.chat-row.selected {
 
 /* ---- right panel ---- */
 .drawer {
-  width: min(26rem, 45vw);
+  width: min(var(--info-w), 45vw);
   flex: none;
-  border-left: 1px solid var(--line);
   background: var(--panel);
   overflow-y: auto;
   position: relative;
@@ -282,7 +321,7 @@ button.chat-row.selected {
   margin: 0;
 }
 
-/* ---- left drawer (the hamburger) ---- */
+/* ---- left drawer (the hamburger): slides over the rail and part of the list ---- */
 .scrim {
   position: fixed;
   inset: 0;
@@ -290,28 +329,73 @@ button.chat-row.selected {
   z-index: 20;
 }
 .left-drawer {
-  width: min(20rem, 85vw);
+  width: min(22rem, 85vw);
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   box-shadow: var(--shadow);
+  animation: drawer-in 0.18s ease-out;
 }
-.left-head {
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .left-drawer {
+    animation: none;
+  }
+}
+button.left-head {
+  position: relative;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: var(--s-2);
-  padding: var(--s-5) var(--s-4) var(--s-4);
+  width: 100%;
+  padding: var(--s-5) var(--s-4) var(--s-3);
+  background: var(--panel);
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  text-align: left;
+}
+button.left-head:hover {
   background: var(--raised);
+  filter: none;
+}
+button.left-head .avatar {
+  --size: 4.4rem;
+}
+button.left-head > .icon-svg {
+  position: absolute;
+  right: var(--s-4);
+  bottom: var(--s-4);
+  color: var(--muted);
+}
+.left-who {
+  display: flex;
+  max-width: calc(100% - 2rem);
+  flex-direction: column;
+  min-width: 0;
 }
 .left-name {
-  margin: 0;
   font-weight: 600;
   font-size: var(--fs-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.left-sub {
+  color: var(--accent);
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .drawer-items {
-  flex: 1;
   padding: var(--s-2) 0;
+  border-top: 1px solid var(--line);
 }
 .drawer-item {
   display: flex;
@@ -327,7 +411,8 @@ button.chat-row.selected {
   color: var(--ink);
   cursor: pointer;
 }
-button.drawer-item:hover {
+button.drawer-item:hover,
+.switch-row:hover {
   background: var(--raised);
   filter: none;
 }
@@ -338,8 +423,13 @@ button.drawer-item:hover {
   flex: 1;
 }
 .left-foot {
-  padding: var(--s-3) var(--s-4);
-  border-top: 1px solid var(--line);
+  margin-top: auto;
+  padding: var(--s-4);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.left-foot p {
+  margin: 0;
 }
 
 /* ---- dialogs and menus ---- */
@@ -354,7 +444,7 @@ button.drawer-item:hover {
 }
 .dialog {
   background: var(--panel);
-  border-radius: var(--r-md);
+  border-radius: 10px;
   padding: var(--s-4) var(--s-5);
   width: min(34rem, 100%);
   max-height: 90vh;
@@ -438,8 +528,8 @@ button.drawer-item:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 1px;
-  background: var(--line);
+  gap: 2px;
+  background: transparent;
 }
 .avatar-grid .avatar {
   --size: 100%;
@@ -452,7 +542,7 @@ button.drawer-item:hover {
   font-size: calc(var(--avatar-xl) * 0.22);
 }
 .avatar-grid .avatar:nth-child(even) {
-  background: var(--line);
+  background: var(--field);
 }
 .avatar-grid.grid-2,
 .avatar-grid.grid-3 {
@@ -490,4 +580,268 @@ button.drawer-item:hover {
     border-top: 1px solid var(--line);
     max-height: 60vh;
   }
+}
+
+/* ---- search panel: takes over the list column while a conversation is searched ---- */
+.scope-title {
+  margin: 0;
+  padding: var(--s-2) var(--s-4);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.scope-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--line);
+}
+.scope-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-5);
+  padding-top: 20%;
+  color: var(--muted);
+}
+button.chat-row.result {
+  min-height: 0;
+}
+.chat-row.result .chat-preview {
+  padding-right: 0;
+}
+
+/* ---- right panel: the info of the open conversation ---- */
+.info-squares {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+  padding: 0 var(--s-4) var(--s-4);
+}
+button.square {
+  flex-direction: column;
+  gap: var(--s-1);
+  height: 5.2rem;
+  background: var(--raised);
+  border: none;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  padding: var(--s-2);
+}
+button.square:hover:not(:disabled) {
+  background: var(--field);
+  filter: none;
+}
+button.square.danger {
+  color: var(--danger);
+  background: var(--raised);
+}
+
+/* ---- cards: settings, contacts, new group ---- */
+.dialog.settings-card,
+.dialog.contacts-card,
+.dialog.group-card {
+  padding: 0;
+}
+.dialog.settings-card {
+  width: min(32.5rem, 100%);
+  display: flex;
+  flex-direction: column;
+}
+.settings-bar {
+  flex: none;
+  padding: var(--s-3) var(--s-3) var(--s-2) var(--s-4);
+}
+.settings-root,
+.settings-page {
+  flex: 0 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+.settings-page {
+  padding: var(--s-3) var(--s-4) var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+button.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--s-3);
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  text-align: left;
+  padding: var(--s-4);
+}
+button.settings-head .avatar {
+  --size: 4.4rem;
+}
+.settings-list {
+  padding: var(--s-1) 0;
+}
+.settings-gap {
+  border-top: 12px solid var(--line);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  padding: var(--s-3) var(--s-4);
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  text-align: left;
+  justify-content: flex-start;
+}
+button.settings-row:hover,
+label.settings-row:hover {
+  background: var(--raised);
+  filter: none;
+}
+.settings-row svg {
+  color: var(--muted);
+}
+.settings-label {
+  flex: 1;
+}
+.settings-value {
+  color: var(--accent);
+}
+.dialog.contacts-card {
+  width: min(32.5rem, 100%);
+  height: min(44rem, 90vh);
+  display: flex;
+  flex-direction: column;
+}
+.contacts-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.contacts-search input {
+  flex: 1;
+  border: none;
+  background: none;
+  box-shadow: none;
+  padding: var(--s-2) 0;
+}
+.contacts-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+button.contact-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--s-3);
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  text-align: left;
+  padding: var(--s-2) var(--s-4);
+}
+button.contact-row:hover:not(:disabled) {
+  background: var(--raised);
+  filter: none;
+}
+.text-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-4);
+  margin: 0;
+  padding: var(--s-3) var(--s-5);
+}
+.contacts-foot {
+  flex: none;
+  justify-content: space-between;
+  background: var(--raised);
+}
+button.text-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 600;
+  padding: var(--s-1) var(--s-2);
+}
+button.text-btn:hover:not(:disabled) {
+  background: var(--raised);
+  filter: none;
+}
+.dialog.group-card {
+  width: min(32.5rem, 100%);
+}
+.group-name-form {
+  padding: var(--s-5) var(--s-5) 0;
+}
+.group-name-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-5);
+}
+button.camera-big {
+  flex: none;
+  width: 5.2rem;
+  height: 5.2rem;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--camera);
+  color: #fff;
+  overflow: hidden;
+}
+button.camera-big img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.underline-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+}
+.underline-field input {
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  padding: var(--s-1) 0;
+}
+.underline-field input:focus-visible {
+  box-shadow: none;
+}
+.dialog.group-card .group-form {
+  padding: var(--s-4) var(--s-5);
+}
+.card-title {
+  margin: 0;
+  padding: var(--s-4) var(--s-4) var(--s-2);
+  font-size: var(--fs-lg);
+  font-weight: 600;
 }

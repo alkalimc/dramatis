@@ -4,34 +4,38 @@
  * sets `data-theme` on the root. Text colours meet WCAG AA on the surfaces they sit on.
  */
 :root {
-  /* surfaces, back to front */
-  --rail: #0d1317;
-  --bg: #0f161b;
-  --panel: #17212a;
-  --raised: #202c36;
-  --field: #121a21;
-  --line: #26333d;
+  /* surfaces, back to front: the night palette of the desktop client this UI follows */
+  --rail: #17191d;
+  --bg: #17191d;
+  --panel: #282e32;
+  --raised: #33393e;
+  --field: #3d444b;
+  --line: #222528;
   --scrim: rgb(0 0 0 / 0.5);
 
   /* text */
-  --ink: #eef3f6;
-  --muted: #8a9aa6;
+  --ink: #f5f6f7;
+  --muted: #8e9399;
+  /* small print on bubbles: stricter than muted, which sits on plain panels */
+  --stamp: #a3a9ae;
 
   /* accent: `--accent` is for text and icons, `--accent-fill` carries white text */
-  --accent: #4fd0c0;
-  --accent-fill: #0e8074;
+  --accent: #3ee2cc;
+  --accent-fill: #009687;
   --accent-ink: #ffffff;
-  --select: #0e8074;
+  --select: #009687;
   --select-ink: #ffffff;
+  --camera: #4994db;
+  --pill: #4a5159;
 
   /* bubbles */
-  --own: #1b5f59;
-  --other: #202c36;
+  --own: #1b6e68;
+  --other: #33393e;
 
   /* state */
   --warn: #f0b36a;
   --danger: #ff8a7d;
-  --focus: #8ab8ff;
+  --focus: #3ee2cc;
 
   /* speaker name colours */
   --hue-0: #5ec8bd;
@@ -46,7 +50,7 @@
   /* shape */
   --r-xs: 6px;
   --r-sm: 10px;
-  --r-md: 16px;
+  --r-md: 14px;
   --r-pill: 999px;
   --shadow: 0 8px 28px rgb(0 0 0 / 0.35);
 
@@ -64,12 +68,16 @@
   --fs-lg: 1.1rem;
 
   /* sizes of the fixed parts */
-  --rail-w: 4.5rem;
-  --list-w: clamp(16rem, 26vw, 22rem);
+  --rail-w: 5.3rem;
+  --list-w: clamp(16rem, 22vw, 19.5rem);
+  --info-w: 22rem;
+  --row-h: 5.1rem;
+  --head-h: 4.5rem;
   --avatar-s: 1.75rem;
   --avatar-m: 2.4rem;
-  --avatar-l: 3.3rem;
+  --avatar-l: 3.9rem;
   --avatar-xl: 7rem;
+  --bubble-r: 12px;
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -81,6 +89,8 @@
 
 :root[data-theme="light"] {
   --rail: #f1f4f6;
+  --pill: #c9d2d9;
+  --camera: #3a82d0;
   --bg: #e4eaee;
   --panel: #ffffff;
   --raised: #eef2f5;
@@ -89,6 +99,7 @@
   --scrim: rgb(20 30 40 / 0.35);
   --ink: #1a2229;
   --muted: #566570;
+  --stamp: #3d4a54;
   --accent: #0b6f66;
   --accent-fill: #0b7a6f;
   --select: #0b7a6f;
@@ -96,7 +107,7 @@
   --other: #ffffff;
   --warn: #8a4b00;
   --danger: #a3261b;
-  --focus: #1a64d6;
+  --focus: #0b6f66;
   --hue-0: #0b7a70;
   --hue-1: #a8500f;
   --hue-2: #2a5fb8;

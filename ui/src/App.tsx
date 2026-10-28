@@ -15,9 +15,10 @@ import { GroupDialog } from "./screens/Group";
 import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
 import { PersonDrawer } from "./screens/Person";
-import { LeftDrawer } from "./screens/Profile";
+import { LeftDrawer, ProfileCard } from "./screens/Profile";
+import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
-import { SystemDrawer } from "./screens/System";
+import { SettingsCard } from "./screens/Settings";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -68,6 +69,7 @@ function Shell() {
   const wordingError = useStore((s) => s.loadErrors.wording);
   const full = useStore((s) => s.status?.form === "full" && Boolean(s.hostChannel));
   const menuOpen = useStore((s) => s.menuOpen);
+  const profile = useStore((s) => s.profile);
   const actions = useActions();
   usePresence();
   useTheme();
@@ -107,11 +109,14 @@ function Shell() {
         {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
         <div className="body">
           <Main />
-          {drawer && <DrawerPane drawer={drawer} />}
+          {drawer && drawer.kind !== "system" && drawer.kind !== "contacts" && <DrawerPane drawer={drawer} />}
         </div>
       </div>
       <ErrorBar />
       {menuOpen && <LeftDrawer />}
+      {drawer?.kind === "contacts" && <ContactsCard />}
+      {drawer?.kind === "system" && <SettingsCard page={drawer.tab} />}
+      {profile && <ProfileCard mode={profile} />}
       {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
     </div>
@@ -148,15 +153,15 @@ function useTheme() {
   }, [theme]);
 }
 
-const NAV: { key: "roster" | "cases" | "world" | "system"; icon: IconName; drawer: Drawer }[] = [
+// Settings live in the hamburger's drawer, not on the rail.
+const NAV: { key: "roster" | "cases" | "world"; icon: IconName; drawer: Drawer }[] = [
   { key: "roster", icon: "people", drawer: { kind: "roster" } },
   { key: "cases", icon: "cases", drawer: { kind: "cases" } },
   { key: "world", icon: "world", drawer: { kind: "world" } },
-  { key: "system", icon: "system", drawer: { kind: "system", tab: "quota" } },
 ];
 
 function drawerKey(d: Drawer | null): "roster" | "cases" | "world" | "system" | null {
-  if (!d || d.kind === "channel") return null;
+  if (!d || d.kind === "channel" || d.kind === "contacts") return null;
   if (d.kind === "person") return "roster";
   if (d.kind === "case") return "cases";
   return d.kind;
@@ -173,18 +178,25 @@ function Rail() {
     for (const id of ids) if (unreadOf(id, s.unread, s.digest) > 0) n += 1;
     return n;
   });
-  const current = drawerKey(drawer);
+  const key = drawerKey(drawer);
+  // Settings is a card over the app, not a section: the rail keeps showing the chats.
+  const current = key === "system" ? null : key;
 
   return (
     <header className="rail">
       <h1 className="sr-only">{t("host.name")}</h1>
+      <button type="button" className="rail-menu" aria-label={t("menu.open")} title={t("menu.open")} aria-haspopup="dialog" onClick={() => dispatch({ type: "menu", open: true })}>
+        <Icon name="menu" size={26} />
+      </button>
       <nav aria-label={t("nav.label")}>
         <ul>
           <li>
             <button type="button" className={`rail-item${current === null ? " on" : ""}`} aria-pressed={current === null} onClick={() => dispatch({ type: "drawer", drawer: null })}>
-              <Icon name="chats" />
-              <span>{t("nav.chats")}</span>
-              {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
+              <span className="rail-icon">
+                <Icon name="chats" size={30} />
+                {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
+              </span>
+              <span className="rail-label">{t("nav.chats")}</span>
             </button>
           </li>
           {NAV.map((n) => (
@@ -195,8 +207,10 @@ function Rail() {
                 aria-pressed={current === n.key}
                 onClick={() => dispatch({ type: "drawer", drawer: current === n.key ? null : n.drawer })}
               >
-                <Icon name={n.icon} />
-                <span>{t(`nav.${n.key}`)}</span>
+                <span className="rail-icon">
+                  <Icon name={n.icon} size={30} />
+                </span>
+                <span className="rail-label">{t(`nav.${n.key}`)}</span>
               </button>
             </li>
           ))}
@@ -231,7 +245,6 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       {drawer.kind === "cases" && <CasesDrawer />}
       {drawer.kind === "case" && <CaseDrawer id={drawer.id} />}
       {drawer.kind === "world" && <WorldDrawer />}
-      {drawer.kind === "system" && <SystemDrawer tab={drawer.tab} />}
     </aside>
   );
 }
