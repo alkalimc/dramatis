@@ -303,19 +303,22 @@ pub fn hand_off_mark(wording: &Wording) -> &str {
 }
 
 /// A reply without its closing hand-off line, and the names that line listed. The line
-/// is the last non-empty one and starts with `mark`; names are separated by commas
-/// (ASCII or full-width), enumeration commas or semicolons. A marker anywhere else is
-/// speech and stays.
+/// is the last non-empty one and starts with `mark`, or comes just before closing lines
+/// of citation marks only (a model that writes the two closing lines in the other order);
+/// those stay. Names are separated by commas (ASCII or full-width), enumeration commas or
+/// semicolons. A marker anywhere else is speech and stays.
 pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
-    let kept = text.trim_end();
-    let (head, last) = match kept.rfind('\n') {
-        Some(i) => (&kept[..i], &kept[i + 1..]),
-        None => ("", kept),
-    };
-    let Some(list) = last
-        .trim_start()
-        .strip_prefix(mark)
-        .filter(|_| !mark.is_empty())
+    if mark.is_empty() {
+        return (text.to_owned(), Vec::new());
+    }
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    let mut i = lines.len();
+    while i > 0 && (lines[i - 1].trim().is_empty() || is_cite_line(lines[i - 1])) {
+        i -= 1;
+    }
+    let Some(list) = i
+        .checked_sub(1)
+        .and_then(|k| lines[k].trim_start().strip_prefix(mark))
     else {
         return (text.to_owned(), Vec::new());
     };
@@ -325,7 +328,33 @@ pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
         .filter(|n| !n.is_empty())
         .map(str::to_owned)
         .collect();
-    (head.trim_end().to_owned(), names)
+    let head = lines[..i - 1].join("\n");
+    let cites = lines[i..].join("\n");
+    let kept = match (head.trim_end(), cites.trim()) {
+        (h, "") => h.to_owned(),
+        ("", c) => c.to_owned(),
+        (h, c) => format!("{h}\n{c}"),
+    };
+    (kept, names)
+}
+
+/// A line of `[#id]` marks and nothing else.
+fn is_cite_line(line: &str) -> bool {
+    let line = line.trim();
+    if !line.starts_with("[#") || ids_in(line).is_empty() {
+        return false;
+    }
+    let mut rest = line;
+    while let Some(i) = rest.find('[') {
+        if !rest[..i].trim().is_empty() {
+            return false;
+        }
+        let Some(end) = rest[i..].find(']') else {
+            return false;
+        };
+        rest = &rest[i + end + 1..];
+    }
+    rest.trim().is_empty()
 }
 
 /// How much of the streamed text is safe to show: everything except a trailing line that
@@ -336,6 +365,24 @@ pub fn shown_len(pending: &str, mark: &str) -> usize {
         return pending.len();
     }
     let body = pending.trim_end();
+    let mut start = body.rfind('\n').map_or(0, |i| i + 1);
+    // Closing citation lines (or one still being written) after a marker line: the
+    // marker line is still the hand-off line, so hold from there.
+    let mut end = body.len();
+    while start > 0 {
+        let line = body[start..end].trim();
+        let cite = is_cite_line(line)
+            || (end == body.len() && line.starts_with('[') && !line.contains(']'));
+        if !(line.is_empty() || cite) {
+            break;
+        }
+        end = start - 1;
+        let prev = body[..end].rfind('\n').map_or(0, |i| i + 1);
+        if body[prev..end].trim_start().starts_with(mark) {
+            return prev;
+        }
+        start = prev;
+    }
     let start = body.rfind('\n').map_or(0, |i| i + 1);
     let line = body[start..].trim_start();
     let held = line.starts_with(mark) || (pending.len() == body.len() && mark.starts_with(line));
@@ -632,6 +679,11 @@ mod tests {
         assert_eq!(split_hand_off("plain", m).1, Vec::<String>::new());
         assert_eq!(split_hand_off("x\n\u{2192}", m), ("x".to_owned(), vec![]));
         assert_eq!(split_hand_off("x\n-> Ann", "").1.len(), 0);
+        // Written before the citation line: still the hand-off, and the marks stay.
+        let (t, n) = split_hand_off("Hi.\n\n\u{2192} Ann\n[#u1, #u2]\n", m);
+        assert_eq!((t.as_str(), n), ("Hi.\n[#u1, #u2]", vec!["Ann".to_owned()]));
+        let speech = "Hi.\n\u{2192} Ann\n[#u1] and more";
+        assert_eq!(split_hand_off(speech, m).1, Vec::<String>::new());
     }
 
     #[test]
@@ -648,6 +700,10 @@ mod tests {
             "Hello\n\u{2192} Ann\nmore".len()
         );
         assert_eq!(at("\u{2192} Ann"), 0);
+        // A citation line after the marker line keeps the marker line held.
+        assert_eq!(at("Hello\n\u{2192} Ann\n[#u1]"), 6);
+        assert_eq!(at("Hello\n\u{2192} Ann\n[#u"), 6);
+        assert_eq!(at("Hello\n[#u1]"), "Hello\n[#u1]".len());
         // A multi-character marker is held while it could still complete.
         assert_eq!(shown_len("Hi\n=", "=>"), 3);
         assert_eq!(shown_len("Hi\n=x", "=>"), 5);
