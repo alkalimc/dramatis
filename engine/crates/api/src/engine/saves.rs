@@ -36,6 +36,12 @@ impl Engine {
             .cloned()
     }
 
+    /// The password entered for the open save in this process, so a front end that
+    /// reopens the engine on the same home can carry it over (in memory only).
+    pub fn open_password(&self) -> Option<String> {
+        self.password_of(&self.open_save())
+    }
+
     fn remember(&self, name: &str, password: Option<&str>) {
         let mut all = self.passwords.lock().unwrap_or_else(|e| e.into_inner());
         match password {
@@ -135,10 +141,17 @@ impl Engine {
             self.password_of(&open)
         };
         let reopened = World::open_with(&path, key.as_deref()).map_err(world_err);
-        if let Ok(w) = reopened {
-            *world = w;
-        } else if done.is_ok() {
-            return reopened.map(drop);
+        match reopened {
+            Ok(w) => *world = w,
+            Err(e) => {
+                // The engine would otherwise keep writing to a blank world nobody sees:
+                // it stays locked until the save opens again.
+                self.locked.store(true, Ordering::Relaxed);
+                if done.is_ok() {
+                    self.remember(&open, new.as_deref());
+                    return Err(e);
+                }
+            }
         }
         drop(world);
         done.map_err(|e| match e {
@@ -169,16 +182,39 @@ impl Engine {
             &mut *world,
             World::in_memory().map_err(world_err)?,
         ));
+        let locked = self.locked.load(Ordering::Relaxed);
+        let reopen = |name: &str| {
+            if locked {
+                World::in_memory()
+            } else {
+                World::open_with(self.home.save_path(name), key.as_deref())
+            }
+            .map_err(world_err)
+        };
         let moved = saves::rename(&self.home, from, to);
-        let now = if moved.is_ok() { to } else { from };
-        *world = if self.locked.load(Ordering::Relaxed) {
-            World::in_memory()
-        } else {
-            World::open_with(self.home.save_path(now), key.as_deref())
-        }
-        .map_err(world_err)?;
-        moved?;
-        self.home.set_current_save(to).map_err(io)?;
+        // The new name takes hold only once the file reopens under it and the name for
+        // the next start is written; any failure before that puts everything back.
+        let next = moved.clone().and_then(|()| {
+            let w = reopen(to)?;
+            self.home.set_current_save(to).map_err(io)?;
+            Ok(w)
+        });
+        let w = match next {
+            Ok(w) => w,
+            Err(e) => {
+                if moved.is_ok() {
+                    let _ = saves::rename(&self.home, to, from);
+                }
+                match reopen(from) {
+                    Ok(w) => *world = w,
+                    // Nothing writable is open: say so rather than let writes vanish.
+                    Err(_) => self.locked.store(true, Ordering::Relaxed),
+                }
+                return Err(e);
+            }
+        };
+        *world = w;
+        drop(world);
         self.move_password(from, to);
         self.ports
             .agent

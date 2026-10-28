@@ -1658,3 +1658,87 @@ async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_pa
         Some("Bea")
     );
 }
+
+#[tokio::test]
+async fn a_rename_that_cannot_finish_leaves_the_open_save_open_under_its_old_name() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+
+    // The new name cannot be written for the next start.
+    let current = e.home.root().join("current_save");
+    let _ = std::fs::remove_file(&current);
+    std::fs::create_dir(&current).unwrap();
+    assert!(
+        e.rename_save("default".into(), "main".into())
+            .await
+            .is_err()
+    );
+    std::fs::remove_dir(&current).unwrap();
+    std::fs::write(&current, "default").unwrap();
+    assert!(e.home.save_path("default").exists());
+    assert!(!e.home.save_path("main").exists());
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
+    // The write above is in the live world, and new writes land in the file.
+    name_user(e, "Bea").await;
+    let on_disk = world::World::open(e.home.save_path("default")).unwrap();
+    assert_eq!(
+        world::settings::get::<String>(&on_disk, "user.name")
+            .unwrap()
+            .as_deref(),
+        Some("Bea")
+    );
+    drop(on_disk);
+
+    // The file will not reopen under the password this process holds: the files go back
+    // and the engine says it is locked instead of writing to a blank world.
+    e.passwords
+        .lock()
+        .unwrap()
+        .insert("default".into(), "wrong".into());
+    assert!(
+        e.rename_save("default".into(), "main".into())
+            .await
+            .is_err()
+    );
+    assert!(e.home.save_path("default").exists());
+    assert!(!e.home.save_path("main").exists());
+    assert_eq!(e.home.current_save(), "default");
+    assert!(e.locked.load(Ordering::Relaxed));
+}
+
+#[tokio::test]
+async fn a_rewind_frees_ids_that_a_terminal_write_then_reuses() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    let wc = convert::world_channel(&ch).unwrap();
+    let sent = {
+        let w = e.w();
+        world::message::append(&w, wc, &world::Actor::User, "mine", None, None, 4).unwrap()
+    };
+    let view = e.history_impl(&ch, None, 10).unwrap().pop().unwrap();
+    e.ports
+        .seen
+        .record(&Event::MessageAdded(crate::events::MessageAdded {
+            message: view.clone(),
+        }));
+    assert_eq!(e.poll_external().unwrap(), 0);
+    r.events.take();
+
+    // The user takes it back (the agent's rewind announces `Rewound` through the sink).
+    {
+        let w = e.w();
+        world::rewind::rewind(&w, wc, sent).unwrap();
+    }
+    e.ports.seen.record(&Event::Rewound(crate::events::Rewound {
+        channel: ch.clone(),
+        from: view.id.clone(),
+    }));
+    // The terminal's next message gets the freed id.
+    terminal_says(e, &ch, "from the terminal");
+    assert_eq!(e.poll_external().unwrap(), 1);
+}

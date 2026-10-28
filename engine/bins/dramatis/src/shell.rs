@@ -86,7 +86,20 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
         app: app.clone(),
         engine: Mutex::new(Weak::new()),
     });
-    let Runtime { engine, bridge } = Runtime::open(home, folio, sink.clone(), Options::default())?;
+    // A reopen on the same home (a new corpus) keeps the save unlocked: the password the
+    // user entered travels in memory from the old engine to the new one.
+    let password = app
+        .state::<Current>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|(engine, _)| engine.open_password());
+    let options = Options {
+        password,
+        ..Options::default()
+    };
+    let Runtime { engine, bridge } = Runtime::open(home, folio, sink.clone(), options)?;
     *sink.engine.lock().unwrap_or_else(|e| e.into_inner()) = Arc::downgrade(&engine);
     // Stop the previous bridge before the swap: its in-flight turns would otherwise keep
     // emitting into the new window and writing the same world.
