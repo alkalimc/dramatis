@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn names_are_file_safe() {
-        for ok in ["default", "story 2", "第二", "a.b", "x-y_z"] {
+        for ok in ["default", "story 2", "café", "a.b", "x-y_z"] {
             assert!(valid_name(ok), "{ok}");
         }
         for bad in [
