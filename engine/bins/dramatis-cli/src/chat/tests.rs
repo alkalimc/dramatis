@@ -107,6 +107,7 @@ fn corpus(wording: &str, host: bool) -> TempFolio {
         .manifest("wording", wording)
         .manifest("scene_marker", r#"["(", ")"]"#);
     b.person("ann", None).person("bo", None).person("cy", None);
+    b.alias("Annie", "ann", "term_exact");
     for (id, page, text, persons) in [
         (
             "u1",
@@ -177,6 +178,7 @@ impl Drop for TempHome {
 
 struct Rig {
     session: Session,
+    completions: super::complete::Completions,
     show: Arc<Show>,
     engine: Arc<Engine>,
     names: Arc<Names>,
@@ -229,6 +231,7 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
     let scene = engine.wording().await.unwrap().scene_marker;
     show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
     let bridge = runtime.bridge.unwrap();
+    let completions = super::complete::Completions::default();
     Rig {
         session: Session::new(
             engine.clone(),
@@ -236,8 +239,10 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
             term,
             show.clone(),
             names.clone(),
+            completions.clone(),
         )
         .await,
+        completions,
         show,
         engine,
         names,
@@ -766,4 +771,32 @@ async fn arrivals_run_the_tick_without_a_model_call_when_nothing_is_due() {
     r.session.arrivals(true).await;
     r.session.arrivals(false).await;
     assert!(r.out.take().is_empty() || !r.out.take().contains("error"));
+}
+
+#[tokio::test]
+async fn tab_completes_persons_with_a_persona_and_follows_the_saves() {
+    let mut r = rig().await;
+    let names = |r: &Rig, line: &str| -> Vec<String> {
+        r.completions
+            .complete(line, line.len())
+            .1
+            .into_iter()
+            .map(|p| p.display)
+            .collect()
+    };
+    // Ann and Cy have personas, Bo has none; the alias reaches Ann.
+    let all = names(&r, "/talk ");
+    assert!(all.iter().any(|n| n == "Annie"), "{all:?}");
+    assert!(
+        !all.iter().any(|n| n.to_lowercase().starts_with("bo")),
+        "{all:?}"
+    );
+    assert_eq!(names(&r, "/talk Ann").len(), 2, "display name and alias");
+    // A new save is offered at once, and one that was deleted no longer is.
+    assert_eq!(names(&r, "/save switch sec"), Vec::<String>::new());
+    r.run("/save new second").await;
+    assert_eq!(names(&r, "/save switch sec"), ["second"]);
+    r.run("/save delete second").await;
+    r.run("y").await;
+    assert_eq!(names(&r, "/save switch sec"), Vec::<String>::new());
 }

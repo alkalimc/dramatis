@@ -13,6 +13,7 @@ use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
 
 use super::command::{Command, Save, parse};
+use super::complete::{Completions, Snapshot};
 use super::show::{Names, Offer, Show, Term, Working};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -55,6 +56,7 @@ pub struct Session {
     term: Arc<Term>,
     show: Arc<Show>,
     names: Arc<Names>,
+    completions: Completions,
     current: Option<Current>,
     /// The host's latest choices, numbered from 1 for `/go`.
     offers: Vec<Offer>,
@@ -114,6 +116,7 @@ impl Session {
         term: Arc<Term>,
         show: Arc<Show>,
         names: Arc<Names>,
+        completions: Completions,
     ) -> Self {
         let metered = bridge
             .calls_after(0)
@@ -121,12 +124,13 @@ impl Session {
             .ok()
             .and_then(|c| c.last().map(|c| c.id))
             .unwrap_or(0);
-        Self {
+        let session = Self {
             engine,
             bridge,
             term,
             show,
             names,
+            completions,
             current: None,
             offers: Vec::new(),
             calls: Vec::new(),
@@ -134,7 +138,9 @@ impl Session {
             prefill: None,
             listed: Vec::new(),
             pending: None,
-        }
+        };
+        session.refresh_completions().await;
+        session
     }
 
     /// The input prompt: the channel in dim type, then the user's own name, since the
@@ -182,6 +188,7 @@ impl Session {
         };
         if matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
             self.confirmed(pending).await;
+            self.refresh_completions().await;
         } else {
             self.term.note("cancelled");
         }
@@ -212,7 +219,10 @@ impl Session {
             Command::Edit(n, text) => self.change_memory(n, Change::Edit(text)).await,
             Command::Tier(level) => self.tier(level.as_deref()).await,
             Command::Quiet(arg) => self.quiet(arg.as_deref()).await,
-            Command::Save(cmd) => self.save(cmd).await,
+            Command::Save(cmd) => {
+                self.save(cmd).await;
+                self.refresh_completions().await;
+            }
             Command::History(n) => self.history(n).await,
             Command::Resend(n) => self.resend(n).await,
             Command::Sources(n) => self.sources(n).await,
@@ -243,6 +253,36 @@ impl Session {
                 display: r.person.name,
             })
             .collect())
+    }
+
+    /// What the editor's Tab completes to: the names persons answer to and the save names.
+    /// Read again after a `/save` command, which can change either.
+    async fn refresh_completions(&self) {
+        let roster = self.roster().await.unwrap_or_default();
+        let talkable: Vec<&Entry> = roster.iter().filter(|e| e.persona).collect();
+        let mut names: Vec<String> = talkable
+            .iter()
+            .flat_map(|e| std::iter::once(&e.display).chain(&e.forms).cloned())
+            .collect();
+        // Aliases are the corpus's own dictionary: keep those that name a talkable person.
+        if let Some(corpus) = self.names.corpus() {
+            let aliases = corpus.with_folio(|f| f.exact_aliases()).unwrap_or_default();
+            for alias in aliases {
+                let who = corpus
+                    .with_folio(|f| f.persons_for_alias(&alias))
+                    .unwrap_or_default();
+                if talkable.iter().any(|e| who.contains(&e.id)) {
+                    names.push(alias);
+                }
+            }
+        }
+        let ids = talkable.iter().map(|e| e.id.clone()).collect();
+        let saves = self.engine.saves().await.unwrap_or_default();
+        self.completions.set(Snapshot::new(
+            names,
+            ids,
+            saves.into_iter().map(|s| s.name).collect(),
+        ));
     }
 
     async fn list(&self, filter: Option<&str>) {

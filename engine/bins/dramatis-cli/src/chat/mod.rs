@@ -4,10 +4,12 @@
 //! same seam commands and events: slash commands, anything else is a message to the
 //! current channel, replies stream as they are generated. On a terminal the input is edited
 //! by rustyline, which measures wide (CJK) characters correctly: Enter starts a new line
-//! and Alt-Enter sends (a slash command runs on Enter). Piped input, and
+//! and Alt-Enter sends (a slash command runs on Enter), and Tab completes command names,
+//! persons and save names. Piped input, and
 //! `--plain`, is read as plain lines, one message each.
 
 mod command;
+mod complete;
 mod render;
 mod session;
 mod show;
@@ -25,6 +27,7 @@ use api::home::Home;
 use runtime::{Options, Runtime};
 
 use command::Command;
+use complete::Completions;
 use render::{Marker, Style};
 use session::{Flow, Session};
 use show::{Names, Show, Term};
@@ -119,12 +122,14 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             .scene_marker;
         show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
         println!("{}", header(&engine, &folio, &home, args.fresh).await);
+        let completions = Completions::default();
         let typing = Typing {
             tip: names.text("cli.typing.more"),
             style: term.style,
+            completions: completions.clone(),
         };
         let intro = intro_lines(&names);
-        let mut session = Session::new(engine, bridge, term, show, names).await;
+        let mut session = Session::new(engine, bridge, term, show, names, completions).await;
         if let Some(name) = args.user.as_deref() {
             session.set_user(name).await;
         }
@@ -194,6 +199,7 @@ fn is_command_line(line: &str) -> bool {
 struct Typing {
     tip: String,
     style: Style,
+    completions: Completions,
 }
 
 /// A hint is display only: the right arrow must not paste it into the draft.
@@ -222,7 +228,16 @@ impl rustyline::highlight::Highlighter for Typing {
 }
 
 impl rustyline::completion::Completer for Typing {
-    type Candidate = String;
+    type Candidate = rustyline::completion::Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
+        Ok(self.completions.complete(line, pos))
+    }
 }
 impl rustyline::validate::Validator for Typing {}
 impl rustyline::Helper for Typing {}
@@ -232,7 +247,11 @@ type Editor = rustyline::Editor<Typing, rustyline::history::DefaultHistory>;
 /// The line editor with the key scheme: Enter newline, Alt-Enter send.
 fn editor(typing: &Typing) -> rustyline::Result<Editor> {
     use rustyline::{Cmd, EventHandler, KeyCode, KeyEvent, Modifiers};
-    let mut editor = Editor::new()?;
+    // A list, not a cycle: with several matches the user sees what they are.
+    let config = rustyline::Config::builder()
+        .completion_type(rustyline::CompletionType::List)
+        .build();
+    let mut editor = Editor::with_config(config)?;
     editor.set_helper(Some(typing.clone()));
     editor.bind_sequence(
         KeyEvent(KeyCode::Enter, Modifiers::NONE),
