@@ -62,7 +62,7 @@ scratch/
 forge/.contract/
 
 # UI dependencies
-node_modules/
+node_modules
 
 # Dev-only corpus wording for the browser preview (exported by the forge)
 ui/wording.local.json
