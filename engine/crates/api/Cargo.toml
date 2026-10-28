@@ -31,6 +31,8 @@ chrono = { version = "=0.4.45", default-features = false, features = ["clock", "
 # Local prompt overrides (`$DRAMATIS_HOME/prompts/<subject>.yaml`).
 serde_norway = "=0.9.42"
 sha2 = "=0.10.9"
+# Hashed upload paths in avatar URLs (a path convention, not a security use).
+md-5 = "=0.10.6"
 tokio = { version = "=1.53.1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]

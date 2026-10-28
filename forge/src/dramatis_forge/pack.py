@@ -783,7 +783,12 @@ class WikiConfig:
     #: One exact revision, `{revid}` substituted.
     revision_url: str = ""
     #: Where a person's avatar image lives, `{page}` substituted with the person's page
-    #: title. Stored in the folio like the other patterns; empty means no avatars.
+    #: title (spaces as underscores). Stored in the folio like the other patterns; empty
+    #: means no avatars. MediaWiki upload hosts keep a file under a path built from the md5
+    #: of its name, so `{md5_1}` and `{md5_2}` stand for the first one and two hex digits
+    #: of that hash, taken over the last path segment after `{page}` is filled in, e.g.
+    #: `https://media.example/{md5_1}/{md5_2}/avatar_{page}.png`. The engine percent-encodes
+    #: the segment, so write it unencoded.
     avatar_url: str = ""
     rate: float = 8.0
     #: Namespaces whose changes can matter for incremental update.

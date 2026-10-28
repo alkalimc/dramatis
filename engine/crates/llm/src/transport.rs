@@ -81,6 +81,12 @@ impl fmt::Debug for Http {
 impl Http {
     pub fn new() -> Result<Self> {
         let client = reqwest::Client::builder()
+            // Sites that serve public files (avatars) expect a client that names itself.
+            .user_agent(concat!(
+                "dramatis/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/alkalimc/dramatis)"
+            ))
             .connect_timeout(Duration::from_secs(30))
             // Between chunks, not for the whole call: a thinking model can be silent for
             // minutes before its first byte.

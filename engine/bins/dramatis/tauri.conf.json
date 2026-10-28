@@ -18,6 +18,7 @@
       }
     ],
     "security": {
+      "assetProtocol": { "enable": true, "scope": [] },
       "csp": "default-src 'self'; img-src 'self' asset: data:; media-src 'self' asset:; style-src 'self' 'unsafe-inline'"
     }
   },
