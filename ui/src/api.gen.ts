@@ -653,7 +653,11 @@ export type Tier = "low" | "middle" | "high" | "extra_high" | "max" |
 export type Timestamp = string;
 
 /**  One tool call as the UI shows it: typed, so each kind gets its own i18n line. */
-export type ToolAction = { tool: "search"; query: string } | { tool: "get_chunk"; chunk_id: string } | { tool: "request_join"; person: PersonRef | null; topic: string | null } | { tool: "remember"; text: string } | { tool: "report" } | { tool: "wrapup" } | { tool: "digest" } | { tool: "find_people"; topic: string } | { tool: "ask"; person: PersonRef; question: string } | { tool: "create_group"; members: PersonRef[] } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId };
+export type ToolAction = { tool: "search"; query: string } | { tool: "get_chunk"; chunk_id: string } | { tool: "request_join"; person: PersonRef | null; topic: string | null } | { tool: "remember"; text: string } | { tool: "report" } | { tool: "wrapup" } | { tool: "digest" } | { tool: "find_people"; topic: string; 
+/**  Who was found, so a front end can offer to open their channels. */
+persons?: PersonRef[] } | { tool: "ask"; person: PersonRef; question: string } | { tool: "create_group"; members: PersonRef[]; 
+/**  The new group, so a front end can offer to open it. Absent on older rows. */
+channel?: ChannelId | null } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId };
 
 /**  A tool call, shown as a visible action line under the message it belongs to. */
 export type ToolCalled = {

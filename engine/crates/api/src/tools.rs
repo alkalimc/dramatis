@@ -136,7 +136,8 @@ pub struct Hurt {
 #[serde(deny_unknown_fields)]
 pub struct Digest {}
 
-/// Find people who know about something.
+/// Find people who know about something. The user is shown a way to talk to them; you
+/// cannot move the user yourself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindPeople {
@@ -158,7 +159,8 @@ pub struct Ask {
     pub turns: Option<u32>,
 }
 
-/// Start a group conversation.
+/// Start a group conversation. The result gives the group id, and the user is shown a way
+/// to open it; you cannot move the user yourself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateGroup {
