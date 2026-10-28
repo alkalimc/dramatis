@@ -2428,6 +2428,7 @@ dependencies = [
  "futures",
  "keyring",
  "reqwest",
+ "security-framework 2.11.1",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
