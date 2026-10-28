@@ -3,6 +3,7 @@ update, and a full re-sync all leave the archive in the same recorded shape."""
 
 from __future__ import annotations
 
+import pytest
 from conftest import sync
 
 from dramatis_forge import harvest
@@ -134,3 +135,43 @@ def test_the_discovered_set_is_what_the_last_run_found(wiki, pack, paths):
         assert a.seed("body") == []
     assert [(f.guard, f.severity) for f in res.findings] == [("G1", "low")]
     assert "Chapter 1/body" in res.findings[0].detail
+
+
+def test_only_throttling_and_server_errors_are_retried():
+    import httpx
+
+    from dramatis_forge import wiki
+
+    def status(code):
+        return httpx.HTTPStatusError("x", request=httpx.Request("GET", "http://x"),
+                                     response=httpx.Response(code))
+
+    assert all(wiki._retryable(status(c)) for c in (429, 500, 503))
+    assert not any(wiki._retryable(status(c)) for c in (400, 403, 404))
+    assert wiki._retryable(httpx.ConnectError("x")) and wiki._retryable(wiki.Throttled("x"))
+
+
+def test_interrupted_sync_leaves_the_watermark_and_the_next_run_finishes(wiki, pack, paths):
+    sync(wiki, pack, paths)
+    wiki.edit("Chapter 1", "Alice: One.\n", story=True)
+    wiki.edit("Chapter 2", "Bob: Two.\n", story=True)
+    old = meta(paths, "watermark")
+    real = wiki.content
+
+    def dies_after_one(titles):
+        for i, item in enumerate(real(titles)):
+            if i == 1:
+                raise KeyboardInterrupt
+            yield item
+
+    wiki.content = dies_after_one
+    with pytest.raises(KeyboardInterrupt):
+        sync(wiki, pack, paths)
+    assert meta(paths, "watermark") == old, "an unfinished sync must not move the watermark"
+
+    wiki.content = real
+    sync(wiki, pack, paths)
+    assert meta(paths, "watermark") == wiki.rcid
+    with Archive(paths.archive, readonly=True) as a:
+        assert a.page("Chapter 1")["wikitext"] == "Alice: One.\n"
+        assert a.page("Chapter 2")["wikitext"] == "Bob: Two.\n"

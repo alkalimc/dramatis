@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Annotated
@@ -66,12 +67,17 @@ def _resolve(pack_name: str, home: Path | None) -> tuple[Pack, Paths]:
     name = pack_name or os.environ.get("DRAMATIS_PACK", "")
     if not name:
         _die("no pack selected", "pass --pack <name> or set DRAMATIS_PACK; the directory "
-             "holding packs/<name>/ must be on DRAMATIS_PACKS")
+             "holding packs/<name>/ must be on DRAMATIS_PACKS or PYTHONPATH")
+    # `./forge` already adds DRAMATIS_PACKS to PYTHONPATH; `python -m dramatis_forge` does not.
+    for root in reversed(os.environ.get("DRAMATIS_PACKS", "").split(os.pathsep)):
+        if root and root not in sys.path:
+            sys.path.insert(0, root)
     try:
         pack = load_pack(name)
     except ModuleNotFoundError as exc:
-        _die(f"no pack named {name!r}",
-             f"{exc}. Point DRAMATIS_PACKS at the directory containing packs/{name}/")
+        _die(f"pack {name!r} not found ({exc})",
+             f"Set DRAMATIS_PACKS (or PYTHONPATH) to the directory that contains packs/{name}/, "
+             f"i.e. the one where packs/{name}/__init__.py exists, then run again.")
     except TypeError as exc:
         _die(f"pack {name!r} is malformed", str(exc))
     return pack, Paths.for_pack(pack.name, home).ensure()
