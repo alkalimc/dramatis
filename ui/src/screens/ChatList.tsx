@@ -26,7 +26,7 @@ export function ChatList() {
   const messages = useStore((s) => s.messages);
   const host = useStore((s) => s.hostChannel);
   const rows = useMemo(() => {
-    const all = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null } satisfies ChannelSummary, ...channels] : channels;
+    const all = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary, ...channels] : channels;
     return byActivity(all, messages);
   }, [channels, messages, host]);
 

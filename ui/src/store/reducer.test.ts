@@ -88,7 +88,7 @@ test("mode changes update the roster row, the enabled count, channels and bump p
   let s = reduce(initialState(), { type: "roster", roster });
   s = reduce(s, {
     type: "channels",
-    channels: [{ id: "g1", kind: "group", origin: "user", participants: [], topic: null, mode: "frozen", last_at: null }],
+    channels: [{ id: "g1", kind: "group", origin: "user", participants: [], topic: null, mode: "frozen", last_at: null, name: null, avatar: null, archived: false }],
   });
   const v = s.peopleVersion;
   s = reduce(s, { type: "modeChanged", event: { target: { kind: "person", id: "p2" }, mode: "enabled" } });
