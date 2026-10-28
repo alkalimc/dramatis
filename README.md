@@ -58,6 +58,23 @@ written three ways: as fetched, as records, as archived text. Read it, then:
 ./forge baseline show      # compare without accepting
 ```
 
+## Personas
+
+```sh
+./forge persona                 # generate and gate a persona per person; resumable
+./forge persona --probe         # only a small probe set, with a readable file per subject
+./forge persona --stale         # no network: list personas whose source material changed
+./forge persona --stale --regenerate
+./forge persona --only <name> --force
+```
+
+Generation uses the `chat` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another
+file). Models billed per request run 3 calls at once by default (`--jobs`); on HTTP 429 every
+worker waits together. A persona that fails a gate is not written. Reports go to
+`<workspace>/artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
+cached under `persona/raw/`; rebuilding the folio drops the personas, and running
+`./forge persona` again restores them from that cache with no model calls.
+
 ## Reports
 
 All generated; do not edit them.
@@ -190,24 +207,31 @@ build, and the app and the terminal client are two different apps, so each new b
 Signing both with one stable certificate makes the identity survive rebuilds.
 
 One time, create a local code-signing certificate: Keychain Access, menu Certificate Assistant,
-Create a Certificate; name `dramatis-local`, Identity Type Self Signed Root, Certificate Type
-Code Signing. Check it is usable:
+Create a Certificate; Identity Type Self Signed Root, Certificate Type Code Signing. The name is
+yours to choose; the commands below use `dramatis` as an example. Check it is usable:
 
 ```sh
-security find-identity -p codesigning        # lists "dramatis-local"
+security find-identity -p codesigning        # lists the certificate by name
 ```
 
-After every build, sign the binaries (the identifier is fixed so it does not carry a build hash):
+After every build, sign what you run. The identifier of the terminal client is fixed so it does
+not carry a build hash. Replace `dramatis` with your certificate's name:
 
 ```sh
 cd engine && cargo build --release -p dramatis-cli
-codesign --force --sign dramatis-local --identifier dramatis.cli target/release/dramatis-cli
-# the desktop binary the same way (a Tauri bundle signs with the identity in this variable)
-codesign --force --sign dramatis-local --identifier dramatis.app target/release/dramatis
-# bundled: APPLE_SIGNING_IDENTITY=dramatis-local pnpm tauri build
+codesign --force --sign dramatis --identifier dramatis.cli target/release/dramatis-cli
 codesign -dv target/release/dramatis-cli 2>&1 | grep -E 'Identifier|Signature'
 ```
 
-The first run of each signed binary asks once more; choose Always Allow and it holds across
+For the desktop app, build the bundle, clear extended attributes and sign it as a whole:
+
+```sh
+cd ui && pnpm build
+cd ../engine/bins/dramatis && npx --prefix ../../../ui tauri build --bundles app
+cd ../.. && xattr -cr target/release/bundle/macos/dramatis.app
+codesign --force --deep --sign dramatis target/release/bundle/macos/dramatis.app
+```
+
+The first run of each signed program asks once more; choose Always Allow and it holds across
 rebuilds. A key saved before signing keeps its old access list, so save it again (profile
 settings, or delete and add it) if a prompt keeps coming back.
