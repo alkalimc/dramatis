@@ -373,7 +373,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       reply = "Noted. You can find it in the world drawer.";
     } else if (/\bwho\b|\bknows?\b|\bask\b|\bfind\b/i.test(text)) {
       const found = candidates(text);
-      actions.push({ tool: "find_people", topic: text.slice(0, 60) });
+      actions.push({ tool: "find_people", topic: text.slice(0, 60), persons: found.map((c) => c.person) });
       reply = found.length
         ? `These could help:\n\n${found.map((c) => `- **${c.person.name}**: ${c.reason}`).join("\n")}\n\nWant me to ask one of them?`
         : "Nobody on the roster has material on that.";

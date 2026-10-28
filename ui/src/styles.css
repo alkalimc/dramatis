@@ -509,6 +509,11 @@ button.nav.on {
   max-width: 16rem;
   border-radius: 8px;
 }
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
 .quote-cards {
   display: flex;
   flex-direction: column;

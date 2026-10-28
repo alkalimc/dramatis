@@ -90,6 +90,8 @@ export const en = {
   "action.set_mode": "setting {target} to {mode}",
   "action.forget": "forgetting a note",
   "action.target.group": "a group",
+  "choice.person": "Talk to {name}",
+  "choice.group": "Open the group with {names}",
   "confidence.low": "Thin archive",
   "citation.label": "From the archive",
   "citation.stale": "This passage changed since it was cited; showing the current version.",
