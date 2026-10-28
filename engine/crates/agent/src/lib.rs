@@ -7,6 +7,7 @@
 //! request, [`Agent::wrapup`], [`Agent::presence`], [`Agent::on_event`] and
 //! [`Agent::on_rename`]. Everything the UI hears arrives through the [`Sink`].
 
+mod address;
 pub mod agent;
 pub mod assemble;
 mod dispatch;

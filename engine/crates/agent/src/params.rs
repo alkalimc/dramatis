@@ -1,4 +1,4 @@
-//! Estimated values this crate reads (`roll`, `interject`, `reasoning`, `loop`, `retrieve`). `Default`
+//! Estimated values this crate reads (`roll`, `interject`, `group`, `reasoning`, `loop`, `retrieve`). `Default`
 //! carries the register's current values and is the only place they are written; use
 //! sites take the struct as an argument. Missing keys fall back field by field.
 
@@ -48,6 +48,30 @@ pub struct Interject {
     /// Own-unit score above which an enabled member may add one line. `None` = the
     /// high boundary of `retrieve.confidence`.
     pub min_confidence: Option<f64>,
+}
+
+/// `group.*`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Group {
+    /// Most members who reply to one message that speaks to several of them, the first
+    /// one included. A hard bound per user message; each reply is one more request.
+    pub collective_max: u32,
+    /// Ask the model who a message speaks to when the cheap rules cannot tell (one small
+    /// request). Off, only the corpus's collective address words widen the audience.
+    pub classify: bool,
+    /// Lines before the message that the audience question shows.
+    pub classify_lines: u32,
+}
+
+impl Default for Group {
+    fn default() -> Self {
+        Self {
+            collective_max: 5,
+            classify: true,
+            classify_lines: 4,
+        }
+    }
 }
 
 /// `reasoning.*`: one value per session, never switched per call. `None` sends nothing
@@ -124,6 +148,7 @@ impl Default for Cost {
 pub struct Params {
     pub roll: Roll,
     pub interject: Interject,
+    pub group: Group,
     pub reasoning: Reasoning,
     #[serde(rename = "loop")]
     pub turn_loop: Loop,
@@ -144,6 +169,8 @@ mod tests {
         assert_eq!(p.roll.tail, Roll::default().tail);
         assert_eq!(p.turn_loop.max_steps, 2);
         assert_eq!(p.interject.min_confidence, None);
+        assert_eq!(p.group.collective_max, 5);
+        assert!(p.group.classify);
         assert_eq!(p.cost.w, 1.25);
         assert_eq!(Roll::default().threshold(0.25), 2400.0);
         assert_eq!(Roll::default().threshold(0.0), f64::INFINITY);

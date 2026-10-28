@@ -22,6 +22,7 @@ use world::{
     channel, fact, message, session, settings,
 };
 
+use crate::address::Audience;
 use crate::agent::{Agent, Event};
 use crate::assemble::{self, Member};
 use crate::error::{Error, Result, timestamp};
@@ -441,9 +442,18 @@ impl Agent {
             .iter()
             .map(|m| PersonId::from(m.person.as_str()))
             .collect();
-        let Some(addressed) = channel::address(&self.db(), posted.channel, named.as_ref(), &hits)?
-        else {
-            return Ok(());
+        let turns = self
+            .speakers(posted, &members, named.as_ref(), &hits)
+            .await?;
+        let addressed = match turns.first() {
+            Some(first) => first.clone(),
+            None => {
+                let Some(a) = channel::address(&self.db(), posted.channel, named.as_ref(), &hits)?
+                else {
+                    return Ok(());
+                };
+                a
+            }
         };
         session::open(
             &self.db(),
@@ -472,6 +482,18 @@ impl Agent {
             .await?;
         self.replied(posted.channel, &addressed)?;
 
+        // A message to several of them gets a short round of replies, each seeing the
+        // earlier ones; it ends the user's turn, so no interjection follows.
+        if turns.len() > 1 {
+            for p in &turns[1..] {
+                if !self.unprompted_allowed()? {
+                    break;
+                }
+                self.interject(posted.channel, p, "harness.chorus").await?;
+            }
+            return Ok(());
+        }
+
         // At most one more line, from the enabled member with the best own material.
         let scored: Vec<(PersonId, f64)> = people
             .persons
@@ -484,11 +506,7 @@ impl Agent {
             .interject
             .min_confidence
             .unwrap_or(self.ix().params().confidence.high_top1);
-        let status = {
-            let conn = self.db();
-            let tier = settings::intensity(&conn)?;
-            quota::status(&conn, tier, self.now().ms, &self.config.world.quota)?
-        };
+        let status = self.quota_status()?;
         let pick = channel::interjector(
             &self.db(),
             posted.channel,
@@ -498,9 +516,97 @@ impl Agent {
             &status,
         )?;
         if let Some(p) = pick.filter(|p| self.has_persona(p.as_str())) {
-            self.interject(posted.channel, &p).await?;
+            self.interject(posted.channel, &p, "harness.interject")
+                .await?;
         }
         Ok(())
+    }
+
+    fn quota_status(&self) -> Result<quota::Status> {
+        let conn = self.db();
+        let tier = settings::intensity(&conn)?;
+        Ok(quota::status(
+            &conn,
+            tier,
+            self.now().ms,
+            &self.config.world.quota,
+        )?)
+    }
+
+    /// Whether the quota band still lets extra turns through; the user's own turn
+    /// always proceeds.
+    fn unprompted_allowed(&self) -> Result<bool> {
+        Ok(quota::decide(&self.quota_status()?, quota::CallKind::Interjection).allowed())
+    }
+
+    /// Whether the text holds one of the corpus's collective address words
+    /// (`harness.collective`, whitespace separated): it speaks to the whole group.
+    fn is_collective(&self, text: &str) -> bool {
+        self.corpus
+            .wording
+            .get("harness.collective")
+            .split_whitespace()
+            .any(|w| text.contains(w))
+    }
+
+    /// Who replies, in order, when the message speaks to several members; empty when the
+    /// plain rule (named, best hit, last speaker) applies. One member named and no
+    /// collective word is the common case and costs no extra request, as does a
+    /// collective word with nobody named. Otherwise the model is asked once who is
+    /// addressed (unless `group.classify` is off, where a collective word alone widens
+    /// it); an unusable answer means the plain rule.
+    async fn speakers(
+        &self,
+        posted: &Posted,
+        members: &[PersonId],
+        named: Option<&PersonId>,
+        hits: &[PersonId],
+    ) -> Result<Vec<PersonId>> {
+        let group = &self.config.agent.group;
+        let candidates: Vec<PersonId> = members
+            .iter()
+            .filter(|p| self.has_persona(p.as_str()))
+            .cloned()
+            .collect();
+        if candidates.len() < 2 || group.collective_max < 2 {
+            return Ok(Vec::new());
+        }
+        let many_named = candidates
+            .iter()
+            .filter(|p| self.is_named(&posted.text, p).unwrap_or(false))
+            .count();
+        let collective = self.is_collective(&posted.text);
+        let audience = if many_named == 1 && !collective {
+            None
+        } else if collective && (many_named == 0 || !group.classify) {
+            Some(Audience::Everyone)
+        } else if group.classify {
+            self.audience(posted.channel, posted.message, &posted.text, &candidates)
+                .await?
+        } else {
+            None
+        };
+        let set = match audience {
+            Some(Audience::Everyone) => candidates,
+            Some(Audience::Some(ids)) => ids,
+            None => return Ok(Vec::new()),
+        };
+        let first = named.or_else(|| hits.iter().find(|h| set.contains(h)));
+        Ok(channel::round(
+            &self.db(),
+            posted.channel,
+            first,
+            &set,
+            group.collective_max,
+        )?)
+    }
+
+    /// Whether the text names this person, by display name or id.
+    fn is_named(&self, text: &str, person: &PersonId) -> Result<bool> {
+        let display = self.display(person.as_str())?;
+        Ok([display.as_str(), person.as_str()]
+            .iter()
+            .any(|n| !n.is_empty() && text.contains(n)))
     }
 
     /// The participant the user named: the longest display name or id in the text.
@@ -520,7 +626,7 @@ impl Agent {
         Ok(best.map(|(_, p)| p))
     }
 
-    async fn interject(&self, ch: ChannelId, person: &PersonId) -> Result<()> {
+    async fn interject(&self, ch: ChannelId, person: &PersonId, key: &str) -> Result<()> {
         let seg = self.current_segment(ch)?;
         let names = self.segment_names(seg)?;
         let name = self.display(person.as_str())?;
@@ -532,12 +638,7 @@ impl Agent {
             .find(|m| m.author == Actor::User)
             .map(|m| m.text)
             .unwrap_or_default();
-        let mut lines =
-            vec![
-                self.corpus
-                    .wording
-                    .fill("harness.interject", &names, &[("name", &name)]),
-            ];
+        let mut lines = vec![self.corpus.wording.fill(key, &names, &[("name", &name)])];
         lines.extend(self.attachment(seg, &mut turn, &last_user, vec![person.0.clone()])?);
         self.append_user(
             seg,

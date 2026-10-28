@@ -349,6 +349,15 @@ impl Transport for Fake {
         // A whole reply: only a structured-output request is sent this way.
         let (wire, reply, usage) = self.take(&req).await;
         let (input, cached, output) = usage;
+        if let Reply::Fail(detail) = &reply {
+            return Ok(HttpResponse {
+                status: 500,
+                body: json!({"error": {"message": detail}})
+                    .to_string()
+                    .into_bytes(),
+                retry_after: None,
+            });
+        }
         let (text, call) = match &reply {
             Reply::Say(t) => (t.clone(), None),
             Reply::Call(n, a) => (String::new(), Some((n.clone(), a.to_string()))),
@@ -454,7 +463,7 @@ pub const T0: i64 = 1_773_144_000_000;
 pub const META: &str = "META-LAYER-ONLY-FOR-THE-HOST";
 pub const IN_WORLD: &str = "In-world layer of the host.";
 
-/// Three people: `ann` and `bo` have personas, `cy` has none. The placeholder is `<U>`
+/// Four people: `ann`, `bo` and `dee` have personas, `cy` has none. The placeholder is `<U>`
 /// and the corpus's word for "you" is `Doc`.
 pub fn corpus() -> TempFolio {
     let mut b = Builder::new()
@@ -466,7 +475,8 @@ pub fn corpus() -> TempFolio {
         .manifest("scene_marker", r#"["(", ")"]"#);
     b.person("ann", Some("03-10"))
         .person("bo", None)
-        .person("cy", None);
+        .person("cy", None)
+        .person("dee", None);
     let units: &[(&str, &str, &str, &[&str])] = &[
         (
             "u1",
@@ -524,7 +534,7 @@ pub fn corpus() -> TempFolio {
             )
             .unwrap();
     };
-    for p in ["ann", "bo"] {
+    for p in ["ann", "bo", "dee"] {
         prompt(
             p,
             "system",
@@ -633,6 +643,8 @@ pub fn env_retrieving(
         office: office.0.clone(),
         ..Config::default()
     };
+    // Scripts do not expect the extra audience request unless a test asks for it.
+    config.agent.group.classify = false;
     tune(&mut config);
     let fake = Arc::new(Fake::default());
     let sink = Arc::new(Recorder::default());

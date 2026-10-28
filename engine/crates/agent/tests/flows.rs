@@ -928,6 +928,202 @@ async fn group_log(wire: WireApi) {
 }
 
 #[tokio::test]
+async fn a_message_to_everyone_gets_a_round_of_replies_in_order() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    // The group and both members are frozen: speaking to everyone still reaches both.
+    e.fake
+        .push([say("Ann: good morning."), say("Bo: morning.")]);
+    e.agent
+        .send(g, "good morning everyone", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 2);
+    let second = list(&json[1]).last().unwrap().to_string();
+    assert!(
+        second.contains("answers too, after the others."),
+        "{second}"
+    );
+    assert_prefix_chain(&e.fake.bodies());
+    let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
+    assert_eq!(shapes, ["group", "interject"]);
+
+    // Someone named in the same message still answers first.
+    e.fake.push([say("Bo: first."), say("Ann: then me.")]);
+    e.agent
+        .send(g, "bo, and everyone, how are you?", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 4);
+    assert!(
+        list(&json[2])
+            .last()
+            .unwrap()
+            .to_string()
+            .contains("bo answers.")
+    );
+}
+
+#[tokio::test]
+async fn the_cap_a_named_question_and_disabled_members_bound_the_round() {
+    // Cap of one: the addressed member alone.
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.group.collective_max = 1;
+    });
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Ann: hello.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+
+    // A named question in a frozen group keeps today's single reply.
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Bo: steel.")]);
+    e.agent
+        .send(g, "bo, where is the steel from?", None)
+        .await
+        .unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+
+    // A disabled member never speaks, even when everyone is addressed.
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("bo"), Mode::Disabled).unwrap());
+    e.fake.push([say("Ann: hello.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
+async fn a_round_stops_when_the_quota_band_closes_unprompted_speech() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.world.quota.quiet_at = 0.0;
+    });
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Ann: hello."), say("Bo: hi.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1, "the extra turn is unprompted");
+}
+
+fn classifying(max: u32) -> Env {
+    env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.group.classify = true;
+        c.agent.group.collective_max = max;
+    })
+}
+
+fn three(e: &Env) -> world::ChannelId {
+    e.agent
+        .create_group(&[p("ann"), p("bo"), p("dee")], None)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn the_model_names_the_audience_and_the_cap_bounds_the_round() {
+    // "all": everyone speaks, after one small request outside the group's log.
+    let e = classifying(5);
+    let g = three(&e);
+    e.fake.push([
+        say(r#"{"addressed": ["all"]}"#),
+        say("one"),
+        say("two"),
+        say("three"),
+    ]);
+    e.agent.send(g, "what a fine morning", None).await.unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 4);
+    let asked = json[0].to_string();
+    assert!(
+        asked.contains("Decide who") && asked.contains("json_schema"),
+        "{asked}"
+    );
+    assert!(!asked.contains("You are ann."), "outside the group log");
+    assert_prefix_chain(&e.fake.bodies()[1..]);
+
+    // The cap is a hard bound on speakers.
+    let e = classifying(2);
+    let g = three(&e);
+    e.fake
+        .push([say(r#"{"addressed": ["all"]}"#), say("one"), say("two")]);
+    e.agent.send(g, "what a fine morning", None).await.unwrap();
+    assert_eq!(e.fake.json().len(), 3);
+
+    // One member named by the model: one reply, no round.
+    let e = classifying(5);
+    let g = three(&e);
+    e.fake
+        .push([say(r#"{"addressed": ["bo"]}"#), say("Bo here.")]);
+    e.agent.send(g, "what a fine morning", None).await.unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 2);
+    assert!(
+        list(&json[1])
+            .last()
+            .unwrap()
+            .to_string()
+            .contains("bo answers.")
+    );
+
+    // Two of three, the disabled one never among them.
+    let e = classifying(5);
+    let g = three(&e);
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("dee"), Mode::Disabled).unwrap());
+    e.fake
+        .push([say(r#"{"addressed": ["bo", "dee"]}"#), say("Bo here.")]);
+    e.agent.send(g, "what a fine morning", None).await.unwrap();
+    assert_eq!(e.fake.json().len(), 2);
+}
+
+#[tokio::test]
+async fn an_unusable_audience_answer_falls_back_to_the_plain_rule() {
+    let e = classifying(5);
+    let g = three(&e);
+    e.fake.push([say("no idea"), say("Ann: cooler water.")]);
+    e.agent
+        .send(g, "how should the jasmine tea be brewed?", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 2);
+    assert!(
+        list(&json[1])
+            .last()
+            .unwrap()
+            .to_string()
+            .contains("ann answers.")
+    );
+
+    // A failed request does the same, and the user's turn still gets its reply.
+    let e = classifying(5);
+    let g = three(&e);
+    e.fake
+        .push([Reply::Fail("boom".into()), say("Ann: cooler water.")]);
+    e.agent
+        .send(g, "how should the jasmine tea be brewed?", None)
+        .await
+        .unwrap();
+    assert!(
+        e.fake
+            .json()
+            .last()
+            .unwrap()
+            .to_string()
+            .contains("ann answers.")
+    );
+
+    // One member named, no collective word: no extra request at all.
+    let e = classifying(5);
+    let g = three(&e);
+    e.fake.push([say("Bo here.")]);
+    e.agent.send(g, "bo, how are you?", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
 async fn a_colleague_pulled_in_joins_the_log_as_an_entry() {
     let e = env(WireApi::Chat);
     let ch = direct(&e, "ann");
