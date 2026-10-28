@@ -28,13 +28,16 @@ pub struct Runtime {
     pub bridge: Option<Arc<AgentBridge>>,
 }
 
-/// What differs between the app and a test: the byte transport and where keys come from.
+/// What differs between front ends and tests: the byte transport, where keys come from and
+/// where background failures go.
 #[derive(Default)]
 pub struct Options {
     /// `None`: HTTP.
     pub transport: Option<Arc<dyn Transport>>,
     /// Keys the agent reads before the system keychain; `None`: the keychain only.
     pub keys: Option<Arc<dyn agent::endpoint::Keys>>,
+    /// See [`BridgeParts::quiet`].
+    pub quiet: bool,
 }
 
 /// Hands the agent's events to the engine's sink, as the seam's own event type.
@@ -89,6 +92,7 @@ impl Runtime {
                 sink: Arc::new(Forward(sink)),
                 clock: Arc::new(ports::Local),
                 keys: options.keys,
+                quiet: options.quiet,
             })
         });
         if let Some(b) = &bridge {

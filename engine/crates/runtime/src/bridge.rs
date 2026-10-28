@@ -48,6 +48,9 @@ pub struct BridgeParts {
     pub clock: Arc<dyn agent::Clock>,
     /// Where profile keys come from; `None`: the system keychain.
     pub keys: Option<Arc<dyn Keys>>,
+    /// Keep background failures for [`AgentBridge::take_failures`] instead of printing
+    /// them to stderr.
+    pub quiet: bool,
 }
 
 /// The background work in flight.
@@ -77,6 +80,7 @@ pub struct AgentBridge {
     endpoints: Mutex<Endpoints>,
     agent: OnceCell<Arc<Agent>>,
     tasks: Mutex<Tasks>,
+    failures: Mutex<Vec<String>>,
     /// How many background tasks are running.
     busy: watch::Sender<usize>,
 }
@@ -87,10 +91,6 @@ fn agent_params(home: &Home) -> agent::params::Params {
         .ok()
         .and_then(|text| toml::from_str(&text).ok())
         .unwrap_or_default()
-}
-
-fn failed(what: &str, e: impl std::fmt::Display) {
-    eprintln!("dramatis: {what}: {e}");
 }
 
 fn io(e: impl std::fmt::Display) -> ApiError {
@@ -107,8 +107,24 @@ impl AgentBridge {
             parts,
             agent: OnceCell::new(),
             tasks: Mutex::default(),
+            failures: Mutex::default(),
             busy: watch::channel(0).0,
         })
+    }
+
+    fn failed(&self, what: &str, e: impl std::fmt::Display) {
+        if self.parts.quiet {
+            let mut failures = self.failures.lock().unwrap_or_else(|e| e.into_inner());
+            failures.push(format!("{what}: {e}"));
+        } else {
+            eprintln!("dramatis: {what}: {e}");
+        }
+    }
+
+    /// The failures of background work since the last call (only with `quiet`): the
+    /// endpoint's own text for a turn that ended without a reply.
+    pub fn take_failures(&self) -> Vec<String> {
+        std::mem::take(&mut *self.failures.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// The agent, built if nobody has yet.
@@ -172,10 +188,10 @@ impl AgentBridge {
             match me.agent().await {
                 Ok(a) => {
                     if let Err(e) = f(a).await {
-                        failed(what, e);
+                        me.failed(what, e);
                     }
                 }
-                Err(e) => failed(what, e),
+                Err(e) => me.failed(what, e),
             }
         });
         tasks.live.insert(id, handle.abort_handle());
@@ -201,7 +217,7 @@ impl AgentBridge {
         if let Ok(a) = self.agent().await
             && let Err(e) = a.tick().await
         {
-            failed("tick", e);
+            self.failed("tick", e);
         }
     }
 

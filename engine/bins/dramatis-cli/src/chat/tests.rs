@@ -5,22 +5,26 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use agent::endpoint::StaticKeys;
-use agent::{Agent, Config, Parts, SystemClock};
+use api::home::Home;
+use api::{Api, Engine};
 use async_trait::async_trait;
 use folio::fixture::{Builder, TempFolio, UnitSpec};
 use futures::StreamExt;
+use llm::Transport;
 use llm::transport::{HttpRequest, HttpResponse, StreamResponse};
-use llm::{Llm, Retry, Transport};
+use runtime::{Options, Runtime};
 use serde_json::json;
 
 use super::command::parse;
 use super::render::{Marker, Style};
 use super::session::Session;
-use super::show::{Show, Term};
+use super::show::{Names, Show, Term};
 
 enum Reply {
     Say(&'static str),
     Fail(&'static str),
+    /// The endpoint never answers.
+    Hang,
 }
 
 /// Answers chat-completion streams from a script, cutting each text in two deltas.
@@ -53,6 +57,7 @@ impl Transport for Scripted {
                 ])
             }
             Reply::Fail(message) => sse(&[json!({"error": {"message": message}})]),
+            Reply::Hang => std::future::pending().await,
         };
         Ok(StreamResponse {
             status: 200,
@@ -87,7 +92,7 @@ fn corpus() -> TempFolio {
         .manifest("user_placeholder", r#""<U>""#)
         .manifest("wording", r#"{"user.you": "Doc", "host.name": "Hostess"}"#)
         .manifest("scene_marker", r#"["(", ")"]"#);
-    b.person("ann", None).person("bo", None);
+    b.person("ann", None).person("bo", None).person("cy", None);
     for (id, page, text, persons) in [
         (
             "u1",
@@ -112,67 +117,103 @@ fn corpus() -> TempFolio {
             span: None,
         });
     }
-    for (slot, body) in [
-        ("system", "You are ann."),
-        ("tone", "Brief."),
-        ("capability", "Knows tea."),
-    ] {
-        b.conn()
-            .execute(
-                "INSERT INTO prompts(subject, slot, body) VALUES ('ann', ?1, ?2)",
-                [slot, body],
-            )
-            .unwrap();
+    for subject in ["ann", "cy"] {
+        for (slot, body) in [
+            ("system", "You are a person."),
+            ("tone", "Brief."),
+            ("capability", "Knows tea."),
+        ] {
+            b.conn()
+                .execute(
+                    "INSERT INTO prompts(subject, slot, body) VALUES (?1, ?2, ?3)",
+                    [subject, slot, body],
+                )
+                .unwrap();
+        }
     }
     b.finish()
+}
+
+/// A throwaway home directory.
+struct TempHome(std::path::PathBuf);
+
+impl TempHome {
+    fn new() -> Self {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("dramatis-chat-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+}
+
+impl Drop for TempHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 struct Rig {
     session: Session,
     show: Arc<Show>,
-    agent: Arc<Agent>,
+    engine: Arc<Engine>,
+    names: Arc<Names>,
+    bridge: Arc<runtime::AgentBridge>,
     out: Buf,
     script: Arc<Scripted>,
+    _home: TempHome,
     _folio: TempFolio,
 }
 
-fn rig() -> Rig {
+async fn rig() -> Rig {
     let folio = corpus();
-    let index = index::Index::open(folio.path(), index::params::Retrieve::default()).unwrap();
-    let marker = Marker::new(&index.folio().manifest().scene_marker);
-    let out = Buf::default();
-    let term = Arc::new(Term::new(Box::new(out.clone()), Style::PLAIN));
-    let show = Arc::new(Show::new(term.clone(), marker));
-    let script = Arc::new(Scripted::default());
-    let endpoints = api::endpoints::Endpoints::from_toml(
+    let home = TempHome::new();
+    std::fs::write(
+        home.0.join("endpoints.toml"),
         "[[profile]]\nname = 'p'\nbase_url = 'http://127.0.0.1:9/v1'\nwire_api = 'chat'\n\
          [[profile.model]]\nid = 'model-a'\n\
          [roles]\nchat = { profile = 'p', model = 'model-a' }\n",
     )
     .unwrap();
-    let agent = Arc::new(
-        Agent::new(Parts {
-            world: world::World::in_memory().unwrap(),
-            index,
-            config: Config::default(),
-            endpoints,
+    let out = Buf::default();
+    let term = Arc::new(Term::new(Box::new(out.clone()), Style::PLAIN));
+    let show = Arc::new(Show::new(term.clone()));
+    let script = Arc::new(Scripted::default());
+    let runtime = Runtime::open(
+        Home::new(&home.0),
+        Some(folio.path().to_owned()),
+        show.clone(),
+        Options {
+            transport: Some(script.clone()),
             keys: Some(Arc::new(StaticKeys(vec![(
                 "p".into(),
                 llm::Secret::new("sk-test"),
             )]))),
-            llm: Llm::new(script.clone(), Retry::none()),
-            sink: show.clone(),
-            clock: Arc::new(SystemClock { offset_min: 0 }),
-        })
-        .unwrap(),
-    );
-    show.bind(&agent);
+            quiet: true,
+        },
+    )
+    .unwrap();
+    let engine = runtime.engine;
+    let names = Arc::new(Names::load(&engine).await.unwrap());
+    let scene = engine.wording().await.unwrap().scene_marker;
+    show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
+    let bridge = runtime.bridge.unwrap();
     Rig {
-        session: Session::new(agent.clone(), term, show.clone()),
+        session: Session::new(
+            engine.clone(),
+            bridge.clone(),
+            term,
+            show.clone(),
+            names.clone(),
+        )
+        .await,
         show,
-        agent,
+        engine,
+        names,
+        bridge,
         out,
         script,
+        _home: home,
         _folio: folio,
     }
 }
@@ -186,7 +227,7 @@ impl Rig {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
-    let mut r = rig();
+    let mut r = rig().await;
     let listed = r.run("/list").await;
     assert!(
         listed.contains("ann") && !listed.contains("bo "),
@@ -235,7 +276,7 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn search_runs_retrieval_as_the_current_speaker_without_a_model_call() {
-    let mut r = rig();
+    let mut r = rig().await;
     r.run("/talk ann").await;
     let found = r.run("/search jasmine tea").await;
     assert!(
@@ -244,13 +285,14 @@ async fn search_runs_retrieval_as_the_current_speaker_without_a_model_call() {
     );
     assert!(r.run("/stats").await.contains("no model calls yet"));
     assert!(r.run("/memories").await.contains("no memories"));
+    assert!(r.run("/memories ann").await.contains("no memories"));
     let group = r.run("/group ann bo").await;
     assert!(group.contains("has no persona"), "{group}");
     assert!(r.run("/host").await.contains("no host"));
 }
 
-fn host_called(action: api::views::ToolAction) -> agent::Event {
-    agent::Event::ToolCalled(api::events::ToolCalled {
+fn host_called(action: api::views::ToolAction) -> api::port::Event {
+    api::port::Event::ToolCalled(api::events::ToolCalled {
         channel: api::types::ChannelId("1".into()),
         message: api::types::MessageId("1".into()),
         author: api::types::Author::Host,
@@ -260,24 +302,18 @@ fn host_called(action: api::views::ToolAction) -> agent::Event {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
-    use agent::Sink;
-    use api::types::{ChannelId, PersonId};
+    use api::port::Sink;
+    use api::types::PersonId;
     use api::views::ToolAction;
-    let mut r = rig();
+    let mut r = rig().await;
     let person = |id: &str| api::types::PersonRef {
         id: PersonId(id.into()),
         name: id.into(),
     };
     let group = r
-        .agent
-        .with_world(|w| {
-            world::channel::create_group(
-                w,
-                &[world::PersonId("ann".into()), world::PersonId("bo".into())],
-                None,
-                world::Origin::User,
-            )
-        })
+        .engine
+        .create_group(vec![PersonId("ann".into()), PersonId("cy".into())], None)
+        .await
         .unwrap();
     assert!(r.run("/go 1").await.contains("offered nothing"));
 
@@ -287,18 +323,18 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
         persons: vec![person("ann")],
     }));
     r.show.emit(host_called(ToolAction::CreateGroup {
-        members: vec![person("ann"), person("bo")],
-        channel: Some(ChannelId(group.0.to_string())),
+        members: vec![person("ann"), person("cy")],
+        channel: Some(group),
     }));
     r.session.offers_for_test();
     let listed = r.out.take();
     assert!(
-        listed.contains("1 talk to ann") && listed.contains("2 open group: ann, bo"),
+        listed.contains("1 talk to ann") && listed.contains("2 open group: ann, cy"),
         "{listed}"
     );
     assert!(r.run("/go 3").await.contains("no such choice"));
-    assert!(r.run("/go 2").await.contains("group with ann, bo"));
-    assert!(r.session.prompt().starts_with("[ann, bo]"));
+    assert!(r.run("/go 2").await.contains("group with ann, cy"));
+    assert!(r.session.prompt().starts_with("[ann, cy]"));
     assert!(r.run("/go 1").await.contains("talking to ann"));
     assert!(r.session.prompt().starts_with("[ann]"));
 
@@ -315,8 +351,8 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
     );
 }
 
-fn activity(who: &str, state: api::events::ActivityState) -> agent::Event {
-    agent::Event::TurnActivity(api::events::TurnActivity {
+fn activity(who: &str, state: api::events::ActivityState) -> api::port::Event {
+    api::port::Event::TurnActivity(api::events::TurnActivity {
         channel: api::types::ChannelId("1".into()),
         author: api::types::Author::Person {
             id: api::types::PersonId(who.into()),
@@ -327,9 +363,9 @@ fn activity(who: &str, state: api::events::ActivityState) -> agent::Event {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_typing_line_names_whoever_generates_once_per_turn() {
-    use agent::Sink;
     use api::events::ActivityState::{Done, Thinking, Tool, Writing};
-    let r = rig();
+    use api::port::Sink;
+    let r = rig().await;
     // A group: ann answers (thinking, a lookup, thinking, writing), then bo.
     for (who, state) in [
         ("ann", Thinking),
@@ -356,10 +392,39 @@ async fn the_typing_line_names_whoever_generates_once_per_turn() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_group_label_lists_three_names_and_counts_the_rest() {
-    let r = rig();
+    let r = rig().await;
     let names = |n: usize| (0..n).map(|i| format!("p{i}")).collect::<Vec<_>>();
-    let label = |n| super::show::group_label(&r.agent, &names(n));
+    let label = |n| r.names.group_label(&names(n));
     assert_eq!(label(2), "p0, p1");
     assert_eq!(label(3), "p0, p1, p2");
     assert_eq!(label(5), "p0, p1, p2 +2");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wrapup_ends_the_conversation_and_a_hung_turn_can_be_abandoned() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    let done = r.run("/wrapup").await;
+    assert!(
+        done.contains("wrapped up; no memories were written"),
+        "{done}"
+    );
+
+    // A turn whose endpoint never answers is background work; cancelling ends it.
+    r.script.0.lock().unwrap().push_back(Reply::Hang);
+    let channel = r
+        .engine
+        .open_direct(api::types::PersonId("ann".into()))
+        .await
+        .unwrap();
+    r.engine
+        .send_message(channel, "hello?".into(), None)
+        .await
+        .unwrap();
+    let waiting = tokio::time::timeout(std::time::Duration::from_millis(300), r.bridge.idle());
+    assert!(waiting.await.is_err(), "the turn should still be running");
+    r.bridge.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), r.bridge.idle())
+        .await
+        .expect("cancelled work ends");
 }

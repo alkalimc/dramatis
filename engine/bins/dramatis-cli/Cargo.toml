@@ -19,15 +19,14 @@ anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 api = { path = "../../crates/api" }
-agent = { path = "../../crates/agent" }
+runtime = { path = "../../crates/runtime" }
 world = { path = "../../crates/world" }
-llm = { path = "../../crates/llm" }
-rusqlite.workspace = true
 rustyline = { version = "=19.0.0", default-features = false }
-toml.workspace = true
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 
 [dev-dependencies]
+agent = { path = "../../crates/agent" }
+llm = { path = "../../crates/llm" }
 folio = { path = "../../crates/folio", features = ["fixture"] }
 async-trait.workspace = true
 futures = "=0.3.34"
