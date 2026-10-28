@@ -24,6 +24,11 @@ const DEFAULTS: &[(&str, &str)] = &[
          send it again later.",
     ),
     (
+        "harness.picture_unseen",
+        "{user} attached a picture here, but this channel cannot show pictures, so it \
+         could not be seen.",
+    ),
+    (
         "harness.introduce",
         "{user} opens the app for the first time. Introduce yourself in a few lines.",
     ),

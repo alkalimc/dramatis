@@ -17,6 +17,7 @@ mod flows;
 pub mod meter;
 pub mod params;
 pub mod persona;
+mod picture;
 pub mod request;
 mod session;
 pub mod text;

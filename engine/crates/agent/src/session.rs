@@ -129,6 +129,7 @@ fn failure(e: &Error) -> ActivityFailure {
     match e {
         Error::RateLimited { .. } => ActivityFailure::RateLimited,
         Error::QuotaExhausted { .. } => ActivityFailure::QuotaExhausted,
+        Error::ImageRejected { .. } => ActivityFailure::ImageUnsupported,
         _ => ActivityFailure::Error,
     }
 }
@@ -593,12 +594,32 @@ impl Agent {
             shape.tools.clear();
         }
         let log = self.log(seg)?;
+        // A model that cannot see gets the pictures in words. One that refused a picture
+        // is asked again with the newest one only: its history must not fail every turn.
+        let model_key = format!("{}/{}", role.profile.name, role.model.id);
+        let learned = self
+            .sightless
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&model_key);
+        let described;
+        let items = if (learned || !role.model.sees()) && request::has_picture(&log.items) {
+            let note = self
+                .corpus
+                .wording
+                .fill("harness.picture_unseen", &names, &[]);
+            described = request::without_pictures(&log.items, role.model.sees(), &note);
+            &described
+        } else {
+            &log.items
+        };
+        let sent_picture = request::has_picture(items);
         let mut req = request::build(
             &Call {
                 shape: &shape,
                 cache_key: cache_key(seg),
                 system: [&log.system[0], &log.system[1], &log.system[2]],
-                messages: &log.items,
+                messages: items,
                 choice,
             },
             &ep,
@@ -606,7 +627,10 @@ impl Agent {
         req.output_schema = schema;
         let mut retried = false;
         let (reply, refused) = loop {
-            let mut events = self.llm.stream(&ep, &req).await?;
+            let mut events = match self.llm.stream(&ep, &req).await {
+                Ok(events) => events,
+                Err(e) => return Err(self.picture_refusal(e, sent_picture, &model_key)),
+            };
             let mut done = None;
             let mut failure = None;
             let mut streamed = false;
@@ -638,7 +662,7 @@ impl Agent {
                     Ok(LlmEvent::Done(r)) => done = Some(r),
                     Ok(_) => {}
                     Err(e) => {
-                        failure = Some(Error::from(e));
+                        failure = Some(self.picture_refusal(e, sent_picture, &model_key));
                         break;
                     }
                 }
@@ -659,6 +683,12 @@ impl Agent {
                     }));
                 }
             };
+            if sent_picture {
+                self.sightless
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&model_key);
+            }
             let refused = reply.tool_calls().next().is_none()
                 && assemble::refusal(&reply.text(), self.corpus.cjk) == assemble::Refusal::Is;
             if !refused && !held.is_empty() {
@@ -703,6 +733,27 @@ impl Agent {
         }
         self.record_usage(turn, seg, &shape.model, &role, reply.usage)?;
         Ok(reply)
+    }
+
+    /// The error of a failed call. A client error on a request that carried a picture is
+    /// taken as the endpoint refusing the picture (the answer rarely says so in a way that
+    /// can be matched), and the model is remembered as not seeing.
+    fn picture_refusal(&self, e: llm::Error, sent_picture: bool, model_key: &str) -> Error {
+        match e {
+            llm::Error::Http {
+                status: status @ (400 | 413 | 415 | 422),
+                message,
+            } if sent_picture => {
+                self.sightless
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(model_key.to_owned());
+                Error::ImageRejected {
+                    detail: format!("HTTP {status}: {message}"),
+                }
+            }
+            other => other.into(),
+        }
     }
 
     /// One call's usage: the segment's fill, the meter row and the quota event.

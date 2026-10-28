@@ -157,6 +157,25 @@ impl Default for Context {
     }
 }
 
+/// `picture.*`: how an attached picture is shrunk before it is sent and stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Picture {
+    /// Longest side, pixels; larger pictures are scaled down to it.
+    pub max_side: u32,
+    /// JPEG quality, 1 to 100, of a re-encoded picture.
+    pub quality: u8,
+}
+
+impl Default for Picture {
+    fn default() -> Self {
+        Self {
+            max_side: 1024,
+            quality: 80,
+        }
+    }
+}
+
 /// Every group this crate reads, as `api` composes them into its one `Params`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -171,6 +190,7 @@ pub struct Params {
     pub retrieve: Retrieve,
     pub cost: Cost,
     pub context: Context,
+    pub picture: Picture,
 }
 
 #[cfg(test)]

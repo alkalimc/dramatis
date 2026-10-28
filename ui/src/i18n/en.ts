@@ -497,6 +497,7 @@ export const en = {
   "error.busy": "A reply is being written. Try again when it ends.",
   "error.turn.rate_limited": "{name} could not reply: the endpoint is rate limiting. Try again in a moment.",
   "error.turn.quota_exhausted": "{name} could not reply: the quota for now is used up.",
+  "error.turn.image_unsupported": "{name} could not reply: this channel cannot see pictures. Send the message again without the picture.",
   "error.turn.cancelled": "{name}'s reply was cut off before it finished.",
   "error.turn.error": "{name} could not reply. Send again to retry.",
   "error.exists": "That name is already taken.",

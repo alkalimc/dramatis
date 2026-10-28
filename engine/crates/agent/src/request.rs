@@ -161,6 +161,41 @@ pub fn user(text: &str, image: Option<&Image>) -> Message {
     m
 }
 
+/// Whether any entry carries a picture.
+pub fn has_picture(messages: &[Message]) -> bool {
+    messages
+        .iter()
+        .any(|m| m.parts.iter().any(|p| matches!(p, Part::Image { .. })))
+}
+
+/// The entries with their pictures replaced by `note`, as text. The last entry keeps its
+/// pictures when `keep_last` is set: a model that refused a picture is asked again with
+/// the next one, but its history must not fail every later turn.
+pub fn without_pictures(messages: &[Message], keep_last: bool, note: &str) -> Vec<Message> {
+    let last = messages.len().saturating_sub(1);
+    messages
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            if (keep_last && i == last) || !has_picture(std::slice::from_ref(m)) {
+                return m.clone();
+            }
+            let parts = m
+                .parts
+                .iter()
+                .map(|p| match p {
+                    Part::Image { .. } => Part::Text(note.to_owned()),
+                    other => other.clone(),
+                })
+                .collect();
+            Message {
+                role: m.role,
+                parts,
+            }
+        })
+        .collect()
+}
+
 /// A tool's output for one call.
 pub fn tool_result_part(call_id: &str, output: String) -> Part {
     Part::ToolResult {

@@ -131,6 +131,8 @@ pub enum ActivityState {
 pub enum ActivityFailure {
     RateLimited,
     QuotaExhausted,
+    /// The endpoint refused a request that carried a picture: this model cannot see it.
+    ImageUnsupported,
     /// The future was dropped before the turn ended.
     Cancelled,
     Error,
