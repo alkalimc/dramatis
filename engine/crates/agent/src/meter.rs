@@ -8,7 +8,6 @@ use world::quota::{self, Prices};
 use world::{ChannelId, Shape};
 
 use crate::params::Cost;
-use crate::store;
 
 /// Record one call. The points are `world`'s formula plus a third term for tokens written
 /// to a cache, `w` times the plain input price each; `world` has no such term yet, so the
@@ -85,7 +84,7 @@ pub fn report(
     status: Option<&quota::Status>,
 ) -> world::Result<Vec<(String, f64)>> {
     let mut out = Vec::new();
-    for (shape, t) in store::totals_by_shape(conn, until - span_ms, until)? {
+    for (shape, t) in quota::totals_by_shape(conn, until - span_ms, until)? {
         if t.calls > 0 {
             out.push((key(shape).to_owned(), t.points / t.calls as f64));
         }

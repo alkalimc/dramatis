@@ -89,10 +89,18 @@ impl Agent {
         if let Some(p) = ch.person() {
             self.available(&conn, p)?;
         }
-        let id = message::append(&conn, channel, &Actor::User, text, None, None, now.ms)?;
-        if !meta.is_empty() {
-            crate::store::complete_message(&conn, id, text, None, meta)?;
-        }
+        let attachment = (!meta.is_empty())
+            .then(|| serde_json::to_value(meta))
+            .transpose()?;
+        let id = message::append(
+            &conn,
+            channel,
+            &Actor::User,
+            text,
+            None,
+            attachment.as_ref(),
+            now.ms,
+        )?;
         session::touch_channel(&conn, channel, now.ms)?;
         let stored = message::get(&conn, id)?;
         let host = ch.is_host_channel();
@@ -1080,7 +1088,12 @@ impl Agent {
     /// talking about the user under the old name. A log with nothing appended yet is
     /// simply replaced.
     pub async fn on_rename(&self) -> Result<()> {
-        let channels = crate::store::channels_with_segments(&self.db())?;
+        let mut channels: Vec<_> = world::channel::list(&self.db())?
+            .into_iter()
+            .filter(|c| c.log_segment.is_some())
+            .map(|c| c.id)
+            .collect();
+        channels.sort();
         for ch in channels {
             // One channel at a time: each roll waits for that channel's turn only.
             let _turn = self.lock_channel(ch).await;

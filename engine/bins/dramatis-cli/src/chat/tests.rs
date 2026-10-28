@@ -16,6 +16,7 @@ use runtime::{Options, Runtime};
 use serde_json::json;
 
 use super::command::{Command, parse};
+use super::interrupt::Interrupt;
 use super::render::{Marker, Style};
 use super::session::Session;
 use super::show::{Names, Show, Term};
@@ -185,6 +186,7 @@ struct Rig {
     engine: Arc<Engine>,
     names: Arc<Names>,
     bridge: Arc<runtime::AgentBridge>,
+    interrupt: Arc<Interrupt>,
     out: Buf,
     script: Arc<Scripted>,
     _home: TempHome,
@@ -234,6 +236,7 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
     show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
     let bridge = runtime.bridge.unwrap();
     let completions = super::complete::Completions::default();
+    let interrupt = Arc::new(Interrupt::default());
     Rig {
         session: Session::new(
             engine.clone(),
@@ -242,6 +245,7 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
             show.clone(),
             names.clone(),
             completions.clone(),
+            interrupt.clone(),
         )
         .await,
         completions,
@@ -249,6 +253,7 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
         engine,
         names,
         bridge,
+        interrupt,
         out,
         script,
         _home: home,
@@ -261,6 +266,24 @@ impl Rig {
         self.session.input(line).await;
         self.out.take()
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ctrl_c_cancels_a_hung_turn_and_the_session_goes_on() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    r.script.0.lock().unwrap().push_back(Reply::Hang);
+    let interrupt = r.interrupt.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        interrupt.hit();
+    });
+    let out = tokio::time::timeout(std::time::Duration::from_secs(10), r.run("hello?"))
+        .await
+        .expect("Ctrl-C ends the wait");
+    assert!(out.contains("cancelled"), "{out}");
+    r.script.0.lock().unwrap().push_back(Reply::Say("Back."));
+    assert!(r.run("again").await.contains("Back."));
 }
 
 #[tokio::test(flavor = "multi_thread")]

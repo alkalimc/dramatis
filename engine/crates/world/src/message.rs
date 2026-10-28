@@ -96,6 +96,33 @@ pub fn append(
     })
 }
 
+/// Fill in a message written empty: a streamed reply needs its id before its text is
+/// known, so the row exists from the first delta and is completed when the reply is.
+pub fn complete(
+    conn: &Connection,
+    id: MessageId,
+    text: &str,
+    tool_calls: Option<&Value>,
+    attachment: Option<&Value>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE message SET text = ?2, tool_calls = ?3, attachment = ?4 WHERE id = ?1",
+        (
+            id,
+            text,
+            tool_calls.map(Value::to_string),
+            attachment.map(Value::to_string),
+        ),
+    )?;
+    Ok(())
+}
+
+/// Remove a message that never got any text (its stream failed before the first delta).
+pub fn discard(conn: &Connection, id: MessageId) -> Result<()> {
+    conn.execute("DELETE FROM message WHERE id = ?1", [id])?;
+    Ok(())
+}
+
 pub fn get(conn: &Connection, id: MessageId) -> Result<Message> {
     conn.query_row(
         &format!("SELECT {COLUMNS} FROM message WHERE id = ?1"),

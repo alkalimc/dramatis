@@ -18,13 +18,6 @@ pub fn ts(ms: i64, offset_min: i32) -> Timestamp {
     )
 }
 
-/// Unix milliseconds of an RFC 3339 timestamp from the UI.
-pub fn ms_of(at: &Timestamp) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(&at.0)
-        .ok()
-        .map(|d| d.timestamp_millis())
-}
-
 macro_rules! ids {
     ($($to:ident / $from:ident: $world:ident),* $(,)?) => {$(
         pub fn $to(id: world::$world) -> t::$world {
@@ -235,7 +228,6 @@ mod tests {
         assert_eq!(ts(0, 0).0, "1970-01-01T00:00:00+00:00");
         assert_eq!(ts(0, 480).0, "1970-01-01T08:00:00+08:00");
         assert_eq!(ts(0, -90).0, "1969-12-31T22:30:00-01:30");
-        assert_eq!(ms_of(&ts(1_773_144_000_000, 480)), Some(1_773_144_000_000));
     }
 
     #[test]

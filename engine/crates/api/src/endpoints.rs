@@ -2,7 +2,7 @@
 //!
 //! The user adds **profiles** (an OpenAI-style or an Anthropic-style endpoint) and points
 //! each **role** at one model of one profile. The file holds no secret: a profile's API key lives only in the
-//! system keychain under service [`KEYCHAIN_SERVICE`], account [`keychain_account`].
+//! system keychain (service `dramatis`, account `profile.<name>`).
 //!
 //! ```toml
 //! [[profile]]
@@ -53,14 +53,6 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-
-/// Keychain service every profile key is stored under.
-pub const KEYCHAIN_SERVICE: &str = "dramatis";
-
-/// Keychain account for one profile's key.
-pub fn keychain_account(profile: &str) -> String {
-    format!("profile.{profile}")
-}
 
 /// The whole file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
@@ -466,6 +458,5 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
                 .base_url
                 .starts_with("http://127.0.0.1:")
         );
-        assert_eq!(keychain_account("local"), "profile.local");
     }
 }

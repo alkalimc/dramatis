@@ -10,6 +10,7 @@
 
 mod command;
 mod complete;
+mod interrupt;
 mod render;
 mod session;
 mod show;
@@ -28,6 +29,7 @@ use runtime::{Options, Runtime};
 
 use command::Command;
 use complete::Completions;
+use interrupt::Interrupt;
 use render::{Marker, Style};
 use session::{Flow, Session};
 use show::{Names, Show, Term};
@@ -79,7 +81,7 @@ impl Drop for Throwaway {
 
 pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
     let mut home = args.home.as_deref().map_or_else(Home::from_env, Home::new);
-    let _throwaway = if args.fresh {
+    let throwaway = if args.fresh {
         let t = Throwaway::new(&home)?;
         home = Home::new(&t.0);
         Some(t)
@@ -98,7 +100,9 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
     let tokio = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    let leftover = throwaway.as_ref().map(|t| t.0.clone());
     tokio.block_on(async move {
+        let interrupt = Interrupt::install(leftover)?;
         let options = Options {
             quiet: true,
             frontend: runtime::Frontend::Terminal,
@@ -129,14 +133,23 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             completions: completions.clone(),
         };
         let intro = intro_lines(&names);
-        let mut session = Session::new(engine, bridge, term, show, names, completions).await;
+        let mut session = Session::new(
+            engine,
+            bridge,
+            term,
+            show,
+            names,
+            completions,
+            interrupt.clone(),
+        )
+        .await;
         if let Some(name) = args.user.as_deref() {
             session.set_user(name).await;
         }
         if let Some(person) = args.person {
             session.handle(Command::Talk(person)).await;
         }
-        repl(session, args.plain, typing, intro).await
+        repl(session, args.plain, typing, intro, interrupt).await
     })
 }
 
@@ -294,11 +307,16 @@ impl Input {
 
     /// The next line, or `None` at the end of input. `Some("")` for an abandoned line.
     /// `initial` is text the line starts with, for the user to edit.
-    async fn next(&mut self, prompt: String, initial: Option<String>) -> Option<String> {
+    async fn next(
+        &mut self,
+        prompt: String,
+        initial: Option<String>,
+        interrupt: &Interrupt,
+    ) -> Option<String> {
         match self {
             Self::Lines(rx) => tokio::select! {
                 l = rx.recv() => l,
-                _ = tokio::signal::ctrl_c() => None,
+                _ = interrupt.wait() => None,
             },
             Self::Edit(slot, typing) => {
                 use rustyline::error::ReadlineError;
@@ -333,7 +351,13 @@ fn intro_lines(names: &Names) -> [String; 2] {
     [names.text("cli.typing"), names.text("cli.start")]
 }
 
-async fn repl(mut session: Session, plain: bool, typing: Typing, intro: [String; 2]) -> Result<()> {
+async fn repl(
+    mut session: Session,
+    plain: bool,
+    typing: Typing,
+    intro: [String; 2],
+    interrupt: Arc<Interrupt>,
+) -> Result<()> {
     let mut input = Input::open(plain, typing)?;
     let interactive = matches!(input, Input::Edit(..));
     if interactive {
@@ -349,12 +373,15 @@ async fn repl(mut session: Session, plain: bool, typing: Typing, intro: [String;
         } else {
             String::new()
         };
+        if interactive {
+            interrupt.clear();
+        }
         let initial = session.take_prefill();
         if !interactive && let Some(text) = &initial {
             // No editor to put it in: show it, to be typed again.
             println!("{text}");
         }
-        let Some(line) = input.next(prompt, initial).await else {
+        let Some(line) = input.next(prompt, initial, &interrupt).await else {
             println!();
             return Ok(());
         };
