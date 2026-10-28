@@ -1274,3 +1274,162 @@ async fn another_process_writing_the_world_is_noticed() {
     assert_eq!(e.poll_external().unwrap(), 0);
     assert!(r.events.take().is_empty());
 }
+
+/// Appends as the terminal would: a second connection to the open save's file.
+fn terminal_says(e: &Engine, ch: &ChannelId, text: &str) {
+    let other = world::World::open(e.home.save_path(&e.home.current_save())).unwrap();
+    let wc = convert::world_channel(ch).unwrap();
+    world::message::append(&other, wc, &world::Actor::User, text, None, None, 5).unwrap();
+}
+
+fn added(events: Vec<Event>) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|ev| match ev {
+            Event::MessageAdded(m) => Some(m.message.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn this_processs_own_writes_are_never_announced_by_the_poll() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    assert_eq!(e.poll_external().unwrap(), 0);
+    // The engine's own connection is the one that polls, so its commits leave
+    // `data_version` alone.
+    e.rename_channel(ch.clone(), Some("Night".into()))
+        .await
+        .unwrap();
+    r.events.take();
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(r.events.take().is_empty());
+
+    // Another process's message arrives once.
+    terminal_says(e, &ch, "theirs");
+    assert_eq!(e.poll_external().unwrap(), 1);
+    assert_eq!(added(r.events.take()), ["theirs"]);
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(r.events.take().is_empty());
+}
+
+#[tokio::test]
+async fn the_poll_follows_a_save_switch_to_the_new_file() {
+    let r = rig();
+    let e = &r.engine;
+    let old = e.open_direct(id("amy")).await.unwrap();
+    e.poll_external().unwrap();
+    e.new_save("second".into()).await.unwrap();
+    e.switch_save("second".into()).await.unwrap();
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    // The first look at a new file only records where it stands.
+    assert_eq!(e.poll_external().unwrap(), 0);
+    r.events.take();
+
+    terminal_says(e, &ch, "in the new save");
+    assert_eq!(e.poll_external().unwrap(), 1);
+    assert_eq!(added(r.events.take()), ["in the new save"]);
+
+    // Writes to the save that was left are nobody's business now.
+    let left = world::World::open(e.home.save_path("default")).unwrap();
+    let wc = convert::world_channel(&old).unwrap();
+    world::message::append(&left, wc, &world::Actor::User, "elsewhere", None, None, 9).unwrap();
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(r.events.take().is_empty());
+}
+
+#[tokio::test]
+async fn the_watcher_ends_when_its_engine_is_dropped() {
+    let r = rig();
+    let engine = Arc::new(r.engine);
+    let task = tokio::spawn(Engine::watch_every(
+        Arc::downgrade(&engine),
+        std::time::Duration::from_millis(10),
+    ));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!task.is_finished());
+    drop(engine);
+    tokio::time::timeout(std::time::Duration::from_secs(2), task)
+        .await
+        .expect("the watcher stops")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn export_while_another_connection_writes_is_a_consistent_copy() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    let wc = convert::world_channel(&ch).unwrap();
+    let path = e.home.save_path(&e.home.current_save());
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writer = std::thread::spawn({
+        let stop = stop.clone();
+        move || {
+            let w = world::World::open(path).unwrap();
+            let mut n = 0;
+            while !stop.load(Ordering::Relaxed) {
+                n += 1;
+                world::message::append(
+                    &w,
+                    wc,
+                    &world::Actor::User,
+                    &format!("m{n}"),
+                    None,
+                    None,
+                    n,
+                )
+                .unwrap();
+            }
+            n
+        }
+    });
+    let dir = e.home.root().join("out");
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..5 {
+        let file = dir.join(format!("copy{i}.sqlite"));
+        e.export_save("default".into(), file.display().to_string())
+            .await
+            .unwrap();
+        // Each copy opens, passes the integrity check and holds whole messages only.
+        let copy = rusqlite::Connection::open(&file).unwrap();
+        let ok: String = copy
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ok, "ok");
+        let (count, max): (i64, i64) = copy
+            .query_row(
+                "SELECT count(*), coalesce(max(id), 0) FROM message",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(count, max, "no message missing below the newest");
+    }
+    stop.store(true, Ordering::Relaxed);
+    assert!(writer.join().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn a_picture_used_twice_is_stored_once_and_clearing_one_use_keeps_the_other() {
+    let r = rig();
+    let e = &r.engine;
+    let g = e
+        .create_group(vec![id("amy"), id("kal")], None)
+        .await
+        .unwrap();
+    let group = e
+        .set_channel_avatar(g.clone(), Some(png_part(7)))
+        .await
+        .unwrap()
+        .unwrap();
+    let own = e.set_user_avatar(Some(png_part(7))).await.unwrap().unwrap();
+    assert_eq!(group, own);
+    assert_eq!(std::fs::read_dir(e.home.uploads()).unwrap().count(), 1);
+
+    e.set_channel_avatar(g, None).await.unwrap();
+    assert!(std::path::Path::new(&own.path).is_file());
+    assert_eq!(e.user_avatar().await.unwrap(), Some(own));
+}

@@ -94,20 +94,23 @@ impl Runtime {
             seen,
             ..Ports::default()
         };
-        let bridge = folio.as_ref().map(|path| {
-            AgentBridge::new(BridgeParts {
-                home: home.clone(),
-                corpus: path.clone(),
-                params: params.clone(),
-                endpoints: Endpoints::default(),
-                llm: client,
-                sink: Arc::new(Forward(sink)),
-                clock: Arc::new(ports::Local),
-                keys: options.keys,
-                quiet: options.quiet,
-                frontend: options.frontend,
+        let bridge = folio
+            .as_ref()
+            .map(|path| {
+                AgentBridge::new(BridgeParts {
+                    home: home.clone(),
+                    corpus: path.clone(),
+                    params: params.clone(),
+                    endpoints: Endpoints::default(),
+                    llm: client,
+                    sink: Arc::new(Forward(sink)),
+                    clock: Arc::new(ports::Local),
+                    keys: options.keys,
+                    quiet: options.quiet,
+                    frontend: options.frontend,
+                })
             })
-        });
+            .transpose()?;
         if let Some(b) = &bridge {
             ports.agent = Arc::new(bridge::Port(b.clone()));
         }

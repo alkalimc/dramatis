@@ -823,7 +823,28 @@ async fn tab_completes_persons_with_a_persona_and_follows_the_saves() {
     assert_eq!(names(&r, "/save switch sec"), Vec::<String>::new());
     r.run("/save new second").await;
     assert_eq!(names(&r, "/save switch sec"), ["second"]);
+    // Switching keeps the lists current: the save just left is offered as well.
+    r.run("/save switch second").await;
+    assert_eq!(names(&r, "/save switch def"), ["default"]);
+    assert_eq!(names(&r, "/talk Lady"), ["Lady A"]);
+    r.run("/save switch default").await;
     r.run("/save delete second").await;
     r.run("y").await;
     assert_eq!(names(&r, "/save switch sec"), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resend_after_a_failed_turn_takes_back_the_unanswered_message() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Fail("overloaded"));
+    assert!(r.run("how is the tea?").await.contains("overloaded"));
+    let out = r.run("/resend").await;
+    assert!(out.contains("took back 1 message;"), "{out}");
+    assert_eq!(r.session.take_prefill().as_deref(), Some("how is the tea?"));
+    assert!(!r.run("/history 10").await.contains("how is the tea?"));
 }

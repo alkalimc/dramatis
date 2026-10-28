@@ -49,7 +49,10 @@ impl Engine {
     /// once it is idle. The first look only records where things stand. Returns how many
     /// messages were announced.
     pub fn poll_external(&self) -> ApiResult<usize> {
-        let save = self.save.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        // The name is held until the connection is read: a switch swaps both under this
+        // lock, so the numbers below always belong to the save they are filed under.
+        let open = self.save.lock().unwrap_or_else(|e| e.into_inner());
+        let save = open.clone();
         let mut watch = self.watch.lock().unwrap_or_else(|e| e.into_inner());
         let (version, now) = {
             let w = self.w();
@@ -63,6 +66,7 @@ impl Engine {
             );
             (version, now)
         };
+        drop(open);
         if watch.save != save || watch.version.is_none() {
             *watch = Watch {
                 save,
@@ -148,13 +152,35 @@ impl Engine {
     /// replaced corpus or save-less reopen ends the old engine's watcher). The app spawns
     /// this once per engine.
     pub async fn watch_external(engine: std::sync::Weak<Self>) {
+        Self::watch_every(engine, POLL).await;
+    }
+
+    pub(super) async fn watch_every(engine: std::sync::Weak<Self>, period: Duration) {
+        let mut failing = false;
         loop {
-            tokio::time::sleep(POLL).await;
+            tokio::time::sleep(period).await;
             let Some(engine) = engine.upgrade() else {
                 return;
             };
             // The pragma and the queries are blocking calls on a mutex-guarded connection.
-            let _ = tokio::task::spawn_blocking(move || engine.poll_external()).await;
+            let looked = tokio::task::spawn_blocking(move || engine.poll_external()).await;
+            // Say so once when a look fails and again when it works, not every 2 s.
+            let failure = match looked {
+                Ok(Ok(_)) => None,
+                Ok(Err(e)) => Some(e.to_string()),
+                Err(e) => Some(e.to_string()),
+            };
+            if failure.is_some() != failing {
+                match &failure {
+                    Some(e) => {
+                        eprintln!("dramatis: checking for changes by another process failed: {e}")
+                    }
+                    None => {
+                        eprintln!("dramatis: checking for changes by another process works again")
+                    }
+                }
+                failing = failure.is_some();
+            }
         }
     }
 }

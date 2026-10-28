@@ -261,9 +261,13 @@ impl Session {
     }
 
     /// What the editor's Tab completes to: the names persons answer to and the save names.
-    /// Read again after a `/save` command, which can change either.
+    /// Read again after a `/save` command, which can change either. When either cannot be
+    /// read the previous lists stay, and the error is shown.
     async fn refresh_completions(&self) {
-        let roster = self.roster().await.unwrap_or_default();
+        let roster = match self.roster().await {
+            Ok(r) => r,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
         let talkable: Vec<&Entry> = roster.iter().filter(|e| e.persona).collect();
         let mut names: Vec<String> = talkable
             .iter()
@@ -282,7 +286,10 @@ impl Session {
             );
         }
         let ids = talkable.iter().map(|e| e.id.clone()).collect();
-        let saves = self.engine.saves().await.unwrap_or_default();
+        let saves = match self.engine.saves().await {
+            Ok(s) => s,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
         self.completions.set(Snapshot::new(
             names,
             ids,
@@ -1064,7 +1071,9 @@ impl Session {
             .ok()
             .and_then(|c| c.last().map(|c| c.id))
             .unwrap_or(0);
-        let _ = self.names.refresh_user(&self.engine).await;
+        if let Err(e) = self.names.refresh_user(&self.engine).await {
+            self.term.error(&e.to_string());
+        }
         self.term.note(&format!(
             "now playing {name}; /talk <person> or /host to begin"
         ));
