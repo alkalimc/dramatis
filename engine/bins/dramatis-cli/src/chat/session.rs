@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use api::error::ApiResult;
-use api::types::{Author, ChannelId, FactId, PersonId};
-use api::views::{Audience, FactFilter, FactScope, FactView, RosterRow, Settings};
+use api::types::{Author, ChannelId, FactId, PersonId, Tier};
+use api::views::{Audience, FactFilter, FactScope, FactView, QuietHours, RosterRow, Settings};
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
 
-use super::command::{Command, HELP};
+use super::command::{Command, Save, parse};
 use super::show::{Names, Offer, Show, Term, Working};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -63,6 +63,24 @@ pub struct Session {
     metered: i64,
     /// Text for the next input line to start with (`/resend`).
     prefill: Option<String>,
+    /// The memories of the last `/memories` list, which `/forget`, `/restore` and `/edit`
+    /// number into. Dropped when one of them changes the list.
+    listed: Vec<FactView>,
+    /// What the next line answers (y/n), when a command asked.
+    pending: Option<Pending>,
+}
+
+/// What `/forget`, `/restore` and `/edit` do to a listed memory.
+enum Change {
+    Forget,
+    Restore,
+    Edit(String),
+}
+
+/// A destructive step waiting for a yes.
+enum Pending {
+    DeleteSave(String),
+    Overwrite { name: String, path: String },
 }
 
 fn now_ms() -> i64 {
@@ -70,6 +88,14 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// A path as typed in a shell: a leading `~/` is the home directory.
+fn expand(path: &str) -> String {
+    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => std::path::Path::new(&home).join(rest).display().to_string(),
+        _ => path.to_owned(),
+    }
 }
 
 fn excerpt(text: &str, max: usize) -> String {
@@ -106,6 +132,8 @@ impl Session {
             calls: Vec::new(),
             metered,
             prefill: None,
+            listed: Vec::new(),
+            pending: None,
         }
     }
 
@@ -147,11 +175,24 @@ impl Session {
         true
     }
 
+    /// One line of input: the answer to a question just asked, else a command or message.
+    pub async fn input(&mut self, line: &str) -> Flow {
+        let Some(pending) = self.pending.take() else {
+            return self.handle(parse(line)).await;
+        };
+        if matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+            self.confirmed(pending).await;
+        } else {
+            self.term.note("cancelled");
+        }
+        Flow::Continue
+    }
+
     pub async fn handle(&mut self, command: Command) -> Flow {
         match command {
             Command::Noop => {}
             Command::Quit => return Flow::Quit,
-            Command::Help => self.term.print(&format!("{HELP}\n")),
+            Command::Help => self.term.print(&format!("{}\n", self.help())),
             Command::Invalid(text) => self.term.print(&format!("{text}\n")),
             Command::List(filter) => self.list(filter.as_deref()).await,
             Command::Talk(who) => self.talk(&who).await,
@@ -166,6 +207,12 @@ impl Session {
             Command::Say(text) => self.say(&text).await,
             Command::Wrapup => self.wrapup().await,
             Command::Memories(who) => self.memories(who.as_deref()).await,
+            Command::Forget(n) => self.change_memory(n, Change::Forget).await,
+            Command::Restore(n) => self.change_memory(n, Change::Restore).await,
+            Command::Edit(n, text) => self.change_memory(n, Change::Edit(text)).await,
+            Command::Tier(level) => self.tier(level.as_deref()).await,
+            Command::Quiet(arg) => self.quiet(arg.as_deref()).await,
+            Command::Save(cmd) => self.save(cmd).await,
             Command::History(n) => self.history(n).await,
             Command::Resend(n) => self.resend(n).await,
             Command::Sources(n) => self.sources(n).await,
@@ -450,6 +497,7 @@ impl Session {
         self.report_failures();
         self.offer();
         self.footer(at, started).await;
+        self.arrivals(false).await;
     }
 
     /// Count the calls made since `at` and say how many and how long.
@@ -510,7 +558,7 @@ impl Session {
             Some(Err(e)) => self.term.error(&e.to_string()),
             Some(Ok(())) => {
                 let written: Vec<FactView> = self
-                    .facts(None)
+                    .facts(None, FactScope::All)
                     .await
                     .unwrap_or_default()
                     .into_iter()
@@ -522,6 +570,8 @@ impl Session {
                     self.term
                         .note(&format!("wrapped up; {} memories written", written.len()));
                     self.print_memories(&written);
+                    // So `/forget 1` right after a wrap-up means the first of these.
+                    self.listed = written;
                 }
             }
             None => {}
@@ -531,9 +581,9 @@ impl Session {
 
     // ---- memories ----
 
-    async fn facts(&self, person: Option<PersonId>) -> ApiResult<Vec<FactView>> {
+    async fn facts(&self, person: Option<PersonId>, scope: FactScope) -> ApiResult<Vec<FactView>> {
         let filter = FactFilter {
-            scope: FactScope::All,
+            scope,
             person,
             task: None,
         };
@@ -541,7 +591,7 @@ impl Session {
     }
 
     async fn fact_ids(&self) -> Vec<FactId> {
-        self.facts(None)
+        self.facts(None, FactScope::All)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -562,16 +612,16 @@ impl Session {
     }
 
     fn print_memories(&self, memories: &[FactView]) {
-        for m in memories {
+        for (i, m) in memories.iter().enumerate() {
             let kind = format!("{:?}", m.kind).to_lowercase();
             self.term
-                .print(&format!("#{} [{kind}] {}\n", m.id.0, m.text));
+                .print(&format!("{}. [{kind}] {}\n", i + 1, m.text));
             self.term
                 .note(&format!("    seen by: {}", self.audience(m)));
         }
     }
 
-    async fn memories(&self, who: Option<&str>) {
+    async fn memories(&mut self, who: Option<&str>) {
         let person = match who {
             Some(who) => match self.resolve(who).await {
                 Ok(p) => Some(p),
@@ -579,15 +629,67 @@ impl Session {
             },
             None => None,
         };
-        let all = match self.facts(person).await {
+        let mut all = match self.facts(person.clone(), FactScope::All).await {
             Ok(m) => m,
             Err(e) => return self.term.error(&e.to_string()),
         };
+        let live = all.len();
+        // Deleted ones follow in the same numbering, so `/restore` has something to name.
+        all.extend(
+            self.facts(person, FactScope::Deleted)
+                .await
+                .unwrap_or_default(),
+        );
         if all.is_empty() {
             return self.term.note("no memories");
         }
-        self.print_memories(&all);
-        self.term.note(&format!("{} memories", all.len()));
+        for (i, m) in all.iter().enumerate() {
+            let kind = format!("{:?}", m.kind).to_lowercase();
+            let line = format!("{}. [{kind}] {}", i + 1, m.text);
+            if i < live {
+                self.term.print(&format!("{line}\n"));
+                self.term
+                    .note(&format!("    seen by: {}", self.audience(m)));
+            } else {
+                self.term.note(&format!("{line}  (deleted)"));
+            }
+        }
+        self.term.note(&format!(
+            "{live} memories, {} deleted; /forget, /restore or /edit <n>",
+            all.len() - live
+        ));
+        self.listed = all;
+    }
+
+    async fn change_memory(&mut self, n: usize, change: Change) {
+        let Some(m) = self.listed.get(n - 1).cloned() else {
+            return self.term.note(if self.listed.is_empty() {
+                "no list yet: /memories first"
+            } else {
+                "no such memory in the last list"
+            });
+        };
+        let done = match (&change, m.retracted) {
+            (Change::Forget, true) | (Change::Edit(_), true) => {
+                return self.term.note("that one is deleted; /restore it first");
+            }
+            (Change::Restore, false) => return self.term.note("that one is not deleted"),
+            (Change::Forget, false) => self.engine.delete_fact(m.id).await.map(|()| "deleted"),
+            (Change::Restore, true) => self.engine.restore_fact(m.id).await.map(|()| "restored"),
+            (Change::Edit(text), false) => self
+                .engine
+                .edit_fact(m.id, text.clone())
+                .await
+                .map(|_| "rewritten"),
+        };
+        match done {
+            Ok(what) => {
+                // Numbers would now point at different memories.
+                self.listed.clear();
+                self.term.note(&format!("{what}; /memories lists again"));
+            }
+            Err(e) => self.term.error(&e.to_string()),
+        }
     }
 
     // ---- reading back ----
@@ -733,6 +835,267 @@ impl Session {
         if found.hits.is_empty() {
             self.term.note("no hits");
         }
+    }
+
+    // ---- help and settings ----
+
+    /// `/help`: the groups in the corpus's wording, then how to send.
+    fn help(&self) -> String {
+        let mut groups: Vec<String> = [
+            "conversation",
+            "channels",
+            "memories",
+            "saves",
+            "settings",
+            "other",
+        ]
+        .iter()
+        .map(|g| self.names.text(&format!("cli.help.{g}")))
+        .collect();
+        groups.push(self.names.text("cli.typing"));
+        groups.join("\n\n")
+    }
+
+    async fn tier(&self, level: Option<&str>) {
+        const LEVELS: [(&str, Tier); 6] = [
+            ("low", Tier::Low),
+            ("middle", Tier::Middle),
+            ("high", Tier::High),
+            ("extra_high", Tier::ExtraHigh),
+            ("max", Tier::Max),
+            ("ultra", Tier::Ultra),
+        ];
+        let name = |t: Tier| LEVELS.iter().find(|(_, l)| *l == t).map_or("", |(n, _)| *n);
+        if let Some(level) = level {
+            let want = level.trim().to_lowercase().replace(['-', ' '], "_");
+            let Some((_, tier)) = LEVELS.iter().find(|(n, _)| *n == want) else {
+                let all: Vec<&str> = LEVELS.iter().map(|(n, _)| *n).collect();
+                return self.term.print(&format!("levels: {}\n", all.join(", ")));
+            };
+            if let Err(e) = self.engine.set_tier(*tier).await {
+                return self.term.error(&e.to_string());
+            }
+        }
+        match self.engine.quota().await {
+            Ok(q) => self.term.note(&format!(
+                "tier {}, quota {}",
+                name(q.tier),
+                format!("{:?}", q.band).to_lowercase()
+            )),
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    async fn quiet(&self, arg: Option<&str>) {
+        let settings = match self.engine.settings().await {
+            Ok(s) => s,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        let quiet = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
+            None => settings.quiet_hours.clone(),
+            Some("off") => None,
+            Some("on") => settings.quiet_hours.clone().or_else(|| {
+                // Back to the register's hours, which the engine would show on a fresh world.
+                let d = &self.engine.params().world.seed.quiet_hours;
+                Some(QuietHours {
+                    from: d.from.clone(),
+                    to: d.to.clone(),
+                })
+            }),
+            Some(range) => match range.split_once('-') {
+                Some((from, to)) => Some(QuietHours {
+                    from: from.trim().into(),
+                    to: to.trim().into(),
+                }),
+                None => return self.term.print("usage: /quiet [on|off|HH:MM-HH:MM]\n"),
+            },
+        };
+        if arg.is_some() {
+            let next = Settings {
+                quiet_hours: quiet.clone(),
+                ..settings
+            };
+            if let Err(e) = self.engine.update_settings(next).await {
+                return match e {
+                    api::ApiError::Invalid { .. } => self
+                        .term
+                        .print("hours are 24-hour HH:MM, like 23:00-07:00\n"),
+                    e => self.term.error(&e.to_string()),
+                };
+            }
+        }
+        self.term.note(&match quiet {
+            Some(q) => format!("quiet hours on, {} to {}", q.from, q.to),
+            None => "quiet hours off".to_owned(),
+        });
+    }
+
+    // ---- saves ----
+
+    /// What a save command's failure means in a terminal.
+    fn why(e: &api::ApiError) -> String {
+        match e {
+            api::ApiError::Busy => "a reply is still being written; try again when it ends".into(),
+            api::ApiError::Exists => "a save with that name already exists".into(),
+            api::ApiError::NotFound => "no such save (or file)".into(),
+            api::ApiError::Invalid { field } if field == "name" => {
+                "that is not a usable name (no slashes, no leading dot, at most 48 characters)"
+                    .into()
+            }
+            api::ApiError::Invalid { field } if field == "file" => {
+                "that file is not a world database this version can read".into()
+            }
+            other => other.to_string(),
+        }
+    }
+
+    async fn save(&mut self, cmd: Save) {
+        let done = match cmd {
+            Save::List => return self.list_saves().await,
+            Save::New(n) => self
+                .engine
+                .new_save(n.clone())
+                .await
+                .map(|()| format!("created {n}")),
+            Save::Switch(n) => return self.switch_save(&n).await,
+            Save::Copy(a, b) => self
+                .engine
+                .copy_save(a.clone(), b.clone())
+                .await
+                .map(|()| format!("copied {a} to {b}")),
+            Save::Rename(a, b) => self
+                .engine
+                .rename_save(a.clone(), b.clone())
+                .await
+                .map(|()| format!("renamed {a} to {b}")),
+            Save::Delete(n) => return self.ask_delete(n).await,
+            Save::Export(n, path) => return self.export_save(n, path).await,
+            Save::Import(path, name) => self
+                .engine
+                .import_save(expand(&path), name)
+                .await
+                .map(|n| format!("imported as {n}; /save switch {n} opens it")),
+        };
+        match done {
+            Ok(text) => self.term.note(&text),
+            Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+        }
+    }
+
+    async fn list_saves(&self) {
+        let saves = match self.engine.saves().await {
+            Ok(s) => s,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        for s in &saves {
+            let played = s.played_at.as_ref().map_or_else(
+                || "-".to_owned(),
+                |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
+            );
+            self.term.print(&format!(
+                "{} {:<24} {:>8} KB  {played}\n",
+                if s.current { "*" } else { " " },
+                s.name,
+                s.size_kb
+            ));
+        }
+    }
+
+    /// Close this world and open another: what the session held about the old one (the
+    /// channel, the choices the host offered, the numbered memories, the call counts) goes.
+    async fn switch_save(&mut self, name: &str) {
+        if let Err(e) = self.engine.switch_save(name.to_owned()).await {
+            return self.term.print(&format!("{}\n", Self::why(&e)));
+        }
+        self.current = None;
+        self.offers.clear();
+        self.listed.clear();
+        self.calls.clear();
+        self.metered = self
+            .bridge
+            .calls_after(0)
+            .await
+            .ok()
+            .and_then(|c| c.last().map(|c| c.id))
+            .unwrap_or(0);
+        let _ = self.names.refresh_user(&self.engine).await;
+        self.term.note(&format!(
+            "now playing {name}; /talk <person> or /host to begin"
+        ));
+    }
+
+    async fn ask_delete(&mut self, name: String) {
+        let in_use = self
+            .engine
+            .saves()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|s| s.current && s.name == name);
+        if in_use {
+            return self
+                .term
+                .print("that is the save in use; /save switch to another first\n");
+        }
+        self.term
+            .print(&format!("delete save {name} for good? (y/n) "));
+        self.pending = Some(Pending::DeleteSave(name));
+    }
+
+    async fn export_save(&mut self, name: String, path: String) {
+        let path = expand(&path);
+        if std::path::Path::new(&path).exists() {
+            self.term
+                .print(&format!("{path} exists; replace it? (y/n) "));
+            self.pending = Some(Pending::Overwrite { name, path });
+            return;
+        }
+        self.export_now(&name, path).await;
+    }
+
+    async fn export_now(&self, name: &str, path: String) {
+        match self.engine.export_save(name.to_owned(), path.clone()).await {
+            Ok(()) => self.term.note(&format!("wrote {path}")),
+            Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+        }
+    }
+
+    async fn confirmed(&mut self, pending: Pending) {
+        match pending {
+            Pending::DeleteSave(name) => match self.engine.delete_save(name.clone()).await {
+                Ok(()) => self.term.note(&format!("deleted {name}")),
+                Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+            },
+            Pending::Overwrite { name, path } => self.export_now(&name, path).await,
+        }
+    }
+
+    // ---- people coming to you ----
+
+    /// What the app does on a timer, here at the two moments the terminal is awake: when
+    /// it opens (`opened`: presence, which may bring the host's line and one person's
+    /// opening) and after each message. Idle conversations are wrapped up and due
+    /// openings written; anything that arrives is printed by the event sink.
+    pub async fn arrivals(&mut self, opened: bool) {
+        let (started, at) = (Instant::now(), now_ms());
+        let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
+        let ran = self
+            .interruptible(async move {
+                if opened {
+                    engine.presence().await?;
+                    bridge.idle().await;
+                }
+                bridge.tick().await;
+                bridge.idle().await;
+                Ok::<(), api::ApiError>(())
+            })
+            .await;
+        if let Some(Err(e)) = ran {
+            self.term.error(&e.to_string());
+        }
+        self.report_failures();
+        self.offer();
+        self.footer(at, started).await;
     }
 
     fn stats(&self) {

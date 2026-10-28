@@ -104,6 +104,8 @@ fn fixture() -> TempFolio {
 #[derive(Default)]
 struct Spy {
     calls: Mutex<Vec<String>>,
+    /// Pretend a reply is being written.
+    busy: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -155,6 +157,13 @@ impl AgentPort for Spy {
         Ok(())
     }
     fn set_endpoints(&self, _: &Endpoints) {}
+    fn idle(&self) -> bool {
+        !self.busy.load(Ordering::Relaxed)
+    }
+    fn switch_world(&self, path: &std::path::Path) {
+        let name = path.file_stem().unwrap().to_string_lossy();
+        self.calls.lock().unwrap().push(format!("world {name}"));
+    }
 }
 
 struct Net(Option<Vec<u8>>, Mutex<u32>);
@@ -943,4 +952,96 @@ async fn search_in_library_form_filters_by_person() {
     );
     let empty = e.search_corpus("  ".into(), vec![]).await.unwrap();
     assert!(empty.hits.is_empty());
+}
+
+#[tokio::test]
+async fn saves_switch_keep_their_own_worlds_and_guard_the_open_one() {
+    let r = rig();
+    let e = &r.engine;
+    // The first start has one save, the default, and it is open.
+    let all = e.saves().await.unwrap();
+    assert_eq!(
+        (all.len(), all[0].name.as_str(), all[0].current),
+        (1, "default", true)
+    );
+
+    name_user(e, "Ada").await;
+    e.new_save("second".into()).await.unwrap();
+    assert_eq!(e.new_save("Second".into()).await, Err(ApiError::Exists));
+
+    // A reply in flight: nothing that closes the world.
+    r.spy.busy.store(true, Ordering::Relaxed);
+    assert_eq!(e.switch_save("second".into()).await, Err(ApiError::Busy));
+    assert_eq!(
+        e.rename_save("default".into(), "main".into()).await,
+        Err(ApiError::Busy)
+    );
+    r.spy.busy.store(false, Ordering::Relaxed);
+
+    e.switch_save("second".into()).await.unwrap();
+    assert_eq!(e.home.current_save(), "second");
+    assert_eq!(
+        e.settings().await.unwrap().user_name,
+        None,
+        "an empty world"
+    );
+    assert_eq!(r.spy.calls.lock().unwrap().last().unwrap(), "world second");
+    assert!(
+        e.saves()
+            .await
+            .unwrap()
+            .iter()
+            .any(|s| s.name == "second" && s.current)
+    );
+
+    e.switch_save("default".into()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
+
+    // The open save cannot be deleted; another can.
+    assert!(matches!(
+        e.delete_save("default".into()).await,
+        Err(ApiError::Invalid { .. })
+    ));
+    e.delete_save("second".into()).await.unwrap();
+    assert_eq!(
+        e.switch_save("second".into()).await,
+        Err(ApiError::NotFound)
+    );
+
+    // Renaming the open save moves its files and the world with them.
+    e.rename_save("default".into(), "main".into())
+        .await
+        .unwrap();
+    assert_eq!(e.home.current_save(), "main");
+    assert_eq!(r.spy.calls.lock().unwrap().last().unwrap(), "world main");
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
+    name_user(e, "Bea").await;
+
+    // Export is a consistent copy; importing it gives a save with the same world.
+    let out = e.home.root().join("backup.sqlite");
+    e.export_save("main".into(), out.display().to_string())
+        .await
+        .unwrap();
+    let name = e
+        .import_save(out.display().to_string(), None)
+        .await
+        .unwrap();
+    assert_eq!(name, "backup");
+    e.copy_save("main".into(), "twin".into()).await.unwrap();
+    e.switch_save("backup".into()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
+    e.switch_save("twin".into()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
 }

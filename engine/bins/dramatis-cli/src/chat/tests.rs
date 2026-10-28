@@ -15,7 +15,6 @@ use llm::transport::{HttpRequest, HttpResponse, StreamResponse};
 use runtime::{Options, Runtime};
 use serde_json::json;
 
-use super::command::parse;
 use super::render::{Marker, Style};
 use super::session::Session;
 use super::show::{Names, Show, Term};
@@ -87,10 +86,12 @@ impl Buf {
     }
 }
 
-fn corpus() -> TempFolio {
+const WORDING: &str = r#"{"user.you": "Doc", "host.name": "Hostess"}"#;
+
+fn corpus(wording: &str) -> TempFolio {
     let mut b = Builder::new()
         .manifest("user_placeholder", r#""<U>""#)
-        .manifest("wording", r#"{"user.you": "Doc", "host.name": "Hostess"}"#)
+        .manifest("wording", wording)
         .manifest("scene_marker", r#"["(", ")"]"#);
     b.person("ann", None).person("bo", None).person("cy", None);
     for (id, page, text, persons) in [
@@ -166,7 +167,11 @@ struct Rig {
 }
 
 async fn rig() -> Rig {
-    let folio = corpus();
+    rig_wording(WORDING).await
+}
+
+async fn rig_wording(wording: &str) -> Rig {
+    let folio = corpus(wording);
     let home = TempHome::new();
     std::fs::write(
         home.0.join("endpoints.toml"),
@@ -220,7 +225,7 @@ async fn rig() -> Rig {
 
 impl Rig {
     async fn run(&mut self, line: &str) -> String {
-        self.session.handle(parse(line)).await;
+        self.session.input(line).await;
         self.out.take()
     }
 }
@@ -452,4 +457,218 @@ async fn wrapup_ends_the_conversation_and_a_hung_turn_can_be_abandoned() {
     tokio::time::timeout(std::time::Duration::from_secs(5), r.bridge.idle())
         .await
         .expect("cancelled work ends");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_start_lines_say_how_to_send_in_the_corpus_wording() {
+    let plain = rig().await;
+    let [typing, start] = super::intro_lines(&plain.names);
+    assert_eq!(typing, "Enter: new line · Option/Alt-Enter: send");
+    assert!(start.contains("/help"), "{start}");
+    assert_eq!(
+        plain.names.text("cli.typing.more"),
+        "Option/Alt-Enter: send"
+    );
+
+    let worded = rig_wording(
+        r#"{"user.you": "Doc", "cli.typing": "line / send", "cli.typing.more": "send key"}"#,
+    )
+    .await;
+    assert_eq!(super::intro_lines(&worded.names)[0], "line / send");
+    assert_eq!(worded.names.text("cli.typing.more"), "send key");
+}
+
+/// Two memories in the world, written the way a wrap-up would.
+async fn plant_memories(r: &Rig) {
+    r.bridge.agent().await.unwrap().with_world(|w| {
+        for text in ["Ann likes jasmine tea", "Bo works at the forge"] {
+            w.execute(
+                "INSERT INTO fact(author, audience_kind, kind, text, created_at)
+                     VALUES ('user', 'world', 'fact', ?1, 0)",
+                [text],
+            )
+            .unwrap();
+        }
+    });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn memories_are_numbered_and_can_be_forgotten_restored_and_edited() {
+    let mut r = rig().await;
+    assert!(r.run("/forget 1").await.contains("/memories first"));
+    plant_memories(&r).await;
+    let listed = r.run("/memories").await;
+    assert!(
+        listed.contains("1. [fact] Ann likes jasmine tea")
+            && listed.contains("2. [fact] Bo works at the forge"),
+        "{listed}"
+    );
+    assert!(r.run("/forget 9").await.contains("no such memory"));
+    assert!(r.run("/forget 1").await.contains("deleted"));
+    // Numbers are stale once something changed.
+    assert!(r.run("/forget 1").await.contains("/memories first"));
+
+    let listed = r.run("/memories").await;
+    assert!(
+        listed.contains("1. [fact] Bo works at the forge")
+            && listed.contains("2. [fact] Ann likes jasmine tea  (deleted)"),
+        "{listed}"
+    );
+    assert!(r.run("/edit 2 nope").await.contains("/restore it first"));
+    assert!(r.run("/restore 1").await.contains("not deleted"));
+    assert!(r.run("/restore 2").await.contains("restored"));
+    let again = r.run("/memories").await;
+    let bo = again
+        .lines()
+        .find(|l| l.contains("Bo works"))
+        .and_then(|l| l.split('.').next())
+        .unwrap()
+        .to_owned();
+    let edit = format!("/edit {bo} Bo moved to the tea house");
+    assert!(r.run(&edit).await.contains("rewritten"));
+    let listed = r.run("/memories").await;
+    assert!(
+        listed.contains("[fact] Bo moved to the tea house")
+            && listed.contains("Bo works at the forge  (deleted)"),
+        "{listed}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tier_and_quiet_hours_show_and_set() {
+    let mut r = rig().await;
+    assert!(r.run("/tier").await.contains("tier middle"));
+    assert!(r.run("/tier extra-high").await.contains("tier extra_high"));
+    assert!(
+        r.run("/tier nonsense")
+            .await
+            .contains("levels: low, middle")
+    );
+    assert!(
+        r.run("/quiet 23:00-07:00")
+            .await
+            .contains("on, 23:00 to 07:00")
+    );
+    assert!(r.run("/quiet off").await.contains("quiet hours off"));
+    assert!(r.run("/quiet").await.contains("quiet hours off"));
+    assert!(r.run("/quiet on").await.contains("quiet hours on"));
+    assert!(r.run("/quiet 25:00-07:00").await.contains("24-hour"));
+    assert!(r.run("/quiet noon").await.contains("usage"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saves_list_switch_and_ask_before_deleting() {
+    let mut r = rig().await;
+    plant_memories(&r).await;
+    let listed = r.run("/save").await;
+    assert!(listed.starts_with("* default"), "{listed}");
+    assert!(r.run("/save new second").await.contains("created second"));
+    assert!(r.run("/save new SECOND").await.contains("already exists"));
+    assert!(r.run("/save new a/b").await.contains("not a usable name"));
+
+    r.run("/talk ann").await;
+    assert!(
+        r.run("/save switch second")
+            .await
+            .contains("now playing second")
+    );
+    // The new world is empty, and the old channel is not there.
+    assert!(r.run("/memories").await.contains("no memories"));
+    assert!(r.run("hello").await.contains("no channel yet"));
+    assert!(r.session.prompt().contains("[-]"));
+    let both = r.run("/save").await;
+    assert!(
+        both.contains("* second") && both.contains("  default"),
+        "{both}"
+    );
+
+    // The save in use is protected; another asks first, and a no (or anything else) keeps it.
+    assert!(r.run("/save delete second").await.contains("save in use"));
+    assert!(r.run("/save delete default").await.contains("(y/n)"));
+    assert!(r.run("n").await.contains("cancelled"));
+    assert!(r.run("/save").await.contains("default"));
+    r.run("/save delete default").await;
+    assert!(r.run("y").await.contains("deleted default"));
+    assert!(!r.run("/save").await.contains("default"));
+    assert!(r.run("/save switch default").await.contains("no such save"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saves_export_and_import_through_a_file() {
+    let mut r = rig().await;
+    plant_memories(&r).await;
+    let file = r._home.0.join("out.sqlite");
+    let cmd = format!("/save export default \"{}\"", file.display());
+    assert!(r.run(&cmd).await.contains("wrote"));
+    // A second export to the same place asks before replacing.
+    assert!(r.run(&cmd).await.contains("replace it? (y/n)"));
+    assert!(r.run("no").await.contains("cancelled"));
+    r.run(&cmd).await;
+    assert!(r.run("y").await.contains("wrote"));
+
+    let import = format!("/save import \"{}\" copy", file.display());
+    assert!(r.run(&import).await.contains("imported as copy"));
+    assert!(r.run(&import).await.contains("already exists"));
+    r.run("/save switch copy").await;
+    let listed = r.run("/memories").await;
+    assert!(listed.contains("Ann likes jasmine tea"), "{listed}");
+
+    std::fs::write(r._home.0.join("junk.sqlite"), b"nothing").unwrap();
+    let junk = format!(
+        "/save import \"{}\"",
+        r._home.0.join("junk.sqlite").display()
+    );
+    assert!(r.run(&junk).await.contains("not a world database"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn help_is_grouped_and_takes_the_corpus_wording() {
+    let mut r = rig().await;
+    let help = r.run("/help").await;
+    let at = |needle: &str| {
+        help.find(needle)
+            .unwrap_or_else(|| panic!("{needle} in {help}"))
+    };
+    let order = [
+        "Conversation",
+        "Channels",
+        "Memories",
+        "Saves",
+        "Settings",
+        "Other",
+    ];
+    assert!(order.windows(2).all(|w| at(w[0]) < at(w[1])), "{help}");
+    for cmd in [
+        "/save switch",
+        "/forget <n>",
+        "/tier [level]",
+        "/quiet",
+        "/wrapup",
+        "Enter: new line",
+    ] {
+        assert!(help.contains(cmd), "{cmd}");
+    }
+    assert!(!help.contains("Ctrl-J"));
+
+    // The default names the host through the corpus's word for it.
+    assert!(!help.contains("{host}") && help.contains("whether Hostess is available"));
+    let mut worded = rig_wording(
+        r#"{"host.name": "Hostess", "cli.help.memories": "MEMORY-GROUP for {host}", "cli.typing": "SEND-KEY"}"#,
+    )
+    .await;
+    let help = worded.run("/help").await;
+    assert!(
+        help.contains("MEMORY-GROUP for Hostess") && help.contains("SEND-KEY"),
+        "{help}"
+    );
+    assert!(help.contains("whether Hostess is available"), "{help}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn arrivals_run_the_tick_without_a_model_call_when_nothing_is_due() {
+    let mut r = rig().await;
+    // Nothing is idle or due: no endpoint is asked (the script is empty and would panic).
+    r.session.arrivals(true).await;
+    r.session.arrivals(false).await;
+    assert!(r.out.take().is_empty() || !r.out.take().contains("error"));
 }

@@ -33,6 +33,7 @@ import type {
   QuotaStatus,
   Roster,
   RosterBand,
+  SaveInfo,
   RosterRow,
   Settings,
   TaskSummary,
@@ -118,6 +119,17 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     notifications: true,
   };
   let introPending = settings.user_name === null;
+  let openSave = "default";
+  let saves: SaveInfo[] = [
+    { name: "default", size_kb: 412, played_at: iso(5), current: true },
+    { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false },
+  ];
+  const saveNameError = (name: string): ApiError | null => {
+    if (!name.trim() || name !== name.trim() || /[/\\:*?"<>|]/.test(name) || name.startsWith(".")) {
+      return { code: "invalid", field: "name" };
+    }
+    return saves.some((s) => s.name.toLowerCase() === name.toLowerCase()) ? { code: "exists" } : null;
+  };
   let greeted = false;
   let tier: Tier = params.get("tier") === "ultra" ? "ultra" : "middle";
   const band: QuotaBand =
@@ -802,6 +814,52 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (next.user_name !== null && !next.user_name.trim()) return fail({ code: "invalid", field: "user_name" });
       settings = { ...next };
       return ok(null);
+    },
+    saves: () => ok(saves.map((s) => ({ ...s, current: s.name === openSave }))),
+    newSave: (name) => {
+      const bad = saveNameError(name);
+      if (bad) return fail(bad);
+      saves.push({ name, size_kb: 96, played_at: iso(), current: false });
+      return ok(null);
+    },
+    switchSave: (name) => {
+      if (!saves.some((s) => s.name === name)) return fail({ code: "not_found" });
+      openSave = name;
+      return ok(null);
+    },
+    copySave: (from, to) => {
+      const src = saves.find((s) => s.name === from);
+      if (!src) return fail({ code: "not_found" });
+      const bad = saveNameError(to);
+      if (bad) return fail(bad);
+      saves.push({ ...src, name: to, played_at: iso(), current: false });
+      return ok(null);
+    },
+    renameSave: (from, to) => {
+      const src = saves.find((s) => s.name === from);
+      if (!src) return fail({ code: "not_found" });
+      const bad = saveNameError(to);
+      if (bad) return fail(bad);
+      src.name = to;
+      if (openSave === from) openSave = to;
+      return ok(null);
+    },
+    deleteSave: (name) => {
+      if (name === openSave) return fail({ code: "invalid", field: "name" });
+      if (!saves.some((s) => s.name === name)) return fail({ code: "not_found" });
+      saves = saves.filter((s) => s.name !== name);
+      return ok(null);
+    },
+    exportSave: (name, path) => {
+      if (!saves.some((s) => s.name === name)) return fail({ code: "not_found" });
+      return path.trim() ? ok(null) : fail({ code: "invalid", field: "path" });
+    },
+    importSave: (path, name) => {
+      const used = name ?? path.split(/[\\/]/).pop()?.replace(/\.[^.]*$/, "") ?? "";
+      const bad = saveNameError(used);
+      if (bad) return fail(bad);
+      saves.push({ name: used, size_kb: 128, played_at: iso(), current: false });
+      return ok(used);
     },
     endpoints: () => ok(structuredClone(endpoints)),
     addProfile: (profile) => {

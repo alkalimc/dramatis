@@ -72,6 +72,8 @@ const CODES: Record<gen.ApiError["code"], true> = {
   endpoint: true,
   keychain: true,
   io: true,
+  busy: true,
+  exists: true,
 };
 
 export function asFailure(e: unknown): Failure {

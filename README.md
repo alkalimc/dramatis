@@ -120,9 +120,13 @@ that is used; with an ad-hoc signed build the first run of each new build trigge
 keychain prompt (choose Always Allow). To stop the prompts coming back after every rebuild, sign
 with a stable identity, see [Keychain prompts](#keychain-prompts).
 
-The world (channels, memories, usage) is the app's: `$DRAMATIS_HOME/world.sqlite`, so the
-terminal and the app share conversations, settings and endpoints, and may be open together
-(the database is in WAL mode and writes wait for each other). Use `--home <dir>` for another
+The world (channels, memories, usage) is a save: `$DRAMATIS_HOME/saves/<name>.sqlite`, and
+`current_save` in the home directory names the one a process opens when it starts (an older
+`world.sqlite` is moved there as `default` on first start). The terminal and the app share the
+saves, settings and endpoints, and may be open together (the database is in WAL mode and writes
+wait for each other). Each process keeps the save it started with: switching in one does not move
+the other until it is restarted, and deleting a save another process has open loses what that
+process writes after. Use `--home <dir>` for another
 home directory, `--fresh` for a throwaway world (a temporary home that keeps your endpoints and
 parameters and is deleted at exit), and `--user <name>` to set the user's name. On a terminal
 the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK) characters count by their display width;
@@ -137,13 +141,21 @@ the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK)
 | `/go <n>` (`/open`) | after the host found people or made a group, a numbered list follows its reply; this switches to choice n |
 | `/name <new name>` | set the name you are called by (`--user` sets it at start) |
 | `/wrapup` | end the conversation and show the memories it wrote |
-| `/memories [person]` | stored memories and who can see them, or those about or recalled by a person |
+| `/memories [person]` | numbered memories and who can see them, or those about or recalled by a person; deleted ones follow |
+| `/forget <n>`, `/restore <n>`, `/edit <n> <text>` | delete, bring back or rewrite memory n of the last list |
+| `/tier [level]` | show or set the intensity tier (`low` to `ultra`) |
+| `/quiet [on\|off\|HH:MM-HH:MM]` | show or set the hours when nobody comes to you unprompted |
+| `/save` | list saves; `new <name>`, `switch <name>`, `copy <from> <to>`, `rename <from> <to>`, `delete <name>` (asks first), `export <name> <path>`, `import <path> [name]` |
 | `/history [n]` | reprint the last n messages (default 10) |
 | `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
 | `/stats` | one row per model call of this session: shape, model, tokens, seconds (read from the meter, not part of the app's interface) |
 | `/help`, `/quit` | Ctrl-D also leaves |
 
-Anything else is sent to the current channel. Replies stream as they are written; scene lines
+Anything else is sent to the current channel. Enter starts a new line and Alt-Enter (Option set as
+Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
+chat opens and after each message the terminal runs what the app runs on a timer (idle
+conversations are wrapped up, due openings written), so a person who has something to say shows up
+then; there is no background loop. Replies stream as they are written; scene lines
 are dimmed, citation marks are hidden and the cited sources are listed after the reply, tool
 actions get one dim line, a dim line says who is typing while a turn runs, and another gives
 the call count and time. The prompt shows the channel and then your own name. Colour is off when

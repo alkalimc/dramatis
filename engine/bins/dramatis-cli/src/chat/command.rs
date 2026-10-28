@@ -15,7 +15,17 @@ pub enum Command {
     /// Set the user's display name.
     Name(String),
     Wrapup,
+    /// Numbered list of memories, all or those a person may recall.
     Memories(Option<String>),
+    /// Delete, restore or rewrite memory n of the last `/memories` list.
+    Forget(usize),
+    Restore(usize),
+    Edit(usize, String),
+    /// Show or set the intensity tier.
+    Tier(Option<String>),
+    /// Show quiet hours, switch them `on`/`off`, or set `HH:MM-HH:MM`.
+    Quiet(Option<String>),
+    Save(Save),
     History(usize),
     /// Take back the n-th last message of the user in this channel (1 = the last) and
     /// put its text in the input line.
@@ -30,31 +40,70 @@ pub enum Command {
     Invalid(String),
 }
 
+/// What `/save` was asked to do. Names and paths may be "double quoted" to hold spaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Save {
+    List,
+    New(String),
+    Switch(String),
+    Copy(String, String),
+    Rename(String, String),
+    Delete(String),
+    Export(String, String),
+    Import(String, Option<String>),
+}
+
+const SAVE_USAGE: &str = "usage: /save [new <name> | switch <name> | copy <from> <to> | \
+rename <from> <to> | delete <name> | export <name> <path> | import <path> [name]]";
+
+/// Split on spaces, keeping "double quoted" text together.
+fn words(args: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let (mut word, mut quoted, mut any) = (String::new(), false, false);
+    for c in args.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                any = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if any {
+                    out.push(std::mem::take(&mut word));
+                    any = false;
+                }
+            }
+            c => {
+                word.push(c);
+                any = true;
+            }
+        }
+    }
+    if any {
+        out.push(word);
+    }
+    out
+}
+
+fn parse_save(args: &str) -> Command {
+    let w = words(args);
+    let w: Vec<&str> = w.iter().map(String::as_str).collect();
+    let save = match w.as_slice() {
+        [] | ["list"] => Save::List,
+        ["new", n] => Save::New((*n).into()),
+        ["switch", n] => Save::Switch((*n).into()),
+        ["copy", a, b] => Save::Copy((*a).into(), (*b).into()),
+        ["rename", a, b] => Save::Rename((*a).into(), (*b).into()),
+        ["delete", n] => Save::Delete((*n).into()),
+        ["export", n, p] => Save::Export((*n).into(), (*p).into()),
+        ["import", p] => Save::Import((*p).into(), None),
+        ["import", p, n] => Save::Import((*p).into(), Some((*n).into())),
+        _ => return Command::Invalid(SAVE_USAGE.into()),
+    };
+    Command::Save(save)
+}
+
 /// Lines shown by `/history` without an argument.
 pub const HISTORY_DEFAULT: usize = 10;
-
-pub const HELP: &str = "\
-/list [filter]         persons who can be talked to, and whether the host is available
-/talk <person>         open the direct channel with a person (id, name or alias)
-/group <p1> <p2> ...   start a group channel with several persons
-/host                  switch to the host's channel
-/go <n>                take choice n from the list the host just offered
-/name <new name>       change the name you are called by
-/wrapup                end the current conversation and show the memories it wrote
-/memories [person]     stored memories, or those a person may recall
-/history [n]           reprint the last n messages of this channel (default 10)
-/resend [n]            take back your n-th last message (default 1) and everything after it,
-                       and put its text back in the input line to edit and send again
-/sources [n]           list in full the sources of the n-th last reply that has any (default 1)
-/search <query>        retrieval only, as the current speaker would see it
-/stats                 model calls made in this session
-/help, /quit           this text; leave (Ctrl-D also works)
-//text                 send a message that starts with a slash
-anything else is sent to the current channel
-
-Typing: Enter starts a new line; Ctrl-J or Alt-Enter sends (Alt is Option set as Meta in
-macOS Terminal and iTerm). A line that starts with a slash is a command and Enter runs it.
-With --plain each input line is one message.";
 
 pub fn parse(line: &str) -> Command {
     let line = line.trim();
@@ -93,6 +142,22 @@ pub fn parse(line: &str) -> Command {
         "name" => Command::Name(args.to_owned()),
         "wrapup" => Command::Wrapup,
         "memories" | "mem" => Command::Memories(optional(args)),
+        "forget" | "restore" => match args.parse::<usize>() {
+            Ok(n) if n > 0 && name == "forget" => Command::Forget(n),
+            Ok(n) if n > 0 => Command::Restore(n),
+            _ => Command::Invalid(format!("usage: /{name} <n>, a number from /memories")),
+        },
+        "edit" => match args.split_once(char::is_whitespace) {
+            Some((n, text))
+                if n.parse::<usize>().is_ok_and(|n| n > 0) && !text.trim().is_empty() =>
+            {
+                Command::Edit(n.parse().unwrap_or(1), text.trim().to_owned())
+            }
+            _ => Command::Invalid("usage: /edit <n> <new text>, n from /memories".into()),
+        },
+        "tier" => Command::Tier(optional(args)),
+        "quiet" => Command::Quiet(optional(args)),
+        "save" => parse_save(args),
         "history" | "h" => match args {
             "" => Command::History(HISTORY_DEFAULT),
             n => match n.parse::<usize>() {
@@ -162,6 +227,44 @@ mod tests {
         assert_eq!(parse("/go 2"), Command::Go(2));
         assert_eq!(parse("/open 1"), Command::Go(1));
         assert_eq!(parse("/name  Dr. Doc "), Command::Name("Dr. Doc".into()));
+        assert_eq!(parse("/forget 2"), Command::Forget(2));
+        assert_eq!(parse("/restore 3"), Command::Restore(3));
+        assert_eq!(
+            parse("/edit 1 new  words "),
+            Command::Edit(1, "new  words".into())
+        );
+        assert_eq!(parse("/tier"), Command::Tier(None));
+        assert_eq!(parse("/quiet off"), Command::Quiet(Some("off".into())));
+    }
+
+    #[test]
+    fn save_subcommands_and_quoting() {
+        use Save::*;
+        let save = |line| match parse(line) {
+            Command::Save(s) => s,
+            other => panic!("{line}: {other:?}"),
+        };
+        assert_eq!(save("/save"), List);
+        assert_eq!(save("/save new second"), New("second".into()));
+        assert_eq!(save("/save switch \"story 2\""), Switch("story 2".into()));
+        assert_eq!(save("/save copy a b"), Copy("a".into(), "b".into()));
+        assert_eq!(
+            save("/save rename a \"b c\""),
+            Rename("a".into(), "b c".into())
+        );
+        assert_eq!(save("/save delete a"), Delete("a".into()));
+        assert_eq!(
+            save("/save export a \"/tmp/my dir/a.sqlite\""),
+            Export("a".into(), "/tmp/my dir/a.sqlite".into())
+        );
+        assert_eq!(
+            save("/save import /x.sqlite"),
+            Import("/x.sqlite".into(), None)
+        );
+        assert_eq!(
+            save("/save import /x.sqlite name"),
+            Import("/x.sqlite".into(), Some("name".into()))
+        );
     }
 
     #[test]
@@ -179,6 +282,14 @@ mod tests {
             "/go 0",
             "/go x",
             "/name",
+            "/forget",
+            "/forget 0",
+            "/restore x",
+            "/edit 1",
+            "/edit x text",
+            "/save new",
+            "/save copy a",
+            "/save frobnicate",
             "/nope",
         ] {
             assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");

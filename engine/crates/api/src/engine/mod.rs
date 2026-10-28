@@ -8,6 +8,7 @@ mod chat;
 mod endpoints;
 mod library;
 mod people;
+mod saves;
 mod tasks;
 
 use std::path::PathBuf;
@@ -68,6 +69,8 @@ pub struct Engine {
     params: Params,
     ports: Ports,
     world: Mutex<World>,
+    /// The name of the save `world` is.
+    save: Mutex<String>,
     corpus: Option<Arc<Corpus>>,
     state: CorpusState,
     endpoints: Mutex<Endpoints>,
@@ -92,7 +95,8 @@ impl Engine {
     pub fn open(home: Home, folio: Option<PathBuf>, ports: Ports) -> ApiResult<Self> {
         home.create().map_err(io)?;
         let params = Params::load(&home.params()).map_err(io)?;
-        let world = World::open(home.world()).map_err(world_err)?;
+        let save = home.current_save();
+        let world = World::open(home.save_path(&save)).map_err(world_err)?;
         let endpoints = match std::fs::read_to_string(home.endpoints()) {
             Ok(text) => Endpoints::from_toml(&text).map_err(io)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Endpoints::default(),
@@ -116,6 +120,7 @@ impl Engine {
             params,
             ports,
             world: Mutex::new(world),
+            save: Mutex::new(save),
             corpus,
             state,
             endpoints: Mutex::new(endpoints),
@@ -551,6 +556,30 @@ impl Api for Engine {
     }
     async fn update_settings(&self, settings: Settings) -> ApiResult<()> {
         self.update_settings_impl(settings).await
+    }
+    async fn saves(&self) -> ApiResult<Vec<SaveInfo>> {
+        Ok(self.saves_impl())
+    }
+    async fn new_save(&self, name: String) -> ApiResult<()> {
+        crate::saves::create(&self.home, &name)
+    }
+    async fn switch_save(&self, name: String) -> ApiResult<()> {
+        self.switch_save_impl(&name)
+    }
+    async fn copy_save(&self, from: String, to: String) -> ApiResult<()> {
+        crate::saves::copy(&self.home, &from, &to)
+    }
+    async fn rename_save(&self, from: String, to: String) -> ApiResult<()> {
+        self.rename_save_impl(&from, &to)
+    }
+    async fn delete_save(&self, name: String) -> ApiResult<()> {
+        self.delete_save_impl(&name)
+    }
+    async fn export_save(&self, name: String, path: String) -> ApiResult<()> {
+        self.export_save_impl(&name, &path)
+    }
+    async fn import_save(&self, path: String, name: Option<String>) -> ApiResult<String> {
+        self.import_save_impl(&path, name.as_deref())
     }
     async fn endpoints(&self) -> ApiResult<EndpointsView> {
         Ok(self.endpoints_view())

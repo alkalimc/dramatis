@@ -34,7 +34,7 @@ export type Drawer =
   | { kind: "cases" }
   | { kind: "case"; id: TaskId }
   | { kind: "world" }
-  | { kind: "system"; tab: "quota" | "endpoints" };
+  | { kind: "system"; tab: "quota" | "endpoints" | "saves" };
 
 /** What the ask card starts with; every field optional. */
 export interface AskDraft {

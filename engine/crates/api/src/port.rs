@@ -79,6 +79,15 @@ pub trait AgentPort: Send + Sync + 'static {
 
     /// The endpoints changed; the next call uses these.
     fn set_endpoints(&self, endpoints: &Endpoints);
+
+    /// Whether no model-driven work (a reply, a request, a wrap-up) is running.
+    fn idle(&self) -> bool {
+        true
+    }
+
+    /// Work on the world database at `path` from now on (a different save). Only called
+    /// while [`idle`](Self::idle).
+    fn switch_world(&self, _path: &std::path::Path) {}
 }
 
 /// Synthesised speech, ready to cache.

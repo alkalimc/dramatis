@@ -31,7 +31,7 @@ pub mod wrapup;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 pub use types::*;
 
@@ -174,6 +174,71 @@ pub fn migrate(conn: &mut Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", index as i64 + 1)?;
         tx.commit()?;
     }
+    Ok(())
+}
+
+/// Tables every schema version has; a file lacking one is not a world database.
+const CORE_TABLES: &[&str] = &[
+    "bond",
+    "channel",
+    "channel_participant",
+    "message",
+    "task",
+    "fact",
+    "log_segment",
+    "log_entry",
+    "meter",
+    "settings",
+];
+
+/// Whether `path` is a world database this build can migrate: readable, intact, with the
+/// core tables and a schema version no newer than this build's. Nothing is written.
+pub fn check_file(path: impl AsRef<Path>) -> Result<()> {
+    let invalid = |why: &str| Error::Invalid(why.to_owned());
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|_| invalid("not a readable database"))?;
+    let quick: String = conn
+        .pragma_query_value(None, "quick_check", |row| row.get(0))
+        .map_err(|_| invalid("not a database"))?;
+    if quick != "ok" {
+        return Err(invalid("the database is damaged"));
+    }
+    let found: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if found > SCHEMA_VERSION {
+        return Err(Error::TooNew {
+            found,
+            supported: SCHEMA_VERSION,
+        });
+    }
+    let present: i64 = conn.query_row(
+        &format!(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ({})",
+            CORE_TABLES
+                .iter()
+                .map(|t| format!("'{t}'"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        [],
+        |row| row.get(0),
+    )?;
+    if found < 1 || present != CORE_TABLES.len() as i64 {
+        return Err(invalid("not a world database"));
+    }
+    Ok(())
+}
+
+/// A consistent single-file copy of the database at `src` (`VACUUM INTO`, so a WAL that
+/// has not been checkpointed is included and the copy needs no side files). `dest` must
+/// not exist.
+pub fn copy_file(src: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
+    let conn = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    let dest = dest
+        .as_ref()
+        .to_str()
+        .ok_or_else(|| Error::Invalid("path is not text".into()))?;
+    conn.execute("VACUUM INTO ?1", [dest])?;
     Ok(())
 }
 
@@ -387,5 +452,70 @@ mod tests {
         ] {
             assert!(conn.execute(bad, []).is_err(), "accepted: {bad}");
         }
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("world-file-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn copy_file_carries_uncheckpointed_rows_and_check_file_accepts_it() {
+        let dir = scratch("copy");
+        let src = dir.join("a.sqlite");
+        let w = World::open(&src).unwrap();
+        w.execute("INSERT INTO settings VALUES ('user.name', '\"Doc\"')", [])
+            .unwrap();
+        // `w` stays open, so the row may still sit in the WAL.
+        let dest = dir.join("b.sqlite");
+        copy_file(&src, &dest).unwrap();
+        assert!(copy_file(&src, &dest).is_err(), "never overwrites");
+        check_file(&dest).unwrap();
+        let copy = Connection::open(&dest).unwrap();
+        let n: i64 = copy
+            .query_row(
+                "SELECT count(*) FROM settings WHERE key = 'user.name'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        drop(w);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn check_file_refuses_what_is_not_a_world() {
+        let dir = scratch("check");
+        let other = dir.join("other.sqlite");
+        let c = Connection::open(&other).unwrap();
+        c.execute_batch("CREATE TABLE t(x); PRAGMA user_version = 1;")
+            .unwrap();
+        drop(c);
+        assert!(matches!(check_file(&other), Err(Error::Invalid(_))));
+
+        let text = dir.join("text.sqlite");
+        std::fs::write(&text, b"just some text, not a database at all").unwrap();
+        assert!(check_file(&text).is_err());
+        assert!(check_file(dir.join("absent.sqlite")).is_err());
+
+        let newer = dir.join("newer.sqlite");
+        drop(World::open(&newer).unwrap());
+        let c = Connection::open(&newer).unwrap();
+        c.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+        drop(c);
+        assert!(matches!(check_file(&newer), Err(Error::TooNew { .. })));
+
+        // An older schema is accepted: opening it migrates.
+        let old = dir.join("old.sqlite");
+        let c = Connection::open(&old).unwrap();
+        c.execute_batch(MIGRATIONS[0]).unwrap();
+        c.pragma_update(None, "user_version", 1).unwrap();
+        drop(c);
+        check_file(&old).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
