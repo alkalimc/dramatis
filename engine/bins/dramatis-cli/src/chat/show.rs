@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use agent::{Agent, Event, Sink};
 use api::events::ActivityState;
-use api::types::{Author, MessageId};
+use api::types::{Author, ChannelId, MessageId};
 use api::views::{Message, ToolAction};
 
 use super::render::{self, Marker, Streamer, Style};
@@ -109,9 +109,9 @@ pub fn action_line(action: &ToolAction) -> String {
         ToolAction::Report => "reported back".into(),
         ToolAction::Wrapup => "wrapped up the conversation".into(),
         ToolAction::Digest => "looked at the digest".into(),
-        ToolAction::FindPeople { topic } => format!("looked for people on: {topic}"),
+        ToolAction::FindPeople { topic, .. } => format!("looked for people on: {topic}"),
         ToolAction::Ask { person, question } => format!("asked {}: {question}", person.name),
-        ToolAction::CreateGroup { members } => format!(
+        ToolAction::CreateGroup { members, .. } => format!(
             "created a group: {}",
             members
                 .iter()
@@ -124,14 +124,59 @@ pub fn action_line(action: &ToolAction) -> String {
     }
 }
 
+/// What a host tool call lets the user click or pick: a found person, a created group.
+fn offers_of(action: &ToolAction) -> Vec<Offer> {
+    match action {
+        ToolAction::FindPeople { persons, .. } => persons
+            .iter()
+            .map(|p| Offer::Person {
+                id: p.id.0.clone(),
+                name: p.name.clone(),
+            })
+            .collect(),
+        ToolAction::CreateGroup {
+            members,
+            channel: Some(channel),
+        } => vec![Offer::Group {
+            channel: channel.clone(),
+            names: members.iter().map(|m| m.name.clone()).collect(),
+        }],
+        _ => Vec::new(),
+    }
+}
+
 /// The reply being written right now.
 struct Live {
     id: MessageId,
     streamer: Streamer,
 }
 
+/// A place the host offered to take the user to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Offer {
+    Person {
+        id: String,
+        name: String,
+    },
+    Group {
+        channel: ChannelId,
+        names: Vec<String>,
+    },
+}
+
+impl Offer {
+    pub fn text(&self) -> String {
+        match self {
+            Offer::Person { name, .. } => format!("talk to {name}"),
+            Offer::Group { names, .. } => format!("open group: {}", names.join(", ")),
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
+    /// Choices from the host's tool calls since the session last took them.
+    offers: Vec<Offer>,
     live: Option<Live>,
     /// The message whose name has been written, so a stream resumed after a tool line
     /// does not repeat it.
@@ -167,6 +212,12 @@ impl Show {
 
     fn prefix(&self, agent: &Agent, author: &Author) -> String {
         format!("{}: ", self.term.style.bold(&author_name(agent, author)))
+    }
+
+    /// The choices the host offered since the last call, without repeats.
+    pub fn take_offers(&self) -> Vec<Offer> {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut st.offers)
     }
 
     /// Close a reply that was cut off (Ctrl-C), so the next output starts on a fresh line.
@@ -267,6 +318,13 @@ impl Sink for Show {
             }
             Event::ToolCalled(t) => {
                 self.close(&mut st);
+                if t.author == Author::Host {
+                    for offer in offers_of(&t.action) {
+                        if !st.offers.contains(&offer) {
+                            st.offers.push(offer);
+                        }
+                    }
+                }
                 self.term.note(&format!("· {}", action_line(&t.action)));
             }
             Event::MessageAdded(a) => {

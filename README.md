@@ -113,6 +113,8 @@ Home/End and Up/Down history, and wide (CJK) characters count by their display w
 | `/talk <person>` | open the direct channel; an id, display name, other form or alias |
 | `/group <p1> <p2> ...` | start a group channel |
 | `/host` | switch to the host's channel |
+| `/go <n>` (`/open`) | after the host found people or made a group, a numbered list follows its reply; this switches to choice n |
+| `/name <new name>` | set the name you are called by (`--user` sets it at start) |
 | `/wrapup` | end the conversation and show the memories it wrote |
 | `/memories [person]` | stored memories and who can see them, or those a person may recall |
 | `/history [n]` | reprint the last n messages (default 10) |

@@ -9,7 +9,7 @@ use api::types::{Author, PersonId as ApiPerson};
 use world::{Actor, ChannelId, PersonId};
 
 use super::command::{Command, HELP};
-use super::show::{self, Show, Term, Working, person_name};
+use super::show::{self, Offer, Show, Term, Working, person_name};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -64,6 +64,8 @@ pub struct Session {
     show: Arc<Show>,
     roster: Vec<Entry>,
     current: Option<Current>,
+    /// The host's latest choices, numbered from 1 for `/go`.
+    offers: Vec<Offer>,
     calls: Vec<Call>,
     /// The highest meter row already counted; rows before the session are not ours.
     metered: i64,
@@ -107,6 +109,7 @@ impl Session {
             show,
             roster,
             current: None,
+            offers: Vec::new(),
             calls: Vec::new(),
             metered,
         }
@@ -126,7 +129,7 @@ impl Session {
     }
 
     /// Set the user's name; a changed name rolls the channels over, as in the app.
-    pub async fn set_user(&mut self, name: &str) {
+    pub async fn set_user(&mut self, name: &str) -> bool {
         match self
             .agent
             .with_world(|w| world::settings::set_user_name(w, Some(name)))
@@ -135,9 +138,13 @@ impl Session {
                 if let Err(e) = self.agent.on_rename().await {
                     self.term.error(&e.to_string());
                 }
+                true
             }
-            Ok(false) => {}
-            Err(e) => self.term.error(&e.to_string()),
+            Ok(false) => true,
+            Err(e) => {
+                self.term.error(&e.to_string());
+                false
+            }
         }
     }
 
@@ -151,6 +158,12 @@ impl Session {
             Command::Talk(who) => self.talk(&who),
             Command::Group(who) => self.group(&who),
             Command::Host => self.host(),
+            Command::Go(n) => self.go(n),
+            Command::Name(name) => {
+                if self.set_user(&name).await {
+                    self.term.note(&format!("you are called {name} now"));
+                }
+            }
             Command::Say(text) => self.say(&text).await,
             Command::Wrapup => self.wrapup().await,
             Command::Memories(who) => self.memories(who.as_deref()),
@@ -250,10 +263,13 @@ impl Session {
     }
 
     fn talk(&mut self, who: &str) {
-        let person = match self.resolve(who) {
-            Ok(p) => p,
-            Err(e) => return self.term.print(&format!("{e}\n")),
-        };
+        match self.resolve(who) {
+            Ok(person) => self.open_person(person),
+            Err(e) => self.term.print(&format!("{e}\n")),
+        }
+    }
+
+    fn open_person(&mut self, person: PersonId) {
         match self.agent.open_direct(&person) {
             Ok(channel) => {
                 let name = person_name(&self.agent, person.as_str());
@@ -300,6 +316,57 @@ impl Session {
             }
             Err(e) => self.term.error(&e.to_string()),
         }
+    }
+
+    /// Switch to choice `n` of the host's latest offer.
+    fn go(&mut self, n: usize) {
+        let Some(offer) = self.offers.get(n - 1).cloned() else {
+            return self.term.print(if self.offers.is_empty() {
+                "the host has offered nothing to go to\n"
+            } else {
+                "no such choice; the host's list is above\n"
+            });
+        };
+        match offer {
+            Offer::Person { id, .. } => self.open_person(PersonId(id)),
+            Offer::Group { channel, .. } => {
+                let Ok(id) = channel.0.parse::<i64>().map(ChannelId) else {
+                    return self.term.error("bad group id");
+                };
+                let members = match self.agent.with_world(|w| world::channel::get(w, id)) {
+                    Ok(c) => c.persons(),
+                    Err(e) => return self.term.error(&e.to_string()),
+                };
+                let names: Vec<String> = members
+                    .iter()
+                    .map(|p| person_name(&self.agent, p.as_str()))
+                    .collect();
+                self.term.note(&format!("group with {}", names.join(", ")));
+                self.current = Some(Current {
+                    channel: id,
+                    kind: Kind::Group(members),
+                    label: names.join("+"),
+                });
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn offers_for_test(&mut self) {
+        self.offer();
+    }
+
+    /// Print what the host just offered and keep it for `/go`.
+    fn offer(&mut self) {
+        let offers = self.show.take_offers();
+        if offers.is_empty() {
+            return;
+        }
+        for (i, o) in offers.iter().enumerate() {
+            self.term.note(&format!("  {} {}", i + 1, o.text()));
+        }
+        self.term.note("  /go <n> takes you there");
+        self.offers = offers;
     }
 
     fn host(&mut self) {
@@ -355,6 +422,7 @@ impl Session {
         if let Some(Err(e)) = result {
             self.term.error(&e.to_string());
         }
+        self.offer();
         self.footer(at, started);
     }
 

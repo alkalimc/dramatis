@@ -10,6 +10,10 @@ pub enum Command {
     Talk(String),
     Group(Vec<String>),
     Host,
+    /// Take one of the choices the host last offered (1-based).
+    Go(usize),
+    /// Set the user's display name.
+    Name(String),
     Wrapup,
     Memories(Option<String>),
     History(usize),
@@ -29,6 +33,8 @@ pub const HELP: &str = "\
 /talk <person>         open the direct channel with a person (id, name or alias)
 /group <p1> <p2> ...   start a group channel with several persons
 /host                  switch to the host's channel
+/go <n>                take choice n from the list the host just offered
+/name <new name>       change the name you are called by
 /wrapup                end the current conversation and show the memories it wrote
 /memories [person]     stored memories, or those a person may recall
 /history [n]           reprint the last n messages of this channel (default 10)
@@ -67,6 +73,12 @@ pub fn parse(line: &str) -> Command {
             }
         }
         "host" => Command::Host,
+        "go" | "open" => match args.parse::<usize>() {
+            Ok(n) if n > 0 => Command::Go(n),
+            _ => Command::Invalid("usage: /go <n>, a number from the host's list".into()),
+        },
+        "name" if args.is_empty() => Command::Invalid("usage: /name <new name>".into()),
+        "name" => Command::Name(args.to_owned()),
         "wrapup" => Command::Wrapup,
         "memories" | "mem" => Command::Memories(optional(args)),
         "history" | "h" => match args {
@@ -117,6 +129,9 @@ mod tests {
         assert_eq!(parse("/memories x"), Command::Memories(Some("x".into())));
         assert_eq!(parse("/quit"), Command::Quit);
         assert_eq!(parse("/host"), Command::Host);
+        assert_eq!(parse("/go 2"), Command::Go(2));
+        assert_eq!(parse("/open 1"), Command::Go(1));
+        assert_eq!(parse("/name  Dr. Doc "), Command::Name("Dr. Doc".into()));
     }
 
     #[test]
@@ -127,6 +142,10 @@ mod tests {
             "/history 0",
             "/history x",
             "/search",
+            "/go",
+            "/go 0",
+            "/go x",
+            "/name",
             "/nope",
         ] {
             assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");
