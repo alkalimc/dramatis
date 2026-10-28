@@ -516,11 +516,9 @@ impl Agent {
             &status,
         )?;
         if let Some(p) = pick.filter(|p| self.has_persona(p.as_str())) {
-            let handed = self
-                .interject(posted.channel, &p, "harness.interject")
-                .await?;
-            spoken.push(p);
-            self.round(posted.channel, &mut spoken, VecDeque::new(), &handed)
+            // The ordinary interjection is the end of the turn: a hand-off line on it is
+            // stripped like any other but starts nothing.
+            self.interject(posted.channel, &p, "harness.interject")
                 .await?;
         }
         Ok(())

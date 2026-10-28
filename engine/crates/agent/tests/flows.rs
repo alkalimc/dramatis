@@ -2001,3 +2001,29 @@ async fn the_hand_off_line_is_never_streamed() {
         "{all}"
     );
 }
+
+#[tokio::test]
+async fn an_ordinary_interjection_hands_the_turn_to_nobody() {
+    let e = env(WireApi::Chat);
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("smithing"))
+        .unwrap();
+    e.agent.with_world(|w| {
+        channel::set_mode(w, g, Mode::Enabled).unwrap();
+        bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap();
+        bond::set_mode(w, &p("bo"), Mode::Enabled).unwrap();
+    });
+    e.fake.push([
+        say("Ann: by name."),
+        say("Bo: a line.\n\u{2192} ann"),
+        say("unused"),
+    ]);
+    e.agent
+        .send(g, "ann, jasmine tea at the forge blade?", None)
+        .await
+        .unwrap();
+    assert_eq!(e.fake.bodies().len(), 2);
+    let said = texts(&e, g);
+    assert!(said.iter().any(|(_, t)| t == "Bo: a line."), "{said:?}");
+}
