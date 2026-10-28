@@ -24,7 +24,7 @@ pub(crate) fn document(text: &str) -> Option<String> {
     Some(Value::Object(kept).to_string())
 }
 
-fn unfence(text: &str) -> &str {
+pub(crate) fn unfence(text: &str) -> &str {
     let Some(body) = text.strip_prefix("```") else {
         return text;
     };

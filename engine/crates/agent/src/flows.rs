@@ -22,6 +22,7 @@ use world::{
     channel, fact, message, session, settings,
 };
 
+use crate::address::Audience;
 use crate::agent::{Agent, Event};
 use crate::assemble::{self, Member};
 use crate::error::{Error, Result, timestamp};
@@ -441,9 +442,18 @@ impl Agent {
             .iter()
             .map(|m| PersonId::from(m.person.as_str()))
             .collect();
-        let Some(addressed) = channel::address(&self.db(), posted.channel, named.as_ref(), &hits)?
-        else {
-            return Ok(());
+        let turns = self
+            .speakers(posted, &members, named.as_ref(), &hits)
+            .await?;
+        let addressed = match turns.first() {
+            Some(first) => first.clone(),
+            None => {
+                let Some(a) = channel::address(&self.db(), posted.channel, named.as_ref(), &hits)?
+                else {
+                    return Ok(());
+                };
+                a
+            }
         };
         session::open(
             &self.db(),
@@ -472,25 +482,14 @@ impl Agent {
             .await?;
         self.replied(posted.channel, &addressed)?;
 
-        // A message to everyone gets a short round of replies, each seeing the earlier ones.
-        if self.is_collective(&posted.text) {
-            let candidates: Vec<PersonId> = members
-                .iter()
-                .filter(|p| self.has_persona(p.as_str()))
-                .cloned()
-                .collect();
-            let rest = channel::chorus(
-                &self.db(),
-                posted.channel,
-                &addressed,
-                &candidates,
-                self.config.agent.group.collective_max,
-            )?;
-            for p in rest {
+        // A message to several of them gets a short round of replies, each seeing the
+        // earlier ones; it ends the user's turn, so no interjection follows.
+        if turns.len() > 1 {
+            for p in &turns[1..] {
                 if !self.unprompted_allowed()? {
                     break;
                 }
-                self.interject(posted.channel, &p, "harness.chorus").await?;
+                self.interject(posted.channel, p, "harness.chorus").await?;
             }
             return Ok(());
         }
@@ -540,14 +539,74 @@ impl Agent {
         Ok(quota::decide(&self.quota_status()?, quota::CallKind::Interjection).allowed())
     }
 
-    /// Whether the text speaks to the whole group: it holds one of the corpus's
-    /// collective address words (`harness.collective`, whitespace separated).
+    /// Whether the text holds one of the corpus's collective address words
+    /// (`harness.collective`, whitespace separated): it speaks to the whole group.
     fn is_collective(&self, text: &str) -> bool {
         self.corpus
             .wording
             .get("harness.collective")
             .split_whitespace()
             .any(|w| text.contains(w))
+    }
+
+    /// Who replies, in order, when the message speaks to several members; empty when the
+    /// plain rule (named, best hit, last speaker) applies. One member named and no
+    /// collective word is the common case and costs no extra request, as does a
+    /// collective word with nobody named. Otherwise the model is asked once who is
+    /// addressed (unless `group.classify` is off, where a collective word alone widens
+    /// it); an unusable answer means the plain rule.
+    async fn speakers(
+        &self,
+        posted: &Posted,
+        members: &[PersonId],
+        named: Option<&PersonId>,
+        hits: &[PersonId],
+    ) -> Result<Vec<PersonId>> {
+        let group = &self.config.agent.group;
+        let candidates: Vec<PersonId> = members
+            .iter()
+            .filter(|p| self.has_persona(p.as_str()))
+            .cloned()
+            .collect();
+        if candidates.len() < 2 || group.collective_max < 2 {
+            return Ok(Vec::new());
+        }
+        let many_named = candidates
+            .iter()
+            .filter(|p| self.is_named(&posted.text, p).unwrap_or(false))
+            .count();
+        let collective = self.is_collective(&posted.text);
+        let audience = if many_named == 1 && !collective {
+            None
+        } else if collective && (many_named == 0 || !group.classify) {
+            Some(Audience::Everyone)
+        } else if group.classify {
+            self.audience(posted.channel, posted.message, &posted.text, &candidates)
+                .await?
+        } else {
+            None
+        };
+        let set = match audience {
+            Some(Audience::Everyone) => candidates,
+            Some(Audience::Some(ids)) => ids,
+            None => return Ok(Vec::new()),
+        };
+        let first = named.or_else(|| hits.iter().find(|h| set.contains(h)));
+        Ok(channel::round(
+            &self.db(),
+            posted.channel,
+            first,
+            &set,
+            group.collective_max,
+        )?)
+    }
+
+    /// Whether the text names this person, by display name or id.
+    fn is_named(&self, text: &str, person: &PersonId) -> Result<bool> {
+        let display = self.display(person.as_str())?;
+        Ok([display.as_str(), person.as_str()]
+            .iter()
+            .any(|n| !n.is_empty() && text.contains(n)))
     }
 
     /// The participant the user named: the longest display name or id in the text.

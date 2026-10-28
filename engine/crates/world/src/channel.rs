@@ -395,15 +395,16 @@ pub fn interjector(
     Ok(best.map(|(p, _)| p.clone()))
 }
 
-/// Who answers after `addressed` when the user spoke to the whole group: up to
-/// `max - 1` of `candidates` (those still in the group and not disabled), the ones
-/// who spoke least recently first, never-spoken ahead of all, ties in the order given.
-/// Mode is not consulted: the user spoke to them directly, so frozen members count as
-/// addressed. Quota is the caller's to check per turn.
-pub fn chorus(
+/// The members who reply in order when a message speaks to several of them: `first`
+/// (if it is among the candidates) and then the rest, those who spoke least recently
+/// first (never-spoken ahead of all), ties in the order given; at most `max`. Only
+/// members still in the group and not disabled count. Mode is not consulted: the user
+/// spoke to them directly, so frozen members take part. Quota is the caller's to check
+/// per turn.
+pub fn round(
     conn: &Connection,
     channel: ChannelId,
-    addressed: &PersonId,
+    first: Option<&PersonId>,
     candidates: &[PersonId],
     max: u32,
 ) -> Result<Vec<PersonId>> {
@@ -420,12 +421,14 @@ pub fn chorus(
         .collect::<rusqlite::Result<_>>()?;
     let mut rest: Vec<&PersonId> = candidates
         .iter()
-        .filter(|p| *p != addressed && members.contains(p))
+        .filter(|p| members.contains(p) && Some(*p) != first)
         .collect();
     rest.sort_by_key(|p| last.get(*p).copied());
-    Ok(rest
+    let lead = first.filter(|f| candidates.contains(f) && members.contains(f));
+    Ok(lead
         .into_iter()
-        .take((max as usize).saturating_sub(1))
+        .chain(rest)
+        .take(max as usize)
         .cloned()
         .collect())
 }
@@ -521,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn chorus_orders_by_least_recent_speech_and_respects_the_cap() {
+    fn round_orders_by_least_recent_speech_and_respects_the_cap() {
         let w = world();
         let g = create_group(&w, &[p("a"), p("b"), p("c"), p("d")], None, Origin::User).unwrap();
         let say = |who: &str, at: i64| {
@@ -530,17 +533,27 @@ mod tests {
         say("c", 1);
         say("b", 2);
         let all = [p("a"), p("b"), p("c"), p("d")];
-        // `a` is addressed; `d` never spoke, then `c`, then `b`.
+        // `a` leads; then `d` never spoke, `c` spoke before `b`.
         assert_eq!(
-            chorus(&w, g, &p("a"), &all, 4).unwrap(),
-            vec![p("d"), p("c"), p("b")]
+            round(&w, g, Some(&p("a")), &all, 4).unwrap(),
+            vec![p("a"), p("d"), p("c"), p("b")]
         );
-        assert_eq!(chorus(&w, g, &p("a"), &all, 2).unwrap(), vec![p("d")]);
-        assert!(chorus(&w, g, &p("a"), &all, 1).unwrap().is_empty());
+        assert_eq!(
+            round(&w, g, Some(&p("b")), &all, 2).unwrap(),
+            vec![p("b"), p("a")]
+        );
+        assert_eq!(
+            round(&w, g, None, &all, 3).unwrap(),
+            vec![p("a"), p("d"), p("c")]
+        );
+        assert!(round(&w, g, None, &all, 0).unwrap().is_empty());
         // Frozen members take part; disabled ones and strangers do not.
         bond::set_mode(&w, &p("d"), Mode::Disabled).unwrap();
         let more = [p("a"), p("b"), p("d"), p("x")];
-        assert_eq!(chorus(&w, g, &p("a"), &more, 4).unwrap(), vec![p("b")]);
+        assert_eq!(
+            round(&w, g, Some(&p("d")), &more, 4).unwrap(),
+            vec![p("a"), p("b")]
+        );
     }
 
     #[test]

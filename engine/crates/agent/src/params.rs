@@ -54,14 +54,23 @@ pub struct Interject {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Group {
-    /// Most members who reply to one message addressed to the whole group, the first
-    /// addressed one included. Each reply is one more request.
+    /// Most members who reply to one message that speaks to several of them, the first
+    /// one included. A hard bound per user message; each reply is one more request.
     pub collective_max: u32,
+    /// Ask the model who a message speaks to when the cheap rules cannot tell (one small
+    /// request). Off, only the corpus's collective address words widen the audience.
+    pub classify: bool,
+    /// Lines before the message that the audience question shows.
+    pub classify_lines: u32,
 }
 
 impl Default for Group {
     fn default() -> Self {
-        Self { collective_max: 3 }
+        Self {
+            collective_max: 5,
+            classify: true,
+            classify_lines: 4,
+        }
     }
 }
 
@@ -160,7 +169,8 @@ mod tests {
         assert_eq!(p.roll.tail, Roll::default().tail);
         assert_eq!(p.turn_loop.max_steps, 2);
         assert_eq!(p.interject.min_confidence, None);
-        assert_eq!(p.group.collective_max, 3);
+        assert_eq!(p.group.collective_max, 5);
+        assert!(p.group.classify);
         assert_eq!(p.cost.w, 1.25);
         assert_eq!(Roll::default().threshold(0.25), 2400.0);
         assert_eq!(Roll::default().threshold(0.0), f64::INFINITY);

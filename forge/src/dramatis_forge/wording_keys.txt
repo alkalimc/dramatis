@@ -199,6 +199,7 @@ harness.digest.came_by
 harness.digest.commitment_due
 harness.digest.messaged
 harness.digest.replied
+harness.address
 harness.chorus
 harness.collective
 harness.done

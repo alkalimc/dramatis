@@ -83,6 +83,12 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.interject", "{name} may add one line."),
     ("harness.chorus", "{name} answers too, after the others."),
     ("harness.collective", "everyone everybody"),
+    (
+        "harness.address",
+        "Decide who the last message in a group chat speaks to. Members:\n{members}\n\n\
+         Lines before it:\n{recent}\n\nMessage: {message}\n\nReply with one JSON object \
+         only, no code fence, using exactly these keys: {shape}",
+    ),
     ("harness.joined", "{name} joins the conversation."),
     (
         "harness.ask",
