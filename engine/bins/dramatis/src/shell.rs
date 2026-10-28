@@ -88,6 +88,17 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
     });
     let Runtime { engine, bridge } = Runtime::open(home, folio, sink.clone(), Options::default())?;
     *sink.engine.lock().unwrap_or_else(|e| e.into_inner()) = Arc::downgrade(&engine);
+    // Stop the previous bridge before the swap: its in-flight turns would otherwise keep
+    // emitting into the new window and writing the same world.
+    let previous = app
+        .state::<Current>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some((_, old)) = previous {
+        old.cancel();
+    }
     app.state::<api::Handle>().replace(engine.clone());
 
     // Off the first screen's path: the retrieval index, and the network answer the form needs.
@@ -100,12 +111,10 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
     tauri::async_runtime::spawn(async move {
         probe.probe_network().await;
     });
-    if let Some(bridge) = bridge {
-        *app.state::<Current>()
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some((engine, bridge));
-    }
+    *app.state::<Current>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = bridge.map(|bridge| (engine, bridge));
     Ok(())
 }
 
@@ -157,6 +166,8 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // the home can be moved by `DRAMATIS_HOME`, so the scope is not static.
     let scope = app.asset_protocol_scope();
     for dir in [home.media(), home.office()] {
+        // The scope canonicalizes its paths, so they must exist (a fresh home has neither yet).
+        let _ = std::fs::create_dir_all(&dir);
         let _ = scope.allow_directory(dir, true);
     }
     let folio = home.resolve_folio();
