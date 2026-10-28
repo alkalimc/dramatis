@@ -15,7 +15,7 @@
       },
       {
         "function": {
-          "description": "Find people who know about something.",
+          "description": "Find people who know about something. The user is shown a way to talk to them; you\ncannot move the user yourself.",
           "name": "find_people",
           "parameters": {
             "additionalProperties": false,
@@ -68,7 +68,7 @@
       },
       {
         "function": {
-          "description": "Start a group conversation.",
+          "description": "Start a group conversation. The result gives the group id, and the user is shown a way\nto open it; you cannot move the user yourself.",
           "name": "create_group",
           "parameters": {
             "additionalProperties": false,
@@ -228,7 +228,7 @@
         "name": "digest"
       },
       {
-        "description": "Find people who know about something.",
+        "description": "Find people who know about something. The user is shown a way to talk to them; you\ncannot move the user yourself.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -275,7 +275,7 @@
         "name": "ask"
       },
       {
-        "description": "Start a group conversation.",
+        "description": "Start a group conversation. The result gives the group id, and the user is shown a way\nto open it; you cannot move the user yourself.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -422,7 +422,7 @@
         "type": "function"
       },
       {
-        "description": "Find people who know about something.",
+        "description": "Find people who know about something. The user is shown a way to talk to them; you\ncannot move the user yourself.",
         "name": "find_people",
         "parameters": {
           "additionalProperties": false,
@@ -471,7 +471,7 @@
         "type": "function"
       },
       {
-        "description": "Start a group conversation.",
+        "description": "Start a group conversation. The result gives the group id, and the user is shown a way\nto open it; you cannot move the user yourself.",
         "name": "create_group",
         "parameters": {
           "additionalProperties": false,

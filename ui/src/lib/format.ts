@@ -39,8 +39,17 @@ export function activityText(a: Activity, t: T): string {
   }
 }
 
+/** Most names a list spells out before it counts the rest. */
+const LIST_NAMES = 3;
+
+export function nameList(names: string[], t: T): string {
+  const shown = names.slice(0, LIST_NAMES).join(t("list.separator"));
+  const more = names.length - LIST_NAMES;
+  return more > 0 ? t("list.more", { names: shown, count: more }) : shown;
+}
+
 export function actionText(a: ToolAction, t: T, names: Names): string {
-  const list = (ps: { name: string }[]) => ps.map((p) => p.name).join(", ");
+  const list = (ps: { name: string }[]) => nameList(ps.map((p) => p.name), t);
   switch (a.tool) {
     case "search":
       return t("action.search", { query: a.query });
@@ -73,6 +82,30 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
     case "forget":
       return t("action.forget");
   }
+}
+
+/** Where the user can go from a host message: people it found, a group it made. */
+export type Choice = { kind: "person"; id: string; name: string } | { kind: "group"; channel: string; names: string[] };
+
+export function choicesOf(actions: ToolAction[]): Choice[] {
+  const out: Choice[] = [];
+  const seen = new Set<string>();
+  for (const a of actions) {
+    const found: Choice[] =
+      a.tool === "find_people"
+        ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name }))
+        : a.tool === "create_group" && a.channel
+          ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name) }]
+          : [];
+    for (const c of found) {
+      const key = c.kind === "person" ? `p:${c.id}` : `g:${c.channel}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(c);
+      }
+    }
+  }
+  return out;
 }
 
 export function audienceText(a: Audience, t: T): string {

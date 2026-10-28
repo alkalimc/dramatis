@@ -382,18 +382,24 @@ impl Agent {
                 Ok(Ok(self.digest_text(&d, names)?))
             }
             HostCall::FindPeople(f) => {
-                self.show_action(
-                    turn,
-                    ToolAction::FindPeople {
-                        topic: f.topic.clone(),
-                    },
-                )?;
                 let offer = self.offerable(&self.db())?;
                 let people = self.ix().find_people(
                     &f.topic,
                     Some(&offer),
                     self.config.find_people.k,
                     &[],
+                )?;
+                let persons = people
+                    .persons
+                    .iter()
+                    .map(|m| view::person_ref(self.ix().folio(), &m.person))
+                    .collect::<Result<Vec<_>>>()?;
+                self.show_action(
+                    turn,
+                    ToolAction::FindPeople {
+                        topic: f.topic.clone(),
+                        persons,
+                    },
                 )?;
                 if people.persons.is_empty() {
                     return Ok(Ok(self.say(names, "harness.nothing_found", &[])));
@@ -467,11 +473,17 @@ impl Agent {
                     .iter()
                     .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
                     .collect::<Result<Vec<_>>>()?;
-                self.show_action(turn, ToolAction::CreateGroup { members: refs })?;
                 let created =
                     channel::create_group(&self.db(), &members, g.topic.as_deref(), Origin::User);
                 match created {
                     Ok(id) => {
+                        self.show_action(
+                            turn,
+                            ToolAction::CreateGroup {
+                                members: refs,
+                                channel: Some(view::channel_id(id)),
+                            },
+                        )?;
                         self.changed(vec![api::events::WorldChange::Channel {
                             id: view::channel_id(id),
                         }]);

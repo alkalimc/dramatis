@@ -121,6 +121,12 @@ export function createActions(api: Api, store: Store) {
     await open(channel);
   }
 
+  /** Open a channel that may be newer than the list (a group the host just made). */
+  async function openChannel(channel: ChannelId) {
+    if (!store.getState().channels.some((ch) => ch.id === channel)) await refreshChannels();
+    await open(channel);
+  }
+
   async function setMode(target: Target, mode: Mode) {
     // The store follows the `ModeChanged` event, which also covers changes the host makes.
     await attempt(c.setMode(target, mode));
@@ -149,6 +155,7 @@ export function createActions(api: Api, store: Store) {
     markRead,
     open,
     openDirect,
+    openChannel,
     setMode,
     saveSettings,
   };

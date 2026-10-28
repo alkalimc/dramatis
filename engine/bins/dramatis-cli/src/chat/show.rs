@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use agent::{Agent, Event, Sink};
 use api::events::ActivityState;
-use api::types::{Author, MessageId};
+use api::types::{Author, ChannelId, MessageId};
 use api::views::{Message, ToolAction};
 
 use super::render::{self, Marker, Streamer, Style};
@@ -95,6 +95,29 @@ pub fn working_text(agent: &Agent, who: &str, what: Working) -> String {
     }
 }
 
+/// Most names a group label spells out before it counts the rest.
+const LABEL_NAMES: usize = 3;
+
+/// The corpus's wording for `key`, else `default`.
+fn wording_or(agent: &Agent, key: &str, default: &str) -> String {
+    match agent.wording().get(key) {
+        k if k == key => default.to_owned(),
+        template => template.to_owned(),
+    }
+}
+
+/// Names for a group in the corpus's list separator, the first few and then a count.
+pub fn group_label(agent: &Agent, names: &[String]) -> String {
+    let sep = wording_or(agent, "list.separator", ", ");
+    let shown = names[..names.len().min(LABEL_NAMES)].join(&sep);
+    match names.len() - names.len().min(LABEL_NAMES) {
+        0 => shown,
+        more => wording_or(agent, "list.more", "{names} +{count}")
+            .replace("{names}", &shown)
+            .replace("{count}", &more.to_string()),
+    }
+}
+
 /// One tool call as a short English line; the contents are the model's and the corpus's.
 pub fn action_line(action: &ToolAction) -> String {
     match action {
@@ -109,9 +132,9 @@ pub fn action_line(action: &ToolAction) -> String {
         ToolAction::Report => "reported back".into(),
         ToolAction::Wrapup => "wrapped up the conversation".into(),
         ToolAction::Digest => "looked at the digest".into(),
-        ToolAction::FindPeople { topic } => format!("looked for people on: {topic}"),
+        ToolAction::FindPeople { topic, .. } => format!("looked for people on: {topic}"),
         ToolAction::Ask { person, question } => format!("asked {}: {question}", person.name),
-        ToolAction::CreateGroup { members } => format!(
+        ToolAction::CreateGroup { members, .. } => format!(
             "created a group: {}",
             members
                 .iter()
@@ -124,18 +147,65 @@ pub fn action_line(action: &ToolAction) -> String {
     }
 }
 
+/// What a host tool call lets the user click or pick: a found person, a created group.
+fn offers_of(action: &ToolAction) -> Vec<Offer> {
+    match action {
+        ToolAction::FindPeople { persons, .. } => persons
+            .iter()
+            .map(|p| Offer::Person {
+                id: p.id.0.clone(),
+                name: p.name.clone(),
+            })
+            .collect(),
+        ToolAction::CreateGroup {
+            members,
+            channel: Some(channel),
+        } => vec![Offer::Group {
+            channel: channel.clone(),
+            names: members.iter().map(|m| m.name.clone()).collect(),
+        }],
+        _ => Vec::new(),
+    }
+}
+
 /// The reply being written right now.
 struct Live {
     id: MessageId,
     streamer: Streamer,
 }
 
+/// A place the host offered to take the user to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Offer {
+    Person {
+        id: String,
+        name: String,
+    },
+    Group {
+        channel: ChannelId,
+        names: Vec<String>,
+    },
+}
+
+impl Offer {
+    pub fn text(&self, agent: &Agent) -> String {
+        match self {
+            Offer::Person { name, .. } => format!("talk to {name}"),
+            Offer::Group { names, .. } => format!("open group: {}", group_label(agent, names)),
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
+    /// Choices from the host's tool calls since the session last took them.
+    offers: Vec<Offer>,
     live: Option<Live>,
     /// The message whose name has been written, so a stream resumed after a tool line
     /// does not repeat it.
     named: Option<MessageId>,
+    /// Whose "is typing" line is showing, so one turn says it once.
+    typing: Option<Author>,
 }
 
 /// Prints replies as they stream. Built before the agent (which takes it), bound to the
@@ -169,11 +239,18 @@ impl Show {
         format!("{}: ", self.term.style.bold(&author_name(agent, author)))
     }
 
+    /// The choices the host offered since the last call, without repeats.
+    pub fn take_offers(&self) -> Vec<Offer> {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut st.offers)
+    }
+
     /// Close a reply that was cut off (Ctrl-C), so the next output starts on a fresh line.
     pub fn abort(&self) {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         self.close(&mut st);
         st.named = None;
+        st.typing = None;
     }
 
     fn close(&self, st: &mut State) {
@@ -237,12 +314,27 @@ impl Sink for Show {
         let Some(agent) = self.agent() else { return };
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Event::TurnActivity(a) = &event {
-            // The session already said who is typing; a tool round is the one change worth
-            // a line of its own.
-            if matches!(a.state, ActivityState::Tool { .. }) && st.live.is_none() {
-                let who = author_name(&agent, &a.author);
-                self.term
-                    .note(&working_text(&agent, &who, Working::Searching));
+            // Whoever is generating gets the line, not the channel: in a group the one who
+            // answers is not known before the turn starts.
+            let who = author_name(&agent, &a.author);
+            match &a.state {
+                ActivityState::Thinking | ActivityState::Writing => {
+                    if st.typing.as_ref() != Some(&a.author) {
+                        st.typing = Some(a.author.clone());
+                        self.term.note(&working_text(&agent, &who, Working::Typing));
+                    }
+                }
+                ActivityState::Tool { .. } => {
+                    if st.live.is_none() {
+                        self.term
+                            .note(&working_text(&agent, &who, Working::Searching));
+                    }
+                }
+                ActivityState::Done | ActivityState::Failed { .. } => {
+                    if st.typing.as_ref() == Some(&a.author) {
+                        st.typing = None;
+                    }
+                }
             }
             return;
         }
@@ -267,6 +359,13 @@ impl Sink for Show {
             }
             Event::ToolCalled(t) => {
                 self.close(&mut st);
+                if t.author == Author::Host {
+                    for offer in offers_of(&t.action) {
+                        if !st.offers.contains(&offer) {
+                            st.offers.push(offer);
+                        }
+                    }
+                }
                 self.term.note(&format!("· {}", action_line(&t.action)));
             }
             Event::MessageAdded(a) => {

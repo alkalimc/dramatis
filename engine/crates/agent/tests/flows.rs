@@ -1606,3 +1606,47 @@ async fn without_a_host_role_the_host_uses_chat() {
     e.agent.send(host, "hello", None).await.unwrap();
     assert_eq!(models_sent(&e), ["model-a"]);
 }
+
+#[tokio::test]
+async fn host_tool_actions_carry_what_a_front_end_needs_to_offer_a_switch() {
+    use agent::Event;
+    use api::views::ToolAction;
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        call("create_group", json!({"members": ["ann", "bo"]})),
+        call("find_people", json!({"topic": "forge blade"})),
+        say("The group is ready; you can open it from here."),
+    ]);
+    e.agent.send(host, "make a group", None).await.unwrap();
+    let actions: Vec<ToolAction> = e
+        .sink
+        .take()
+        .into_iter()
+        .filter_map(|ev| match ev {
+            Event::ToolCalled(t) => Some(t.action),
+            _ => None,
+        })
+        .collect();
+    let groups = e.agent.with_world(|w| {
+        w.query_row("SELECT id FROM channel WHERE kind = 'group'", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap()
+    });
+    assert!(
+        actions.iter().any(|a| matches!(a,
+            ToolAction::CreateGroup { members, channel: Some(c) }
+                if members.len() == 2 && c.0 == groups.to_string())),
+        "{actions:?}"
+    );
+    assert!(
+        actions.iter().any(|a| matches!(a,
+            ToolAction::FindPeople { persons, .. } if !persons.is_empty())),
+        "{actions:?}"
+    );
+    // The model is told the id, and a stored message round-trips without it too.
+    assert!(log_bytes(&e.agent, host).contains(&format!("Group {groups} created.")));
+    let old: ToolAction = serde_json::from_str(r#"{"tool":"create_group","members":[]}"#).unwrap();
+    assert!(matches!(old, ToolAction::CreateGroup { channel: None, .. }));
+}

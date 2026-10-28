@@ -73,6 +73,8 @@ channel.group.untitled
 channel.host
 channel.more
 channel.person_page
+choice.group
+choice.person
 citation.gone
 citation.label
 citation.loading
@@ -252,6 +254,8 @@ library.search.placeholder
 library.search.submit
 library.searching
 library.understood
+list.more
+list.separator
 message.actions
 message.author
 message.awaiting

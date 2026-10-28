@@ -129,6 +129,8 @@ fn corpus() -> TempFolio {
 
 struct Rig {
     session: Session,
+    show: Arc<Show>,
+    agent: Arc<Agent>,
     out: Buf,
     script: Arc<Scripted>,
     _folio: TempFolio,
@@ -166,7 +168,9 @@ fn rig() -> Rig {
     );
     show.bind(&agent);
     Rig {
-        session: Session::new(agent, term, show),
+        session: Session::new(agent.clone(), term, show.clone()),
+        show,
+        agent,
         out,
         script,
         _folio: folio,
@@ -243,4 +247,119 @@ async fn search_runs_retrieval_as_the_current_speaker_without_a_model_call() {
     let group = r.run("/group ann bo").await;
     assert!(group.contains("has no persona"), "{group}");
     assert!(r.run("/host").await.contains("no host"));
+}
+
+fn host_called(action: api::views::ToolAction) -> agent::Event {
+    agent::Event::ToolCalled(api::events::ToolCalled {
+        channel: api::types::ChannelId("1".into()),
+        message: api::types::MessageId("1".into()),
+        author: api::types::Author::Host,
+        action,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
+    use agent::Sink;
+    use api::types::{ChannelId, PersonId};
+    use api::views::ToolAction;
+    let mut r = rig();
+    let person = |id: &str| api::types::PersonRef {
+        id: PersonId(id.into()),
+        name: id.into(),
+    };
+    let group = r
+        .agent
+        .with_world(|w| {
+            world::channel::create_group(
+                w,
+                &[world::PersonId("ann".into()), world::PersonId("bo".into())],
+                None,
+                world::Origin::User,
+            )
+        })
+        .unwrap();
+    assert!(r.run("/go 1").await.contains("offered nothing"));
+
+    // The host's tool calls become a numbered list after its reply.
+    r.show.emit(host_called(ToolAction::FindPeople {
+        topic: "tea".into(),
+        persons: vec![person("ann")],
+    }));
+    r.show.emit(host_called(ToolAction::CreateGroup {
+        members: vec![person("ann"), person("bo")],
+        channel: Some(ChannelId(group.0.to_string())),
+    }));
+    r.session.offers_for_test();
+    let listed = r.out.take();
+    assert!(
+        listed.contains("1 talk to ann") && listed.contains("2 open group: ann, bo"),
+        "{listed}"
+    );
+    assert!(r.run("/go 3").await.contains("no such choice"));
+    assert!(r.run("/go 2").await.contains("group with ann, bo"));
+    assert!(r.session.prompt().starts_with("[ann, bo]"));
+    assert!(r.run("/go 1").await.contains("talking to ann"));
+    assert!(r.session.prompt().starts_with("[ann]"));
+
+    assert!(r.run("/name").await.contains("usage"));
+    assert!(
+        r.run("/name Dr. Who")
+            .await
+            .contains("you are called Dr. Who now")
+    );
+    assert!(
+        r.session.prompt().contains("Dr. Who>"),
+        "{}",
+        r.session.prompt()
+    );
+}
+
+fn activity(who: &str, state: api::events::ActivityState) -> agent::Event {
+    agent::Event::TurnActivity(api::events::TurnActivity {
+        channel: api::types::ChannelId("1".into()),
+        author: api::types::Author::Person {
+            id: api::types::PersonId(who.into()),
+        },
+        state,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_typing_line_names_whoever_generates_once_per_turn() {
+    use agent::Sink;
+    use api::events::ActivityState::{Done, Thinking, Tool, Writing};
+    let r = rig();
+    // A group: ann answers (thinking, a lookup, thinking, writing), then bo.
+    for (who, state) in [
+        ("ann", Thinking),
+        (
+            "ann",
+            Tool {
+                name: "search".into(),
+            },
+        ),
+        ("ann", Thinking),
+        ("ann", Writing),
+        ("ann", Done),
+        ("bo", Thinking),
+        ("bo", Writing),
+        ("bo", Done),
+    ] {
+        r.show.emit(activity(who, state));
+    }
+    assert_eq!(
+        r.out.take(),
+        "ann is typing...\nann is looking things up...\nbo is typing...\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_label_lists_three_names_and_counts_the_rest() {
+    let r = rig();
+    let names = |n: usize| (0..n).map(|i| format!("p{i}")).collect::<Vec<_>>();
+    let label = |n| super::show::group_label(&r.agent, &names(n));
+    assert_eq!(label(2), "p0, p1");
+    assert_eq!(label(3), "p0, p1, p2");
+    assert_eq!(label(5), "p0, p1, p2 +2");
 }

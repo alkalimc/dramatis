@@ -80,3 +80,44 @@ test("the channel shows who is typing, a lookup wording for tools, and clears on
   });
   expect(screen.queryByText(/Mira is/)).toBeNull();
 });
+
+test("a host message that found people or made a group offers them, and a click switches the open channel", async () => {
+  const { store } = renderWith(
+    <MessageView
+      showPlay={false}
+      message={{
+        ...base,
+        channel: "host",
+        author: { kind: "host" },
+        text: "Here you are.",
+        actions: [
+          { tool: "find_people", topic: "ledgers", persons: [{ id: "mira", name: "Mira" }] },
+          { tool: "create_group", members: [{ id: "mira", name: "Mira" }, { id: "oren", name: "Oren" }], channel: "grp:1" },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Open the group with Mira, Oren" })).toBeDefined();
+  await act(async () => {
+    screen.getByRole("button", { name: "Open the group with Mira, Oren" }).click();
+  });
+  expect(store.getState().channel).toBe("grp:1");
+  await act(async () => {
+    screen.getByRole("button", { name: "Talk to Mira" }).click();
+  });
+  expect(store.getState().channel).toBe("dm:mira");
+});
+
+test("older rows without a group id or found people offer nothing", () => {
+  const { container } = renderWith(
+    <MessageView
+      showPlay={false}
+      message={{
+        ...base,
+        author: { kind: "host" },
+        actions: [{ tool: "find_people", topic: "x" }, { tool: "create_group", members: [] }],
+      }}
+    />,
+  );
+  expect(container.querySelector(".choices")).toBeNull();
+});

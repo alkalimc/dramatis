@@ -277,6 +277,9 @@ pub enum ToolAction {
     Digest,
     FindPeople {
         topic: String,
+        /// Who was found, so a front end can offer to open their channels.
+        #[serde(default)]
+        persons: Vec<PersonRef>,
     },
     Ask {
         person: PersonRef,
@@ -284,6 +287,9 @@ pub enum ToolAction {
     },
     CreateGroup {
         members: Vec<PersonRef>,
+        /// The new group, so a front end can offer to open it. Absent on older rows.
+        #[serde(default)]
+        channel: Option<ChannelId>,
     },
     SetMode {
         target: Target,

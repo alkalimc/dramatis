@@ -1,7 +1,7 @@
 import { memo, useMemo, useRef, useState } from "react";
 import type { Author, Citation, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
-import { actionText, authorName, when } from "../lib/format";
+import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { blocks, splitScene, withoutCites } from "../lib/scene";
 import { useActions, useApi, useStore } from "../store";
@@ -21,6 +21,29 @@ export function ActionLines({ author, actions }: { author: Author; actions: Tool
         <li key={i}>{t("action.line", { name, action: actionText(a, t, names) })}</li>
       ))}
     </ul>
+  );
+}
+
+/** What the host offered the user: each button takes them to that conversation. */
+function Choices({ actions }: { actions: ToolAction[] }) {
+  const t = useT();
+  const acts = useActions();
+  const choices = useMemo(() => choicesOf(actions), [actions]);
+  if (choices.length === 0) return null;
+  return (
+    <div className="choices">
+      {choices.map((c) =>
+        c.kind === "person" ? (
+          <button key={`p:${c.id}`} type="button" className="ghost" onClick={() => acts.openDirect(c.id)}>
+            {t("choice.person", { name: c.name })}
+          </button>
+        ) : (
+          <button key={`g:${c.channel}`} type="button" className="ghost" onClick={() => acts.openChannel(c.channel)}>
+            {t("choice.group", { names: nameList(c.names, t) })}
+          </button>
+        ),
+      )}
+    </div>
   );
 }
 
@@ -151,6 +174,8 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
           </button>
         )}
       </div>
+
+      {message.author.kind === "host" && <Choices actions={message.actions} />}
 
       {sourcesOpen && <CitationList cites={own.map((i) => message.cites[i])} />}
       {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
