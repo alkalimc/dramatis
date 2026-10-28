@@ -827,6 +827,10 @@ impl Agent {
             ended: turn.wrapup,
         };
         let out = self.run_steps(turn, max_steps).await;
+        if out.is_err() {
+            // What the screen showed before the failure is the message, not an empty row.
+            let _ = self.finish_message(turn);
+        }
         guard.ended = true;
         let end = match &out {
             Ok(()) => ActivityState::Done,
@@ -881,10 +885,25 @@ impl Agent {
             }
             let seg = self.current_segment(turn.channel)?;
             let mut results = Vec::with_capacity(calls.len());
-            for (id, name, args) in calls {
-                self.set_activity(turn, ActivityState::Tool { name: name.into() });
-                let output = self.dispatch(turn, name, args).await?;
-                results.push(request::tool_result_part(id, output));
+            for (id, name, args) in &calls {
+                self.set_activity(
+                    turn,
+                    ActivityState::Tool {
+                        name: (*name).into(),
+                    },
+                );
+                match self.dispatch(turn, name, args).await {
+                    Ok(output) => results.push(request::tool_result_part(id, output)),
+                    Err(e) => {
+                        // The reply with these calls is already in the log; every call
+                        // needs an output or the endpoint refuses the channel from now on.
+                        for (id, _, _) in &calls[results.len()..] {
+                            results.push(request::failed_tool_result(id));
+                        }
+                        let _ = self.append(seg, &request::tool_results(results));
+                        return Err(e);
+                    }
+                }
             }
             self.append(seg, &request::tool_results(results))?;
             // A colleague pulled in speaks next; the caller resumes after him.
