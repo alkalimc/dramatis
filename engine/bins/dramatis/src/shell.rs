@@ -153,6 +153,12 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     app.manage(Current::default());
     let home = Home::from_env();
+    // The webview may read the cached media and the notes people write, and nothing else;
+    // the home can be moved by `DRAMATIS_HOME`, so the scope is not static.
+    let scope = app.asset_protocol_scope();
+    for dir in [home.media(), home.office()] {
+        let _ = scope.allow_directory(dir, true);
+    }
     let folio = home.resolve_folio();
     let have_corpus = folio.is_some();
     if let Err(e) = open(&handle, home.clone(), folio) {

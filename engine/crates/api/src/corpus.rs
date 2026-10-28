@@ -10,6 +10,7 @@ use std::sync::{Mutex, OnceLock};
 
 use folio::{Folio, Manifest};
 use index::Index;
+use md5::{Digest, Md5};
 
 use crate::error::{ApiError, ApiResult};
 use crate::views::CorpusState;
@@ -226,12 +227,13 @@ impl Corpus {
     }
 
     /// Where a person's avatar lives on the source site, from the optional manifest key
-    /// `avatar_url_pattern` (`{page}` stands for the page title); `None` without one.
+    /// `avatar_url_pattern`; `None` without one. `{page}` stands for the page title (spaces
+    /// as underscores). MediaWiki upload hosts store a file under a path built from the md5
+    /// of its name, so `{md5_1}` and `{md5_2}` stand for the first one and two hex digits of
+    /// that hash, taken over the last path segment once `{page}` is filled in. The segment is
+    /// percent-encoded after hashing.
     pub fn avatar_url(&self, page: &str) -> Option<String> {
-        (!self.avatar_url_pattern.is_empty()).then(|| {
-            self.avatar_url_pattern
-                .replace("{page}", &page.replace(' ', "_"))
-        })
+        (!self.avatar_url_pattern.is_empty()).then(|| expand_avatar(&self.avatar_url_pattern, page))
     }
 
     /// The first line of a person's profile text, if the corpus has a profile unit for them.
@@ -368,4 +370,84 @@ fn read_overrides(dir: &Path) -> HashMap<String, BTreeMap<String, String>> {
         }
     }
     out
+}
+
+fn expand_avatar(pattern: &str, page: &str) -> String {
+    let page = page.replace(' ', "_");
+    let (head, name) = match pattern.rfind('/') {
+        Some(i) => pattern.split_at(i + 1),
+        None => ("", pattern),
+    };
+    let raw = name.replace("{page}", &page);
+    let hex: String = Md5::digest(raw.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let head = head
+        .replace("{page}", &page)
+        .replace("{md5_1}", &hex[..1])
+        .replace("{md5_2}", &hex[..2]);
+    // The page title is encoded whole; the pack's own text only where it is not ASCII,
+    // so a query or fragment it wrote stays intact.
+    let name = name
+        .split("{page}")
+        .map(|lit| percent_encode(lit, |b| b.is_ascii() && b != b' '))
+        .collect::<Vec<_>>()
+        .join(&percent_encode(&page, |b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
+        }));
+    format!("{head}{name}")
+}
+
+/// Percent-encode every byte `keep` rejects.
+fn percent_encode(s: &str, keep: impl Fn(u8) -> bool) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if keep(b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_avatar;
+
+    #[test]
+    fn plain_pattern_substitutes_the_page() {
+        assert_eq!(
+            expand_avatar("https://img.example/{page}.png", "Amy Lee"),
+            "https://img.example/Amy_Lee.png"
+        );
+    }
+
+    #[test]
+    fn hashed_upload_path_uses_the_md5_of_the_file_name() {
+        // Known vector: md5("abc") = 900150983cd24fb0d6963f7d28e17f72.
+        assert_eq!(
+            expand_avatar("https://m.example/{md5_1}/{md5_2}/{page}", "abc"),
+            "https://m.example/9/90/abc"
+        );
+    }
+
+    #[test]
+    fn the_hash_covers_the_literal_prefix_and_the_name_is_encoded() {
+        // The hash is taken over the raw name; encoding comes after.
+        let url = expand_avatar(
+            "https://m.example/{md5_1}/{md5_2}/\u{e9}_{page}.png",
+            "a b&c",
+        );
+        assert!(url.ends_with("/%C3%A9_a_b%26c.png"), "{url}");
+    }
+
+    #[test]
+    fn a_query_in_the_pattern_is_left_alone() {
+        assert_eq!(
+            expand_avatar("https://s.example/f?name={page}&w=1", "x y"),
+            "https://s.example/f?name=x_y&w=1"
+        );
+    }
 }

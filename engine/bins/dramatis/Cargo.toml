@@ -18,7 +18,7 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 api = { path = "../../crates/api", features = ["tauri"] }
 runtime = { path = "../../crates/runtime" }
-tauri = { workspace = true, features = ["tray-icon"] }
+tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-notification = "=2.4.0"
 tauri-plugin-dialog = "=2.7.3"
 tokio = { version = "=1.53.1", features = ["time"] }

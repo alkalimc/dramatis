@@ -60,6 +60,9 @@ impl Default for Ports {
     }
 }
 
+/// Avatar downloads in flight at once.
+const AVATAR_FETCHES: usize = 3;
+
 pub struct Engine {
     home: Home,
     params: Params,
@@ -69,6 +72,9 @@ pub struct Engine {
     state: CorpusState,
     endpoints: Mutex<Endpoints>,
     media: MediaCache,
+    /// Bounds concurrent avatar downloads: a roster opens dozens at once, and the source
+    /// site is a volunteer-run server.
+    fetches: tokio::sync::Semaphore,
     /// The last reachability probe of the chat endpoint; assumed up until one says otherwise.
     online: AtomicBool,
 }
@@ -114,6 +120,7 @@ impl Engine {
             state,
             endpoints: Mutex::new(endpoints),
             media,
+            fetches: tokio::sync::Semaphore::new(AVATAR_FETCHES),
             online: AtomicBool::new(true),
         })
     }

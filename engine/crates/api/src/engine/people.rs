@@ -333,6 +333,13 @@ impl Engine {
         let Some(url) = c.avatar_url(&p.primary_page) else {
             return Ok(None);
         };
+        let Ok(_slot) = self.fetches.acquire().await else {
+            return Ok(None);
+        };
+        // A queued call may find the file already fetched by the one ahead of it.
+        if let Some(path) = self.media.get("avatar", &stem) {
+            return Ok(Some(file(path)));
+        }
         let Ok(Some(bytes)) = self.ports.net.get(&url).await else {
             return Ok(None);
         };
