@@ -185,6 +185,14 @@ impl Engine {
         self.ports.agent.send_message(ch, text, image).await
     }
 
+    pub(crate) async fn wrapup_impl(&self, ch: ChannelId) -> ApiResult<()> {
+        channel::get(&self.w(), convert::world_channel(&ch)?).map_err(world_err)?;
+        if !self.has_chat() {
+            return Err(ApiError::NoEndpoint);
+        }
+        self.ports.agent.wrapup(ch).await
+    }
+
     pub(crate) async fn relay_impl(
         &self,
         excerpt: String,

@@ -10,7 +10,7 @@ wording, language rules) lives in a **pack** that you supply. This repository sh
 ```
 forge/    Python 3.13   sync · build · baseline · report · persona
 engine/   Rust 2024     crates/folio · crates/index · crates/eval · crates/world
-                        crates/agent · crates/api
+                        crates/agent · crates/api · crates/runtime
                         bins/dramatis-cli · bins/dramatis (desktop app, Tauri 2)
 ui/       TypeScript    React 19 + Vite, talks only to the engine's `api` commands
 ```
@@ -85,7 +85,9 @@ export DRAMATIS_FOLIO=/path/to/artifacts/<pack>/<pack>.folio
 
 ## Terminal
 
-Talk to the persons of a corpus from a shell, with the same agent the desktop app uses.
+Talk to the persons of a corpus from a shell. The terminal and the desktop app are two front ends
+of one back end: both build the same engine (`engine/crates/runtime`) and the terminal issues the
+same `api` commands and renders the same events the app does, so the two cannot drift apart.
 
 ```sh
 cd engine
@@ -95,16 +97,16 @@ printf '/talk <person>\nhello\n/wrapup\n' | ./target/release/dramatis-cli chat
 ```
 
 The corpus is `--folio`, else `$DRAMATIS_FOLIO`, else the `.folio` in `$DRAMATIS_HOME`
-(default `~/.dramatis`). Endpoints come from `--endpoints`, else
-`$DRAMATIS_HOME/endpoints.toml`, and keys from the system keychain exactly as in the app. The
-first run of each new build triggers a macOS keychain prompt: choose Always Allow.
+(default `~/.dramatis`). Endpoints come from `$DRAMATIS_HOME/endpoints.toml` and keys from the
+system keychain exactly as in the app. The first run of each new build triggers a macOS keychain
+prompt: choose Always Allow.
 
 The world (channels, memories, usage) is the app's: `$DRAMATIS_HOME/world.sqlite`, so the
 terminal and the app share conversations, settings and endpoints, and may be open together
-(the database is in WAL mode and writes wait up to 10 seconds for each other). Use
-`--world <path>` for another file, `--fresh` for a throwaway in-memory world, and
-`--user <name>` to set the user's name. On a terminal the line is edited with arrow keys,
-Home/End and Up/Down history, and wide (CJK) characters count by their display width;
+(the database is in WAL mode and writes wait for each other). Use `--home <dir>` for another
+home directory, `--fresh` for a throwaway world (a temporary home that keeps your endpoints and
+parameters and is deleted at exit), and `--user <name>` to set the user's name. On a terminal
+the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK) characters count by their display width;
 `--plain`, or piped input, reads plain lines with no prompt.
 
 | Command | What it does |
@@ -116,10 +118,10 @@ Home/End and Up/Down history, and wide (CJK) characters count by their display w
 | `/go <n>` (`/open`) | after the host found people or made a group, a numbered list follows its reply; this switches to choice n |
 | `/name <new name>` | set the name you are called by (`--user` sets it at start) |
 | `/wrapup` | end the conversation and show the memories it wrote |
-| `/memories [person]` | stored memories and who can see them, or those a person may recall |
+| `/memories [person]` | stored memories and who can see them, or those about or recalled by a person |
 | `/history [n]` | reprint the last n messages (default 10) |
-| `/search <query>` | retrieval only, as the current speaker would see it; no model call |
-| `/stats` | one row per model call of this session: shape, model, tokens, seconds |
+| `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
+| `/stats` | one row per model call of this session: shape, model, tokens, seconds (read from the meter, not part of the app's interface) |
 | `/help`, `/quit` | Ctrl-D also leaves |
 
 Anything else is sent to the current channel. Replies stream as they are written; scene lines

@@ -126,6 +126,10 @@ commands! {
     fn host_channel() -> ChannelId;
     /// Append a user turn. The reply streams back as events.
     fn send_message(channel: ChannelId, text: String, image: Option<ImagePart>) -> MessageId;
+    /// End the channel's conversation now: the next message starts a new one, and what is
+    /// worth keeping from this one is written as facts (`WorldChanged`). Returns at once;
+    /// idle conversations are wrapped up without being asked.
+    fn wrapup(channel: ChannelId) -> ();
     /// Pass a quoted excerpt to someone else; their answer lands in their direct channel.
     fn relay(excerpt: String, from: MessageId, to: PersonId) -> ChannelId;
     /// Everything before this message has been seen.

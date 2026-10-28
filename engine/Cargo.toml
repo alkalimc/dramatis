@@ -7,6 +7,7 @@ members = [
     "crates/world",
     "crates/agent",
     "crates/api",
+    "crates/runtime",
     "crates/llm",
     "bins/dramatis-cli",
     "bins/dramatis",

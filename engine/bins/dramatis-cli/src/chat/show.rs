@@ -1,13 +1,17 @@
-//! What reaches the terminal: the output handle, and the sink that turns the agent's
+//! What reaches the terminal: the output handle, and the sink that turns the engine's
 //! events into streamed, styled lines.
 
+use std::collections::BTreeMap;
 use std::io::Write;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use agent::{Agent, Event, Sink};
+use api::corpus::Corpus;
+use api::error::ApiResult;
 use api::events::ActivityState;
-use api::types::{Author, ChannelId, MessageId};
+use api::port::{Event, Sink};
+use api::types::{Author, ChannelId, Citation, MessageId, PersonId, PersonRef};
 use api::views::{Message, ToolAction};
+use api::{Api, Engine};
 
 use super::render::{self, Marker, Streamer, Style};
 
@@ -46,25 +50,13 @@ impl Term {
     }
 }
 
-/// How an author is named on screen: the user by their name, the host by the corpus's
-/// word for it, a person by their display name.
-pub fn author_name(agent: &Agent, author: &Author) -> String {
-    match author {
-        Author::User => agent
-            .names()
-            .map(|n| n.user().to_owned())
-            .unwrap_or_else(|_| "you".into()),
-        Author::Host => agent.wording().get("host.name").to_owned(),
-        Author::Person { id } => person_name(agent, &id.0),
-    }
-}
-
-pub fn person_name(agent: &Agent, id: &str) -> String {
-    agent
-        .with_index(|ix| ix.folio().person(id))
-        .ok()
-        .flatten()
-        .map_or_else(|| id.to_owned(), |p| p.display)
+/// What the terminal needs to put names on things: the corpus's display names and
+/// wording, and the user's own name. Read through the same commands the app uses, then
+/// kept, so the event sink can look things up without waiting.
+pub struct Names {
+    corpus: Option<Arc<Corpus>>,
+    wording: BTreeMap<String, String>,
+    user: RwLock<String>,
 }
 
 /// What the speaker is doing while a turn runs.
@@ -74,47 +66,107 @@ pub enum Working {
     Searching,
 }
 
-/// The status line for a running turn. One place for the wording, so it can come from the
-/// corpus's manifest once the engine's activity event carries it.
-pub fn working_line(who: &str, what: Working) -> String {
-    match what {
-        Working::Typing => format!("{who} is typing..."),
-        Working::Searching => format!("{who} is looking things up..."),
-    }
-}
-
-/// The status line in the corpus's own wording when it has one, else the English line.
-pub fn working_text(agent: &Agent, who: &str, what: Working) -> String {
-    let key = match what {
-        Working::Typing => "typing.writing",
-        Working::Searching => "typing.tool",
-    };
-    match agent.wording().get(key) {
-        k if k == key => working_line(who, what),
-        template => template.replace("{name}", who),
-    }
-}
-
 /// Most names a group label spells out before it counts the rest.
 const LABEL_NAMES: usize = 3;
 
-/// The corpus's wording for `key`, else `default`.
-fn wording_or(agent: &Agent, key: &str, default: &str) -> String {
-    match agent.wording().get(key) {
-        k if k == key => default.to_owned(),
-        template => template.to_owned(),
+impl Names {
+    pub async fn load(engine: &Engine) -> ApiResult<Self> {
+        let names = Self {
+            corpus: engine.corpus_handle(),
+            wording: engine.wording().await?.entries,
+            user: RwLock::new(String::new()),
+        };
+        names.refresh_user(engine).await?;
+        Ok(names)
     }
-}
 
-/// Names for a group in the corpus's list separator, the first few and then a count.
-pub fn group_label(agent: &Agent, names: &[String]) -> String {
-    let sep = wording_or(agent, "list.separator", ", ");
-    let shown = names[..names.len().min(LABEL_NAMES)].join(&sep);
-    match names.len() - names.len().min(LABEL_NAMES) {
-        0 => shown,
-        more => wording_or(agent, "list.more", "{names} +{count}")
-            .replace("{names}", &shown)
-            .replace("{count}", &more.to_string()),
+    /// Read the user's name again, after it was changed.
+    pub async fn refresh_user(&self, engine: &Engine) -> ApiResult<()> {
+        let name = engine.settings().await?.user_name;
+        *self.user.write().unwrap_or_else(|e| e.into_inner()) =
+            name.unwrap_or_else(|| self.word("user.you", "you"));
+        Ok(())
+    }
+
+    pub fn corpus(&self) -> Option<&Arc<Corpus>> {
+        self.corpus.as_ref()
+    }
+
+    /// The corpus's wording for `key`, else `default`.
+    pub fn word(&self, key: &str, default: &str) -> String {
+        self.wording
+            .get(key)
+            .map_or_else(|| default.to_owned(), Clone::clone)
+    }
+
+    pub fn user(&self) -> String {
+        self.user.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn host(&self) -> String {
+        self.word("host.name", "the host")
+    }
+
+    /// Whether the corpus gives the host a persona to talk to.
+    pub fn has_host(&self) -> bool {
+        self.corpus
+            .as_ref()
+            .and_then(|c| c.prompt("host", "in_world").ok().flatten())
+            .is_some_and(|body| !body.trim().is_empty())
+    }
+
+    pub fn person(&self, id: &str) -> String {
+        self.corpus
+            .as_ref()
+            .map_or_else(|| id.to_owned(), |c| c.display(id))
+    }
+
+    /// How an author is named on screen: the user by their name, the host by the corpus's
+    /// word for it, a person by their display name.
+    pub fn author(&self, author: &Author) -> String {
+        match author {
+            Author::User => self.user(),
+            Author::Host => self.host(),
+            Author::Person { id } => self.person(&id.0),
+        }
+    }
+
+    /// The status line for a running turn, in the corpus's wording when it has one.
+    pub fn working(&self, who: &str, what: Working) -> String {
+        let (key, default) = match what {
+            Working::Typing => ("typing.writing", "{name} is typing..."),
+            Working::Searching => ("typing.tool", "{name} is looking things up..."),
+        };
+        self.word(key, default).replace("{name}", who)
+    }
+
+    /// Names for a group in the corpus's list separator, the first few and then a count.
+    pub fn group_label(&self, names: &[String]) -> String {
+        let sep = self.word("list.separator", ", ");
+        let shown = names[..names.len().min(LABEL_NAMES)].join(&sep);
+        match names.len() - names.len().min(LABEL_NAMES) {
+            0 => shown,
+            more => self
+                .word("list.more", "{names} +{count}")
+                .replace("{names}", &shown)
+                .replace("{count}", &more.to_string()),
+        }
+    }
+
+    /// The header of a cited passage, else the chunk id.
+    fn source(&self, cite: &Citation) -> String {
+        self.corpus
+            .as_ref()
+            .and_then(|c| c.with_index(|ix| ix.get(&cite.chunk_id, 0)).ok().flatten())
+            .map(|(u, _)| {
+                if u.header.is_empty() {
+                    u.title
+                } else {
+                    u.header
+                }
+            })
+            .filter(|h| !h.is_empty())
+            .unwrap_or_else(|| cite.chunk_id.clone())
     }
 }
 
@@ -162,7 +214,7 @@ fn offers_of(action: &ToolAction) -> Vec<Offer> {
             channel: Some(channel),
         } => vec![Offer::Group {
             channel: channel.clone(),
-            names: members.iter().map(|m| m.name.clone()).collect(),
+            members: members.clone(),
         }],
         _ => Vec::new(),
     }
@@ -183,15 +235,25 @@ pub enum Offer {
     },
     Group {
         channel: ChannelId,
-        names: Vec<String>,
+        members: Vec<PersonRef>,
     },
 }
 
 impl Offer {
-    pub fn text(&self, agent: &Agent) -> String {
+    pub fn text(&self, names: &Names) -> String {
         match self {
             Offer::Person { name, .. } => format!("talk to {name}"),
-            Offer::Group { names, .. } => format!("open group: {}", group_label(agent, names)),
+            Offer::Group { members, .. } => format!(
+                "open group: {}",
+                names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
+            ),
+        }
+    }
+
+    pub fn members(&self) -> Vec<PersonId> {
+        match self {
+            Offer::Person { id, .. } => vec![PersonId(id.clone())],
+            Offer::Group { members, .. } => members.iter().map(|m| m.id.clone()).collect(),
         }
     }
 }
@@ -208,35 +270,35 @@ struct State {
     typing: Option<Author>,
 }
 
-/// Prints replies as they stream. Built before the agent (which takes it), bound to the
-/// agent afterwards so it can look names and sources up.
+/// What the sink needs once the engine is open.
+struct Bound {
+    names: Arc<Names>,
+    marker: Marker,
+}
+
+/// Prints replies as they stream. Built before the engine (which takes it as its sink),
+/// bound to the names and the scene marker afterwards.
 pub struct Show {
     term: Arc<Term>,
-    marker: Marker,
-    agent: OnceLock<Weak<Agent>>,
+    bound: OnceLock<Bound>,
     state: Mutex<State>,
 }
 
 impl Show {
-    pub fn new(term: Arc<Term>, marker: Marker) -> Self {
+    pub fn new(term: Arc<Term>) -> Self {
         Self {
             term,
-            marker,
-            agent: OnceLock::new(),
+            bound: OnceLock::new(),
             state: Mutex::new(State::default()),
         }
     }
 
-    pub fn bind(&self, agent: &Arc<Agent>) {
-        let _ = self.agent.set(Arc::downgrade(agent));
+    pub fn bind(&self, names: Arc<Names>, marker: Marker) {
+        let _ = self.bound.set(Bound { names, marker });
     }
 
-    fn agent(&self) -> Option<Arc<Agent>> {
-        self.agent.get().and_then(Weak::upgrade)
-    }
-
-    fn prefix(&self, agent: &Agent, author: &Author) -> String {
-        format!("{}: ", self.term.style.bold(&author_name(agent, author)))
+    fn prefix(&self, names: &Names, author: &Author) -> String {
+        format!("{}: ", self.term.style.bold(&names.author(author)))
     }
 
     /// The choices the host offered since the last call, without repeats.
@@ -260,22 +322,10 @@ impl Show {
     }
 
     /// The sources of a message, compactly: the header of each cited passage.
-    fn sources(&self, agent: &Agent, m: &Message) -> Option<String> {
+    fn sources(&self, names: &Names, m: &Message) -> Option<String> {
         let mut seen: Vec<String> = Vec::new();
         for c in &m.cites {
-            let label = agent
-                .with_index(|ix| ix.get(&c.chunk_id, 0))
-                .ok()
-                .flatten()
-                .map(|(u, _)| {
-                    if u.header.is_empty() {
-                        u.title
-                    } else {
-                        u.header
-                    }
-                })
-                .filter(|h| !h.is_empty())
-                .unwrap_or_else(|| c.chunk_id.clone());
+            let label = names.source(c);
             if !seen.contains(&label) {
                 seen.push(label);
             }
@@ -285,12 +335,14 @@ impl Show {
         if seen.is_empty() {
             return None;
         }
-        let line = format!("sources: {}", seen.join("; "));
-        Some(line)
+        Some(format!("sources: {}", seen.join("; ")))
     }
 
     /// A stored message in full: name, text, tool lines, sources.
-    pub fn whole(&self, agent: &Agent, m: &Message) -> String {
+    pub fn whole(&self, m: &Message) -> String {
+        let Some(b) = self.bound.get() else {
+            return String::new();
+        };
         let style = self.term.style;
         let mut out = String::new();
         for a in &m.actions {
@@ -298,10 +350,10 @@ impl Show {
             out.push('\n');
         }
         if !m.text.trim().is_empty() {
-            out.push_str(&self.prefix(agent, &m.author));
-            out.push_str(&render::message(&m.text, &self.marker, style));
+            out.push_str(&self.prefix(&b.names, &m.author));
+            out.push_str(&render::message(&m.text, &b.marker, style));
         }
-        if let Some(s) = self.sources(agent, m) {
+        if let Some(s) = self.sources(&b.names, m) {
             out.push_str(&style.dim(&format!("  {s}")));
             out.push('\n');
         }
@@ -311,23 +363,23 @@ impl Show {
 
 impl Sink for Show {
     fn emit(&self, event: Event) {
-        let Some(agent) = self.agent() else { return };
+        let Some(b) = self.bound.get() else { return };
+        let names = &b.names;
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Event::TurnActivity(a) = &event {
             // Whoever is generating gets the line, not the channel: in a group the one who
             // answers is not known before the turn starts.
-            let who = author_name(&agent, &a.author);
+            let who = names.author(&a.author);
             match &a.state {
                 ActivityState::Thinking | ActivityState::Writing => {
                     if st.typing.as_ref() != Some(&a.author) {
                         st.typing = Some(a.author.clone());
-                        self.term.note(&working_text(&agent, &who, Working::Typing));
+                        self.term.note(&names.working(&who, Working::Typing));
                     }
                 }
                 ActivityState::Tool { .. } => {
                     if st.live.is_none() {
-                        self.term
-                            .note(&working_text(&agent, &who, Working::Searching));
+                        self.term.note(&names.working(&who, Working::Searching));
                     }
                 }
                 ActivityState::Done | ActivityState::Failed { .. } => {
@@ -345,12 +397,12 @@ impl Sink for Show {
                 }
                 if st.live.is_none() {
                     if st.named.as_ref() != Some(&d.message) {
-                        self.term.print(&self.prefix(&agent, &d.author));
+                        self.term.print(&self.prefix(names, &d.author));
                     }
                     st.named = Some(d.message.clone());
                     st.live = Some(Live {
                         id: d.message.clone(),
-                        streamer: Streamer::new(self.marker.clone(), self.term.style),
+                        streamer: Streamer::new(b.marker.clone(), self.term.style),
                     });
                 }
                 if let Some(live) = st.live.as_mut() {
@@ -377,11 +429,12 @@ impl Sink for Show {
                 self.close(&mut st);
                 st.named = None;
                 if streamed {
-                    if let Some(s) = self.sources(&agent, &m) {
+                    if let Some(s) = self.sources(names, &m) {
                         self.term.note(&format!("  {s}"));
                     }
                 } else {
-                    self.term.print(&self.whole(&agent, &m));
+                    drop(st);
+                    self.term.print(&self.whole(&m));
                 }
             }
             _ => {}

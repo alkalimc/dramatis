@@ -1,8 +1,8 @@
 //! `chat`: talk to the corpus's persons from a terminal.
 //!
-//! A line-based REPL over the same agent, config and world file the app uses: slash
-//! commands, anything else is a message to the current channel, replies stream as they are
-//! generated. On a terminal the line is edited by rustyline, which measures wide (CJK)
+//! A line-based REPL over the same engine, ports and world file the app uses, through the
+//! same seam commands and events: slash commands, anything else is a message to the
+//! current channel, replies stream as they are generated. On a terminal the line is edited by rustyline, which measures wide (CJK)
 //! characters correctly; piped input is read as plain lines.
 
 mod command;
@@ -13,32 +13,31 @@ mod show;
 mod tests;
 
 use std::io::{BufRead, IsTerminal};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use agent::{Agent, Config, Parts};
-use anyhow::{Context, Result, anyhow};
-use api::endpoints::Endpoints;
+use anyhow::{Context, Result, bail};
+use api::Api;
 use api::home::Home;
+use runtime::{Options, Runtime};
 
 use command::{Command, parse};
 use render::{Marker, Style};
 use session::{Flow, Session};
-use show::{Show, Term};
+use show::{Names, Show, Term};
 
 #[derive(clap::Args)]
 pub struct Args {
     /// Open the direct channel with this person at start (id, name or alias).
     person: Option<String>,
-    /// Endpoints file. Defaults to $DRAMATIS_HOME/endpoints.toml.
+    /// Home directory: the world database, endpoints file and parameters. Defaults to
+    /// $DRAMATIS_HOME (else ~/.dramatis). It is safe to have the app open on the same
+    /// directory at once (WAL, busy timeout).
     #[arg(long)]
-    endpoints: Option<PathBuf>,
-    /// World database to use. Defaults to the app's, $DRAMATIS_HOME/world.sqlite; it is
-    /// safe to have both open at once (WAL, busy timeout).
-    #[arg(long)]
-    world: Option<PathBuf>,
-    /// Use a throwaway in-memory world.
-    #[arg(long, conflicts_with = "world")]
+    home: Option<PathBuf>,
+    /// Use a throwaway world: a temporary home that keeps the real home's endpoints and
+    /// parameters and is deleted at exit.
+    #[arg(long, conflicts_with = "home")]
     fresh: bool,
     /// Read plain lines even on a terminal: no line editing, no prompt.
     #[arg(long)]
@@ -48,95 +47,75 @@ pub struct Args {
     user: Option<String>,
 }
 
-/// How long a write waits for another process (the app) to release the world file.
-const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// A temporary home for `--fresh`, removed when dropped.
+struct Throwaway(PathBuf);
 
-/// The local UTC offset at each call, as the app supplies it.
-struct Local;
+impl Throwaway {
+    /// A new directory holding copies of the real home's endpoints and parameters.
+    fn new(real: &Home) -> Result<Self> {
+        let dir = std::env::temp_dir().join(format!("dramatis-fresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("cannot create {}", dir.display()))?;
+        for from in [real.endpoints(), real.params()] {
+            if let Some(name) = from.file_name() {
+                let _ = std::fs::copy(&from, dir.join(name));
+            }
+        }
+        Ok(Self(dir))
+    }
+}
 
-impl agent::Clock for Local {
-    fn now(&self) -> world::clock::Now {
-        api::port::Clock::now(&api::port::LocalClock)
+impl Drop for Throwaway {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
 pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
-    let home = Home::from_env();
+    let mut home = args.home.as_deref().map_or_else(Home::from_env, Home::new);
+    let _throwaway = if args.fresh {
+        let t = Throwaway::new(&home)?;
+        home = Home::new(&t.0);
+        Some(t)
+    } else {
+        None
+    };
     let folio = folio.or_else(|| home.resolve_folio()).with_context(|| {
         format!(
             "no corpus found: pass --folio <path>, set DRAMATIS_FOLIO, or put a .folio file in {}",
             home.root().display()
         )
     })?;
-    let endpoints_path = args.endpoints.clone().unwrap_or_else(|| home.endpoints());
-    let endpoints = std::fs::read_to_string(&endpoints_path)
-        .map_err(|e| anyhow!("cannot read endpoints {}: {e}", endpoints_path.display()))
-        .and_then(|t| {
-            Endpoints::from_toml(&t)
-                .map_err(|e| anyhow!("bad endpoints {}: {e}", endpoints_path.display()))
-        })?;
-    let params = api::params::Params::load(&home.params()).map_err(|e| anyhow!(e))?;
-    let agent_params: agent::params::Params = std::fs::read_to_string(home.params())
-        .ok()
-        .and_then(|t| toml::from_str(&t).ok())
-        .unwrap_or_default();
-
-    let (world, world_label) = if args.fresh {
-        (world::World::in_memory()?, "in memory".to_owned())
-    } else {
-        let path = args.world.clone().unwrap_or_else(|| home.world());
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("cannot create {}", dir.display()))?;
-        }
-        let world = world::World::open(&path)?;
-        // The app may hold the same file: wait for its write lock rather than fail.
-        world.busy_timeout(BUSY_TIMEOUT)?;
-        (world, path.display().to_string())
-    };
-    let index = index::Index::open(&folio, params.retrieve.clone())
-        .with_context(|| format!("cannot open {}", folio.display()))?;
-    let marker = Marker::new(&index.folio().manifest().scene_marker);
 
     let term = Arc::new(Term::new(Box::new(std::io::stdout()), Style::detect()));
-    let show = Arc::new(Show::new(term.clone(), marker.clone()));
-    let agent = Arc::new(Agent::new(Parts {
-        world,
-        index,
-        config: Config {
-            world: params.world.clone(),
-            find_people: params.find_people.clone(),
-            agent: agent_params,
-            office: home.office(),
-        },
-        endpoints: endpoints.clone(),
-        keys: None,
-        llm: llm::Llm::new(Arc::new(llm::Http::new()?), llm::Retry::default()),
-        sink: show.clone(),
-        clock: Arc::new(Local),
-    })?);
-    show.bind(&agent);
-
-    let model = |role: agent::Result<agent::endpoint::ChatRole>| match role {
-        Ok(r) => format!("{}/{}", r.profile.name, r.model.id),
-        Err(_) => "none".to_owned(),
-    };
-    println!(
-        "folio {} | world {} | chat {} | host {}",
-        folio.file_name().map_or_else(
-            || folio.display().to_string(),
-            |n| n.to_string_lossy().into()
-        ),
-        world_label,
-        model(agent::endpoint::ChatRole::resolve(&endpoints)),
-        model(agent::endpoint::ChatRole::resolve_host(&endpoints)),
-    );
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let show = Arc::new(Show::new(term.clone()));
+    let tokio = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async move {
-        let mut session = Session::new(agent, term, show);
+    tokio.block_on(async move {
+        let options = Options {
+            quiet: true,
+            ..Options::default()
+        };
+        let runtime = Runtime::open(home.clone(), Some(folio.clone()), show.clone(), options)
+            .map_err(|e| anyhow::anyhow!("cannot open {}: {e}", folio.display()))?;
+        let (engine, bridge) = (runtime.engine, runtime.bridge);
+        let Some(bridge) = bridge.filter(|_| engine.corpus_handle().is_some()) else {
+            bail!("cannot read {} as a corpus", folio.display());
+        };
+        let names = Arc::new(
+            Names::load(&engine)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?,
+        );
+        let scene = engine
+            .wording()
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .scene_marker;
+        show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
+        println!("{}", header(&engine, &folio, &home, args.fresh).await);
+        let mut session = Session::new(engine, bridge, term, show, names).await;
         if let Some(name) = args.user.as_deref() {
             session.set_user(name).await;
         }
@@ -145,6 +124,34 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         }
         repl(session, args.plain).await
     })
+}
+
+/// The line printed at start: which corpus, which world, and the models in use.
+async fn header(engine: &api::Engine, folio: &Path, home: &Home, fresh: bool) -> String {
+    use api::Api;
+    let model = |role: Option<&api::endpoints::Role>| {
+        role.map_or_else(
+            || "none".to_owned(),
+            |r| format!("{}/{}", r.profile, r.model),
+        )
+    };
+    let roles = engine.endpoints().await.ok().and_then(|e| e.roles);
+    let chat = roles.as_ref().map(|r| &r.chat);
+    let host = roles.as_ref().and_then(|r| r.host.as_ref()).or(chat);
+    format!(
+        "folio {} | world {} | chat {} | host {}",
+        folio.file_name().map_or_else(
+            || folio.display().to_string(),
+            |n| n.to_string_lossy().into()
+        ),
+        if fresh {
+            "throwaway".to_owned()
+        } else {
+            home.world().display().to_string()
+        },
+        model(chat),
+        model(host),
+    )
 }
 
 /// Where the next line comes from.

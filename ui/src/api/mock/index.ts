@@ -615,6 +615,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       void stream(cid, person(to), `${sc(`${first} reads the quote twice.`)}\n"${excerpt.slice(0, 80)}"? That's not how I'd put it, but I can see where it comes from.`, { relayed: true });
       return ok(cid);
     },
+    // The mock keeps no memories to write, so ending a conversation changes nothing.
+    wrapup: (channel) => (channels.has(channel) ? ok(null) : fail({ code: "not_found" })),
     markRead: (channel) => {
       const before = digestItems.length;
       for (let i = digestItems.length - 1; i >= 0; i--) {

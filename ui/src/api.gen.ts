@@ -49,6 +49,12 @@ export const commands = {
 	mime: string,
 	data_base64: string,
 } | null) => typedError<MessageId, ApiError>(__TAURI_INVOKE("send_message", { channel, text, image })),
+	/**
+	 *  End the channel's conversation now: the next message starts a new one, and what is
+	 *  worth keeping from this one is written as facts (`WorldChanged`). Returns at once;
+	 *  idle conversations are wrapped up without being asked.
+	 */
+	wrapup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("wrapup", { channel })),
 	/**  Pass a quoted excerpt to someone else; their answer lands in their direct channel. */
 	relay: (excerpt: string, from: MessageId, to: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("relay", { excerpt, from, to })),
 	/**  Everything before this message has been seen. */

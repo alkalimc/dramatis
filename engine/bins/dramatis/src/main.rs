@@ -10,7 +10,6 @@
 // Release builds are GUI apps; no console window on platforms that would open one.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod runtime;
 mod shell;
 
 use tauri::{RunEvent, WindowEvent};

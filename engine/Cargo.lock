@@ -1018,19 +1018,13 @@ dependencies = [
 name = "dramatis"
 version = "0.1.0"
 dependencies = [
- "agent",
  "api",
- "async-trait",
- "folio",
- "index",
- "llm",
+ "runtime",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tokio",
- "toml 1.1.6+spec-1.1.0",
- "world",
 ]
 
 [[package]]
@@ -1047,11 +1041,10 @@ dependencies = [
  "futures",
  "index",
  "llm",
- "rusqlite",
+ "runtime",
  "rustyline",
  "serde_json",
  "tokio",
- "toml 1.1.6+spec-1.1.0",
  "world",
 ]
 
@@ -3496,6 +3489,21 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "agent",
+ "api",
+ "async-trait",
+ "index",
+ "llm",
+ "rusqlite",
+ "tokio",
+ "toml 1.1.6+spec-1.1.0",
+ "world",
+]
 
 [[package]]
 name = "rusqlite"
