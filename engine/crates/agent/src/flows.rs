@@ -1061,6 +1061,15 @@ impl Agent {
                     let d = self.persona_digest(d);
                     if !d.is_empty() {
                         out.host_spoke = self.host_harness(Some(&d)).await?;
+                        if out.host_spoke {
+                            let conn = self.db();
+                            world::presence::mark_announced(
+                                &conn,
+                                &planned.digest,
+                                &d,
+                                now.local_date(),
+                            )?;
+                        }
                     }
                 }
                 Call::HostLine(_) => {}

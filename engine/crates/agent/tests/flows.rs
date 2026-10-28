@@ -1597,6 +1597,65 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
     assert_eq!(shapes, ["host", "opening", "wrapup", "host"]);
 }
 
+#[tokio::test]
+async fn the_host_announces_each_waiting_item_once_even_across_a_restart() {
+    let dir = tempdir::Dir::new();
+    let file = dir.0.join("world.db");
+    let open = || {
+        let e = env_on(
+            world::World::open(&file).unwrap(),
+            endpoints(WireApi::Responses, true, None),
+            retrieve(),
+            |_| {},
+        );
+        e.agent
+            .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
+        e
+    };
+    let e = open();
+    // The first open introduces the host; the birthday is then news on the next return.
+    e.fake.push([say("Welcome.")]);
+    assert!(e.agent.presence(true).await.unwrap().host_spoke);
+    e.clock.advance(31 * 60_000);
+    e.fake.push([say("It is ann's birthday.")]);
+    assert!(e.agent.presence(false).await.unwrap().host_spoke);
+    let calls = e.fake.bodies().len();
+
+    // Back again and again with nothing new: the panel is full, the host is silent.
+    for _ in 0..3 {
+        e.clock.advance(31 * 60_000);
+        let out = e.agent.presence(true).await.unwrap();
+        assert!(!out.host_spoke && !out.digest.items.is_empty());
+    }
+    assert_eq!(e.fake.bodies().len(), calls);
+
+    // A restart on the same world is no different, and the introduction does not repeat.
+    drop(e);
+    let e = open();
+    let out = e.agent.presence(true).await.unwrap();
+    assert!(!out.host_spoke && !out.digest.items.is_empty());
+    assert_eq!(e.fake.bodies().len(), 0);
+
+    // A new item is news: exactly one call, and it names only that item.
+    let ch = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        world::message::append(w, ch, &Actor::Person(p("ann")), "hi", None, None, T0).unwrap();
+    });
+    e.clock.advance(31 * 60_000);
+    e.fake.push([say("Ann wrote.")]);
+    assert!(e.agent.presence(false).await.unwrap().host_spoke);
+    let bodies = e.fake.json();
+    assert_eq!(bodies.len(), 1);
+    let entry = list(&bodies[0]).last().unwrap().to_string();
+    assert!(!entry.contains("birthday"), "{entry}");
+
+    // The next day the birthday is over and nothing else is new.
+    e.clock.advance(24 * 3_600_000);
+    let out = e.agent.presence(false).await.unwrap();
+    assert!(!out.host_spoke);
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
 #[test]
 fn flows_are_send() {
     fn send<T: Send>(_: &T) {}
