@@ -146,10 +146,6 @@ impl Written {
             Self::New(id) | Self::Duplicate { existing: id, .. } => id,
         }
     }
-
-    pub fn is_new(self) -> bool {
-        matches!(self, Self::New(_))
-    }
 }
 
 const COLUMNS: &str = "id, author, audience_kind, audience_ref, kind, about_kind, about_ref, \
@@ -525,7 +521,7 @@ mod tests {
         let c = channel::direct(&w, &p("a")).unwrap();
         let aud = Audience::Participants(c);
         let first = write(&w, &note(aud.clone(), "Likes tea."), 1).unwrap();
-        assert!(first.is_new());
+        assert!(matches!(first, Written::New(_)));
         assert_eq!(
             write(&w, &note(aud.clone(), "  likes TEA "), 2).unwrap(),
             Written::Duplicate {
@@ -546,11 +542,10 @@ mod tests {
             "a deleted error does not come back"
         );
         // Another audience or kind is another memory.
-        assert!(
-            write(&w, &note(Audience::World, "likes tea"), 4)
-                .unwrap()
-                .is_new()
-        );
+        assert!(matches!(
+            write(&w, &note(Audience::World, "likes tea"), 4).unwrap(),
+            Written::New(_)
+        ));
         restore(&w, first.id()).unwrap();
         assert!(!get(&w, first.id()).unwrap().retracted);
         assert!(write(&w, &note(aud, " . "), 5).is_err());
