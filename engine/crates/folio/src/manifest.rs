@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 
 use crate::error::{Error, Result};
@@ -62,7 +62,7 @@ fn get<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<Opti
         .query_row("SELECT value FROM manifest WHERE key = ?1", [key], |row| {
             row.get(0)
         })
-        .ok();
+        .optional()?;
     match raw {
         None => Ok(None),
         Some(text) => serde_json::from_str(&text)
@@ -202,5 +202,24 @@ mod tests {
             Manifest::load(&conn),
             Err(Error::UnmetRequirement { requirement }) if requirement == "span_merge"
         ));
+    }
+
+    #[test]
+    fn only_an_absent_key_reads_as_none() {
+        let conn = manifest_with(&[("pack", "\"p\"")]);
+        assert_eq!(get::<String>(&conn, "pack").unwrap().as_deref(), Some("p"));
+        assert_eq!(get::<String>(&conn, "other").unwrap(), None);
+
+        let no_table = Connection::open_in_memory().unwrap();
+        assert!(matches!(
+            get::<String>(&no_table, "pack"),
+            Err(Error::Sqlite(_))
+        ));
+
+        // A value of the wrong storage class is an error, not an absent key.
+        let conn = manifest_with(&[]);
+        conn.execute("INSERT INTO manifest VALUES ('pack', x'ff')", [])
+            .unwrap();
+        assert!(get::<String>(&conn, "pack").is_err());
     }
 }

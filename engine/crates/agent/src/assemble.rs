@@ -313,7 +313,7 @@ pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
     }
     let lines: Vec<&str> = text.trim_end().lines().collect();
     let mut i = lines.len();
-    while i > 0 && (lines[i - 1].trim().is_empty() || is_cite_line(lines[i - 1])) {
+    while i > 0 && (lines[i - 1].trim().is_empty() || api::cites::is_cite_line(lines[i - 1])) {
         i -= 1;
     }
     let Some(list) = i
@@ -338,25 +338,6 @@ pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
     (kept, names)
 }
 
-/// A line of `[#id]` marks and nothing else.
-fn is_cite_line(line: &str) -> bool {
-    let line = line.trim();
-    if !line.starts_with("[#") || ids_in(line).is_empty() {
-        return false;
-    }
-    let mut rest = line;
-    while let Some(i) = rest.find('[') {
-        if !rest[..i].trim().is_empty() {
-            return false;
-        }
-        let Some(end) = rest[i..].find(']') else {
-            return false;
-        };
-        rest = &rest[i + end + 1..];
-    }
-    rest.trim().is_empty()
-}
-
 /// How much of the streamed text is safe to show: everything except a trailing line that
 /// is, or may still turn out to be, the hand-off line. A marker line followed by more
 /// speech was never a closing line and is released.
@@ -371,7 +352,7 @@ pub fn shown_len(pending: &str, mark: &str) -> usize {
     let mut end = body.len();
     while start > 0 {
         let line = body[start..end].trim();
-        let cite = is_cite_line(line)
+        let cite = api::cites::is_cite_line(line)
             || (end == body.len() && line.starts_with('[') && !line.contains(']'));
         if !(line.is_empty() || cite) {
             break;
@@ -391,37 +372,6 @@ pub fn shown_len(pending: &str, mark: &str) -> usize {
     } else {
         pending.len()
     }
-}
-
-/// Every id cited in a text, in order. A bracket holds one id or a comma-separated list
-/// (`[#a]`, `[#a, #b]`, `[#a,b]`); a bracket with any malformed item cites nothing.
-pub fn ids_in(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut rest = text;
-    while let Some(i) = rest.find("[#") {
-        rest = &rest[i + 2..];
-        let Some(end) = rest.find(']') else { break };
-        if let Some(ids) = id_list(&rest[..end]) {
-            out.extend(ids);
-            rest = &rest[end + 1..];
-        }
-    }
-    out
-}
-
-/// The ids of one bracket's inside (after its first `#`).
-fn id_list(inside: &str) -> Option<Vec<String>> {
-    if inside.starts_with(char::is_whitespace) {
-        return None;
-    }
-    inside
-        .split(',')
-        .map(|item| {
-            let id = item.trim().trim_start_matches('#');
-            (!id.is_empty() && id.len() <= 128 && !id.contains(char::is_whitespace))
-                .then(|| id.to_owned())
-        })
-        .collect()
 }
 
 /// Whether a reply is an endpoint's canned refusal.
@@ -788,22 +738,6 @@ mod tests {
         );
         assert!(text_call("use a tool_call {\"name\": \"x\"}").is_none());
         assert!(text_call("```tool_call\n{broken").is_none());
-    }
-
-    #[test]
-    fn ids_are_found_and_nonsense_skipped() {
-        assert_eq!(
-            ids_in("a [#u1] b [#m12] c [# x] [#] [#u1]"),
-            ["u1", "m12", "u1"]
-        );
-    }
-
-    #[test]
-    fn lists_in_one_bracket_are_read() {
-        assert_eq!(
-            ids_in("a [#x:1,#y:2] b [#p:3, #q:4] c [#r:5, s:6] [#bad, ] [#z:7]"),
-            ["x:1", "y:2", "p:3", "q:4", "r:5", "s:6", "z:7"]
-        );
     }
 
     #[test]
