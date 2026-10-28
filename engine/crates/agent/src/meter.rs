@@ -17,7 +17,8 @@ use crate::store;
 ///
 /// `write_ratio` is the model's configured cache-write price over its input price; absent,
 /// the `cost.w` parameter stands in. A per-request model records its tokens but no points:
-/// the quota windows are token-priced, and every row is still one counted request.
+/// the token windows have nothing to count, and the row is flagged as one request for
+/// the hourly request window.
 #[allow(clippy::too_many_arguments)]
 pub fn record(
     conn: &Connection,
@@ -46,8 +47,8 @@ pub fn record(
     let n =
         |v: u64| i64::try_from(v).map_err(|_| world::Error::Invalid("token count overflow".into()));
     conn.execute(
-        "INSERT INTO meter(at, shape, channel, model, uncached, cached, output, points)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO meter(at, shape, channel, model, uncached, cached, output, points, requests)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![
             at,
             shape,
@@ -56,7 +57,8 @@ pub fn record(
             n(usage.uncached_in.saturating_add(usage.cache_write_in))?,
             n(usage.cached_in)?,
             n(usage.output)?,
-            points
+            points,
+            i64::from(per_request)
         ],
     )?;
     Ok(points)

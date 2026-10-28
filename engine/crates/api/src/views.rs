@@ -478,6 +478,8 @@ pub enum QuotaBand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowSpan {
+    /// Request-billed calls, counted rather than priced.
+    OneHour,
     FiveHours,
     SevenDays,
 }

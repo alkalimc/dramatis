@@ -424,6 +424,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       windows: [
         { span: "five_hours", used: used[0], release_at: band === "open" ? null : later(band === "quiet" ? 50 : 125) },
         { span: "seven_days", used: used[1], release_at: null },
+        { span: "one_hour", used: 0.35, release_at: null },
       ],
       binding: band === "open" ? null : "five_hours",
       spent: spend(),
