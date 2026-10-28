@@ -125,7 +125,8 @@
   align-items: flex-end;
   gap: var(--s-2);
   margin-top: 2px;
-  max-width: min(100%, 46rem);
+  /* a person's bubble stays in the left two thirds, the user's in the right two thirds */
+  max-width: min(66%, 56rem);
 }
 .message.first {
   margin-top: var(--s-3);
@@ -281,7 +282,7 @@
 }
 .message-offers {
   align-self: flex-start;
-  max-width: min(100%, 46rem);
+  max-width: min(66%, 56rem);
   margin-top: 2px;
   padding-left: calc(var(--avatar-m) + var(--s-2));
 }

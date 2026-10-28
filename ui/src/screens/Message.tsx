@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Author, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
@@ -7,6 +7,7 @@ import { bubbles, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { SourcesPanel } from "./Citation";
 import { Avatar, UserAvatar } from "../ui/Avatar";
+import { Menu, type MenuItem } from "../ui/Menu";
 import { SelectionMenu } from "./SelectionMenu";
 
 export function ActionLines({ author, actions }: { author: Author; actions: ToolAction[] }) {
@@ -128,6 +129,7 @@ export const MessageView = memo(function MessageView({
   const writing = useStore((s) => Boolean(s.typing[message.channel]) || Object.values(s.streams).some((v) => v.channel === message.channel));
   const [selection, setSelection] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const body = useRef<HTMLDivElement>(null);
 
   const mine = message.author.kind === "user";
@@ -150,6 +152,29 @@ export const MessageView = memo(function MessageView({
     const audio = new Audio(api.mediaUrl(file.path));
     audio.onended = audio.onerror = () => setPlaying(false);
     audio.play().catch(() => setPlaying(false));
+  };
+
+  const closeMenu = useCallback(() => setMenuAt(null), []);
+  const menuItems = (): MenuItem[] => {
+    const out: MenuItem[] = [];
+    // A selection inside this message is what the user means to copy; otherwise the spoken text.
+    const picked = window.getSelection()?.toString().trim();
+    const text = picked && body.current?.contains(window.getSelection()?.anchorNode ?? null) ? picked : speech;
+    if (text) out.push({ label: t("message.copy"), icon: "copy", onSelect: () => void navigator.clipboard?.writeText(text).catch(() => undefined) });
+    if (mine && !writing) {
+      out.push({
+        label: t("message.resend"),
+        icon: "reset",
+        onSelect: () => {
+          if (after > 0 && !window.confirm(t("message.resend.confirm", { count: after }))) return;
+          void resend(message.channel, message.id);
+        },
+      });
+    }
+    if (message.cites.length > 0) {
+      out.push({ label: t("message.sources", { count: message.cites.length }), icon: "cases", onSelect: () => dispatch({ type: "sources", message: message.id }) });
+    }
+    return out;
   };
 
   const label =
@@ -219,7 +244,13 @@ export const MessageView = memo(function MessageView({
   return (
     <>
     <ActionLines author={message.author} actions={message.actions} />
-    <article id={`m-${message.id}`} className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}>
+    <article id={`m-${message.id}`} className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}
+      onContextMenu={(e) => {
+        if (menuItems().length === 0) return;
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
+    >
       {!mine && <div className="message-avatar">{last && <SpeakerAvatar author={message.author} name={name} />}</div>}
       <div className="message-stack">
         <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
@@ -232,6 +263,7 @@ export const MessageView = memo(function MessageView({
 
         {sourcesOpen && <SourcesPanel cites={message.cites} onClose={() => dispatch({ type: "sources", message: message.id })} />}
         {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
+        {menuAt && <Menu at={menuAt} items={menuItems()} label={t("message.actions")} onClose={closeMenu} />}
       </div>
       {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}
     </article>

@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./Icon";
 
 export interface MenuItem {
   label: string;
   icon?: IconName;
   danger?: boolean;
+  /** A band between this item and the one above it. */
+  separated?: boolean;
   onSelect: () => void;
 }
 
@@ -30,13 +32,20 @@ export function Menu({ at, items, label, onClose }: { at: { x: number; y: number
   useEffect(() => {
     ref.current?.querySelector<HTMLElement>("button")?.focus();
     const away = (e: Event) => {
+      // A right click that another handler took (it opened its own menu) is not ours to close on.
+      if (e.type === "contextmenu" && e.defaultPrevented) return;
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("contextmenu", away);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("resize", onClose);
+    // The event that opened the menu is still travelling up the page; listening from the next
+    // tick keeps it from closing the menu it just opened.
+    const arm = setTimeout(() => {
+      document.addEventListener("mousedown", away);
+      document.addEventListener("contextmenu", away);
+      window.addEventListener("blur", onClose);
+      window.addEventListener("resize", onClose);
+    }, 0);
     return () => {
+      clearTimeout(arm);
       document.removeEventListener("mousedown", away);
       document.removeEventListener("contextmenu", away);
       window.removeEventListener("blur", onClose);
@@ -60,19 +69,21 @@ export function Menu({ at, items, label, onClose }: { at: { x: number; y: number
   return (
     <div ref={ref} className="menu-pop" role="menu" aria-label={label} style={{ left: pos.x, top: pos.y }} onKeyDown={onKeyDown}>
       {items.map((it) => (
-        <button
-          key={it.label}
-          type="button"
-          role="menuitem"
-          className={it.danger ? "danger" : undefined}
-          onClick={() => {
-            onClose();
-            it.onSelect();
-          }}
-        >
-          {it.icon && <Icon name={it.icon} size={18} />}
-          <span>{it.label}</span>
-        </button>
+        <Fragment key={it.label}>
+          {it.separated && <div className="menu-sep" role="separator" />}
+          <button
+            type="button"
+            role="menuitem"
+            className={it.danger ? "danger" : undefined}
+            onClick={() => {
+              onClose();
+              it.onSelect();
+            }}
+          >
+            {it.icon && <Icon name={it.icon} size={20} />}
+            <span>{it.label}</span>
+          </button>
+        </Fragment>
       ))}
     </div>
   );

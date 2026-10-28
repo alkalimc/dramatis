@@ -1,4 +1,5 @@
 import { act, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { Message } from "../api";
 import { renderWith } from "../test/render";
 import { ChannelView } from "./Channel";
@@ -191,4 +192,12 @@ test("the user's own messages sit on the right with their picture, others on the
   const theirs = renderWith(<MessageView message={{ ...base, text: "Hello." }} showPlay={false} />).container.querySelector("article")!;
   expect(theirs.className).toContain("from-other");
   expect(theirs.firstElementChild!.className).toBe("message-avatar");
+});
+
+test("right click on a message offers to copy it, and to send an own message again", async () => {
+  const user = userEvent.setup();
+  const { container } = renderWith(<MessageView message={{ ...base, author: { kind: "user" }, text: "Hello there" }} showPlay={false} />);
+  await user.pointer({ keys: "[MouseRight]", target: container.querySelector(".bubble")! });
+  expect(await screen.findByRole("menuitem", { name: "Copy text" })).toBeDefined();
+  expect(screen.getByRole("menuitem", { name: "Send again" })).toBeDefined();
 });

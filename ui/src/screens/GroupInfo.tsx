@@ -20,7 +20,13 @@ export function GroupInfo({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 
-  useEffect(() => setEditing(false), [id]);
+  const rename = useStore((s) => s.drawer?.kind === "channel" && s.drawer.rename === true);
+  useEffect(() => {
+    setEditing(rename);
+    if (rename && group) setDraft(group.name?.trim() ? groupTitle(group, t) : "");
+    // Only a new group or a new request to rename resets the field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, rename]);
 
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
   const modeOf = new Map((roster?.groups ?? []).flatMap((g) => g.rows).map((r) => [r.person.id, r.mode] as const));

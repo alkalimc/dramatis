@@ -361,6 +361,7 @@ menu.version
 message.actions
 message.author
 message.awaiting
+message.copy
 message.note
 message.play
 message.playing

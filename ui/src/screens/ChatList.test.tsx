@@ -118,3 +118,25 @@ test("a conversation opened before anyone spoke gets a row while it is open, and
   });
   expect(rowsOf(nav).some((r) => r.textContent?.includes("Kael Moor"))).toBe(false);
 });
+
+test("a second right click opens the menu of the new row instead of closing", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const nav = await list();
+  const find = (name: string) => rowsOf(nav).find((r) => r.textContent?.includes(name))!;
+  await user.pointer({ keys: "[MouseRight]", target: find("Juno Reyes") });
+  expect(await screen.findByRole("menu", { name: "Chat actions" })).toBeDefined();
+  await user.pointer({ keys: "[MouseRight]", target: find("Tess Arden") });
+  expect(screen.getAllByRole("menu", { name: "Chat actions" })).toHaveLength(1);
+});
+
+test("a group's menu renames it through the info panel", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const nav = await list();
+  const group = rowsOf(nav).find((r) => r.querySelector(".chat-name svg"))!;
+  await user.pointer({ keys: "[MouseRight]", target: group });
+  for (const name of ["Rename", "Change picture", "Delete group"]) expect(await screen.findByRole("menuitem", { name })).toBeDefined();
+  await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+  expect(await screen.findByRole("textbox", { name: "Rename" })).toBeDefined();
+});

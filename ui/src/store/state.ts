@@ -39,8 +39,8 @@ export type Drawer =
   | { kind: "case"; id: TaskId }
   | { kind: "world" }
   | { kind: "system"; tab: SystemPage }
-  /** A group's info panel (a person's is `person`). */
-  | { kind: "channel"; id: ChannelId };
+  /** A group's info panel (a person's is `person`); `rename` opens it with the name field ready. */
+  | { kind: "channel"; id: ChannelId; rename?: boolean };
 
 export type ProfileMode = "view" | "edit";
 
