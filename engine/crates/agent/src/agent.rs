@@ -17,7 +17,7 @@
 //! choose who speaks unprompted (presence, event seeds) from planning the same seed twice;
 //! it is never taken while a channel lock is held.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -144,6 +144,9 @@ pub struct Agent {
     /// Input plus output tokens of the last call per segment: how full the context is.
     /// Lost on restart, when the segment's bytes are estimated instead.
     pub(crate) filled: Mutex<HashMap<SegmentId, u64>>,
+    /// Models (`profile/model`) whose endpoint refused a picture. Their history is sent
+    /// with the pictures described instead, until one is accepted again. Lost on restart.
+    pub(crate) sightless: Mutex<HashSet<String>>,
 }
 
 impl Agent {
@@ -189,6 +192,7 @@ impl Agent {
             planner: tokio::sync::Mutex::new(()),
             quota_events: Mutex::new(()),
             filled: Mutex::new(HashMap::new()),
+            sightless: Mutex::new(HashSet::new()),
         })
     }
 

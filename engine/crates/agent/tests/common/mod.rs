@@ -30,6 +30,8 @@ pub enum Reply {
     Fail(String),
     /// HTTP 429 with an optional `Retry-After`.
     Limited(Option<u64>),
+    /// An error status with the endpoint's own message.
+    Rejected(u16, String),
 }
 
 pub fn say(t: &str) -> Reply {
@@ -414,6 +416,16 @@ impl Transport for Fake {
                 )])
                 .boxed(),
                 retry_after,
+            });
+        }
+        if let Reply::Rejected(status, message) = &reply {
+            return Ok(StreamResponse {
+                status: *status,
+                chunks: futures::stream::iter(vec![Ok(json!({"error": {"message": message}})
+                    .to_string()
+                    .into_bytes())])
+                .boxed(),
+                retry_after: None,
             });
         }
         let n = self.n.fetch_add(1, Ordering::SeqCst);

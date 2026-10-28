@@ -23,6 +23,8 @@
 //! price_out = 4.0
 //! billing = "token"                    # "token" (default) | "request": a flat fee per call
 //! native_tools = true                  # false: the endpoint emulates function calling
+//! vision = true                        # false: pictures are described, never sent
+//! max_image_bytes = 90000              # a picture over this many base64 bytes is shrunk
 //!
 //! [roles]                              # absent = no chat model: the app runs as a library
 //! chat = { profile = "example", model = "model-a" }
@@ -43,6 +45,11 @@
 //! with no tools, since retrieval is attached to every turn anyway and the emulation's
 //! instructions pull the model out of its role; requests keep `report` and the wrap-up
 //! keeps the forced `wrapup`. Edited in the file only.
+//!
+//! `vision = false` marks a model that cannot take pictures: an attached picture reaches it
+//! as a note that one was attached. Left out, pictures are sent, and an endpoint that
+//! refuses one is remembered until the app restarts. `max_image_bytes` is for endpoints
+//! that cap the size of a request; a picture is always scaled to a longest side first.
 //!
 //! Absent optional keys stay absent when written back (TOML has no null).
 //!
@@ -126,6 +133,15 @@ pub struct Model {
     /// `false`: function calling is emulated by the endpoint. Absent: native.
     #[serde(default)]
     pub native_tools: Option<bool>,
+    /// `false`: the model cannot take pictures; they are described to it in words instead
+    /// of sent. Absent: sent, and a refusal is learned from the endpoint's answer.
+    #[serde(default)]
+    pub vision: Option<bool>,
+    /// Most bytes of base64 text one picture may take; larger ones are shrunk until they
+    /// fit. Absent: only the longest side is limited (`picture.max_side`). For an endpoint
+    /// that caps the whole request.
+    #[serde(default)]
+    pub max_image_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -141,6 +157,11 @@ impl Model {
     /// Whether a call costs the same whatever it carries.
     pub fn per_request(&self) -> bool {
         self.billing == Some(Billing::Request)
+    }
+
+    /// Whether pictures may be sent to this model.
+    pub fn sees(&self) -> bool {
+        self.vision != Some(false)
     }
 
     /// Whether the endpoint only emulates function calling.
@@ -384,6 +405,8 @@ persona = { profile = "second", model = "model-b", reasoning = "high" }
                         price_out: Some(4.0),
                         billing: Some(Billing::Request),
                         native_tools: Some(false),
+                        vision: Some(false),
+                        max_image_bytes: Some(90_000),
                     });
                     p
                 })

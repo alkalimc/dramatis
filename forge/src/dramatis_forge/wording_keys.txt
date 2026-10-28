@@ -222,6 +222,7 @@ error.not_implemented
 error.quota_exhausted
 error.turn.cancelled
 error.turn.error
+error.turn.image_unsupported
 error.turn.quota_exhausted
 error.turn.rate_limited
 error.unknown
@@ -317,6 +318,7 @@ harness.opening.pinned
 harness.opening.words
 harness.output
 harness.persona
+harness.picture_unseen
 harness.recent
 harness.remembered
 harness.rules

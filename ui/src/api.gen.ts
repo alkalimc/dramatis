@@ -210,6 +210,8 @@ export type Activity = { kind: "messaged"; at: Timestamp } | { kind: "replied"; 
 
 /**  Why a turn failed, coarse enough to pick a word and nothing more. */
 export type ActivityFailure = "rate_limited" | "quota_exhausted" | 
+/**  The endpoint refused a request that carried a picture: this model cannot see it. */
+"image_unsupported" | 
 /**  The future was dropped before the turn ended. */
 "cancelled" | "error";
 
@@ -519,6 +521,17 @@ export type Model = {
 	billing?: Billing | null,
 	/**  `false`: function calling is emulated by the endpoint. Absent: native. */
 	native_tools?: boolean | null,
+	/**
+	 *  `false`: the model cannot take pictures; they are described to it in words instead
+	 *  of sent. Absent: sent, and a refusal is learned from the endpoint's answer.
+	 */
+	vision?: boolean | null,
+	/**
+	 *  Most bytes of base64 text one picture may take; larger ones are shrunk until they
+	 *  fit. Absent: only the longest side is limited (`picture.max_side`). For an endpoint
+	 *  that caps the whole request.
+	 */
+	max_image_bytes?: number | null,
 };
 
 export type MonthDay = {

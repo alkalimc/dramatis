@@ -27,6 +27,7 @@ use crate::agent::{Agent, Event};
 use crate::assemble::{self, Member};
 use crate::error::{Error, Result, timestamp};
 use crate::persona;
+use crate::picture;
 use crate::request::{self, Image};
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
@@ -84,6 +85,9 @@ impl Agent {
             return Err(Error::Invalid("empty message".into()));
         }
         let now = self.now();
+        // Before the world is locked: decoding a picture takes a moment.
+        let kind = self.log_kind(&self.db(), channel)?;
+        let image = image.map(|i| self.shrink(i, kind));
         let conn = self.db();
         let ch = channel::get(&conn, channel)?;
         if let Some(p) = ch.person() {
@@ -115,6 +119,15 @@ impl Agent {
             image,
             authorized: host,
         })
+    }
+
+    /// The picture as the model's endpoint should get it (and as the log keeps it).
+    fn shrink(&self, image: Image, kind: LogKind) -> Image {
+        let max = self
+            .role_for(kind)
+            .ok()
+            .and_then(|(role, _)| role.model.max_image_bytes);
+        picture::prepare(image, &self.config.agent.picture, max)
     }
 
     /// Run the replies to a posted message. Errors after the message was stored (the

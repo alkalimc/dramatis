@@ -43,6 +43,10 @@ pub enum Error {
     #[error("endpoint: {detail}")]
     Endpoint { detail: String },
 
+    /// The endpoint refused a request that carried a picture. `detail` is its own text.
+    #[error("the endpoint did not accept the picture: {detail}")]
+    ImageRejected { detail: String },
+
     #[error("keychain: {0}")]
     Keychain(String),
 
@@ -143,6 +147,9 @@ impl From<Error> for ApiError {
             },
             // No code of its own: the UI shows the sentence under the endpoint error.
             e @ Error::RateLimited { .. } => ApiError::Endpoint {
+                detail: e.to_string(),
+            },
+            e @ Error::ImageRejected { .. } => ApiError::Endpoint {
                 detail: e.to_string(),
             },
             Error::Endpoint { detail } => ApiError::Endpoint { detail },
