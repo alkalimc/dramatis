@@ -2027,3 +2027,48 @@ async fn an_ordinary_interjection_hands_the_turn_to_nobody() {
     let said = texts(&e, g);
     assert!(said.iter().any(|(_, t)| t == "Bo: a line."), "{said:?}");
 }
+
+#[tokio::test]
+async fn a_reply_that_opens_with_the_previous_message_keeps_only_its_own_words() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.fake.push([
+        say("Ann: the steel is in the hold.\n\u{2192} bo"),
+        say("Ann: the steel is in the hold.\n\nBo: and the hold is locked.\n[#u1]\n"),
+    ]);
+    e.agent
+        .send(g, "ann, where is the steel?", None)
+        .await
+        .unwrap();
+    let said = texts(&e, g);
+    assert!(
+        said.iter()
+            .any(|(_, t)| t.starts_with("Bo: and the hold is locked.")),
+        "{said:?}"
+    );
+    assert_eq!(
+        said.iter()
+            .filter(|(_, t)| t.contains("the steel is in the hold"))
+            .count(),
+        1,
+        "{said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_hand_off_line_before_the_citation_line_still_hands_the_turn_on() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.fake
+        .push([say("Ann: ask bo.\n\u{2192} bo\n[#u1]"), say("Bo: steel.")]);
+    e.agent
+        .send(g, "ann, where is the steel?", None)
+        .await
+        .unwrap();
+    let said = texts(&e, g);
+    assert!(said.iter().any(|(_, t)| t == "Bo: steel."), "{said:?}");
+    assert!(
+        said.iter().all(|(_, t)| !t.contains('\u{2192}')),
+        "{said:?}"
+    );
+}

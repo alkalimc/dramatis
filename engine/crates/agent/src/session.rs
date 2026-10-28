@@ -1069,6 +1069,17 @@ impl Agent {
             let (text, names) = assemble::split_hand_off(&turn.text, mark);
             turn.text = text;
             turn.hand_off = names;
+            // A model that starts by repeating the message before it word for word: the
+            // copy is not this person's line.
+            let before = message::history(&self.db(), turn.channel, turn.message, 1)?;
+            if let Some(prev) = before.first().filter(|m| m.author != turn.speaker) {
+                let echo = prev.text.trim();
+                if echo.chars().count() >= 8
+                    && let Some(rest) = turn.text.trim_start().strip_prefix(echo)
+                {
+                    turn.text = rest.trim_start().to_owned();
+                }
+            }
             // Only the hand-off line was written: nothing to keep as a message.
             if turn.text.trim().is_empty() && turn.actions.is_empty() {
                 if let Some(id) = turn.message.take() {
