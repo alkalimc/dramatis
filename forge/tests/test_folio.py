@@ -192,3 +192,16 @@ def test_contract_folio(built):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(built.folio, target)
         assert manifest(target)["build_fingerprint"] == m["build_fingerprint"]
+
+
+def test_a_failed_build_keeps_the_previous_folio(built, pack, paths, monkeypatch):
+    before = paths.folio.read_bytes()
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(corpus, "_write_roster", boom)
+    with Archive(paths.archive) as archive, pytest.raises(RuntimeError):
+        corpus.run(archive, pack, paths.folio, segmenter="bigram")
+    assert paths.folio.read_bytes() == before
+    assert not paths.folio.with_name(paths.folio.name + ".building").exists()
