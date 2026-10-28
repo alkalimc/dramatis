@@ -19,7 +19,7 @@
     ],
     "security": {
       "assetProtocol": { "enable": true, "scope": [] },
-      "csp": "default-src 'self'; img-src 'self' asset: data:; media-src 'self' asset:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; img-src 'self' asset: data:; media-src 'self' asset:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

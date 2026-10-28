@@ -47,45 +47,47 @@ pub fn append(
     attachment: Option<&Value>,
     at: i64,
 ) -> Result<MessageId> {
-    let ch = channel::get(conn, channel)?;
-    if !ch.is_open() {
-        return Err(Error::ChannelClosed(channel));
-    }
-    if !ch.has(author) {
-        return Err(match author {
-            Actor::Person(p) => Error::NotParticipant {
-                person: p.clone(),
-                channel,
-            },
-            _ => Error::Invalid(format!("{} is not in channel {channel}", author.as_str())),
-        });
-    }
-    if let Actor::Person(p) = author {
-        bond::ensure_available(conn, p)?;
-    }
-    conn.execute(
-        "INSERT INTO message(channel, author, text, tool_calls, attachment, at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        (
-            channel,
-            author,
-            text,
-            tool_calls.map(Value::to_string),
-            attachment.map(Value::to_string),
-            at,
-        ),
-    )?;
-    let id = MessageId(conn.last_insert_rowid());
-    match author {
-        Actor::Person(p) => bond::touch_user(conn, p, at)?,
-        Actor::User if ch.kind == ChannelKind::Direct => {
-            if let Some(p) = ch.person() {
-                bond::touch_user(conn, p, at)?;
-            }
+    crate::atomic(conn, |conn| {
+        let ch = channel::get(conn, channel)?;
+        if !ch.is_open() {
+            return Err(Error::ChannelClosed(channel));
         }
-        _ => {}
-    }
-    Ok(id)
+        if !ch.has(author) {
+            return Err(match author {
+                Actor::Person(p) => Error::NotParticipant {
+                    person: p.clone(),
+                    channel,
+                },
+                _ => Error::Invalid(format!("{} is not in channel {channel}", author.as_str())),
+            });
+        }
+        if let Actor::Person(p) = author {
+            bond::ensure_available(conn, p)?;
+        }
+        conn.execute(
+            "INSERT INTO message(channel, author, text, tool_calls, attachment, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (
+                channel,
+                author,
+                text,
+                tool_calls.map(Value::to_string),
+                attachment.map(Value::to_string),
+                at,
+            ),
+        )?;
+        let id = MessageId(conn.last_insert_rowid());
+        match author {
+            Actor::Person(p) => bond::touch_user(conn, p, at)?,
+            Actor::User if ch.kind == ChannelKind::Direct => {
+                if let Some(p) = ch.person() {
+                    bond::touch_user(conn, p, at)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(id)
+    })
 }
 
 pub fn get(conn: &Connection, id: MessageId) -> Result<Message> {

@@ -12,6 +12,7 @@
 //! Also here, because both the app and the offline tools read them: the tool schemas the
 //! model sees ([`tools`]) and the endpoints file ([`endpoints`]).
 
+pub mod cites;
 pub mod commands;
 pub mod convert;
 pub mod corpus;

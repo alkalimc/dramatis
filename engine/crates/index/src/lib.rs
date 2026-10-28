@@ -319,7 +319,7 @@ impl Index {
     /// than quietly worse results.
     pub fn new(folio: Folio, params: params::Retrieve) -> Self {
         let manifest = folio.manifest();
-        let segmenter = Segmenter::for_corpus(manifest.segmenter_name(), &manifest.stopwords);
+        let segmenter = Segmenter::for_corpus(&manifest.segmenter, &manifest.stopwords);
         Self {
             folio,
             segmenter,

@@ -1,0 +1,23 @@
+{
+  "note": "Shared by forge/tests/test_segment.py and index::segment tests. Input text and the tokens both implementations must produce for the n1 normalisation; non-ASCII characters are escaped so the file stays plain ASCII.",
+  "vectors": [
+    {"in": "UR-6", "tokens": ["ur", "6"]},
+    {"in": "GT-1 Title Case", "tokens": ["gt", "1", "title", "case"]},
+    {"in": "CB-EX8", "tokens": ["cb", "ex8"]},
+    {"in": "H12-4", "tokens": ["h12", "4"]},
+    {"in": "a.b", "tokens": ["a", "b"]},
+    {"in": "3.5%", "tokens": ["3", "5"]},
+    {"in": "C++", "tokens": ["c"]},
+    {"in": "R&D", "tokens": ["r", "d"]},
+    {"in": "snake_case", "tokens": ["snake", "case"]},
+    {"in": "\"quoted\" AND (x)", "tokens": ["quoted", "and", "x"]},
+    {"in": "line one\nline-2\ttab", "tokens": ["line", "one", "line", "2", "tab"]},
+    {"in": "\uff35\uff32\uff0d\uff16", "tokens": ["ur", "6"]},
+    {"in": "\uff21\uff22\uff11\uff12", "tokens": ["ab12"]},
+    {"in": "ABC\uff0cDEF", "tokens": ["abc", "def"]},
+    {"in": "a\u3000b", "tokens": ["a", "b"]},
+    {"in": "x\u2014y", "tokens": ["x", "y"]},
+    {"in": "  --  ", "tokens": []},
+    {"in": "", "tokens": []}
+  ]
+}

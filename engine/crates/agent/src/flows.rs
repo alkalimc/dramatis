@@ -1404,10 +1404,11 @@ impl Agent {
         lines.extend(line);
         let units: Vec<folio::Unit> = {
             let ix = self.ix();
-            o.material
-                .iter()
-                .filter_map(|id| ix.folio().unit_by_id(id).ok().flatten())
-                .collect()
+            let mut found = Vec::new();
+            for id in &o.material {
+                found.extend(ix.folio().unit_by_id(id)?);
+            }
+            found
         };
         let mut turn = Turn::new(o.channel, Actor::Person(o.person.clone()), Shape::Opening);
         if !units.is_empty() {

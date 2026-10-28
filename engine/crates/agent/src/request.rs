@@ -170,6 +170,16 @@ pub fn tool_result_part(call_id: &str, output: String) -> Part {
     }
 }
 
+/// A call's output when it failed or never ran: an answer for every call keeps the log
+/// one every endpoint accepts.
+pub fn failed_tool_result(call_id: &str) -> Part {
+    Part::ToolResult {
+        call_id: call_id.to_owned(),
+        content: "The tool did not finish.".to_owned(),
+        is_error: true,
+    }
+}
+
 /// The outputs of one reply's calls: one entry, so the messages wire gets them in the
 /// single user turn it requires.
 pub fn tool_results(parts: Vec<Part>) -> Message {
@@ -272,7 +282,7 @@ fn native_fits(protocol: Protocol, block: &Value) -> bool {
 /// The log as one protocol can take it. A log goes on across a change of endpoint; the
 /// native blocks of the old protocol are left out of what is sent, and stay in the log.
 fn for_protocol(messages: &[Message], protocol: Protocol) -> Vec<Message> {
-    messages
+    let kept: Vec<Message> = messages
         .iter()
         .filter_map(|m| {
             let parts: Vec<Part> = m
@@ -286,7 +296,48 @@ fn for_protocol(messages: &[Message], protocol: Protocol) -> Vec<Message> {
                 parts,
             })
         })
-        .collect()
+        .collect();
+    close_calls(kept)
+}
+
+/// Every tool call answered: a call without an output gets an error output right after its
+/// reply, in the same entry as the outputs it has. The log itself is left as it is.
+fn close_calls(messages: Vec<Message>) -> Vec<Message> {
+    let mut out: Vec<Message> = Vec::with_capacity(messages.len());
+    let mut iter = messages.into_iter().peekable();
+    while let Some(m) = iter.next() {
+        let ids: Vec<String> = m
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::ToolCall { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        out.push(m);
+        if ids.is_empty() {
+            continue;
+        }
+        let mut results = match iter.peek() {
+            Some(n) if n.role == Role::Tool => iter.next().unwrap(),
+            _ => tool_results(Vec::new()),
+        };
+        let missing: Vec<Part> = ids
+            .iter()
+            .filter(|id| {
+                !results
+                    .parts
+                    .iter()
+                    .any(|p| matches!(p, Part::ToolResult { call_id, .. } if call_id == *id))
+            })
+            .map(|id| failed_tool_result(id))
+            .collect();
+        results.parts.extend(missing);
+        if !results.parts.is_empty() {
+            out.push(results);
+        }
+    }
+    out
 }
 
 /// The protocol-neutral request. Blocks A and B end cacheable prefixes (the host's log has
@@ -402,6 +453,41 @@ mod tests {
         assert_eq!(harness_texts(&msgs[1]).count(), 0);
         assert_eq!(harness_texts(&msgs[2]).collect::<Vec<_>>(), ["found"]);
         assert!(parse(b"{\"item\":\"user\",\"text\":\"old\"}").is_none());
+    }
+
+    #[test]
+    fn unanswered_calls_are_answered_when_the_request_is_built() {
+        let call = |id: &str| Part::ToolCall {
+            id: id.into(),
+            name: "search".into(),
+            args_json: "{}".into(),
+        };
+        let log = [
+            Message::user("a"),
+            Message::assistant(vec![call("c1"), call("c2")]),
+            tool_results(vec![tool_result_part("c1", "found".into())]),
+            Message::assistant(vec![call("c3")]),
+            Message::user("b"),
+        ];
+        let sent = for_protocol(&log, Protocol::OpenAiChat);
+        fn answered(m: &Message) -> Vec<&str> {
+            m.parts
+                .iter()
+                .filter_map(|p| match p {
+                    Part::ToolResult { call_id, .. } => Some(call_id.as_str()),
+                    _ => None,
+                })
+                .collect()
+        }
+        assert_eq!(sent.len(), 6);
+        assert_eq!(answered(&sent[2]), ["c1", "c2"], "merged into one entry");
+        assert_eq!(answered(&sent[4]), ["c3"]);
+        assert_eq!(sent[5], log[4]);
+        assert_eq!(
+            for_protocol(&sent, Protocol::OpenAiChat),
+            sent,
+            "idempotent"
+        );
     }
 
     #[test]

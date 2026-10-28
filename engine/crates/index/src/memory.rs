@@ -6,7 +6,7 @@
 //! That keeps a memory and a unit comparable without inventing a conversion between two
 //! scales.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::Result;
 use crate::segment::Segmenter;
@@ -31,7 +31,7 @@ impl CorpusStats {
                 [],
                 |row| row.get(0),
             )
-            .ok();
+            .optional()?;
         if let Some(block) = block
             && let Some((rows, at)) = varint(&block, 0)
             && let Some((tokens, _)) = varint(&block, at)
@@ -147,5 +147,23 @@ mod tests {
         let common = bm25(&seg, &stats, &["common".into()], "a common word", df);
         assert!(rare > common && common > 0.0);
         assert_eq!(bm25(&seg, &stats, &["absent".into()], "a word", df), 0.0);
+    }
+
+    #[test]
+    fn stats_errors_are_not_read_as_an_empty_record() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(CorpusStats::read(&conn).is_err(), "missing table");
+
+        conn.execute_batch(
+            "CREATE TABLE chunks_fts_data (id INTEGER PRIMARY KEY, block); \
+             CREATE TABLE chunks (id INTEGER);",
+        )
+        .unwrap();
+        let stats = CorpusStats::read(&conn).unwrap();
+        assert_eq!(stats.avg_len, 0.0, "no record falls back to the count");
+
+        conn.execute("INSERT INTO chunks_fts_data VALUES (1, 'text')", [])
+            .unwrap();
+        assert!(CorpusStats::read(&conn).is_err(), "bad value");
     }
 }

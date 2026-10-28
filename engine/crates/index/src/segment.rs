@@ -29,11 +29,17 @@ fn is_cjk(c: char) -> bool {
     CJK.iter().any(|&(lo, hi)| cp >= lo && cp <= hi)
 }
 
+/// Rule tag in the manifest's `segmenter` string (`jieba/<version>+n1`) that marks a corpus
+/// built with the shared normalisation below. A corpus without it was built from raw
+/// `jieba.cut_for_search` output and is queried the old way.
+pub const RULE_TAG: &str = "n1";
+
 /// The tokenizer half of a segmenter.
 pub enum Kind {
-    /// Dictionary segmentation for scripts without word delimiters. Matches the forge's
+    /// Dictionary segmentation for scripts without word delimiters, after the shared
+    /// normalisation (see [`normalise`]) when `normalised` is set. Matches the forge's
     /// `jieba.cut_for_search`.
-    Jieba(Box<Jieba>),
+    Jieba { dict: Box<Jieba>, normalised: bool },
     /// Matches the forge's dependency-free fallback: overlapping character bigrams over
     /// CJK runs, whitespace elsewhere. Weaker but correct — the overlap matters, since
     /// without it a query whose word straddles a pair boundary matches nothing.
@@ -69,12 +75,20 @@ impl Segmenter {
 
     /// Pick the segmenter a corpus was built with, and its stopword list.
     ///
-    /// Unknown names fall back to bigrams rather than failing: a corpus built by a future
-    /// forge with a third segmenter is still usable through the dense path, and degraded
-    /// lexical matching beats refusing to open the file.
-    pub fn for_corpus(name: &str, stopwords: &[String]) -> Self {
+    /// `spec` is the manifest's `segmenter` string, `name/version` with an optional
+    /// `+rule` suffix. Unknown names fall back to bigrams rather than failing: a corpus
+    /// built by a future forge with a third segmenter is still usable through the dense
+    /// path, and degraded lexical matching beats refusing to open the file.
+    pub fn for_corpus(spec: &str, stopwords: &[String]) -> Self {
+        let name = spec.split('/').next().unwrap_or(spec);
+        let normalised = spec
+            .rsplit_once('+')
+            .is_some_and(|(_, rule)| rule == RULE_TAG);
         let kind = match name {
-            "jieba" => Kind::Jieba(Box::new(Jieba::new())),
+            "jieba" => Kind::Jieba {
+                dict: Box::new(Jieba::new()),
+                normalised,
+            },
             _ => Kind::CharBigram,
         };
         Self::new(kind, stopwords.iter().cloned())
@@ -82,9 +96,22 @@ impl Segmenter {
 
     pub fn name(&self) -> &'static str {
         match self.kind {
-            Kind::Jieba(_) => "jieba",
+            Kind::Jieba { .. } => "jieba",
             Kind::CharBigram => "char-bigram",
         }
+    }
+
+    /// False for a corpus built before the shared normalisation: its section-title style
+    /// tokens (`ab-1`) were split differently from how this side would query them, so it
+    /// keeps the old query path until it is rebuilt.
+    pub fn normalised(&self) -> bool {
+        !matches!(
+            self.kind,
+            Kind::Jieba {
+                normalised: false,
+                ..
+            }
+        )
     }
 
     pub fn is_stopword(&self, token: &str) -> bool {
@@ -97,7 +124,16 @@ impl Segmenter {
     /// phrase query.
     pub fn segment(&self, text: &str) -> Vec<String> {
         match &self.kind {
-            Kind::Jieba(jieba) => jieba
+            Kind::Jieba {
+                dict,
+                normalised: true,
+            } => normalise(text, |run| {
+                dict.cut_for_search(run, true)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            }),
+            Kind::Jieba { dict, .. } => dict
                 .cut_for_search(text, true)
                 .into_iter()
                 .map(str::to_string)
@@ -142,6 +178,58 @@ impl Segmenter {
             .collect();
         Some(quoted.join(" OR "))
     }
+}
+
+/// The normalisation both sides apply before dictionary segmentation, so a mixed token such
+/// as a section code is cut the same way at build and at query time. The forge's
+/// `segment.py` implements the same rule; `tests/fixtures/segment_vectors.json` in the forge
+/// is the shared executable definition.
+///
+///  1. Full-width ASCII forms (U+FF01..U+FF5E) fold to ASCII, and U+3000 to a space.
+///  2. Each maximal run of ASCII letters and digits is one token, lowercased, and never
+///     reaches the dictionary segmenter. Every other ASCII character is a separator, so
+///     `ab-1` is `ab`, `1`. The index treats those characters as separators anyway.
+///  3. Each maximal run of non-ASCII characters goes to `cut`; tokens with no alphanumeric
+///     character (punctuation) are dropped, since the index would drop them too.
+pub fn normalise(text: &str, cut: impl Fn(&str) -> Vec<String>) -> Vec<String> {
+    fn flush_word(word: &mut String, out: &mut Vec<String>) {
+        if !word.is_empty() {
+            out.push(std::mem::take(word));
+        }
+    }
+    let flush_other = |other: &mut String, out: &mut Vec<String>| {
+        if !other.is_empty() {
+            out.extend(
+                cut(other)
+                    .into_iter()
+                    .filter(|t| t.chars().any(char::is_alphanumeric)),
+            );
+            other.clear();
+        }
+    };
+    let mut out = Vec::new();
+    let mut word = String::new();
+    let mut other = String::new();
+    for c in text.chars() {
+        let c = match c as u32 {
+            0xFF01..=0xFF5E => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            0x3000 => ' ',
+            _ => c,
+        };
+        if c.is_ascii_alphanumeric() {
+            flush_other(&mut other, &mut out);
+            word.push(c.to_ascii_lowercase());
+        } else if c.is_ascii() {
+            flush_word(&mut word, &mut out);
+            flush_other(&mut other, &mut out);
+        } else {
+            flush_word(&mut word, &mut out);
+            other.push(c);
+        }
+    }
+    flush_word(&mut word, &mut out);
+    flush_other(&mut other, &mut out);
+    out
 }
 
 fn bigrams(text: &str) -> Vec<String> {
@@ -298,6 +386,55 @@ mod tests {
         let seg = Segmenter::for_corpus("unknown-segmenter", &["x".to_string()]);
         assert_eq!(seg.name(), "char-bigram");
         assert!(seg.is_stopword("x"));
+    }
+
+    fn jieba_n1() -> Segmenter {
+        Segmenter::for_corpus("jieba/0.42.1+n1", &[])
+    }
+
+    fn check_vectors(path: &std::path::Path) {
+        let seg = jieba_n1();
+        let file: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let vectors = file["vectors"].as_array().unwrap();
+        assert!(!vectors.is_empty());
+        for v in vectors {
+            let want: Vec<String> = v["tokens"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t.as_str().unwrap().to_string())
+                .collect();
+            let text = v["in"].as_str().unwrap();
+            assert_eq!(seg.segment(text), want, "input {text:?}");
+        }
+    }
+
+    #[test]
+    fn shared_vectors_match_the_forge() {
+        check_vectors(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../forge/tests/fixtures/segment_vectors.json"),
+        );
+        // The private repo keeps vectors with non-ASCII text; point at them to check this
+        // side against the same expectations.
+        if let Some(extra) = std::env::var_os("DRAMATIS_EXTRA_SEGMENT_VECTORS") {
+            check_vectors(std::path::Path::new(&extra));
+        }
+    }
+
+    #[test]
+    fn a_section_code_is_queried_as_the_index_stores_it() {
+        let seg = jieba_n1();
+        assert!(seg.normalised());
+        assert_eq!(seg.match_expression("UR-6").unwrap(), "\"ur\" OR \"6\"");
+    }
+
+    #[test]
+    fn a_corpus_without_the_rule_tag_keeps_the_old_query_path() {
+        let seg = Segmenter::for_corpus("jieba/0.42.1", &[]);
+        assert!(!seg.normalised());
+        assert_eq!(seg.segment("UR-6"), vec!["UR-6"]);
     }
 
     #[test]
