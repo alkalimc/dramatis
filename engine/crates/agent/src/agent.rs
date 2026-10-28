@@ -183,6 +183,9 @@ impl Agent {
             descriptions,
             wording,
         };
+        // Nothing runs yet: a request still open was cut off by a crash or a quit.
+        let now = parts.clock.now().ms;
+        world::task::interrupt_open(&parts.world, now)?;
         Ok(Self {
             world: Mutex::new(parts.world),
             index: Mutex::new(parts.index),

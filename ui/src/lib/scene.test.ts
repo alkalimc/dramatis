@@ -75,6 +75,20 @@ test("brackets that are not citation marks stay", () => {
   expect(withoutCites("[# a b] and [x]")).toBe("[# a b] and [x]");
 });
 
+// The same cases as the engine's citation tests (engine/crates/api/src/cites.rs).
+test("the engine's citation cases", () => {
+  expect(withoutCites("It works [#u2].")).toBe("It works.");
+  expect(withoutCites("a [#u1, #u2] b [#x,y]")).toBe("a b");
+  expect(withoutCites("two  \t[#a]\nnext [#b]  ")).toBe("two\nnext");
+  expect(withoutCites("Yes. [#voice:ab12] Go.")).toBe("Yes. Go.");
+  expect(withoutCites("Yes [#a:1,#b:2] and [#c:3, #d:4] go [#e:5, ].")).toBe("Yes and go [#e:5, ].");
+  expect(withoutCites("see [1] and [#] and [#abc")).toBe("see [1] and [#] and [#abc");
+  const long = `x [#${"a".repeat(129)}]`;
+  expect(withoutCites(long)).toBe(long);
+  expect(withoutCites("[#a b]")).toBe("[#a b]");
+  expect(withoutCites("[# not an id] ok")).toBe("[# not an id] ok");
+});
+
 test("blocks: paragraphs apart, one label per run, scene lines between, marks-only line dropped", () => {
   const text = "One.\n\nTwo.\n*Rain.*\nThree.\n\n[#a:1]";
   expect(blocks(text, star)).toEqual([

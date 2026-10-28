@@ -15,15 +15,24 @@ response plus a warning that is easy to miss.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 LIST_LIMIT = 500
 TITLES_LIMIT = 50
+
+
+def _retryable(exc: BaseException) -> bool:
+    """Throttling, network failure, 429 and 5xx are worth another try; a 4xx such as
+    403 or 404 will answer the same way again."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in (408, 429) or exc.response.status_code >= 500
+    return isinstance(exc, Throttled | httpx.TransportError)
 
 
 class WikiError(RuntimeError):
@@ -75,7 +84,7 @@ class Wiki:
         self._last = time.monotonic()
 
     @retry(
-        retry=retry_if_exception_type((Throttled, httpx.TransportError, httpx.HTTPStatusError)),
+        retry=retry_if_exception(_retryable),
         stop=stop_after_attempt(6),
         wait=wait_exponential_jitter(initial=1, max=60),
         reraise=True,
@@ -87,6 +96,10 @@ class Wiki:
         params.setdefault("maxlag", 5)
         self.requests += 1
         r = self._c.get(self.api, params=params)
+        if r.status_code == 429:
+            # The site said "not now": honour its own wait before the generic backoff.
+            with contextlib.suppress(ValueError):
+                time.sleep(min(float(r.headers.get("retry-after", 0)), 120))
         r.raise_for_status()
         d = r.json()
         if "error" in d:

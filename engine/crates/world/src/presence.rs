@@ -3,18 +3,18 @@
 //!
 //! First the digest (no model call): new messages, answered requests, due commitments,
 //! who came by, whose birthday it is. When it is non-empty and the quota band allows,
-//! the host says one in-world line about it. Then at most one person opens with a seed.
+//! the host says one in-world line about the items it has not announced yet. Then at most one person opens with a seed.
 
 use std::collections::BTreeMap;
 
 use rusqlite::Connection;
 
-use crate::clock::Now;
+use crate::clock::{Date, Now};
 use crate::params::Params;
 use crate::quota::{self, CallKind};
 use crate::seed::{self, Held, Limits, Occasion, Planned, TopicMatch, WordsHit};
 use crate::types::{ChannelId, FactId, MessageId, MonthDay, PersonId, TaskId, Tier};
-use crate::{Call, Result, bond, channel, fact, message, session, task};
+use crate::{Call, Result, bond, channel, fact, message, session, settings, task};
 
 /// Something that is waiting for the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +57,59 @@ impl Digest {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// The items the host has not announced yet.
+    pub fn unannounced(&self, conn: &Connection, today: Date) -> Result<Digest> {
+        let seen = announced(conn)?;
+        let items = self
+            .items
+            .iter()
+            .filter(|w| !seen.contains(&w.key(today)))
+            .cloned()
+            .collect();
+        Ok(Digest { items })
+    }
+}
+
+impl Waiting {
+    /// Stable identity of this item for as long as it is unchanged: a new message, reply
+    /// or due time makes a new key, and a birthday is new each local day.
+    fn key(&self, today: Date) -> String {
+        let (kind, id) = match &self.activity {
+            Activity::Messaged { at } => ("messaged", at.to_string()),
+            Activity::Replied { task, at, .. } => ("replied", format!("{task:?}@{at}")),
+            Activity::CommitmentDue { fact, due, .. } => ("due", format!("{fact:?}@{due}")),
+            Activity::CameBy { message, at } => ("cameby", format!("{message:?}@{at}")),
+            Activity::Birthday => (
+                "birthday",
+                format!("{}-{:02}-{:02}", today.year, today.month, today.day),
+            ),
+        };
+        // A birthday stays the same item when a direct channel with him appears.
+        let ch = match self.activity {
+            Activity::Birthday => String::new(),
+            _ => self.channel.map(|c| format!("{c:?}")).unwrap_or_default(),
+        };
+        format!("{}|{ch}|{kind}|{id}", self.person)
+    }
+}
+
+const ANNOUNCED: &str = "presence.announced";
+
+fn announced(conn: &Connection) -> Result<Vec<String>> {
+    Ok(settings::get(conn, ANNOUNCED)?.unwrap_or_default())
+}
+
+/// Record that the host has told the user about `said`. Keys of items no longer in the
+/// `full` digest are dropped, so the record stays as small as the panel.
+pub fn mark_announced(conn: &Connection, full: &Digest, said: &Digest, today: Date) -> Result<()> {
+    let mut keys = announced(conn)?;
+    keys.extend(said.items.iter().map(|w| w.key(today)));
+    let live: Vec<String> = full.items.iter().map(|w| w.key(today)).collect();
+    keys.retain(|k| live.contains(k));
+    keys.sort();
+    keys.dedup();
+    settings::set(conn, ANNOUNCED, &keys)
 }
 
 /// Who has a birthday on a day: the corpus's profile field, supplied by the caller so
@@ -221,8 +274,10 @@ pub fn on_presence(
         calls.extend(ended.into_iter().map(|channel| Call::Wrapup { channel }));
     }
     let digest = digest(conn, now, birthdays)?;
-    if !digest.is_empty() && quota::decide(&status, CallKind::HostLine).allowed() {
-        calls.push(Call::HostLine(digest.clone()));
+    // Only news: the same waiting items are not announced twice.
+    let news = digest.unannounced(conn, now.local_date())?;
+    if !news.is_empty() && quota::decide(&status, CallKind::HostLine).allowed() {
+        calls.push(Call::HostLine(news));
     }
     let limits = Limits {
         seed: &params.seed,
@@ -417,6 +472,49 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pres.calls.len(), 1, "no bands without windows");
+    }
+
+    #[test]
+    fn announced_items_are_news_only_once() {
+        let w = world();
+        let cb = channel::direct(&w, &p("b")).unwrap();
+        message::append(&w, cb, &Actor::Person(p("b")), "hi", None, None, T0).unwrap();
+        let born = vec![(p("e"), MonthDay { month: 3, day: 10 })];
+        let params = Params::default();
+        let run =
+            |ms: i64| on_presence(&w, at(ms), Tier::Middle, &params, &born, &[], &NoTopic).unwrap();
+        let first = run(T0 + HOUR);
+        let [Call::HostLine(news)] = first.calls.as_slice() else {
+            panic!("one line")
+        };
+        assert_eq!(news.items.len(), 2);
+        mark_announced(&w, &first.digest, news, at(T0 + HOUR).local_date()).unwrap();
+        let again = run(T0 + HOUR + 1);
+        assert!(again.calls.is_empty());
+        assert_eq!(again.digest.items.len(), 2, "the panel still shows both");
+        // A new message is news; the birthday is not.
+        message::append(
+            &w,
+            cb,
+            &Actor::Person(p("b")),
+            "hey",
+            None,
+            None,
+            T0 + HOUR + 2,
+        )
+        .unwrap();
+        let third = run(T0 + HOUR + 3);
+        let [Call::HostLine(news)] = third.calls.as_slice() else {
+            panic!("one line")
+        };
+        assert_eq!(news.items.len(), 1);
+        assert_eq!(news.items[0].person, p("b"));
+        // The birthday is a new item on another day.
+        let b = &first.digest.items[1];
+        assert_ne!(
+            b.key(at(T0).local_date()),
+            b.key(at(T0 + 24 * HOUR).local_date())
+        );
     }
 
     #[test]

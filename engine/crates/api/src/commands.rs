@@ -187,6 +187,30 @@ commands! {
     fn settings() -> Settings = Ok(Settings::default());
     fn update_settings(settings: Settings) -> ();
 
+    // ---- saves ----
+
+    /// Every save, the most recently played first. Endpoints, keys, the corpus and the
+    /// media cache are shared by all of them.
+    fn saves() -> Vec<SaveInfo> = Ok(Vec::new());
+    /// An empty save. `Exists` when the name is taken (ignoring case).
+    fn new_save(name: String) -> ();
+    /// Close the current world and open another. `Busy` while a reply or request is
+    /// being written. The caller reloads what it shows. Another process (the terminal
+    /// next to the app) keeps the save it has open until it is restarted.
+    fn switch_save(name: String) -> ();
+    /// A consistent copy under a new name; works on the current save too.
+    fn copy_save(from: String, to: String) -> ();
+    /// Renaming the current save needs the engine idle, like a switch.
+    fn rename_save(from: String, to: String) -> ();
+    /// For good. Refused for the current save.
+    fn delete_save(name: String) -> ();
+    /// Write a single-file copy to `path`, replacing a file there. Callers confirm
+    /// before overwriting.
+    fn export_save(name: String, path: String) -> ();
+    /// Add the world database at `path` as a save (checked, then migrated). `name`
+    /// defaults to the file's name. Returns the name used.
+    fn import_save(path: String, name: Option<String>) -> String;
+
     // ---- endpoints ----
 
     fn endpoints() -> EndpointsView = Ok(EndpointsView {

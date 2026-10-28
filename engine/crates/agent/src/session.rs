@@ -467,9 +467,9 @@ impl Agent {
     /// Ids a segment has already shown: every `[#id]` the harness wrote into it.
     pub(crate) fn seen(&self, seg: SegmentId) -> Result<HashSet<String>> {
         let log = self.log(seg)?;
-        let mut out: HashSet<String> = assemble::ids_in(&log.system[2]).into_iter().collect();
+        let mut out: HashSet<String> = api::cites::ids(&log.system[2]).into_iter().collect();
         for t in log.items.iter().flat_map(request::harness_texts) {
-            out.extend(assemble::ids_in(t));
+            out.extend(api::cites::ids(t));
         }
         Ok(out)
     }
@@ -832,6 +832,10 @@ impl Agent {
             ended: turn.wrapup,
         };
         let out = self.run_steps(turn, max_steps).await;
+        if out.is_err() {
+            // What the screen showed before the failure is the message, not an empty row.
+            let _ = self.finish_message(turn);
+        }
         guard.ended = true;
         let end = match &out {
             Ok(()) => ActivityState::Done,
@@ -886,10 +890,25 @@ impl Agent {
             }
             let seg = self.current_segment(turn.channel)?;
             let mut results = Vec::with_capacity(calls.len());
-            for (id, name, args) in calls {
-                self.set_activity(turn, ActivityState::Tool { name: name.into() });
-                let output = self.dispatch(turn, name, args).await?;
-                results.push(request::tool_result_part(id, output));
+            for (id, name, args) in &calls {
+                self.set_activity(
+                    turn,
+                    ActivityState::Tool {
+                        name: (*name).into(),
+                    },
+                );
+                match self.dispatch(turn, name, args).await {
+                    Ok(output) => results.push(request::tool_result_part(id, output)),
+                    Err(e) => {
+                        // The reply with these calls is already in the log; every call
+                        // needs an output or the endpoint refuses the channel from now on.
+                        for (id, _, _) in &calls[results.len()..] {
+                            results.push(request::failed_tool_result(id));
+                        }
+                        let _ = self.append(seg, &request::tool_results(results));
+                        return Err(e);
+                    }
+                }
             }
             self.append(seg, &request::tool_results(results))?;
             // A colleague pulled in speaks next; the caller resumes after him.
@@ -1040,7 +1059,7 @@ impl Agent {
         };
         let mut out: Vec<world::Citation> = Vec::new();
         let ix = self.ix();
-        for id in assemble::ids_in(text) {
+        for id in api::cites::ids(text) {
             let Some(id) = assemble::resolve_id(&id, shown.iter().chain(seen.iter())) else {
                 continue;
             };

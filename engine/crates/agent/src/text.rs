@@ -74,6 +74,19 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.context.turns",
         "[{date} {time} · {turns} turns left on this request]",
     ),
+    (
+        "harness.task",
+        "Request {id} to {name} ({question}): {state}",
+    ),
+    ("harness.task.active", "still open, {turns} turns left"),
+    (
+        "harness.task.failed",
+        "it did not run and no answer is coming",
+    ),
+    (
+        "harness.task.interrupted",
+        "it stopped before it finished and no answer is coming",
+    ),
     ("harness.nothing_found", "Nothing came back for this."),
     (
         "harness.low_match",

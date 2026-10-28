@@ -4,7 +4,7 @@
 //! same seam commands and events: slash commands, anything else is a message to the
 //! current channel, replies stream as they are generated. On a terminal the input is edited
 //! by rustyline, which measures wide (CJK) characters correctly: Enter starts a new line
-//! and Ctrl-J or Alt-Enter sends (a slash command runs on Enter). Piped input, and
+//! and Alt-Enter sends (a slash command runs on Enter). Piped input, and
 //! `--plain`, is read as plain lines, one message each.
 
 mod command;
@@ -13,6 +13,7 @@ mod session;
 mod show;
 #[cfg(test)]
 mod tests;
+mod text;
 
 use std::io::{BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -23,7 +24,7 @@ use api::Api;
 use api::home::Home;
 use runtime::{Options, Runtime};
 
-use command::{Command, parse};
+use command::Command;
 use render::{Marker, Style};
 use session::{Flow, Session};
 use show::{Names, Show, Term};
@@ -118,6 +119,11 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             .scene_marker;
         show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
         println!("{}", header(&engine, &folio, &home, args.fresh).await);
+        let typing = Typing {
+            tip: names.text("cli.typing.more"),
+            style: term.style,
+        };
+        let intro = intro_lines(&names);
         let mut session = Session::new(engine, bridge, term, show, names).await;
         if let Some(name) = args.user.as_deref() {
             session.set_user(name).await;
@@ -125,7 +131,7 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         if let Some(person) = args.person {
             session.handle(Command::Talk(person)).await;
         }
-        repl(session, args.plain).await
+        repl(session, args.plain, typing, intro).await
     })
 }
 
@@ -158,7 +164,7 @@ async fn header(engine: &api::Engine, folio: &Path, home: &Home, fresh: bool) ->
 }
 
 /// Enter in the editor: a slash command runs at once, anything else gets a new line, so a
-/// message can span lines. Sending a message is Ctrl-J or Alt-Enter.
+/// message can span lines. Sending a message is Alt-Enter.
 struct EnterKey;
 
 impl rustyline::ConditionalEventHandler for EnterKey {
@@ -182,31 +188,74 @@ fn is_command_line(line: &str) -> bool {
     line.starts_with('/') && !line.contains('\n')
 }
 
-/// The line editor with the key scheme: Enter newline, Ctrl-J / Alt-Enter send.
-fn editor() -> rustyline::Result<rustyline::DefaultEditor> {
+/// What the editor shows after a draft that has run onto a second line, since Enter no
+/// longer sends: the key that does.
+#[derive(Clone)]
+struct Typing {
+    tip: String,
+    style: Style,
+}
+
+/// A hint is display only: the right arrow must not paste it into the draft.
+struct Tip(String);
+
+impl rustyline::hint::Hint for Tip {
+    fn display(&self) -> &str {
+        &self.0
+    }
+    fn completion(&self) -> Option<&str> {
+        None
+    }
+}
+
+impl rustyline::hint::Hinter for Typing {
+    type Hint = Tip;
+    fn hint(&self, line: &str, pos: usize, _: &rustyline::Context<'_>) -> Option<Tip> {
+        (pos == line.len() && line.contains('\n')).then(|| Tip(format!("  ({})", self.tip)))
+    }
+}
+
+impl rustyline::highlight::Highlighter for Typing {
+    fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
+        self.style.dim(hint).into()
+    }
+}
+
+impl rustyline::completion::Completer for Typing {
+    type Candidate = String;
+}
+impl rustyline::validate::Validator for Typing {}
+impl rustyline::Helper for Typing {}
+
+type Editor = rustyline::Editor<Typing, rustyline::history::DefaultHistory>;
+
+/// The line editor with the key scheme: Enter newline, Alt-Enter send.
+fn editor(typing: &Typing) -> rustyline::Result<Editor> {
     use rustyline::{Cmd, EventHandler, KeyCode, KeyEvent, Modifiers};
-    let mut editor = rustyline::DefaultEditor::new()?;
+    let mut editor = Editor::new()?;
+    editor.set_helper(Some(typing.clone()));
     editor.bind_sequence(
         KeyEvent(KeyCode::Enter, Modifiers::NONE),
         EventHandler::Conditional(Box::new(EnterKey)),
     );
     editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::ALT), Cmd::AcceptLine);
-    editor.bind_sequence(KeyEvent::ctrl('J'), Cmd::AcceptLine);
+    // Ctrl-J is the same byte as a line feed: it must not send either.
+    editor.bind_sequence(KeyEvent::ctrl('J'), Cmd::Newline);
     Ok(editor)
 }
 
 /// Where the next line comes from.
 enum Input {
     /// Line editing on a terminal; the editor travels to a blocking thread and back.
-    Edit(Box<rustyline::DefaultEditor>),
+    Edit(Box<Editor>, Typing),
     /// Lines of a pipe or file, read on a thread so a Ctrl-C can be heard while waiting.
     Lines(tokio::sync::mpsc::UnboundedReceiver<String>),
 }
 
 impl Input {
-    fn open(plain: bool) -> Result<Self> {
+    fn open(plain: bool, typing: Typing) -> Result<Self> {
         if !plain && std::io::stdin().is_terminal() {
-            return Ok(Self::Edit(Box::new(editor()?)));
+            return Ok(Self::Edit(Box::new(editor(&typing)?), typing));
         }
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         std::thread::spawn(move || {
@@ -232,9 +281,9 @@ impl Input {
                 l = rx.recv() => l,
                 _ = tokio::signal::ctrl_c() => None,
             },
-            Self::Edit(slot) => {
+            Self::Edit(slot, typing) => {
                 use rustyline::error::ReadlineError;
-                let mut editor = std::mem::replace(slot, Box::new(editor().ok()?));
+                let mut editor = std::mem::replace(slot, Box::new(editor(typing).ok()?));
                 let (editor, line) = tokio::task::spawn_blocking(move || {
                     let line = match &initial {
                         Some(text) => editor.readline_with_initial(&prompt, (text, "")),
@@ -260,14 +309,21 @@ impl Input {
     }
 }
 
-async fn repl(mut session: Session, plain: bool) -> Result<()> {
-    let mut input = Input::open(plain)?;
-    let interactive = matches!(input, Input::Edit(_));
+/// The lines printed when an interactive chat starts: how to send, and how to leave.
+fn intro_lines(names: &Names) -> [String; 2] {
+    [names.text("cli.typing"), names.text("cli.start")]
+}
+
+async fn repl(mut session: Session, plain: bool, typing: Typing, intro: [String; 2]) -> Result<()> {
+    let mut input = Input::open(plain, typing)?;
+    let interactive = matches!(input, Input::Edit(..));
     if interactive {
-        println!(
-            "Enter = new line, Ctrl-J or Alt-Enter = send; /help for commands, /quit or Ctrl-D to leave"
-        );
+        for line in intro {
+            println!("{line}");
+        }
     }
+    // Anyone due to come by does so now, as the app would on opening.
+    session.arrivals(true).await;
     loop {
         let prompt = if interactive {
             session.prompt()
@@ -283,7 +339,7 @@ async fn repl(mut session: Session, plain: bool) -> Result<()> {
             println!();
             return Ok(());
         };
-        if session.handle(parse(&line)).await == Flow::Quit {
+        if session.input(&line).await == Flow::Quit {
             return Ok(());
         }
     }

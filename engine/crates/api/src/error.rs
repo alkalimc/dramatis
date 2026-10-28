@@ -28,6 +28,12 @@ pub enum ApiError {
     /// No chat role configured: the app is in library form.
     #[error("no chat endpoint configured")]
     NoEndpoint,
+    /// A reply or request is being written; what was asked waits for it to end.
+    #[error("busy")]
+    Busy,
+    /// A save with that name is already there.
+    #[error("already exists")]
+    Exists,
     #[error("endpoint error: {detail}")]
     Endpoint { detail: String },
     #[error("keychain error: {detail}")]

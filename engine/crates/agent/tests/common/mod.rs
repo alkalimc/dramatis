@@ -636,6 +636,16 @@ pub fn env_retrieving(
     retrieve: index::params::Retrieve,
     tune: impl FnOnce(&mut Config),
 ) -> Env {
+    env_on(World::in_memory().unwrap(), endpoints, retrieve, tune)
+}
+
+/// The same, over an existing world (a restart reopens the same file).
+pub fn env_on(
+    world: World,
+    endpoints: Endpoints,
+    retrieve: index::params::Retrieve,
+    tune: impl FnOnce(&mut Config),
+) -> Env {
     let folio_file = corpus();
     let index = index::Index::open(folio_file.path(), retrieve).unwrap();
     let office = tempdir::Dir::new();
@@ -650,7 +660,7 @@ pub fn env_retrieving(
     let sink = Arc::new(Recorder::default());
     let clock = Arc::new(TestClock(AtomicI64::new(T0)));
     let agent = Agent::new(Parts {
-        world: World::in_memory().unwrap(),
+        world,
         index,
         config,
         endpoints,

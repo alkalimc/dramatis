@@ -595,11 +595,10 @@ impl Agent {
                 if !turn.authorized {
                     return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
                 }
-                let raw = f
-                    .fact_id
-                    .trim()
-                    .trim_start_matches("[#")
-                    .trim_end_matches(']');
+                let raw = api::cites::ids(&f.fact_id)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| f.fact_id.trim().to_owned());
                 let Ok(id) = raw.trim_start_matches('m').parse::<i64>().map(FactId) else {
                     return Ok(Err(self.refuse(
                         names,

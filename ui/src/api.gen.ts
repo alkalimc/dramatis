@@ -101,6 +101,35 @@ export const commands = {
 	setTier: (tier: Tier) => typedError<null, ApiError>(__TAURI_INVOKE("set_tier", { tier })),
 	settings: () => typedError<Settings, ApiError>(__TAURI_INVOKE("settings")),
 	updateSettings: (settings: Settings) => typedError<null, ApiError>(__TAURI_INVOKE("update_settings", { settings })),
+	/**
+	 *  Every save, the most recently played first. Endpoints, keys, the corpus and the
+	 *  media cache are shared by all of them.
+	 */
+	saves: () => typedError<SaveInfo[], ApiError>(__TAURI_INVOKE("saves")),
+	/**  An empty save. `Exists` when the name is taken (ignoring case). */
+	newSave: (name: string) => typedError<null, ApiError>(__TAURI_INVOKE("new_save", { name })),
+	/**
+	 *  Close the current world and open another. `Busy` while a reply or request is
+	 *  being written. The caller reloads what it shows. Another process (the terminal
+	 *  next to the app) keeps the save it has open until it is restarted.
+	 */
+	switchSave: (name: string) => typedError<null, ApiError>(__TAURI_INVOKE("switch_save", { name })),
+	/**  A consistent copy under a new name; works on the current save too. */
+	copySave: (from: string, to: string) => typedError<null, ApiError>(__TAURI_INVOKE("copy_save", { from, to })),
+	/**  Renaming the current save needs the engine idle, like a switch. */
+	renameSave: (from: string, to: string) => typedError<null, ApiError>(__TAURI_INVOKE("rename_save", { from, to })),
+	/**  For good. Refused for the current save. */
+	deleteSave: (name: string) => typedError<null, ApiError>(__TAURI_INVOKE("delete_save", { name })),
+	/**
+	 *  Write a single-file copy to `path`, replacing a file there. Callers confirm
+	 *  before overwriting.
+	 */
+	exportSave: (name: string, path: string) => typedError<null, ApiError>(__TAURI_INVOKE("export_save", { name, path })),
+	/**
+	 *  Add the world database at `path` as a save (checked, then migrated). `name`
+	 *  defaults to the file's name. Returns the name used.
+	 */
+	importSave: (path: string, name: string | null) => typedError<string, ApiError>(__TAURI_INVOKE("import_save", { path, name })),
 	endpoints: () => typedError<EndpointsView, ApiError>(__TAURI_INVOKE("endpoints")),
 	addProfile: (profile: Profile) => typedError<null, ApiError>(__TAURI_INVOKE("add_profile", { profile })),
 	/**  Replace the profile called `name` (which may rename it). */
@@ -181,7 +210,11 @@ export type ApiError = { code: "not_implemented" } | { code: "not_found" } |
 /**  Quota band three: no new calls until the window releases. */
 { code: "quota_exhausted"; release_at: Timestamp } | 
 /**  No chat role configured: the app is in library form. */
-{ code: "no_endpoint" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
+{ code: "no_endpoint" } | 
+/**  A reply or request is being written; what was asked waits for it to end. */
+{ code: "busy" } | 
+/**  A save with that name is already there. */
+{ code: "exists" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
 
 export type AppForm = 
 /**  No chat endpoint, or no network: roster and search only. */
@@ -621,6 +654,19 @@ export type RosterRow = {
 	recent: Activity | null,
 	/**  People they often appear with in the corpus. */
 	companions: PersonRef[],
+};
+
+/**
+ *  One save: a whole world (channels, memories, bonds, requests, usage). Endpoints, keys,
+ *  the corpus and the media cache are shared by every save.
+ */
+export type SaveInfo = {
+	name: string,
+	size_kb: number,
+	/**  When the file last changed; `None` when the file system does not say. */
+	played_at: Timestamp | null,
+	/**  The save this process has open. */
+	current: boolean,
 };
 
 /**  A line wrapped in these is scene description, rendered apart from speech. */

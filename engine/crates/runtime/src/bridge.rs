@@ -21,7 +21,7 @@ use api::port::AgentPort;
 use api::types::{ChannelId, MessageId, PersonId, TaskId};
 use api::views::ImagePart;
 use async_trait::async_trait;
-use tokio::sync::{OnceCell, watch};
+use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
 /// One model call, from the meter.
@@ -80,7 +80,12 @@ pub struct AgentBridge {
     parts: BridgeParts,
     agent_params: agent::params::Params,
     endpoints: Mutex<Endpoints>,
-    agent: OnceCell<Arc<Agent>>,
+    /// The agent, once built; cleared when the world it works on changes.
+    agent: Mutex<Option<Arc<Agent>>>,
+    /// Serialises building it.
+    building: tokio::sync::Mutex<()>,
+    /// The world database the agent opens: the save this process was started on.
+    world: Mutex<PathBuf>,
     tasks: Mutex<Tasks>,
     failures: Mutex<Vec<String>>,
     /// How many background tasks are running.
@@ -105,9 +110,11 @@ impl AgentBridge {
     pub fn new(parts: BridgeParts) -> Arc<Self> {
         Arc::new(Self {
             agent_params: agent_params(&parts.home),
+            world: Mutex::new(parts.home.world()),
             endpoints: Mutex::new(parts.endpoints.clone()),
             parts,
-            agent: OnceCell::new(),
+            agent: Mutex::new(None),
+            building: tokio::sync::Mutex::new(()),
             tasks: Mutex::default(),
             failures: Mutex::default(),
             busy: watch::channel(0).0,
@@ -131,22 +138,36 @@ impl AgentBridge {
 
     /// The agent, built if nobody has yet.
     pub async fn agent(&self) -> ApiResult<Arc<Agent>> {
-        self.agent
-            .get_or_try_init(|| async {
-                let parts = self.agent_parts()?;
-                tokio::task::spawn_blocking(move || Agent::new(parts))
-                    .await
-                    .map_err(io)?
-                    .map(Arc::new)
-                    .map_err(ApiError::from)
-            })
+        if let Some(a) = self.built() {
+            return Ok(a);
+        }
+        let _building = self.building.lock().await;
+        if let Some(a) = self.built() {
+            return Ok(a);
+        }
+        let parts = self.agent_parts()?;
+        let agent = tokio::task::spawn_blocking(move || Agent::new(parts))
             .await
-            .cloned()
+            .map_err(io)?
+            .map(Arc::new)
+            .map_err(ApiError::from)?;
+        *self.agent.lock().unwrap_or_else(|e| e.into_inner()) = Some(agent.clone());
+        Ok(agent)
+    }
+
+    fn built(&self) -> Option<Arc<Agent>> {
+        self.agent.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn agent_parts(&self) -> ApiResult<Parts> {
         let p = &self.parts;
-        let world = world::World::open(p.home.world()).map_err(io)?;
+        let path = self.world.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        // Opening would create an empty database under the old name: a save another
+        // process removed or renamed must not come back as a blank one.
+        if !path.is_file() {
+            return Err(ApiError::NotFound);
+        }
+        let world = world::World::open(path).map_err(io)?;
         let index = index::Index::open(&p.corpus, p.params.retrieve.clone()).map_err(io)?;
         Ok(Parts {
             world,
@@ -339,8 +360,22 @@ impl AgentPort for Port {
 
     fn set_endpoints(&self, endpoints: &Endpoints) {
         *self.0.endpoints.lock().unwrap_or_else(|e| e.into_inner()) = endpoints.clone();
-        if let Some(a) = self.0.agent.get() {
+        if let Some(a) = self.0.built() {
             a.set_endpoints(endpoints.clone());
         }
+    }
+
+    fn idle(&self) -> bool {
+        self.0
+            .tasks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .live
+            .is_empty()
+    }
+
+    fn switch_world(&self, path: &std::path::Path) {
+        *self.0.world.lock().unwrap_or_else(|e| e.into_inner()) = path.to_owned();
+        *self.0.agent.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }

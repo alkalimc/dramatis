@@ -76,7 +76,7 @@ def _repeats_a_segment(header: str) -> bool:
     return len(parts) != len(set(parts))
 
 
-def _engine_meta(archive: Archive, pack: Pack, rep: CorpusReport):
+def _engine_meta(archive: Archive, pack: Pack):
     keys = archive_triggers(archive)
     return engine_meta_test(pack.chunking, keys)
 
@@ -89,7 +89,19 @@ def _percentile(values: list[int], q: float) -> int:
     return ordered[idx]
 
 
-def run(
+def run(archive: Archive, pack: Pack, folio_path: Path, **kwargs) -> CorpusReport:
+    """Build beside the target and swap it in at the end, so a build that fails halfway
+    leaves the previous folio in place instead of deleting it."""
+    tmp = folio_path.with_name(folio_path.name + ".building")
+    try:
+        rep = _run(archive, pack, tmp, **kwargs)
+        tmp.replace(folio_path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return rep
+
+
+def _run(
     archive: Archive,
     pack: Pack,
     folio_path: Path,
@@ -120,7 +132,7 @@ def run(
     # on (manifest `form_copies`); form *differences* are kept as they are. Scenes are
     # left alone: two scenes that share lines are two tellings, not two copies.
     shared = set(pack.chunking.shaped("profile") + pack.chunking.shaped("voice"))
-    engine_meta = _engine_meta(archive, pack, rep)
+    engine_meta = _engine_meta(archive, pack)
     first_copy: dict[tuple, tuple[str, str]] = {}
     copies: dict[str, list[str]] = {}
     ord_ = 0
@@ -178,7 +190,7 @@ def run(
         rep.chunks = ord_
 
         _write_roster(archive, folio, pack, params, env)
-        _write_relations(archive, folio, pack, params)
+        _write_relations(folio, pack, params)
         alias_rows = [
             *((r["alias"], r["target"], r["kind"])
               for r in archive.db.execute("SELECT alias,target,kind FROM aliases")),
@@ -222,7 +234,7 @@ def run(
             ))
         folio.write_template_stats(stats_rows)
 
-        rep.redundancy = _redundancy(spans, rep.by_template)
+        rep.redundancy = _redundancy(spans)
         # Units are stored once, so a reader that wants surrounding context must fetch
         # it — the corpus does not carry lookbehind. Declaring the capability makes the
         # obligation explicit instead of leaving readers to discover truncated context.
@@ -317,9 +329,7 @@ def _person_sources(archive: Archive) -> dict[str, PersonSource]:
 SPEAKER_ALIAS = "speaker"
 
 
-def _material(
-    archive: Archive, folio: Folio, dialogue: tuple[str, ...], env: Env
-) -> dict[str, int]:
+def _material(folio: Folio, dialogue: tuple[str, ...], env: Env) -> dict[str, int]:
     """Characters of source material that are a person's own, over every template.
 
     Non-dialogue units attributed to a person are wholly theirs (their voice lines, their
@@ -349,7 +359,7 @@ def _write_roster(
     """
     sources = _person_sources(archive)
     forms = archive.persons()
-    material = _material(archive, folio, pack.chunking.shaped("dialogue"), env)
+    material = _material(folio, pack.chunking.shaped("dialogue"), env)
     present = sorted(m for p in sources if (m := material.get(p, 0)) > 0)
     median = present[len(present) // 2] if present else 0
     display_key = pack.identity.display_facet
@@ -428,7 +438,7 @@ def coldstart(
     return [{"person_id": p, "reason": reasons[p]} for p in chosen]
 
 
-def _write_relations(archive: Archive, folio: Folio, pack: Pack, params: Params) -> None:
+def _write_relations(folio: Folio, pack: Pack, params: Params) -> None:
     """Co-appearance and first-hand knowledge, both from who speaks in which scene.
 
     A scene is a dialogue unit's `span_of`. `cooccur` counts, per unordered pair, the
@@ -522,9 +532,7 @@ def _drop_unreached_names(
     return kept
 
 
-def _redundancy(
-    spans: dict[str, dict[str, list[tuple[int, int]]]], counts: dict[str, int]
-) -> dict[str, float]:
+def _redundancy(spans: dict[str, dict[str, list[tuple[int, int]]]]) -> dict[str, float]:
     """Fraction of source positions covered by more than one unit, per template.
 
     Should be zero: units are stored once and widened at query time. A non-zero value

@@ -93,23 +93,25 @@ pub fn open_segment(
     summary: Option<&Summary>,
     now: i64,
 ) -> Result<SegmentId> {
-    if let Some(s) = summary {
-        wrapup::check_summary_target(s, channel)?;
-    }
-    serde_json::from_str::<serde_json::Value>(shape)?;
-    let seq: u32 = conn.query_row(
-        "SELECT coalesce(max(seq) + 1, 0) FROM log_segment WHERE channel = ?1",
-        [channel],
-        |r| r.get(0),
-    )?;
-    conn.execute(
-        "INSERT INTO log_segment(channel, seq, prefix_a, prefix_b, prefix_c, shape, opened_at)
+    crate::atomic(conn, |conn| {
+        if let Some(s) = summary {
+            wrapup::check_summary_target(s, channel)?;
+        }
+        serde_json::from_str::<serde_json::Value>(shape)?;
+        let seq: u32 = conn.query_row(
+            "SELECT coalesce(max(seq) + 1, 0) FROM log_segment WHERE channel = ?1",
+            [channel],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO log_segment(channel, seq, prefix_a, prefix_b, prefix_c, shape, opened_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        (channel, seq, prefix[0], prefix[1], prefix[2], shape, now),
-    )?;
-    let id = SegmentId(conn.last_insert_rowid());
-    channel::set_log_segment(conn, channel, id)?;
-    Ok(id)
+            (channel, seq, prefix[0], prefix[1], prefix[2], shape, now),
+        )?;
+        let id = SegmentId(conn.last_insert_rowid());
+        channel::set_log_segment(conn, channel, id)?;
+        Ok(id)
+    })
 }
 
 /// Append one entry after the prefix; returns its sequence number.

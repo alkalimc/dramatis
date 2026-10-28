@@ -560,6 +560,20 @@ impl Default for Settings {
     }
 }
 
+// ---- saves ----
+
+/// One save: a whole world (channels, memories, bonds, requests, usage). Endpoints, keys,
+/// the corpus and the media cache are shared by every save.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SaveInfo {
+    pub name: String,
+    pub size_kb: u32,
+    /// When the file last changed; `None` when the file system does not say.
+    pub played_at: Option<Timestamp>,
+    /// The save this process has open.
+    pub current: bool,
+}
+
 // ---- endpoints ----
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]

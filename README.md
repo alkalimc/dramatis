@@ -58,6 +58,23 @@ written three ways: as fetched, as records, as archived text. Read it, then:
 ./forge baseline show      # compare without accepting
 ```
 
+## Personas
+
+```sh
+./forge persona                 # generate and gate a persona per person; resumable
+./forge persona --probe         # only a small probe set, with a readable file per subject
+./forge persona --stale         # no network: list personas whose source material changed
+./forge persona --stale --regenerate
+./forge persona --only <name> --force
+```
+
+Generation uses the `chat` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another
+file). Models billed per request run 3 calls at once by default (`--jobs`); on HTTP 429 every
+worker waits together. A persona that fails a gate is not written. Reports go to
+`<workspace>/artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
+cached under `persona/raw/`; rebuilding the folio drops the personas, and running
+`./forge persona` again restores them from that cache with no model calls.
+
 ## Reports
 
 All generated; do not edit them.
@@ -103,9 +120,13 @@ that is used; with an ad-hoc signed build the first run of each new build trigge
 keychain prompt (choose Always Allow). To stop the prompts coming back after every rebuild, sign
 with a stable identity, see [Keychain prompts](#keychain-prompts).
 
-The world (channels, memories, usage) is the app's: `$DRAMATIS_HOME/world.sqlite`, so the
-terminal and the app share conversations, settings and endpoints, and may be open together
-(the database is in WAL mode and writes wait for each other). Use `--home <dir>` for another
+The world (channels, memories, usage) is a save: `$DRAMATIS_HOME/saves/<name>.sqlite`, and
+`current_save` in the home directory names the one a process opens when it starts (an older
+`world.sqlite` is moved there as `default` on first start). The terminal and the app share the
+saves, settings and endpoints, and may be open together (the database is in WAL mode and writes
+wait for each other). Each process keeps the save it started with: switching in one does not move
+the other until it is restarted, and deleting a save another process has open loses what that
+process writes after. Use `--home <dir>` for another
 home directory, `--fresh` for a throwaway world (a temporary home that keeps your endpoints and
 parameters and is deleted at exit), and `--user <name>` to set the user's name. On a terminal
 the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK) characters count by their display width;
@@ -120,13 +141,21 @@ the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK)
 | `/go <n>` (`/open`) | after the host found people or made a group, a numbered list follows its reply; this switches to choice n |
 | `/name <new name>` | set the name you are called by (`--user` sets it at start) |
 | `/wrapup` | end the conversation and show the memories it wrote |
-| `/memories [person]` | stored memories and who can see them, or those about or recalled by a person |
+| `/memories [person]` | numbered memories and who can see them, or those about or recalled by a person; deleted ones follow |
+| `/forget <n>`, `/restore <n>`, `/edit <n> <text>` | delete, bring back or rewrite memory n of the last list |
+| `/tier [level]` | show or set the intensity tier (`low` to `ultra`) |
+| `/quiet [on\|off\|HH:MM-HH:MM]` | show or set the hours when nobody comes to you unprompted |
+| `/save` | list saves; `new <name>`, `switch <name>`, `copy <from> <to>`, `rename <from> <to>`, `delete <name>` (asks first), `export <name> <path>`, `import <path> [name]` |
 | `/history [n]` | reprint the last n messages (default 10) |
 | `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
 | `/stats` | one row per model call of this session: shape, model, tokens, seconds (read from the meter, not part of the app's interface) |
 | `/help`, `/quit` | Ctrl-D also leaves |
 
-Anything else is sent to the current channel. Replies stream as they are written; scene lines
+Anything else is sent to the current channel. Enter starts a new line and Alt-Enter (Option set as
+Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
+chat opens and after each message the terminal runs what the app runs on a timer (idle
+conversations are wrapped up, due openings written), so a person who has something to say shows up
+then; there is no background loop. Replies stream as they are written; scene lines
 are dimmed, citation marks are hidden and the cited sources are listed after the reply, tool
 actions get one dim line, a dim line says who is typing while a turn runs, and another gives
 the call count and time. The prompt shows the channel and then your own name. Colour is off when
@@ -190,24 +219,31 @@ build, and the app and the terminal client are two different apps, so each new b
 Signing both with one stable certificate makes the identity survive rebuilds.
 
 One time, create a local code-signing certificate: Keychain Access, menu Certificate Assistant,
-Create a Certificate; name `dramatis-local`, Identity Type Self Signed Root, Certificate Type
-Code Signing. Check it is usable:
+Create a Certificate; Identity Type Self Signed Root, Certificate Type Code Signing. The name is
+yours to choose; the commands below use `dramatis` as an example. Check it is usable:
 
 ```sh
-security find-identity -p codesigning        # lists "dramatis-local"
+security find-identity -p codesigning        # lists the certificate by name
 ```
 
-After every build, sign the binaries (the identifier is fixed so it does not carry a build hash):
+After every build, sign what you run. The identifier of the terminal client is fixed so it does
+not carry a build hash. Replace `dramatis` with your certificate's name:
 
 ```sh
 cd engine && cargo build --release -p dramatis-cli
-codesign --force --sign dramatis-local --identifier dramatis.cli target/release/dramatis-cli
-# the desktop binary the same way (a Tauri bundle signs with the identity in this variable)
-codesign --force --sign dramatis-local --identifier dramatis.app target/release/dramatis
-# bundled: APPLE_SIGNING_IDENTITY=dramatis-local pnpm tauri build
+codesign --force --sign dramatis --identifier dramatis.cli target/release/dramatis-cli
 codesign -dv target/release/dramatis-cli 2>&1 | grep -E 'Identifier|Signature'
 ```
 
-The first run of each signed binary asks once more; choose Always Allow and it holds across
+For the desktop app, build the bundle, clear extended attributes and sign it as a whole:
+
+```sh
+cd ui && pnpm build
+cd ../engine/bins/dramatis && npx --prefix ../../../ui tauri build --bundles app
+cd ../.. && xattr -cr target/release/bundle/macos/dramatis.app
+codesign --force --deep --sign dramatis target/release/bundle/macos/dramatis.app
+```
+
+The first run of each signed program asks once more; choose Always Allow and it holds across
 rebuilds. A key saved before signing keeps its old access list, so save it again (profile
 settings, or delete and add it) if a prompt keeps coming back.

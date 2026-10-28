@@ -2,8 +2,9 @@ import { useT } from "../i18n";
 import { useDispatch } from "../store";
 import { EndpointsPage } from "./Endpoints";
 import { QuotaAndQuiet } from "./Quota";
+import { SavesPage } from "./Saves";
 
-const TABS = ["quota", "endpoints"] as const;
+const TABS = ["quota", "endpoints", "saves"] as const;
 
 export function SystemDrawer({ tab }: { tab: (typeof TABS)[number] }) {
   const t = useT();
@@ -36,7 +37,7 @@ export function SystemDrawer({ tab }: { tab: (typeof TABS)[number] }) {
         ))}
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === "quota" ? <QuotaAndQuiet /> : <EndpointsPage />}
+        {tab === "quota" ? <QuotaAndQuiet /> : tab === "endpoints" ? <EndpointsPage /> : <SavesPage />}
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ use agent::store;
 use api::endpoints::WireApi;
 use common::*;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use world::fact::{self, Audience, NewFact};
 use world::{Actor, ChannelId, FactKind, Mode, Origin, Shape, bond, channel, settings};
 
@@ -1597,6 +1598,65 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
     assert_eq!(shapes, ["host", "opening", "wrapup", "host"]);
 }
 
+#[tokio::test]
+async fn the_host_announces_each_waiting_item_once_even_across_a_restart() {
+    let dir = tempdir::Dir::new();
+    let file = dir.0.join("world.db");
+    let open = || {
+        let e = env_on(
+            world::World::open(&file).unwrap(),
+            endpoints(WireApi::Responses, true, None),
+            retrieve(),
+            |_| {},
+        );
+        e.agent
+            .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
+        e
+    };
+    let e = open();
+    // The first open introduces the host; the birthday is then news on the next return.
+    e.fake.push([say("Welcome.")]);
+    assert!(e.agent.presence(true).await.unwrap().host_spoke);
+    e.clock.advance(31 * 60_000);
+    e.fake.push([say("It is ann's birthday.")]);
+    assert!(e.agent.presence(false).await.unwrap().host_spoke);
+    let calls = e.fake.bodies().len();
+
+    // Back again and again with nothing new: the panel is full, the host is silent.
+    for _ in 0..3 {
+        e.clock.advance(31 * 60_000);
+        let out = e.agent.presence(true).await.unwrap();
+        assert!(!out.host_spoke && !out.digest.items.is_empty());
+    }
+    assert_eq!(e.fake.bodies().len(), calls);
+
+    // A restart on the same world is no different, and the introduction does not repeat.
+    drop(e);
+    let e = open();
+    let out = e.agent.presence(true).await.unwrap();
+    assert!(!out.host_spoke && !out.digest.items.is_empty());
+    assert_eq!(e.fake.bodies().len(), 0);
+
+    // A new item is news: exactly one call, and it names only that item.
+    let ch = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        world::message::append(w, ch, &Actor::Person(p("ann")), "hi", None, None, T0).unwrap();
+    });
+    e.clock.advance(31 * 60_000);
+    e.fake.push([say("Ann wrote.")]);
+    assert!(e.agent.presence(false).await.unwrap().host_spoke);
+    let bodies = e.fake.json();
+    assert_eq!(bodies.len(), 1);
+    let entry = list(&bodies[0]).last().unwrap().to_string();
+    assert!(!entry.contains("birthday"), "{entry}");
+
+    // The next day the birthday is over and nothing else is new.
+    e.clock.advance(24 * 3_600_000);
+    let out = e.agent.presence(false).await.unwrap();
+    assert!(!out.host_spoke);
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
 #[test]
 fn flows_are_send() {
     fn send<T: Send>(_: &T) {}
@@ -2133,5 +2193,169 @@ async fn a_hand_off_line_before_the_citation_line_still_hands_the_turn_on() {
     assert!(
         said.iter().all(|(_, t)| !t.contains('\u{2192}')),
         "{said:?}"
+    );
+}
+
+fn host_ask(person: &str, question: &str) -> Reply {
+    call(
+        "ask",
+        json!({"person": person, "question": question, "turns": 2}),
+    )
+}
+
+fn last_entry(e: &Env) -> String {
+    list(e.fake.json().last().unwrap())
+        .last()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn a_request_the_host_makes_runs_and_its_reply_lands_in_the_persons_channel() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        host_ask("ann", "How is jasmine tea brewed?"),
+        say("Ann is looking into it."),
+        call("report", json!({"text": "Cooler water.", "cites": []})),
+        call("wrapup", json!({"facts": []})),
+    ]);
+    e.agent.send(host, "ask ann about tea", None).await.unwrap();
+    let t = e
+        .agent
+        .with_world(|w| world::task::list(w).unwrap().remove(0));
+    assert_eq!(t.status, world::TaskStatus::Done);
+    assert_eq!(t.failure, None);
+    assert!(t.reply.is_some());
+    let ann = direct(&e, "ann");
+    let msgs = e.agent.history(ann, None, 10).unwrap();
+    assert_eq!(msgs.last().unwrap().text, "Cooler water.");
+    let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
+    assert_eq!(shapes, ["host", "host", "ask", "wrapup"]);
+}
+
+#[tokio::test]
+async fn a_host_turn_that_fails_after_asking_marks_the_request_failed_and_the_host_is_told() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    // The request is made, then the call that would carry the host's answer fails.
+    e.fake.push([
+        host_ask("ann", "How is tea brewed?"),
+        Reply::Fail("boom".into()),
+    ]);
+    let err = e.agent.send(host, "ask ann about tea", None).await;
+    assert!(err.is_err());
+    let t = e
+        .agent
+        .with_world(|w| world::task::list(w).unwrap().remove(0));
+    assert_eq!(
+        (t.status, t.failure),
+        (world::TaskStatus::Done, Some(world::task::Failure::Failed))
+    );
+    assert!(t.reply.is_none());
+    // Nothing ran in her channel.
+    assert!(
+        e.agent
+            .history(direct(&e, "ann"), None, 10)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        e.agent
+            .with_world(|w| world::task::open_requests(w).unwrap())
+            .is_empty()
+    );
+    // On its next turn the host is shown the failure, once.
+    e.fake.push([say("It never ran."), say("Still nothing.")]);
+    e.agent.send(host, "how is it going?", None).await.unwrap();
+    let entry = last_entry(&e);
+    assert!(
+        entry.contains("did not run") && entry.contains("How is tea brewed?"),
+        "{entry}"
+    );
+    e.agent.send(host, "and now?", None).await.unwrap();
+    assert!(!last_entry(&e).contains("did not run"));
+}
+
+#[tokio::test]
+async fn a_request_that_fails_to_run_is_marked_failed_and_later_ones_are_not_run() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        host_ask("ann", "first?"),
+        host_ask("ann", "second?"),
+        say("Both asked."),
+        Reply::Fail("boom".into()),
+    ]);
+    assert!(e.agent.send(host, "ask ann twice", None).await.is_err());
+    let tasks = e.agent.with_world(|w| world::task::list(w).unwrap());
+    assert_eq!(tasks.len(), 2);
+    assert!(
+        tasks
+            .iter()
+            .all(|t| t.failure == Some(world::task::Failure::Failed))
+    );
+    assert_eq!(e.fake.left(), 0);
+    assert_eq!(e.fake.bodies().len(), 4, "the second request made no call");
+    // A request run directly that errors is marked too.
+    let asked = e.agent.ask(&p("ann"), "third?", Some(2), None).unwrap();
+    e.fake.push([Reply::Fail("boom".into())]);
+    assert!(e.agent.run_request(asked).await.is_err());
+    let t = e
+        .agent
+        .with_world(|w| world::task::get(w, asked.task).unwrap());
+    assert_eq!(t.failure, Some(world::task::Failure::Failed));
+}
+
+#[tokio::test]
+async fn the_host_sees_each_open_request_with_its_turns_left() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.agent
+        .ask(&p("ann"), "How is tea brewed?", Some(5), None)
+        .unwrap();
+    e.fake.push([say("Not yet.")]);
+    e.agent.send(host, "any news?", None).await.unwrap();
+    let entry = last_entry(&e);
+    assert!(
+        entry.contains("How is tea brewed?") && entry.contains("still open, 5 turns left"),
+        "{entry}"
+    );
+}
+
+#[tokio::test]
+async fn requests_left_open_by_a_stopped_app_are_marked_interrupted_at_start() {
+    let folio_file = corpus();
+    let index = index::Index::open(folio_file.path(), retrieve()).unwrap();
+    let world = world::World::in_memory().unwrap();
+    let asked = world::task::ask(
+        &world,
+        &p("ann"),
+        "left over",
+        Some(3),
+        None,
+        world::Tier::Middle,
+        &world::params::Ask::default(),
+        T0,
+    )
+    .unwrap();
+    let agent = agent::Agent::new(agent::Parts {
+        world,
+        index,
+        config: agent::Config::default(),
+        endpoints: endpoints(WireApi::Chat, true, None),
+        keys: None,
+        llm: llm::Llm::new(Arc::new(Fake::default()), llm::Retry::none()),
+        sink: Arc::new(Recorder::default()),
+        clock: Arc::new(TestClock(std::sync::atomic::AtomicI64::new(T0))),
+    })
+    .unwrap();
+    let t = agent.with_world(|w| world::task::get(w, asked.task).unwrap());
+    assert_eq!(
+        (t.status, t.failure),
+        (
+            world::TaskStatus::Done,
+            Some(world::task::Failure::Interrupted)
+        )
     );
 }
