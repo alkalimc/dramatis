@@ -44,7 +44,6 @@ fn reads_the_per_person_tables() -> anyhow::Result<()> {
         "attribution is many-valued"
     );
     assert!(units[0].persons.is_empty());
-    assert_eq!(folio.ords_for_ids(&["d2".into(), "missing".into()])?, [1]);
 
     let ann = folio.person("ann")?.unwrap();
     assert_eq!(ann.birthday.as_deref(), Some("03-14"));
@@ -53,8 +52,6 @@ fn reads_the_per_person_tables() -> anyhow::Result<()> {
 
     assert_eq!(folio.cooccur("ann")?, [("ben".to_string(), 4)]);
     assert_eq!(folio.cooccur("ben")?, [("ann".to_string(), 4)]);
-    assert_eq!(folio.cooccur_pair("ben", "ann")?, 4);
-    assert_eq!(folio.cooccur_pair("ann", "nobody")?, 0);
 
     let ids: Vec<String> = ["d1", "d2", "d3"].map(String::from).into();
     let scope = folio.knowledge_scope("ann", &ids)?;

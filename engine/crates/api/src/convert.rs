@@ -108,16 +108,6 @@ pub fn citation(c: &world::Citation) -> t::Citation {
     }
 }
 
-pub fn world_citation(c: &t::Citation) -> world::Citation {
-    world::Citation {
-        page: c.page.clone(),
-        revid: c.revid,
-        span_from: c.span_from,
-        span_to: c.span_to,
-        chunk_id: c.chunk_id.clone(),
-    }
-}
-
 /// A unit's portable pointer.
 pub fn unit_citation(u: &folio::Unit) -> t::Citation {
     let n = |x: Option<i64>| u32::try_from(x.unwrap_or(0).max(0)).unwrap_or(u32::MAX);

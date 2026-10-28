@@ -126,21 +126,6 @@ impl Folio {
         Ok(ords.iter().filter_map(|ord| found.remove(ord)).collect())
     }
 
-    /// Unit ordinals for a list of unit ids. Unknown ids are skipped: a stored id whose page
-    /// has since changed simply no longer names a unit.
-    pub fn ords_for_ids(&self, ids: &[String]) -> Result<Vec<i64>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let ids_json = serde_json::to_string(ids).expect("string array serialises");
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT ord FROM chunks WHERE id IN (SELECT value FROM json_each(?1))",
-        )?;
-        let rows = stmt.query_map([ids_json], |row| row.get::<_, i64>(0))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
-    }
-
     pub fn unit_by_id(&self, id: &str) -> Result<Option<Unit>> {
         let mut stmt = self.conn.prepare_cached(concat!(
             "SELECT ",
@@ -289,16 +274,6 @@ impl Folio {
         let rows = stmt.query_map([person], |row| Ok((row.get(0)?, row.get(1)?)))?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
-    }
-
-    /// Shared scenes for one pair, in either order; 0 when they never met.
-    pub fn cooccur_pair(&self, a: &str, b: &str) -> Result<i64> {
-        let (a, b) = if a < b { (a, b) } else { (b, a) };
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT scenes FROM cooccur WHERE a = ?1 AND b = ?2")?;
-        let mut rows = stmt.query_map([a, b], |row| row.get::<_, i64>(0))?;
-        Ok(rows.next().transpose()?.unwrap_or(0))
     }
 
     /// How each of `chunk_ids` sits in `person`'s first-hand knowledge. Units outside it

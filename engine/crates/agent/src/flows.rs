@@ -738,26 +738,6 @@ impl Agent {
         Ok(())
     }
 
-    /// Queue event seeds for an event that searched the roster (a conclusion written, a
-    /// question pinned): the people whose own units match `text` best. Run
-    /// [`Agent::on_event`] afterwards to let one of them speak.
-    pub fn queue_event(&self, event: seed::Event, text: &str) -> Result<u32> {
-        let offer = self.offerable(&self.db())?;
-        let people = self
-            .ix()
-            .find_people(text, Some(&offer), self.config.find_people.k, &[])?;
-        let hits: Vec<seed::Hit> = people
-            .persons
-            .iter()
-            .filter(|m| m.level != index::Level::Low)
-            .map(|m| seed::Hit {
-                person: PersonId::from(m.person.as_str()),
-                material: vec![m.reason.id.clone()],
-            })
-            .collect();
-        Ok(seed::queue_hits(&self.db(), event, &hits, self.now().ms)?)
-    }
-
     // ---- requests ----
 
     /// The user asks a person to look into a question. Returns the request at once; the

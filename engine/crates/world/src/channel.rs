@@ -260,15 +260,6 @@ pub fn delete_group(conn: &Connection, channel: ChannelId, now: i64) -> Result<(
     Ok(())
 }
 
-pub fn set_topic(conn: &Connection, channel: ChannelId, topic: Option<&str>) -> Result<()> {
-    get(conn, channel)?;
-    conn.execute(
-        "UPDATE channel SET topic = ?2 WHERE id = ?1",
-        (channel, topic),
-    )?;
-    Ok(())
-}
-
 /// Everything up to `up_to` has been seen. Never moves backwards.
 pub fn mark_read(conn: &Connection, channel: ChannelId, up_to: MessageId) -> Result<()> {
     get(conn, channel)?;

@@ -1,6 +1,6 @@
 //! Conversions from engine values to the types that cross the seam.
 
-use api::types::{self as t, Author, Timestamp};
+use api::types::{self as t, Author};
 use api::views::{self as v, CallShape, QuotaBand, QuotaWindow, ToolAction, WindowSpan};
 use folio::Folio;
 use rusqlite::Connection;
@@ -206,8 +206,4 @@ pub fn world_mode(m: t::Mode) -> world::Mode {
         t::Mode::Frozen => world::Mode::Frozen,
         t::Mode::Disabled => world::Mode::Disabled,
     }
-}
-
-pub fn timestamp_of(ms: i64, offset_min: i32) -> Timestamp {
-    timestamp(ms, offset_min)
 }
