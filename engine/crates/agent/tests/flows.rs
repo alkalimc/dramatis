@@ -732,6 +732,7 @@ async fn a_text_block_is_not_a_call_on_a_native_endpoint() {
     );
 }
 
+/// An endpoint's canned error, as one of many wordings.
 const REFUSAL: &str =
     "I'm having a hard time fulfilling your request. Can I help you with something else instead?";
 
@@ -741,7 +742,7 @@ fn shown_text(e: &Env) -> String {
 
 #[tokio::test]
 async fn a_canned_refusal_is_retried_once_and_never_shown_or_kept() {
-    let e = env(WireApi::Chat);
+    let e = env_cjk(WireApi::Chat);
     let ch = direct(&e, "ann");
     e.fake.push([say(REFUSAL), say("Cooler water.")]);
     e.agent
@@ -758,9 +759,13 @@ async fn a_canned_refusal_is_retried_once_and_never_shown_or_kept() {
 
 #[tokio::test]
 async fn a_repeated_refusal_leaves_the_turn_without_a_reply() {
-    let e = env(WireApi::Chat);
+    let e = env_cjk(WireApi::Chat);
     let ch = direct(&e, "ann");
-    e.fake.push([say(REFUSAL), say(REFUSAL)]);
+    // Worded differently each time.
+    e.fake.push([
+        say(REFUSAL),
+        say("I encountered an error doing what you asked. Could you try again?"),
+    ]);
     e.agent
         .send(ch, "how should I brew tea?", None)
         .await
@@ -769,20 +774,40 @@ async fn a_repeated_refusal_leaves_the_turn_without_a_reply() {
     assert_eq!(hist.len(), 1);
     assert!(!shown_text(&e).contains("hard time"));
     assert!(!log_bytes(&e.agent, ch).contains("hard time"));
+    assert!(!log_bytes(&e.agent, ch).contains("encountered"));
     assert_eq!(meter(&e.agent).len(), 2);
 }
 
 #[tokio::test]
-async fn short_english_replies_that_are_not_refusals_pass() {
+async fn short_replies_and_replies_in_cjk_text_are_not_boilerplate() {
+    let e = env_cjk(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake
+        .push([say("OK."), say("Fine, \u{597d}\u{7684}. I will see to it.")]);
+    e.agent.send(ch, "tea?", None).await.unwrap();
+    e.agent.send(ch, "and then?", None).await.unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist[1].text, "OK.");
+    assert_eq!(
+        hist.last().unwrap().text,
+        "Fine, \u{597d}\u{7684}. I will see to it."
+    );
+    assert_eq!(meter(&e.agent).len(), 2);
+}
+
+#[tokio::test]
+async fn an_english_corpus_keeps_english_replies() {
     let e = env(WireApi::Chat);
     let ch = direct(&e, "ann");
-    e.fake.push([say("I can't help laughing. Tea!")]);
+    e.fake.push([say(REFUSAL)]);
     e.agent
         .send(ch, "how should I brew tea?", None)
         .await
         .unwrap();
-    let hist = e.agent.history(ch, None, 10).unwrap();
-    assert_eq!(hist.last().unwrap().text, "I can't help laughing. Tea!");
+    assert_eq!(
+        e.agent.history(ch, None, 10).unwrap().last().unwrap().text,
+        REFUSAL
+    );
 }
 
 #[tokio::test]
@@ -2357,5 +2382,65 @@ async fn requests_left_open_by_a_stopped_app_are_marked_interrupted_at_start() {
             world::TaskStatus::Done,
             Some(world::task::Failure::Interrupted)
         )
+    );
+}
+
+/// The user entries of the last request, as texts.
+fn user_texts(e: &Env) -> Vec<String> {
+    let last = e.fake.json().pop().unwrap();
+    list(&last)
+        .iter()
+        .filter(|m| m["role"] == "user")
+        .map(|m| m["content"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn every_user_entry_carries_the_clock_and_a_long_silence() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("One."), say("Two."), say("Three.")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    // 12:20 on a Tuesday: no gap worth a word.
+    e.clock.advance(20 * 60_000);
+    e.agent.send(ch, "what time is it?", None).await.unwrap();
+    e.clock.advance(30 * 3_600_000);
+    e.agent.send(ch, "i am back", None).await.unwrap();
+    let texts = user_texts(&e);
+    assert_eq!(texts.len(), 3);
+    assert!(
+        texts[0].ends_with("[2026-03-10 Tuesday 12:00, midday]"),
+        "{}",
+        texts[0]
+    );
+    assert!(
+        texts[1].ends_with("[2026-03-10 Tuesday 12:20, midday]"),
+        "{}",
+        texts[1]
+    );
+    assert!(
+        texts[2].ends_with(
+            "[2026-03-11 Wednesday 18:20, evening] (Doc's previous message was 30 hours ago)"
+        ),
+        "{}",
+        texts[2]
+    );
+    // Entries already in the log are never rewritten: the prefix chain holds.
+    assert_prefix_chain(&e.fake.bodies());
+}
+
+#[tokio::test]
+async fn a_late_hour_reads_as_night_and_days_are_counted_from_two() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("One."), say("Two.")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    e.clock
+        .advance(3 * 86_400_000 + 11 * 3_600_000 + 30 * 60_000);
+    e.agent.send(ch, "still there?", None).await.unwrap();
+    let last = user_texts(&e).pop().unwrap();
+    assert!(
+        last.ends_with("[2026-03-13 Friday 23:30, night] (Doc's previous message was 3 days ago)"),
+        "{last}"
     );
 }

@@ -138,6 +138,9 @@ fn cache_key(segment: SegmentId) -> String {
     format!("dramatis-{segment}")
 }
 
+/// Weekday keys of the corpus wording, Monday first.
+const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
 impl Agent {
     pub(crate) fn log_kind(&self, conn: &rusqlite::Connection, ch: ChannelId) -> Result<LogKind> {
         Ok(if channel::get(conn, ch)?.is_host_channel() {
@@ -504,38 +507,60 @@ impl Agent {
         })
     }
 
-    /// The harness context line when it differs from the last one in this segment.
+    /// The harness context line of one turn: the in-world date, the weekday and time of
+    /// day where the user is, and, when it is long, how long ago the user last wrote
+    /// (`since`, the instant of that message). It goes in the user's entry, never in the
+    /// cached prefix, and is written every turn: a clock quoted once would sit far back in
+    /// the log by the time someone asks the time.
     pub(crate) fn context_line(
         &self,
         seg: SegmentId,
         turns: Option<u32>,
-    ) -> Result<Option<String>> {
+        since: Option<i64>,
+    ) -> Result<String> {
         let now = self.now();
         let d = world::clock::in_world_date(now, self.corpus.year_offset);
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
-        let hour = now.local_minute() / 60;
-        let key = format!("{date} {hour} {turns:?}");
-        let mut contexts = self.contexts.lock().unwrap_or_else(|e| e.into_inner());
-        if contexts.get(&seg) == Some(&key) {
-            return Ok(None);
-        }
-        contexts.insert(seg, key);
-        drop(contexts);
         let names = self.segment_names(seg)?;
-        let time = world::clock::local_time(now);
-        let line = match turns {
-            Some(n) => self.corpus.wording.fill(
-                "harness.context.turns",
-                &names,
-                &[("date", &date), ("time", &time), ("turns", &n.to_string())],
-            ),
-            None => self.corpus.wording.fill(
-                "harness.context",
-                &names,
-                &[("date", &date), ("time", &time)],
-            ),
+        let w = &self.corpus.wording;
+        let local_minutes = now.ms.div_euclid(world::clock::MINUTE_MS) + i64::from(now.offset_min);
+        // 1970-01-01 was a Thursday.
+        let weekday = WEEKDAYS[(local_minutes.div_euclid(24 * 60) + 3).rem_euclid(7) as usize];
+        let part = match now.local_minute() / 60 {
+            22..=23 | 0..=4 => "night",
+            5..=10 => "morning",
+            11..=13 => "noon",
+            14..=17 => "afternoon",
+            _ => "evening",
         };
-        Ok(Some(line))
+        let (weekday, part) = (format!("weekday.{weekday}"), format!("daypart.{part}"));
+        let time = world::clock::local_time(now);
+        let fields = [
+            ("date", date.as_str()),
+            ("weekday", w.get(&weekday)),
+            ("time", time.as_str()),
+            ("part", w.get(&part)),
+        ];
+        let mut line = match turns {
+            Some(n) => {
+                let n = n.to_string();
+                let mut f = fields.to_vec();
+                f.push(("turns", &n));
+                w.fill("harness.context.turns", &names, &f)
+            }
+            None => w.fill("harness.context", &names, &fields),
+        };
+        let hours = since.map_or(0, |at| (now.ms - at).max(0) / world::clock::HOUR_MS);
+        if hours >= i64::from(self.config.agent.context.gap_hours) {
+            let span = if hours >= 48 {
+                w.fill("span.days", &names, &[("n", &(hours / 24).to_string())])
+            } else {
+                w.fill("span.hours", &names, &[("n", &hours.to_string())])
+            };
+            line.push(' ');
+            line.push_str(&w.fill("harness.context.gap", &names, &[("span", &span)]));
+        }
+        Ok(line)
     }
 
     /// One model call on the channel's current segment, streamed. The reply is appended
@@ -603,7 +628,7 @@ impl Agent {
                     Ok(LlmEvent::TextDelta(delta)) if !turn.wrapup => {
                         if holding {
                             held.push_str(&delta);
-                            if assemble::refusal(&held) == assemble::Refusal::No {
+                            if assemble::refusal(&held, self.corpus.cjk) == assemble::Refusal::No {
                                 holding = false;
                                 let all = std::mem::take(&mut held);
                                 self.stream_text(turn, &mut streamed, &mut tail, mark, all)?;
@@ -637,7 +662,7 @@ impl Agent {
                 }
             };
             let refused = reply.tool_calls().next().is_none()
-                && assemble::refusal(&reply.text()) == assemble::Refusal::Is;
+                && assemble::refusal(&reply.text(), self.corpus.cjk) == assemble::Refusal::Is;
             if !refused && !held.is_empty() {
                 self.stream_text(turn, &mut streamed, &mut tail, mark, held)?;
             }

@@ -1,4 +1,4 @@
-//! Estimated values this crate reads (`roll`, `interject`, `group`, `reasoning`, `loop`, `retrieve`). `Default`
+//! Estimated values this crate reads (`roll`, `interject`, `group`, `reasoning`, `loop`, `retrieve`, `context`). `Default`
 //! carries the register's current values and is the only place they are written; use
 //! sites take the struct as an argument. Missing keys fall back field by field.
 
@@ -143,6 +143,20 @@ impl Default for Cost {
     }
 }
 
+/// `context.*`: the clock line on each turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Context {
+    /// Whole hours since the user's previous message from which the line says so.
+    pub gap_hours: u32,
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self { gap_hours: 3 }
+    }
+}
+
 /// Every group this crate reads, as `api` composes them into its one `Params`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -156,6 +170,7 @@ pub struct Params {
     pub opening: Opening,
     pub retrieve: Retrieve,
     pub cost: Cost,
+    pub context: Context,
 }
 
 #[cfg(test)]
