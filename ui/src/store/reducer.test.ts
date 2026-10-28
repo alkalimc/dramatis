@@ -158,3 +158,11 @@ test("activity ends the user's wait for a first sign", () => {
   expect(s.awaiting.c1).toBeUndefined();
   expect(s.typing.c1.host).toBeDefined();
 });
+
+test("a failed turn drops its half-written bubble", () => {
+  const author = { kind: "person", id: "p1" } as const;
+  let s = reduce(initialState(), { type: "messageDelta", event: { channel: "c1", message: "m1", author, delta: "Hal" } });
+  expect(s.streams.m1.text).toBe("Hal");
+  s = reduce(s, { type: "turnActivity", event: { channel: "c1", author, state: { kind: "failed", reason: "error" } } });
+  expect(s.streams.m1).toBeUndefined();
+});

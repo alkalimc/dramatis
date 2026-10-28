@@ -149,9 +149,17 @@ export function reduce(s: State, a: Action): State {
       const key = typingKey(author);
       const here = s.typing[channel] ?? {};
       if (state.kind === "done" || state.kind === "failed") {
-        if (!(key in here)) return s;
+        // A failed turn never sends its message: drop the half-written bubble with it.
+        const streams =
+          state.kind === "failed"
+            ? Object.fromEntries(
+                Object.entries(s.streams).filter(([, v]) => v.channel !== channel || typingKey(v.author) !== key),
+              )
+            : s.streams;
+        if (!(key in here) && streams === s.streams) return s;
         const rest = omit(here, key);
-        return { ...s, typing: Object.keys(rest).length ? { ...s.typing, [channel]: rest } : omit(s.typing, channel) };
+        const typing = Object.keys(rest).length ? { ...s.typing, [channel]: rest } : omit(s.typing, channel);
+        return { ...s, typing, streams };
       }
       const tool = state.kind === "tool";
       if (here[key]?.tool === tool) return s;
