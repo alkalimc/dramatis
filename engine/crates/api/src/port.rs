@@ -22,8 +22,8 @@ use world::clock::Now;
 use crate::endpoints::{Endpoints, Profile};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{
-    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, RosterChanged, ToolCalled,
-    TurnActivity, WorldChanged,
+    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, Rewound, RosterChanged,
+    ToolCalled, TurnActivity, WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId, TaskId};
 use crate::views::ImagePart;
@@ -47,6 +47,10 @@ pub trait AgentPort: Send + Sync + 'static {
     /// Retell an excerpt to someone else; their answer lands in their direct channel,
     /// which is returned at once.
     async fn relay(&self, excerpt: String, from: MessageId, to: PersonId) -> ApiResult<ChannelId>;
+
+    /// Take back the user's message `message` and everything after it in `channel`;
+    /// returns its text. Refused while a turn is running in the channel. Emits `Rewound`.
+    async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String>;
 
     /// Create the request and return it at once; the work runs in the background.
     async fn ask(
@@ -130,6 +134,7 @@ pub enum Event {
     ModeChanged(ModeChanged),
     RosterChanged(RosterChanged),
     QuotaChanged(QuotaChanged),
+    Rewound(Rewound),
     Notification(Notification),
 }
 
@@ -207,6 +212,10 @@ impl AgentPort for Unwired {
     }
 
     async fn relay(&self, _: String, _: MessageId, _: PersonId) -> ApiResult<ChannelId> {
+        Err(ApiError::NotImplemented)
+    }
+
+    async fn rewind(&self, _: ChannelId, _: MessageId) -> ApiResult<String> {
         Err(ApiError::NotImplemented)
     }
 

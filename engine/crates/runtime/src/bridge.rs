@@ -299,6 +299,13 @@ impl AgentPort for Port {
         Ok(id)
     }
 
+    async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        let id = world::MessageId(parse(&message.0)?);
+        Ok(agent.rewind(ch, id)?)
+    }
+
     async fn wrapup(&self, channel: ChannelId) -> ApiResult<()> {
         let ch = world::ChannelId(parse(&channel.0)?);
         self.0

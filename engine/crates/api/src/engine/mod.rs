@@ -449,6 +449,10 @@ impl Api for Engine {
     ) -> ApiResult<MessageId> {
         self.send_message_impl(channel, text, image).await
     }
+    async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String> {
+        self.rewind_impl(channel, message).await
+    }
+
     async fn wrapup(&self, channel: ChannelId) -> ApiResult<()> {
         self.wrapup_impl(channel).await
     }

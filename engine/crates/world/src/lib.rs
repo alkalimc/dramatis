@@ -19,6 +19,7 @@ pub mod message;
 pub mod params;
 pub mod presence;
 pub mod quota;
+pub mod rewind;
 pub mod seed;
 pub mod session;
 pub mod settings;

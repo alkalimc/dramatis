@@ -55,6 +55,14 @@ export const commands = {
 	 *  idle conversations are wrapped up without being asked.
 	 */
 	wrapup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("wrapup", { channel })),
+	/**
+	 *  Take back one of the user's own messages and everything after it in the channel, as
+	 *  if it was never sent: the later messages, the model's log of them, the memories
+	 *  and requests they led to. Returns the message's text for the input box. Refused
+	 *  while a reply is being written in the channel, and for a message that is not the
+	 *  user's. `Rewound` follows.
+	 */
+	rewind: (channel: ChannelId, message: MessageId) => typedError<string, ApiError>(__TAURI_INVOKE("rewind", { channel, message })),
 	/**  Pass a quoted excerpt to someone else; their answer lands in their direct channel. */
 	relay: (excerpt: string, from: MessageId, to: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("relay", { excerpt, from, to })),
 	/**  Everything before this message has been seen. */
@@ -124,6 +132,7 @@ export const events = {
 	modeChanged: makeEvent<ModeChanged>("mode-changed"),
 	notification: makeEvent<Notification>("notification"),
 	quotaChanged: makeEvent<QuotaChanged>("quota-changed"),
+	rewound: makeEvent<Rewound>("rewound"),
 	rosterChanged: makeEvent<RosterChanged>("roster-changed"),
 	toolCalled: makeEvent<ToolCalled>("tool-called"),
 	turnActivity: makeEvent<TurnActivity>("turn-activity"),
@@ -533,6 +542,16 @@ export type QuotaWindow = {
 	used: number | null,
 	/**  When enough usage rolls out of the window to leave the current band. */
 	release_at: Timestamp | null,
+};
+
+/**
+ *  The user took a message back: it and every later message of the channel are gone
+ *  (and so is what the engine wrote because of them). A UI drops them from the view
+ *  and refetches what it shows of the narrative state.
+ */
+export type Rewound = {
+	channel: ChannelId,
+	from: MessageId,
 };
 
 export type Role = {

@@ -94,6 +94,7 @@ pub fn emit<H: tauri::Emitter<tauri::Wry> + tauri::Manager<tauri::Wry>>(
         ModeChanged(e) => e.emit(app),
         RosterChanged(e) => e.emit(app),
         QuotaChanged(e) => e.emit(app),
+        Rewound(e) => e.emit(app),
         Notification(e) => e.emit(app),
     };
     if let Err(e) = sent {

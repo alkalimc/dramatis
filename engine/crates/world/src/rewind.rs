@@ -1,0 +1,362 @@
+//! Take back the user's own message and everything after it in its channel, as if it had
+//! never been sent.
+//!
+//! What goes: the channel's later messages, the model log from that instant (entries
+//! after it, and any segment opened after it), the memories written in the channel since
+//! (a hurt gives its trust back), the seeds those memories or messages queued, the
+//! requests filed in the channel, and the sessions opened there. What stays: the meter
+//! (the calls were made), trust earned by shared turns, sessions that were open before
+//! the message and closed after it, and requests the host filed in other channels.
+//!
+//! The log is append-only for the prefix cache: cutting its tail is allowed because the
+//! bytes before the cut are untouched, so the cached prefix is still valid.
+//!
+//! The cut is a time: the message's `at`. Log entries, segments, facts, sessions and
+//! tasks carry no link to the message that caused them, only a timestamp, and a person
+//! cannot send a message in the same millisecond as the end of the last reply.
+
+use rusqlite::{Connection, OptionalExtension};
+
+use crate::fact::{self};
+use crate::types::{Actor, ChannelId, FactKind, MessageId, TaskId};
+use crate::{Error, Result, channel, message};
+
+/// What a rewind did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rewound {
+    /// The text of the message taken back, for the input box.
+    pub text: String,
+    /// Messages removed, the first being the one chosen.
+    pub removed: u32,
+    /// Memories deleted.
+    pub facts: Vec<crate::FactId>,
+    /// Requests deleted.
+    pub tasks: Vec<TaskId>,
+}
+
+/// Take back `message`, which must be the user's own in `channel`. The caller makes sure no
+/// turn is running there. One transaction: nothing changes if any step fails.
+pub fn rewind(conn: &Connection, channel: ChannelId, message: MessageId) -> Result<Rewound> {
+    let tx = conn.unchecked_transaction()?;
+    let out = rewind_in(&tx, channel, message)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound> {
+    let c = channel::get(conn, ch)?;
+    if c.deleted_at.is_some() {
+        return Err(Error::ChannelClosed(ch));
+    }
+    let m = message::get(conn, id)?;
+    if m.channel != ch {
+        return Err(Error::Invalid(format!(
+            "message {id} is not in channel {ch}"
+        )));
+    }
+    if m.author != Actor::User {
+        return Err(Error::Invalid(
+            "only your own messages can be sent again".into(),
+        ));
+    }
+    let t = m.at;
+
+    // The log: segments opened since go whole; the one before keeps its earlier entries.
+    let last: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM log_segment WHERE channel = ?1 AND opened_at < ?2
+             ORDER BY seq DESC LIMIT 1",
+            (ch, t),
+            |r| r.get(0),
+        )
+        .optional()?;
+    conn.execute(
+        "UPDATE channel SET log_segment = ?2 WHERE id = ?1",
+        (ch, last),
+    )?;
+    conn.execute(
+        "DELETE FROM log_segment WHERE channel = ?1 AND opened_at >= ?2",
+        (ch, t),
+    )?;
+    conn.execute(
+        "DELETE FROM log_entry WHERE at >= ?2
+           AND segment IN (SELECT id FROM log_segment WHERE channel = ?1)",
+        (ch, t),
+    )?;
+
+    // Memories written in this channel since, other than the user's own edits.
+    let audience = ch.0.to_string();
+    let mut facts = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT id FROM fact WHERE audience_kind = 'participants' AND audience_ref = ?1
+           AND created_at >= ?2 AND (author <> 'user' OR kind = 'hurt') ORDER BY id",
+    )?;
+    for f in stmt.query_map((&audience, t), |r| r.get::<_, crate::FactId>(0))? {
+        facts.push(f?);
+    }
+    drop(stmt);
+
+    // Requests filed in this channel since, unless a surviving request hangs under one.
+    let mut tasks: Vec<TaskId> = {
+        let mut stmt =
+            conn.prepare("SELECT id FROM task WHERE channel = ?1 AND created_at >= ?2")?;
+        stmt.query_map((ch, t), |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    loop {
+        let keep: Vec<TaskId> = {
+            let mut stmt = conn.prepare("SELECT id, parent FROM task WHERE parent IS NOT NULL")?;
+            let rows: Vec<(TaskId, TaskId)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            rows.into_iter()
+                .filter(|(child, parent)| !tasks.contains(child) && tasks.contains(parent))
+                .map(|(_, parent)| parent)
+                .collect()
+        };
+        if keep.is_empty() {
+            break;
+        }
+        tasks.retain(|t| !keep.contains(t));
+    }
+    for task in &tasks {
+        let mut stmt =
+            conn.prepare("SELECT id FROM fact WHERE about_kind = 'task' AND about_ref = ?1")?;
+        for f in stmt.query_map([task.0.to_string()], |r| r.get::<_, crate::FactId>(0))? {
+            let f = f?;
+            if !facts.contains(&f) {
+                facts.push(f);
+            }
+        }
+    }
+
+    // Seeds: those the dropped memories or messages queued, and the openings delivered
+    // here since (a commitment brought up again may be brought up again).
+    let removed_messages: Vec<MessageId> = {
+        let mut stmt = conn.prepare("SELECT id FROM message WHERE channel = ?1 AND id >= ?2")?;
+        stmt.query_map((ch, id), |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    for f in &facts {
+        conn.execute(
+            "DELETE FROM seed WHERE kind IN ('commitment', 'conclusion', 'memory') AND ref = ?1",
+            [f.0.to_string()],
+        )?;
+    }
+    for task in &tasks {
+        conn.execute(
+            "DELETE FROM seed WHERE kind = 'pinned' AND ref = ?1",
+            [task.0.to_string()],
+        )?;
+    }
+    for m in &removed_messages {
+        conn.execute(
+            "DELETE FROM seed WHERE (kind = 'words' AND ref = ?1) OR message = ?2",
+            (m.0.to_string(), m),
+        )?;
+    }
+    conn.execute(
+        "UPDATE fact SET delivered = 0 WHERE kind = 'commitment' AND delivered = 1
+           AND CAST(id AS TEXT) IN (SELECT ref FROM seed WHERE kind = 'commitment'
+                                    AND channel = ?1 AND delivered_at >= ?2)",
+        (ch, t),
+    )?;
+    conn.execute(
+        "DELETE FROM seed WHERE channel = ?1 AND delivered_at >= ?2",
+        (ch, t),
+    )?;
+
+    for f in &facts {
+        let fact = fact::get(conn, *f)?;
+        if fact.kind == FactKind::Hurt && !fact.retracted {
+            crate::trust::undo_hurt(conn, &fact)?;
+        }
+        conn.execute("DELETE FROM fact WHERE id = ?1", [f])?;
+    }
+
+    // Sessions opened since, then requests (a session may cite one).
+    conn.execute(
+        "DELETE FROM session WHERE channel = ?1 AND opened_at >= ?2",
+        (ch, t),
+    )?;
+    for task in &tasks {
+        conn.execute("UPDATE task SET parent = NULL WHERE parent = ?1", [task])?;
+    }
+    for task in tasks.iter().rev() {
+        conn.execute("DELETE FROM task WHERE id = ?1", [task])?;
+    }
+
+    conn.execute(
+        "UPDATE task SET reply = NULL WHERE reply IN (SELECT id FROM message WHERE channel = ?1 AND id >= ?2)",
+        (ch, id),
+    )?;
+    conn.execute(
+        "DELETE FROM message WHERE channel = ?1 AND id >= ?2",
+        (ch, id),
+    )?;
+    conn.execute(
+        "UPDATE channel SET read_up_to = (SELECT max(id) FROM message WHERE channel = ?1)
+         WHERE id = ?1 AND read_up_to >= ?2",
+        (ch, id),
+    )?;
+
+    Ok(Rewound {
+        text: m.text,
+        removed: removed_messages.len() as u32,
+        facts,
+        tasks,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fact::{About, Audience, NewFact};
+    use crate::log::{self, Role};
+    use crate::testing::*;
+    use crate::{bond, session, task};
+
+    fn say(w: &Connection, c: ChannelId, who: &Actor, text: &str, ms: i64) -> MessageId {
+        message::append(w, c, who, text, None, None, ms).unwrap()
+    }
+
+    #[test]
+    fn takes_back_messages_log_memories_requests_and_sessions_after_the_message() {
+        let w = world();
+        let a = p("a");
+        let c = channel::direct(&w, &a).unwrap();
+        let person = Actor::Person(a.clone());
+        let s0 = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 10).unwrap();
+        let m1 = say(&w, c, &Actor::User, "one", 100);
+        log::append(&w, s0, Role::User, b"u1", 101).unwrap();
+        say(&w, c, &person, "r1", 102);
+        log::append(&w, s0, Role::Assistant, b"a1", 102).unwrap();
+        let keep = NewFact::new(
+            person.clone(),
+            Audience::Participants(c),
+            FactKind::Fact,
+            "early",
+        );
+        let keep = fact::write(&w, &keep, 103).unwrap().id();
+
+        let m2 = say(&w, c, &Actor::User, "two", 200);
+        log::append(&w, s0, Role::User, b"u2", 201).unwrap();
+        say(&w, c, &person, "r2", 202);
+        log::append(&w, s0, Role::Assistant, b"a2", 202).unwrap();
+        let s1 = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 203).unwrap();
+        let late = NewFact::new(
+            person.clone(),
+            Audience::Participants(c),
+            FactKind::Commitment,
+            "later",
+        )
+        .due(900);
+        let late = fact::write(&w, &late, 204).unwrap().id();
+        let edited = NewFact::new(
+            Actor::User,
+            Audience::Participants(c),
+            FactKind::Fact,
+            "mine",
+        );
+        let edited = fact::write(&w, &edited, 205).unwrap().id();
+        session::open(
+            &w,
+            c,
+            &a,
+            session::Budget::User,
+            session::Cause::Addressed,
+            206,
+        )
+        .unwrap();
+        let t = task::open_case(&w, "q", 207).unwrap();
+        w.execute("UPDATE task SET channel = ?2 WHERE id = ?1", (t, c))
+            .unwrap();
+        w.execute(
+            "INSERT INTO seed(person, kind, ref, created_at) VALUES ('a', 'commitment', ?1, 208)",
+            [late.0.to_string()],
+        )
+        .unwrap();
+
+        let out = rewind(&w, c, m2).unwrap();
+        assert_eq!(out.text, "two");
+        assert_eq!(out.removed, 2);
+        assert_eq!(out.facts, vec![late]);
+        assert_eq!(out.tasks, vec![t]);
+
+        let left: Vec<_> = message::history(&w, c, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.text)
+            .collect();
+        assert_eq!(left, ["one", "r1"]);
+        let cur = log::current(&w, c).unwrap().unwrap();
+        assert_eq!(cur.id, s0);
+        assert!(log::current(&w, c).unwrap().is_some());
+        let bytes: Vec<_> = log::entries(&w, s0)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.bytes)
+            .collect();
+        assert_eq!(bytes, [b"u1".to_vec(), b"a1".to_vec()]);
+        assert!(log::entries(&w, s1).unwrap().is_empty());
+        assert!(fact::get(&w, keep).is_ok());
+        assert!(fact::get(&w, edited).is_ok());
+        assert!(fact::get(&w, late).is_err());
+        assert!(task::get(&w, t).is_err());
+        assert!(session::open_sessions(&w).unwrap().is_empty());
+        let seeds: i64 = w
+            .query_row("SELECT count(*) FROM seed", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(seeds, 0);
+        let _ = m1;
+    }
+
+    #[test]
+    fn rewinding_the_first_message_leaves_no_log() {
+        let w = world();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let m = say(&w, c, &Actor::User, "hello", 100);
+        let s = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 100).unwrap();
+        log::append(&w, s, Role::User, b"u", 101).unwrap();
+        rewind(&w, c, m).unwrap();
+        assert_eq!(log::current(&w, c).unwrap(), None);
+        assert!(message::history(&w, c, None, 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_hurt_gives_its_trust_back() {
+        let w = world();
+        let a = p("a");
+        let c = channel::direct(&w, &a).unwrap();
+        bond::user_bond(&w, &a).unwrap();
+        let before = bond::user_bond(&w, &a).unwrap().trust_exact;
+        let m = say(&w, c, &Actor::User, "rude", 100);
+        let hurt = NewFact::new(
+            Actor::User,
+            Audience::Participants(c),
+            FactKind::Hurt,
+            "rude",
+        )
+        .about(About::Person(a.clone()));
+        let id = fact::write(&w, &hurt, 150).unwrap().id();
+        crate::trust::take_hurt(&w, &fact::get(&w, id).unwrap(), &Default::default()).unwrap();
+        assert!(bond::user_bond(&w, &a).unwrap().trust_exact < before);
+        rewind(&w, c, m).unwrap();
+        assert_eq!(bond::user_bond(&w, &a).unwrap().trust_exact, before);
+        assert!(fact::get(&w, id).is_err());
+    }
+
+    #[test]
+    fn refuses_other_authors_other_channels_and_deleted_groups() {
+        let w = world();
+        let a = p("a");
+        let c = channel::direct(&w, &a).unwrap();
+        let reply = say(&w, c, &Actor::Person(a.clone()), "hi", 100);
+        assert!(matches!(rewind(&w, c, reply), Err(Error::Invalid(_))));
+        let mine = say(&w, c, &Actor::User, "x", 101);
+        let other = channel::direct(&w, &p("b")).unwrap();
+        assert!(matches!(rewind(&w, other, mine), Err(Error::Invalid(_))));
+        assert!(rewind(&w, c, MessageId(999)).is_err());
+        assert!(message::get(&w, mine).is_ok());
+    }
+}

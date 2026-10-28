@@ -55,6 +55,7 @@ impl agent::Sink for Forward {
             A::WorldChanged(e) => P::WorldChanged(e),
             A::ModeChanged(e) => P::ModeChanged(e),
             A::QuotaChanged(e) => P::QuotaChanged(e),
+            A::Rewound(e) => P::Rewound(e),
             A::Notification(e) => P::Notification(e),
         });
     }

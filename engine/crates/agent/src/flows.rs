@@ -123,6 +123,10 @@ impl Agent {
     async fn respond_inner(&self, posted: Posted) -> Result<()> {
         let asks = {
             let _turn = self.lock_channel(posted.channel).await;
+            // Taken back between the post and now: nothing to answer.
+            if message::get(&self.db(), posted.message).is_err() {
+                return Ok(());
+            }
             let ch = channel::get(&self.db(), posted.channel)?;
             if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
                 self.exhausted_line(release_at)?;
@@ -148,6 +152,30 @@ impl Agent {
             self.run_ask(asked.task, asked.channel).await?;
         }
         Ok(())
+    }
+
+    /// Take back the user's `message` and everything after it in `ch` ([`world::rewind`]),
+    /// returning its text. Refused while a turn holds the channel.
+    pub fn rewind(&self, ch: ChannelId, message: MessageId) -> Result<String> {
+        let _turn = self.try_lock_channel(ch).ok_or(Error::Busy)?;
+        let out = world::rewind::rewind(&self.db(), ch, message)?;
+        self.emit(Event::Rewound(api::events::Rewound {
+            channel: crate::view::channel_id(ch),
+            from: crate::view::message_id(message),
+        }));
+        let mut changes: Vec<WorldChange> = out
+            .facts
+            .iter()
+            .map(|f| WorldChange::Fact {
+                id: view::fact_id(*f),
+            })
+            .collect();
+        changes.extend(out.tasks.iter().map(|t| WorldChange::Task {
+            id: view::task_id(*t),
+        }));
+        changes.push(WorldChange::Digest);
+        self.changed(changes);
+        Ok(out.text)
     }
 
     /// `post` then `respond`.

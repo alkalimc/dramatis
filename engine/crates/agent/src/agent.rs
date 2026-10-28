@@ -23,8 +23,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use api::endpoints::Endpoints;
 use api::events::{
-    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, ToolCalled, TurnActivity,
-    WorldChange, WorldChanged,
+    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, Rewound, ToolCalled,
+    TurnActivity, WorldChange, WorldChanged,
 };
 use api::tools::Descriptions;
 use index::Index;
@@ -48,6 +48,7 @@ pub enum Event {
     WorldChanged(WorldChanged),
     ModeChanged(ModeChanged),
     QuotaChanged(QuotaChanged),
+    Rewound(Rewound),
     Notification(Notification),
 }
 

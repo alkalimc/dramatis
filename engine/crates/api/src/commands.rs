@@ -130,6 +130,12 @@ commands! {
     /// worth keeping from this one is written as facts (`WorldChanged`). Returns at once;
     /// idle conversations are wrapped up without being asked.
     fn wrapup(channel: ChannelId) -> ();
+    /// Take back one of the user's own messages and everything after it in the channel, as
+    /// if it was never sent: the later messages, the model's log of them, the memories
+    /// and requests they led to. Returns the message's text for the input box. Refused
+    /// while a reply is being written in the channel, and for a message that is not the
+    /// user's. `Rewound` follows.
+    fn rewind(channel: ChannelId, message: MessageId) -> String;
     /// Pass a quoted excerpt to someone else; their answer lands in their direct channel.
     fn relay(excerpt: String, from: MessageId, to: PersonId) -> ChannelId;
     /// Everything before this message has been seen.

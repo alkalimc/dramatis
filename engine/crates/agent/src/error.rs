@@ -55,6 +55,10 @@ pub enum Error {
     #[error("a forced tool choice is not allowed on this endpoint")]
     ForcedToolNotAllowed,
 
+    /// A reply is being written in this channel; take-back waits for it.
+    #[error("a turn is running in this channel")]
+    Busy,
+
     /// A command or tool argument that cannot be honoured.
     #[error("invalid: {0}")]
     Invalid(String),
@@ -126,6 +130,9 @@ impl From<Error> for ApiError {
             },
             Error::Invalid(_) => ApiError::Invalid {
                 field: "request".into(),
+            },
+            Error::Busy => ApiError::Invalid {
+                field: "busy".into(),
             },
             Error::QuotaExhausted { release_at } => ApiError::QuotaExhausted {
                 release_at: timestamp(release_at.unwrap_or(0), 0),
