@@ -13,11 +13,14 @@ LIST = Path(__file__).resolve().parents[1] / "src" / "dramatis_forge" / "wording
 
 
 def collect(repo: Path) -> list[str]:
-    """UI keys, harness keys and tool-description keys, read from where they are defined."""
+    """UI keys, harness keys, terminal keys and tool-description keys, read from where they are defined."""
     ui = (repo / "ui/src/i18n/en.ts").read_text(encoding="utf-8")
     keys = set(re.findall(r'^\s+"([a-z0-9_.]+)":', ui, re.M))
     rs = (repo / "engine/crates/agent/src/text.rs").read_text(encoding="utf-8")
     table = rs.split("const DEFAULTS", 1)[1].split("];", 1)[0]
+    keys |= set(re.findall(r'\(\s*"([a-z0-9_.]+)",', table))
+    cli = (repo / "engine/bins/dramatis-cli/src/chat/text.rs").read_text(encoding="utf-8")
+    table = cli.split("pub const DEFAULTS", 1)[1].split("];", 1)[0]
     keys |= set(re.findall(r'\(\s*"([a-z0-9_.]+)",', table))
     tools = (repo / "engine/crates/api/src/tools.rs").read_text(encoding="utf-8")
     keys |= {f"{ns}.{name}"

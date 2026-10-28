@@ -99,6 +99,12 @@ impl Names {
             .map_or_else(|| default.to_owned(), Clone::clone)
     }
 
+    /// One of the terminal's own sentences: the corpus's wording for `key`, else the
+    /// English default in [`super::text`].
+    pub fn text(&self, key: &str) -> String {
+        self.word(key, super::text::default(key))
+    }
+
     pub fn user(&self) -> String {
         self.user.read().unwrap_or_else(|e| e.into_inner()).clone()
     }

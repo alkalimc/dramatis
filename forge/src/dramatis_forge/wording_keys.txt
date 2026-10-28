@@ -82,6 +82,15 @@ citation.open_revision
 citation.page
 citation.revid
 citation.stale
+cli.help.channels
+cli.help.conversation
+cli.help.memories
+cli.help.other
+cli.help.saves
+cli.help.settings
+cli.start
+cli.typing
+cli.typing.more
 clock.in_world
 clock.label
 coldstart.frozen
