@@ -100,9 +100,10 @@ impl Names {
     }
 
     /// One of the terminal's own sentences: the corpus's wording for `key`, else the
-    /// English default in [`super::text`].
+    /// English default in [`super::text`]. `{host}` is the corpus's name for the host.
     pub fn text(&self, key: &str) -> String {
         self.word(key, super::text::default(key))
+            .replace("{host}", &self.host())
     }
 
     pub fn user(&self) -> String {

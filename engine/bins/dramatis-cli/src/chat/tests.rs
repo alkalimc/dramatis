@@ -650,13 +650,18 @@ async fn help_is_grouped_and_takes_the_corpus_wording() {
     }
     assert!(!help.contains("Ctrl-J"));
 
-    let mut worded =
-        rig_wording(r#"{"cli.help.memories": "MEMORY-GROUP", "cli.typing": "SEND-KEY"}"#).await;
+    // The default names the host through the corpus's word for it.
+    assert!(!help.contains("{host}") && help.contains("whether Hostess is available"));
+    let mut worded = rig_wording(
+        r#"{"host.name": "Hostess", "cli.help.memories": "MEMORY-GROUP for {host}", "cli.typing": "SEND-KEY"}"#,
+    )
+    .await;
     let help = worded.run("/help").await;
     assert!(
-        help.contains("MEMORY-GROUP") && help.contains("SEND-KEY"),
+        help.contains("MEMORY-GROUP for Hostess") && help.contains("SEND-KEY"),
         "{help}"
     );
+    assert!(help.contains("whether Hostess is available"), "{help}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

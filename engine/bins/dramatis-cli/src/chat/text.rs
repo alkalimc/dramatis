@@ -20,11 +20,11 @@ anything else       send it to the current channel
     (
         "cli.help.channels",
         "Channels
-/list [filter]      persons who can be talked to, and whether the host is available
+/list [filter]      persons who can be talked to, and whether {host} is available
 /talk <person>      open the direct channel with a person (id, name or alias)
 /group <p1> <p2>    start a group channel with several persons
-/host               switch to the host's channel
-/go <n>             take choice n from the list the host just offered",
+/host               switch to {host}'s channel
+/go <n>             take choice n from the list {host} just offered",
     ),
     (
         "cli.help.memories",
