@@ -14,6 +14,13 @@ to **segment at build time and store the segmented text in an ordinary
 The cost is that query-time segmentation must match build-time segmentation. That is
 a real constraint, so which segmenter was used is recorded in the folio manifest and
 the engine can refuse a mismatch rather than silently return worse results.
+
+The dictionary segmenters split mixed tokens differently by implementation (a section code
+such as `ab-1` is one token in one and three in the other), so both sides first apply the
+normalisation in `normalise`, and the manifest records it as a `+n1` suffix on the
+segmenter string. `tests/fixtures/segment_vectors.json` is the definition the engine's
+`index::segment::normalise` is tested against too. Change the rule, and the tag changes
+with it.
 """
 
 from __future__ import annotations
@@ -31,6 +38,53 @@ def _is_cjk(ch: str) -> bool:
     return any(lo <= cp <= hi for lo, hi in CJK_RANGES)
 
 
+#: Rule tag appended to the segmenter version in the manifest.
+RULE_TAG = "n1"
+
+
+def normalise(text: str, cut) -> list[str]:
+    """Tokens of `text`, the same way `index::segment::normalise` produces them.
+
+    1. Full-width ASCII forms (U+FF01..U+FF5E) fold to ASCII, and U+3000 to a space.
+    2. Each maximal run of ASCII letters and digits is one lowercase token and never
+       reaches `cut`. Every other ASCII character is a separator.
+    3. Each maximal run of non-ASCII characters goes to `cut`; tokens with no
+       alphanumeric character are dropped (the index would drop them too).
+    """
+    out: list[str] = []
+    word: list[str] = []
+    other: list[str] = []
+
+    def flush_word() -> None:
+        if word:
+            out.append("".join(word))
+            word.clear()
+
+    def flush_other() -> None:
+        if other:
+            out.extend(t for t in cut("".join(other)) if any(c.isalnum() for c in t))
+            other.clear()
+
+    for ch in text:
+        cp = ord(ch)
+        if 0xFF01 <= cp <= 0xFF5E:
+            ch = chr(cp - 0xFEE0)
+        elif cp == 0x3000:
+            ch = " "
+        if ch.isascii() and ch.isalnum():
+            flush_other()
+            word.append(ch.lower())
+        elif ch.isascii():
+            flush_word()
+            flush_other()
+        else:
+            flush_word()
+            other.append(ch)
+    flush_word()
+    flush_other()
+    return out
+
+
 @dataclass(frozen=True)
 class Segmenter:
     name: str
@@ -44,7 +98,7 @@ class _Jieba(Segmenter):
     def __call__(self, text: str) -> str:
         import jieba
 
-        return " ".join(t for t in jieba.cut_for_search(text) if t.strip())
+        return " ".join(normalise(text, jieba.cut_for_search))
 
 
 class _Bigram(Segmenter):
@@ -96,7 +150,8 @@ def load(prefer: str = "auto") -> Segmenter:
         try:
             import jieba
 
-            return _Jieba(name="jieba", version=getattr(jieba, "__version__", "unknown"))
+            version = getattr(jieba, "__version__", "unknown")
+            return _Jieba(name="jieba", version=f"{version}+{RULE_TAG}")
         except ImportError:
             if prefer == "jieba":
                 raise
