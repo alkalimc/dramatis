@@ -1,0 +1,62 @@
+// Preview-only: `?view=<name>` opens a given screen of the mock app, so a screenshot can
+// reach it without clicking. Not compiled into a production build.
+import type { Actions, Store } from "./store";
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let applied = false;
+
+export async function applyDevView(view: string, store: Store, actions: Actions) {
+  // Strict mode runs the app's effects twice; a click or a toggle must happen once.
+  if (applied) return;
+  applied = true;
+  const d = store.dispatch;
+  await wait(600);
+  const s = store.getState();
+  const group = s.channels.find((c) => c.kind === "group");
+  const direct = s.channels.find((c) => c.kind === "direct");
+  switch (view) {
+    case "light":
+      actions.setTheme("light");
+      return d({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
+    case "menu":
+      return d({ type: "menu", open: true });
+    case "system":
+      return d({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
+    case "endpoints":
+      return d({ type: "drawer", drawer: { kind: "system", tab: "endpoints" } });
+    case "roster":
+      return d({ type: "drawer", drawer: { kind: "roster" } });
+    case "cases":
+      return d({ type: "drawer", drawer: { kind: "cases" } });
+    case "world":
+      return d({ type: "drawer", drawer: { kind: "world" } });
+    case "archived":
+      if (group) await actions.archive(group.id, true);
+      return d({ type: "listView", view: "archived" });
+    case "group":
+      if (!group) return;
+      await actions.open(group.id);
+      return d({ type: "drawer", drawer: { kind: "channel", id: group.id } });
+    case "person":
+      if (!direct) return;
+      await actions.open(direct.id);
+      return d({ type: "drawer", drawer: { kind: "person", id: direct.participants[0].id } });
+    case "direct":
+      if (direct) await actions.open(direct.id);
+      return;
+    case "ctx": {
+      const row = document.querySelector<HTMLElement>("button.chat-row:not(.archived-row)");
+      row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 140 }));
+      return;
+    }
+    case "sources": {
+      const withCites = Object.entries(s.messages).find(([, list]) => list.some((m) => m.cites.length > 0));
+      if (!withCites) return;
+      await actions.open(withCites[0] === s.hostChannel ? null : withCites[0]);
+      await wait(400);
+      document.querySelector<HTMLElement>(".sources-toggle")?.click();
+      return;
+    }
+  }
+}

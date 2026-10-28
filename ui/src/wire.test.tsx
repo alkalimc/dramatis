@@ -201,3 +201,35 @@ describe("persons without a persona", () => {
 function fireOpen() {
   document.querySelectorAll("details").forEach((d) => (d.open = true));
 }
+
+describe("another process wrote", () => {
+  test("a channel change reloads the list and the open conversation", async () => {
+    const extra: Message = {
+      id: "from-terminal", channel: "host", author: { kind: "host" }, text: "Written from the terminal.", actions: [], attachment: null,
+      cites: [], confidence: null, relayed: false, task: null, note: null, at: new Date(Date.now() + 120_000).toISOString(),
+    };
+    let late = false;
+    let api!: Api;
+    const { store } = renderApp("", (base) => {
+      api = {
+        ...base,
+        commands: {
+          ...base.commands,
+          history: async (channel: string, before: string | null, limit: number) => {
+            const r = await base.commands.history(channel, before, limit);
+            return late && channel === "host" && r.status === "ok" ? { status: "ok", data: [...r.data, extra] } : r;
+          },
+        } as Api["commands"],
+      };
+      return api;
+    });
+    await within(await screen.findByRole("log")).findByText(/Good morning\. Mira finished looking/);
+    expect(screen.queryByText("Written from the terminal.")).toBeNull();
+    late = true;
+    await act(async () => {
+      (api.events.worldChanged as unknown as { emit(p: unknown): void }).emit({ changes: [{ kind: "channel", id: "host" }] });
+    });
+    expect(await within(screen.getByRole("log")).findByText("Written from the terminal.")).toBeDefined();
+    expect(store.getState().messages.host.at(-1)?.id).toBe("from-terminal");
+  });
+});

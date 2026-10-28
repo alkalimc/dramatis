@@ -37,7 +37,8 @@ export function tauriApi(): Api {
 }
 
 export function mockApi(params: URLSearchParams, opts?: MockOptions): Api {
-  return { ...createMock(params, opts), mediaUrl: (p) => p, mock: true };
+  const mock = createMock(params, opts);
+  return { ...mock, mediaUrl: (p) => p, mock: true };
 }
 
 function inTauri(): boolean {

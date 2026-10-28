@@ -1,15 +1,17 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChannelId, ImagePart, Message } from "../api";
+import type { ChannelId, ChannelSummary, ImagePart, Message } from "../api";
 import { useT } from "../i18n";
+import { channelTitle } from "../lib/chats";
 import { authorName, sameAuthor, typingText } from "../lib/format";
+import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
 import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
-import { Avatar } from "../ui/Avatar";
+import { ChannelAvatar } from "../ui/Avatar";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
-import { ModeSwitch } from "../ui/ModeSwitch";
 import { ActionLines, MessageView, StreamView } from "./Message";
+import { useChatMenu } from "./chatMenu";
 
 const NO_MESSAGES: Message[] = [];
 
@@ -42,6 +44,9 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
   const quota = useStore((s) => s.quota);
   const exhausted = isHost ? quotaExhaustedLine(quota, t) : null;
   const lastMessage = messages[messages.length - 1];
+  const [find, setFind] = useState<string | null>(null);
+  const needle = find?.trim().toLowerCase() ?? "";
+  const shown = useMemo(() => (needle ? messages.filter((m) => m.text.toLowerCase().includes(needle)) : messages), [messages, needle]);
 
   useEffect(() => {
     void actions.loadHistory(channel);
@@ -60,7 +65,8 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
 
   return (
     <section className="channel" aria-label={t("composer.label")}>
-      <ChannelHeader channel={channel} />
+      <ChannelHeader channel={channel} finding={find !== null} onFind={() => setFind((f) => (f === null ? "" : null))} />
+      {find !== null && <FindBar value={find} count={shown.length} onChange={setFind} onClose={() => setFind(null)} />}
       {pinned}
       <div ref={log} className="log" onScroll={onScroll} role="log" aria-live="polite" aria-relevant="additions" tabIndex={0}>
         {!done && messages.length > 0 && (
@@ -69,13 +75,14 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
           </button>
         )}
         {messages.length === 0 && streams.length === 0 && <p className="muted empty">{t("channel.empty")}</p>}
-        {messages.map((m, i) => (
+        {needle && shown.length === 0 && <p className="muted empty">{t("channel.find.none")}</p>}
+        {shown.map((m, i) => (
           <div key={m.id} className="log-item">
             <MessageView
               message={m}
               showPlay={tts}
-              first={!(i > 0 && continues(messages[i - 1], m))}
-              last={!(i < messages.length - 1 && continues(m, messages[i + 1]))}
+              first={!(i > 0 && continues(shown[i - 1], m))}
+              last={!(i < shown.length - 1 && continues(m, shown[i + 1]))}
             />
             {after?.(m, i)}
           </div>
@@ -119,18 +126,6 @@ function PendingActions({ id, stream, channel, first }: { id: string; stream: St
       <StreamView author={stream.author} text={stream.text} channel={channel} first={first} />
     </>
   );
-}
-
-function readImage(file: File): Promise<ImagePart> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onerror = () => reject(r.error);
-    r.onload = () => {
-      const url = String(r.result);
-      resolve({ mime: file.type, data_base64: url.slice(url.indexOf(",") + 1) });
-    };
-    r.readAsDataURL(file);
-  });
 }
 
 export function Composer({ channel }: { channel: ChannelId }) {
@@ -184,12 +179,12 @@ export function Composer({ channel }: { channel: ChannelId }) {
       }}
     >
       {image && (
-        <p className="attached">
-          <img src={`data:${image.mime};base64,${image.data_base64}`} alt="" />
-          <button type="button" className="link" onClick={() => setImage(null)}>
-            {t("composer.image.remove")}
+        <div className="attached chip-attached">
+          <img src={`data:${image.mime};base64,${image.data_base64}`} alt={t("composer.image.preview")} />
+          <button type="button" className="round small" aria-label={t("composer.image.remove")} title={t("composer.image.remove")} onClick={() => setImage(null)}>
+            <Icon name="close" size={16} />
           </button>
-        </p>
+        </div>
       )}
       <div className="composer-row">
         <input
@@ -220,6 +215,13 @@ export function Composer({ channel }: { channel: ChannelId }) {
           value={text}
           placeholder={t("composer.placeholder")}
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            // A picture on the clipboard becomes the attachment; plain text pastes as usual.
+            const f = pastedImage(e.clipboardData);
+            if (!f) return;
+            e.preventDefault();
+            void readImage(f).then(setImage, () => undefined);
+          }}
           onKeyDown={(e) => {
             if (isSendKey(e)) {
               e.preventDefault();
@@ -247,99 +249,94 @@ export function Composer({ channel }: { channel: ChannelId }) {
   );
 }
 
-/** Title bar of a conversation: avatar, name, and a subtitle that says who is typing. */
-export function ChannelHeader({ channel }: { channel: ChannelId }) {
+function FindBar({ value, count, onChange, onClose }: { value: string; count: number; onChange: (v: string) => void; onClose: () => void }) {
   const t = useT();
-  const api = useApi();
-  const actions = useActions();
+  const id = useId();
+  return (
+    <div className="find-bar" role="search">
+      <Icon name="search" size={18} />
+      <label htmlFor={id} className="sr-only">
+        {t("channel.find")}
+      </label>
+      <input
+        id={id}
+        type="search"
+        autoFocus
+        value={value}
+        placeholder={t("channel.find")}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onClose()}
+      />
+      {value.trim() && <span className="muted small">{t("channel.find.count", { count })}</span>}
+      <button type="button" className="round small" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={onClose}>
+        <Icon name="close" size={18} />
+      </button>
+    </div>
+  );
+}
+
+/** Title bar of a conversation: picture, name, who is typing or how many are here, and the tools. */
+export function ChannelHeader({ channel, finding = false, onFind }: { channel: ChannelId; finding?: boolean; onFind?: () => void }) {
+  const t = useT();
   const dispatch = useDispatch();
-  const summary = useStore((s) => s.channels.find((c) => c.id === channel));
+  const listed = useStore((s) => s.channels.find((c) => c.id === channel) ?? (s.temp?.id === channel ? s.temp : undefined));
   const isHost = useStore((s) => s.hostChannel === channel);
   const who = useStore((s) => s.typing[channel]);
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
-  const [menu, setMenu] = useState(false);
+  const drawer = useStore((s) => s.drawer);
+  const menu = useChatMenu();
   const typing = typingText(who, t, names, user);
 
-  const subtitle = (fallback: string | null) => (
-    <p className={`subtitle${typing ? " typing" : ""}`} role="status">
-      {typing ?? fallback}
-    </p>
-  );
+  const summary: ChannelSummary | undefined = listed ?? (isHost ? ({ id: channel, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary) : undefined);
+  if (!summary) return typing ? <header className="channel-header"><p className="subtitle typing" role="status">{typing}</p></header> : null;
 
-  if (isHost || summary?.kind === "host") {
-    return (
-      <header className="channel-header">
-        <Avatar person={{ id: "host", name: t("host.name") }} plain />
-        <div className="titles">
-          <h2>{t("host.name")}</h2>
-          {subtitle(t("host.role"))}
-        </div>
-      </header>
-    );
-  }
-  if (!summary) return typing ? <header className="channel-header">{subtitle(null)}</header> : null;
-
-  if (summary.kind === "direct") {
-    const p = summary.participants[0];
-    return (
-      <header className="channel-header">
-        {p && <Avatar person={p} />}
-        <div className="titles">
-          <h2>{p?.name ?? t("person.unknown")}</h2>
-          {subtitle(t(`mode.${summary.mode}`))}
-        </div>
-        {p && (
-          <button
-            type="button"
-            className="round"
-            aria-label={t("channel.person_page")}
-            title={t("channel.person_page")}
-            onClick={() => dispatch({ type: "drawer", drawer: { kind: "person", id: p.id } })}
-          >
-            <Icon name="panel" />
-          </button>
-        )}
-      </header>
-    );
-  }
-
-  const members = summary.participants.map((p) => p.name).join(" · ");
-  const title = summary.topic ?? t("channel.group.untitled");
-  const remove = async () => {
-    if (!window.confirm(t("channel.delete.confirm"))) return;
-    const ok = await actions.attempt(api.commands.deleteGroup(channel));
-    if (ok !== undefined) {
-      await actions.refreshChannels();
-      await actions.open(null);
-    }
-  };
+  const person = summary.kind === "direct" ? summary.participants[0] : undefined;
+  const info = summary.kind === "group" ? ({ kind: "channel", id: channel } as const) : person ? ({ kind: "person", id: person.id } as const) : null;
+  // The same icon opens the info panel and closes it again.
+  const infoOpen = Boolean(info && drawer && drawer.kind === info.kind && drawer.id === info.id);
+  const fallback = summary.kind === "host" ? t("host.role") : summary.kind === "group" ? t("group.members.count", { count: summary.participants.length }) : t(`mode.${summary.mode}`);
 
   return (
-    <header className="channel-header group">
-      <Avatar person={{ id: channel, name: title }} plain />
+    <header className="channel-header">
+      <ChannelAvatar channel={summary} />
       <div className="titles">
-        <h2>{title}</h2>
-        {subtitle(t("channel.group.members", { names: members }))}
+        <h2>{channelTitle(summary, t)}</h2>
+        <p className={`subtitle${typing ? " typing" : ""}`} role="status">
+          {typing ?? fallback}
+        </p>
       </div>
-      <ModeSwitch
-        kind="group"
-        mode={summary.mode}
-        label={t("mode.label.group")}
-        onChange={(m) => actions.setMode({ kind: "channel", id: channel }, m)}
-      />
-      <div className="menu">
-        <button type="button" className="round" aria-label={t("channel.more")} title={t("channel.more")} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
-          <Icon name="more" />
+      {onFind && (
+        <button type="button" className="round" aria-label={t("channel.find")} title={t("channel.find")} aria-pressed={finding} onClick={onFind}>
+          <Icon name="search" />
         </button>
-        {menu && (
-          <div className="menu-items">
-            <button type="button" className="danger" onClick={remove}>
-              {t("channel.delete")}
-            </button>
-          </div>
-        )}
-      </div>
+      )}
+      {info && (
+        <button
+          type="button"
+          className="round"
+          aria-label={t(summary.kind === "group" ? "channel.group_info" : "channel.person_page")}
+          title={t(summary.kind === "group" ? "channel.group_info" : "channel.person_page")}
+          aria-pressed={infoOpen}
+          onClick={() => dispatch({ type: "drawer", drawer: infoOpen ? null : info })}
+        >
+          <Icon name="panel" />
+        </button>
+      )}
+      <button
+        type="button"
+        className="round"
+        aria-label={t("channel.more")}
+        title={t("channel.more")}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          menu.show(summary, r.right - 200, r.bottom + 4);
+        }}
+      >
+        <Icon name="more" />
+      </button>
+      {menu.menu}
     </header>
   );
 }

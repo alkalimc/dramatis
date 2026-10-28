@@ -85,7 +85,7 @@ function TaskList({ tasks, onPin }: { tasks: TaskSummary[]; onPin?: (id: TaskId)
               {task.question}
             </button>
           ) : task.channel ? (
-            <button type="button" className="link name" onClick={() => actions.open(task.channel)}>
+            <button type="button" className="link name" onClick={() => actions.open(task.channel, task.assignee ?? undefined)}>
               {task.question}
             </button>
           ) : (
@@ -214,7 +214,7 @@ export function CaseDrawer({ id }: { id: TaskId }) {
           <ul className="reactions" aria-label={t("case.reactions")}>
             {cf.reactions.map((r) => (
               <li key={r.message}>
-                <button type="button" className="link" onClick={() => actions.open(r.channel)}>
+                <button type="button" className="link" onClick={() => actions.open(r.channel, r.author.kind === "person" ? { id: r.author.id, name: names[r.author.id] ?? t("person.unknown") } : undefined)}>
                   {authorName(r.author, t, names, user)}
                 </button>
                 : {r.excerpt}

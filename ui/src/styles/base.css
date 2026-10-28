@@ -1,0 +1,322 @@
+/* Reset, type and the shared controls: one look for every button, input and card. */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  line-height: 1.25;
+  margin: 0 0 var(--s-2);
+}
+h1 {
+  font-size: var(--fs-lg);
+}
+h2 {
+  font-size: var(--fs-lg);
+}
+h3 {
+  font-size: var(--fs-md);
+}
+h4,
+h5 {
+  font-size: var(--fs-sm);
+}
+p {
+  margin: var(--s-1) 0;
+}
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: var(--fs-sm);
+}
+.row {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+}
+.row.wrap {
+  flex-wrap: wrap;
+}
+.row.end {
+  justify-content: flex-end;
+}
+.spacer {
+  flex: 1;
+}
+
+/* ---- buttons: filled, ghost, link, round ---- */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  border: 1px solid var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+  border-radius: var(--r-sm);
+  padding: var(--s-1) var(--s-4);
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.ghost {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--line);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--raised);
+  filter: none;
+}
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  display: inline;
+  text-align: left;
+}
+button.link.name {
+  text-decoration: none;
+  font-weight: 600;
+  color: var(--ink);
+}
+button.icon {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 0 var(--s-2);
+}
+button.icon:hover:not(:disabled) {
+  border-color: var(--line);
+  filter: none;
+}
+button.danger,
+.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+button.round {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+}
+button.round:hover:not(:disabled),
+button.round[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  filter: none;
+}
+button.round.small {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+button.round.send {
+  color: var(--accent);
+}
+
+/* ---- fields ---- */
+input,
+select,
+textarea {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--s-1) var(--s-3);
+  max-width: 100%;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+textarea {
+  width: 100%;
+  resize: vertical;
+}
+input[type="search"],
+input:not([type]),
+input[type="text"] {
+  flex: 1;
+  min-width: 8rem;
+}
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--accent-fill);
+}
+/* One switch for every on/off setting. */
+input[role="switch"] {
+  appearance: none;
+  flex: none;
+  width: 2.2rem;
+  height: 1.3rem;
+  min-width: 0;
+  padding: 0;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  border: none;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+input[role="switch"]::after {
+  content: "";
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--ink);
+  transition: transform 0.15s;
+}
+input[role="switch"]:checked {
+  background: var(--accent-fill);
+}
+input[role="switch"]:checked::after {
+  transform: translateX(0.9rem);
+  background: var(--accent-ink);
+}
+label {
+  display: inline-block;
+}
+fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+legend {
+  padding: 0;
+  font-weight: 600;
+  margin-bottom: var(--s-1);
+}
+
+/* ---- chips, tags, cards ---- */
+.chip {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  border-radius: var(--r-pill);
+  padding: 0 var(--s-3);
+}
+.chip.on {
+  border-color: var(--accent);
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin: var(--s-2) 0;
+}
+.tag {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 0 var(--s-2);
+  font-weight: normal;
+}
+.tag.relayed {
+  background: var(--line);
+}
+.tag.thin {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.tag.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s-4);
+  margin: var(--s-3) 0;
+}
+.raw {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-sm);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: var(--s-2) var(--s-3);
+  margin: var(--s-1) 0;
+}
+.badge {
+  flex: none;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-pill);
+  border: none;
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1.35rem;
+  text-align: center;
+}

@@ -6,7 +6,8 @@ import { App } from "../App";
 import { createActions, createStore, Provider, type Store } from "../store";
 
 export function mockApi(query = ""): Api {
-  return { ...createMock(new URLSearchParams(query), { delay: 0 }), mediaUrl: (p) => p, mock: true };
+  const mock = createMock(new URLSearchParams(query), { delay: 0 });
+  return { ...mock, mediaUrl: (p) => p, mock: true };
 }
 
 /** The whole app on the mock api. */

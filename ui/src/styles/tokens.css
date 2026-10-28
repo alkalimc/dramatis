@@ -1,0 +1,110 @@
+/*
+ * The one set of design tokens: every colour, radius, space and type size the screens use
+ * comes from here. Dark by default; light follows the system until the night-mode switch
+ * sets `data-theme` on the root. Text colours meet WCAG AA on the surfaces they sit on.
+ */
+:root {
+  /* surfaces, back to front */
+  --rail: #0d1317;
+  --bg: #0f161b;
+  --panel: #17212a;
+  --raised: #202c36;
+  --field: #121a21;
+  --line: #26333d;
+  --scrim: rgb(0 0 0 / 0.5);
+
+  /* text */
+  --ink: #eef3f6;
+  --muted: #8a9aa6;
+
+  /* accent: `--accent` is for text and icons, `--accent-fill` carries white text */
+  --accent: #4fd0c0;
+  --accent-fill: #0e8074;
+  --accent-ink: #ffffff;
+  --select: #0e8074;
+  --select-ink: #ffffff;
+
+  /* bubbles */
+  --own: #1b5f59;
+  --other: #202c36;
+
+  /* state */
+  --warn: #f0b36a;
+  --danger: #ff8a7d;
+  --focus: #8ab8ff;
+
+  /* speaker name colours */
+  --hue-0: #5ec8bd;
+  --hue-1: #f2a36b;
+  --hue-2: #8fb8ff;
+  --hue-3: #e58bb4;
+  --hue-4: #b6d36b;
+  --hue-5: #c3a2f5;
+  --hue-6: #f0cf6a;
+  --hue-7: #6fd0e8;
+
+  /* shape */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-pill: 999px;
+  --shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+
+  /* space */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+
+  /* type */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.85rem;
+  --fs-md: 0.95rem;
+  --fs-lg: 1.1rem;
+
+  /* sizes of the fixed parts */
+  --rail-w: 4.5rem;
+  --list-w: clamp(16rem, 26vw, 22rem);
+  --avatar-s: 1.75rem;
+  --avatar-m: 2.4rem;
+  --avatar-l: 3.3rem;
+  --avatar-xl: 7rem;
+
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+:root[data-theme="light"] {
+  --rail: #f1f4f6;
+  --bg: #e4eaee;
+  --panel: #ffffff;
+  --raised: #eef2f5;
+  --field: #f4f7f9;
+  --line: #d5dde3;
+  --scrim: rgb(20 30 40 / 0.35);
+  --ink: #1a2229;
+  --muted: #566570;
+  --accent: #0b6f66;
+  --accent-fill: #0b7a6f;
+  --select: #0b7a6f;
+  --own: #d4f0e5;
+  --other: #ffffff;
+  --warn: #8a4b00;
+  --danger: #a3261b;
+  --focus: #1a64d6;
+  --hue-0: #0b7a70;
+  --hue-1: #a8500f;
+  --hue-2: #2a5fb8;
+  --hue-3: #b02c6a;
+  --hue-4: #4e7a0a;
+  --hue-5: #6b3fb0;
+  --hue-6: #7a5f00;
+  --hue-7: #0b6f87;
+  --shadow: 0 8px 28px rgb(20 30 40 / 0.18);
+  color-scheme: light;
+}

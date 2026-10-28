@@ -11,33 +11,23 @@ export const TIERS: Tier[] = ["low", "middle", "high", "extra_high", "max", "ult
 export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tier: Tier) => void }) {
   const t = useT();
   const id = useId();
-  const index = TIERS.indexOf(quota.tier);
   const exhaustedLine = quotaExhaustedLine(quota, t);
   const total = quota.spent.reduce((n, s) => n + (s.calls ?? 0), 0);
 
   return (
     <section className="quota" aria-labelledby={`${id}-h`}>
       <h3 id={`${id}-h`}>{t("quota.title")}</h3>
-      <div className="tier">
-        <label htmlFor={id}>{t("quota.tier")}</label>
-        <input
-          id={id}
-          type="range"
-          min={0}
-          max={TIERS.length - 1}
-          step={1}
-          value={index}
-          aria-valuetext={t(`quota.tier.${quota.tier}`)}
-          onChange={(e) => onTier(TIERS[Number(e.target.value)])}
-        />
-        <ol className="tier-ticks" aria-hidden="true">
+      <fieldset className="mode mode-none tier">
+        <legend>{t("quota.tier")}</legend>
+        <div className="mode-options">
           {TIERS.map((tier) => (
-            <li key={tier} className={tier === quota.tier ? "on" : undefined}>
-              {t(`quota.tier.${tier}`)}
-            </li>
+            <label key={tier} className="mode-choice">
+              <input type="radio" name={id} value={tier} checked={tier === quota.tier} onChange={() => onTier(tier)} />
+              <span>{t(`quota.tier.${tier}`)}</span>
+            </label>
           ))}
-        </ol>
-      </div>
+        </div>
+      </fieldset>
 
       {quota.tier === "ultra" ? (
         <p className="band">{t("quota.ultra")}</p>
