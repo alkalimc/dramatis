@@ -478,7 +478,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     appStatus: () =>
       ok<AppStatus>({
         form: library ? "library" : "full",
-        corpus: { state: "loaded", name: "demo", encoder_mismatch: false },
+        corpus: { state: "loaded", name: "demo" },
         needs_setup: settings.user_name === null,
       }),
     wording: () => ok({ entries: Object.values(localWording)[0] ?? {}, scene_marker: scene }),

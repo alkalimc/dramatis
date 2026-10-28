@@ -1,9 +1,5 @@
 """Assemble a folio: chunks, lexical index, roster, aliases, stats, manifest.
 
-Vectors are deliberately *not* written here. Encoding needs a model, so folding it
-into this stage would make the whole corpus build depend on one — and the chunk set is
-the thing worth iterating on, dozens of times, with no model in sight.
-
 Guard G5 runs here. Its job is to catch the failures that produce a *plausible* corpus
 — one that builds, counts up, and is quietly worse than it looks: a template that
 silently produced nothing, units outside their budget, positional redundancy from a
@@ -134,7 +130,7 @@ def run(
         for chunk in build_chunks(archive, pack, env=env):
             if chunk.id in seen:
                 # Identical text at an identical span. Real, and harmless once it is
-                # counted rather than silently written twice into the vector store.
+                # counted rather than silently written twice into the index.
                 rep.duplicates += 1
                 continue
             seen.add(chunk.id)

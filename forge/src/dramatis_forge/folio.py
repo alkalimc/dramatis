@@ -7,11 +7,6 @@ prompts, and a manifest that says exactly which build produced all of it.
 
 Design notes worth the space:
 
-**No vectors are written.** The lexical path is the only retrieval path for now. The
-`vectors` table is part of the format but stays empty; dense retrieval will read its
-vectors from a sidecar file named after the encoder, so changing encoders never
-rebuilds the corpus.
-
 **Prompts live here.** They are derived from this corpus by a generator whose
 output is only valid for it, so co-locating them makes lineage automatic instead of
 making it a constraint someone has to enforce.
@@ -24,9 +19,8 @@ span is what lets the engine fetch the adjacent units of a hit at query time
 **One integer format version plus a build fingerprint**, not a five-component
 semver range. This is a single-user local application; a dependency solver would be
 modelling a distribution problem that does not exist. The client's rules are: refuse
-to load an unknown `format_version`; warn but continue when the encoder fingerprint
-does not match the local weights, because mismatched lineage degrades retrieval
-without breaking it, and refusing to start is the worse failure.
+to load an unknown `format_version`, and to load a corpus whose declared `requires`
+it does not implement.
 """
 
 from __future__ import annotations
@@ -44,7 +38,7 @@ PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS chunks (
     id         TEXT PRIMARY KEY,      -- stable, content-derived
-    ord        INTEGER NOT NULL,      -- dense 0..N-1; indexes the vector blob
+    ord        INTEGER NOT NULL,      -- dense 0..N-1; the FTS rowid
     template   TEXT NOT NULL,         -- retrieval-unit type
     page       TEXT NOT NULL,         -- source page title
     revid      INTEGER,               -- source revision: attribution and staleness
@@ -67,14 +61,6 @@ CREATE INDEX IF NOT EXISTS        idx_chunks_span    ON chunks(span_of, span_fro
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     tokens,
     content=''
-);
-
-CREATE TABLE IF NOT EXISTS vectors (
-    id    INTEGER PRIMARY KEY CHECK (id = 0),
-    dim   INTEGER NOT NULL,
-    count INTEGER NOT NULL,
-    dtype TEXT NOT NULL,              -- f16 | f32
-    data  BLOB NOT NULL               -- count * dim, row-major, ordered by chunks.ord
 );
 
 CREATE TABLE IF NOT EXISTS persons (

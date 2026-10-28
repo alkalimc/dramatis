@@ -238,13 +238,7 @@ async fn status_clock_and_wording() {
     let s = e.app_status().await.unwrap();
     assert_eq!(s.form, AppForm::Library);
     assert!(s.needs_setup);
-    assert!(matches!(
-        s.corpus,
-        CorpusState::Loaded {
-            encoder_mismatch: false,
-            ..
-        }
-    ));
+    assert!(matches!(s.corpus, CorpusState::Loaded { .. }));
 
     e.add_profile(profile("p")).await.unwrap();
     e.set_role(RoleKind::Chat, Some(chat_role("p")))
@@ -294,42 +288,6 @@ async fn missing_and_refused_corpora_are_states_not_failures() {
     assert!(matches!(
         e.app_status().await.unwrap().corpus,
         CorpusState::MissingRequirement { .. }
-    ));
-}
-
-#[tokio::test]
-async fn encoder_mismatch_shows_a_banner_and_keeps_going() {
-    let folio = Builder::new()
-        .manifest("embed_model", r#""enc-a""#)
-        .finish();
-    let mismatch = |encoder: Option<&str>| {
-        let ports = Ports {
-            encoder: encoder.map(str::to_owned),
-            ..Ports::default()
-        };
-        Engine::open(temp_home(), Some(folio.path().to_path_buf()), ports).unwrap()
-    };
-    let state = |e: &Engine| e.state.clone();
-    assert!(matches!(
-        state(&mismatch(None)),
-        CorpusState::Loaded {
-            encoder_mismatch: true,
-            ..
-        }
-    ));
-    assert!(matches!(
-        state(&mismatch(Some("enc-b"))),
-        CorpusState::Loaded {
-            encoder_mismatch: true,
-            ..
-        }
-    ));
-    assert!(matches!(
-        state(&mismatch(Some("enc-a"))),
-        CorpusState::Loaded {
-            encoder_mismatch: false,
-            ..
-        }
     ));
 }
 

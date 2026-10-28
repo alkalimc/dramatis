@@ -1,7 +1,7 @@
 //! Read a `.folio` knowledge base.
 //!
 //! One SQLite file holds everything the runtime needs: retrieval units, their lexical
-//! index, their vectors, the person roster, the alias dictionary, synthesised prompts, and
+//! index, the person roster, the alias dictionary, synthesised prompts, and
 //! a manifest describing the build that produced all of it.
 //!
 //! Two behaviours here are deliberately strict, because a corpus is a file someone
@@ -20,7 +20,6 @@ pub mod error;
 pub mod fixture;
 pub mod manifest;
 pub mod unit;
-pub mod vectors;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +29,6 @@ use rusqlite::{Connection, OpenFlags};
 pub use error::{Error, Result};
 pub use manifest::Manifest;
 pub use unit::{Person, PersonForm, Scope, TemplateStats, Unit};
-pub use vectors::Vectors;
 
 /// The column list every unit query selects, in `row_to_unit` order, over `chunks c`.
 ///
@@ -56,7 +54,6 @@ pub struct Folio {
     conn: Connection,
     manifest: Manifest,
     path: PathBuf,
-    vectors: Option<Vectors>,
 }
 
 impl Folio {
@@ -79,7 +76,6 @@ impl Folio {
             conn,
             manifest,
             path,
-            vectors: None,
         })
     }
 
@@ -93,34 +89,6 @@ impl Folio {
 
     pub fn conn(&self) -> &Connection {
         &self.conn
-    }
-
-    /// Load the vector store.
-    ///
-    /// Separate from `open` because the lexical path alone is useful — the library form of
-    /// the product searches without an encoder — and because reading a vector store that
-    /// can run to hundreds of megabytes should be an explicit act rather than a side effect of opening a file.
-    pub fn load_vectors(&mut self) -> Result<&Vectors> {
-        if self.vectors.is_none() {
-            let (dim, count, raw): (i64, i64, Vec<u8>) = self.conn.query_row(
-                "SELECT dim, count, data FROM vectors WHERE id = 0",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )?;
-            self.vectors = Some(Vectors::new(raw, dim as usize, count as usize)?);
-        }
-        Ok(self.vectors.as_ref().expect("just loaded"))
-    }
-
-    pub fn vectors(&self) -> Option<&Vectors> {
-        self.vectors.as_ref()
-    }
-
-    pub fn has_vectors(&self) -> Result<bool> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM vectors", [], |row| row.get(0))?;
-        Ok(count > 0)
     }
 
     pub fn unit_count(&self) -> Result<usize> {

@@ -13,10 +13,6 @@ pub struct Retrieve {
     pub top_k: usize,
     /// Lexical candidates taken before weighting, memory merge and truncation.
     pub candidates: usize,
-    /// Reciprocal-rank-fusion constant. Read once a second path exists.
-    pub rrf_k: f64,
-    /// Candidates handed to a reranker. Read once a reranker exists.
-    pub rerank_in: usize,
     pub confidence: ConfidenceBands,
     pub scope_weight: ScopeWeights,
     /// Neighbouring units fetched on each side of every returned hit.
@@ -28,8 +24,6 @@ impl Default for Retrieve {
         Self {
             top_k: 6,
             candidates: 50,
-            rrf_k: 60.0,
-            rerank_in: 20,
             confidence: ConfidenceBands::default(),
             scope_weight: ScopeWeights::default(),
             neighbours: 1,

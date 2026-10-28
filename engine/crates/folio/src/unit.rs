@@ -28,16 +28,6 @@ pub struct Unit {
 }
 
 impl Unit {
-    /// What the encoder saw. Reproduces the build-time string exactly, because anything
-    /// else would embed a query against text that was never indexed.
-    pub fn embed_text(&self) -> String {
-        if self.header.is_empty() {
-            self.text.clone()
-        } else {
-            format!("{}\n{}", self.header, self.text)
-        }
-    }
-
     /// Does this unit sit next to `other` in the same source sequence?
     pub fn adjacent_to(&self, other: &Unit) -> bool {
         match (

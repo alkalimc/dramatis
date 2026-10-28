@@ -35,7 +35,6 @@ const V2_SCHEMA: &[(&str, &[&str])] = &[
         ],
     ),
     ("chunks_fts", &["tokens"]),
-    ("vectors", &["id", "dim", "count", "dtype", "data"]),
     (
         "persons",
         &[

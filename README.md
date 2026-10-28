@@ -139,12 +139,6 @@ that defines `PACK = Pack(...)` with seed sets, routes to page parsers, inline m
 identity rules, chunking policy, figures, text and stopwords. Missing text keys fall back to
 the English defaults in `forge/src/dramatis_forge/text.py`.
 
-## Research
-
-`research/` is a separate Python project (not part of forge) for fine-tuning and evaluating
-the retrieval models on training pairs that come from the wiki's own structure. It never
-changes a product default. See `research/README.md`.
-
 ## Licence
 
 Code: Apache-2.0. A corpus built with this tool is not covered by that licence; it carries

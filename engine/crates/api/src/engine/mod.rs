@@ -44,8 +44,6 @@ pub struct Ports {
     pub net: Arc<dyn NetPort>,
     pub sink: Arc<dyn Sink>,
     pub clock: Arc<dyn Clock>,
-    /// The local text encoder's id, if the build has one; compared with the corpus's.
-    pub encoder: Option<String>,
 }
 
 impl Default for Ports {
@@ -58,7 +56,6 @@ impl Default for Ports {
             net: Arc::new(Offline),
             sink: Arc::new(NoSink),
             clock: Arc::new(LocalClock),
-            encoder: None,
         }
     }
 }
@@ -100,12 +97,7 @@ impl Engine {
             None => (None, CorpusState::Missing),
             Some(path) => match Corpus::open(&path, params.retrieve.clone(), &home.prompts()) {
                 Ok(c) => {
-                    let declared = c.embed_model();
-                    let state = CorpusState::Loaded {
-                        name: c.name(),
-                        encoder_mismatch: !declared.is_empty()
-                            && ports.encoder.as_deref() != Some(declared),
-                    };
+                    let state = CorpusState::Loaded { name: c.name() };
                     (Some(Arc::new(c)), state)
                 }
                 Err(e) => (None, corpus::refusal(&e)),

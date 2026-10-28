@@ -21,7 +21,6 @@ export const en = {
   "app.corpus.missing": "No corpus is open. Open a .folio file to begin.",
   "app.corpus.unsupported": "This corpus uses format {version}, which this app cannot read. Please update the app.",
   "app.corpus.requirement": "This corpus needs a feature this app lacks ({requirement}). Please update the app.",
-  "app.corpus.encoder": "The local search model differs from the one this corpus was built with. Search still works; results may differ.",
   "app.mock": "Demo data",
   "app.retry": "Try again",
   "app.dismiss": "Dismiss",

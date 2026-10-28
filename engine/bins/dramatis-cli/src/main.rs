@@ -352,14 +352,6 @@ fn inspect(path: &Path) -> Result<()> {
             stats.template, stats.count, stats.embed_p50, stats.embed_p95, stats.embed_max
         );
     }
-    println!(
-        "\nvectors    {}",
-        if folio.has_vectors()? {
-            "present (unused: this build has the lexical path only)"
-        } else {
-            "absent; the lexical path needs none"
-        }
-    );
     Ok(())
 }
 
