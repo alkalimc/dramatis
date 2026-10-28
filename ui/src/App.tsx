@@ -15,7 +15,7 @@ import { GroupDialog } from "./screens/Group";
 import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
 import { PersonDrawer } from "./screens/Person";
-import { LeftDrawer } from "./screens/Profile";
+import { LeftDrawer, ProfileCard } from "./screens/Profile";
 import { RosterDrawer } from "./screens/Roster";
 import { SystemDrawer } from "./screens/System";
 import { WorldDrawer } from "./screens/World";
@@ -68,6 +68,7 @@ function Shell() {
   const wordingError = useStore((s) => s.loadErrors.wording);
   const full = useStore((s) => s.status?.form === "full" && Boolean(s.hostChannel));
   const menuOpen = useStore((s) => s.menuOpen);
+  const profile = useStore((s) => s.profile);
   const actions = useActions();
   usePresence();
   useTheme();
@@ -112,6 +113,7 @@ function Shell() {
       </div>
       <ErrorBar />
       {menuOpen && <LeftDrawer />}
+      {profile && <ProfileCard mode={profile} />}
       {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
     </div>
@@ -148,11 +150,11 @@ function useTheme() {
   }, [theme]);
 }
 
-const NAV: { key: "roster" | "cases" | "world" | "system"; icon: IconName; drawer: Drawer }[] = [
+// Settings live in the hamburger's drawer, not on the rail.
+const NAV: { key: "roster" | "cases" | "world"; icon: IconName; drawer: Drawer }[] = [
   { key: "roster", icon: "people", drawer: { kind: "roster" } },
   { key: "cases", icon: "cases", drawer: { kind: "cases" } },
   { key: "world", icon: "world", drawer: { kind: "world" } },
-  { key: "system", icon: "system", drawer: { kind: "system", tab: "quota" } },
 ];
 
 function drawerKey(d: Drawer | null): "roster" | "cases" | "world" | "system" | null {
@@ -178,13 +180,18 @@ function Rail() {
   return (
     <header className="rail">
       <h1 className="sr-only">{t("host.name")}</h1>
+      <button type="button" className="rail-menu" aria-label={t("menu.open")} title={t("menu.open")} aria-haspopup="dialog" onClick={() => dispatch({ type: "menu", open: true })}>
+        <Icon name="menu" size={26} />
+      </button>
       <nav aria-label={t("nav.label")}>
         <ul>
           <li>
             <button type="button" className={`rail-item${current === null ? " on" : ""}`} aria-pressed={current === null} onClick={() => dispatch({ type: "drawer", drawer: null })}>
-              <Icon name="chats" />
-              <span>{t("nav.chats")}</span>
-              {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
+              <span className="rail-icon">
+                <Icon name="chats" size={26} />
+                {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
+              </span>
+              <span className="rail-label">{t("nav.chats")}</span>
             </button>
           </li>
           {NAV.map((n) => (
@@ -195,8 +202,10 @@ function Rail() {
                 aria-pressed={current === n.key}
                 onClick={() => dispatch({ type: "drawer", drawer: current === n.key ? null : n.drawer })}
               >
-                <Icon name={n.icon} />
-                <span>{t(`nav.${n.key}`)}</span>
+                <span className="rail-icon">
+                  <Icon name={n.icon} size={26} />
+                </span>
+                <span className="rail-label">{t(`nav.${n.key}`)}</span>
               </button>
             </li>
           ))}

@@ -9,6 +9,9 @@ test("full form: header clock, waiting panel, host channel with action lines", a
   expect(screen.getByLabelText("In-world date and local time").closest("footer")).not.toBeNull();
   const panel = screen.getByRole("heading", { name: "Who's waiting" }).closest("section")!;
   expect(await within(panel).findByText("Mira Vale")).toBeDefined();
+  // Two rows at first; the rest are one click away.
+  expect(within(panel).queryByText("birthday today")).toBeNull();
+  await userEvent.setup().click(within(panel).getByRole("button", { name: "Show 2 more" }));
   expect(within(panel).getByText("birthday today")).toBeDefined();
   expect(await screen.findByText(/Host ▸ finding who knows/)).toBeDefined();
   // No unread badges or counts on the panel.
@@ -55,6 +58,7 @@ test("selection menu: where from, and who knows this", async () => {
   const user = userEvent.setup();
   renderApp();
   const panel = (await screen.findByRole("heading", { name: "Who's waiting" })).closest("section")!;
+  await user.click(await within(panel).findByRole("button", { name: "Show 2 more" }));
   await user.click(await within(panel).findByText("Tess Arden"));
   await within(await screen.findByRole("log")).findByText(/Take the stairs by the fish market/);
   const actions = screen.getAllByRole("button", { name: "Actions for this message" });
@@ -149,7 +153,8 @@ test("endpoints: a failed model fetch shows the endpoint's own text and a manual
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getByRole("button", { name: "System" }));
+  await user.click(screen.getByRole("button", { name: "Menu" }));
+  await user.click(within(await screen.findByRole("complementary", { name: "Menu" })).getByRole("button", { name: "Settings" }));
   await user.click(await screen.findByRole("tab", { name: "Endpoints" }));
   const card = (await screen.findByRole("heading", { name: "deepseek" })).closest("li")!;
   await user.click(within(card).getByRole("button", { name: "Fetch models" }));

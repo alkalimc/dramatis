@@ -223,7 +223,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       60 * 26 - 1,
       {
         actions: [
-          { tool: "find_people", topic: "harbor flood" },
+          { tool: "find_people", topic: "harbor flood", persons: [ref("mira"), ref("oren")] },
           { tool: "ask", person: ref("mira"), question: "How did the east corridor come to be sealed?" },
         ],
       },

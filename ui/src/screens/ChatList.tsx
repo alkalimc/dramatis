@@ -90,9 +90,6 @@ export function ChatList() {
   return (
     <nav className="chat-list" aria-label={t("chatlist.label")} onKeyDown={onListKey}>
       <header className="list-head">
-        <button type="button" className="round" aria-label={t("menu.open")} title={t("menu.open")} onClick={() => dispatch({ type: "menu", open: true })}>
-          <Icon name="menu" />
-        </button>
         <div className="search-field">
           <Icon name="search" size={18} />
           <label htmlFor={searchId} className="sr-only">

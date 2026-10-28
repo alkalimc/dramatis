@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useStore, useActions } from "../store";
 import { useT } from "../i18n";
 import { activityText } from "../lib/format";
@@ -12,11 +13,16 @@ function TypingIn({ channel }: { channel: string }) {
   return on ? <TypingMark /> : null;
 }
 
+/** Rows shown before "show more": the panel sits above the conversation and must stay short. */
+const WAITING_SHOWN = 2;
+
 /** Pure data, always there, no model call: who has something for the user. */
 export function WaitingPanel() {
   const t = useT();
   const actions = useActions();
   const items = useStore((s) => s.digest.items);
+  const [all, setAll] = useState(false);
+  const shown = all ? items : items.slice(0, WAITING_SHOWN);
   return (
     <section className="waiting" aria-labelledby="waiting-title">
       <h2 id="waiting-title">{t("waiting.title")}</h2>
@@ -24,7 +30,7 @@ export function WaitingPanel() {
         <p className="muted">{t("waiting.empty")}</p>
       ) : (
         <ul>
-          {items.map((w, i) => (
+          {shown.map((w, i) => (
             <li key={`${w.person.id}-${w.activity.kind}-${i}`}>
               <button type="button" className="waiting-row" onClick={() => actions.open(w.channel, w.person)}>
                 <Avatar person={w.person} size="s" />
@@ -35,6 +41,11 @@ export function WaitingPanel() {
             </li>
           ))}
         </ul>
+      )}
+      {items.length > WAITING_SHOWN && (
+        <button type="button" className="link waiting-more" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? t("waiting.less") : t("waiting.more", { count: items.length - WAITING_SHOWN })}
+        </button>
       )}
     </section>
   );

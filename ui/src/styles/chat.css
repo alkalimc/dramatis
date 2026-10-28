@@ -222,7 +222,7 @@
   align-items: center;
   gap: var(--s-3);
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--stamp);
   min-height: 1.2rem;
 }
 .message-foot time {

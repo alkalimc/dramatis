@@ -83,30 +83,31 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
   return (
     <section className="quiet" aria-labelledby={`${id}-h`}>
       <h3 id={`${id}-h`}>{t("quiet.title")}</h3>
-      <div className="row wrap">
-        <label>
-          <input
-            type="checkbox"
-            checked={on}
-            onChange={(e) => {
-              setOn(e.target.checked);
-              if (!e.target.checked) save({ ...settings, quiet_hours: null });
-              else if (last.from && last.to) save({ ...settings, quiet_hours: last });
-            }}
-          />{" "}
-          {t("quiet.dnd")}
-        </label>
-        {on && (
-          <>
-            <label>
-              {t("quiet.from")} <input type="time" value={hours.from} onChange={(e) => update({ ...hours, from: e.target.value })} />
-            </label>
-            <label>
-              {t("quiet.to")} <input type="time" value={hours.to} onChange={(e) => update({ ...hours, to: e.target.value })} />
-            </label>
-          </>
-        )}
-      </div>
+      <label className="switch">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={on}
+          onChange={(e) => {
+            setOn(e.target.checked);
+            if (!e.target.checked) save({ ...settings, quiet_hours: null });
+            else if (last.from && last.to) save({ ...settings, quiet_hours: last });
+          }}
+        />
+        <span>{t("quiet.dnd")}</span>
+      </label>
+      {on && (
+        <div className="field-row">
+          <label className="field">
+            <span>{t("quiet.from")}</span>
+            <input type="time" value={hours.from} onChange={(e) => update({ ...hours, from: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>{t("quiet.to")}</span>
+            <input type="time" value={hours.to} onChange={(e) => update({ ...hours, to: e.target.value })} />
+          </label>
+        </div>
+      )}
       <label className="switch">
         <input
           type="checkbox"
@@ -114,8 +115,8 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
           checked={settings.notifications}
           aria-describedby={`${id}-n`}
           onChange={(e) => save({ ...settings, notifications: e.target.checked })}
-        />{" "}
-        {t("quiet.notifications")}
+        />
+        <span>{t("quiet.notifications")}</span>
       </label>
       <p id={`${id}-n`} className="muted small">
         {t("quiet.notifications.hint")}
@@ -144,7 +145,7 @@ export function YouPanel({ settings, save }: { settings: Settings; save: (s: Set
       >
         <NameAndBirthday id={id} name={name} setName={setName} month={month} setMonth={setMonth} day={day} setDay={setDay} />
         <p className="muted">{t("you.preview", { title: userTitle(t, name) })}</p>
-        <p className="row">
+        <p className="row form-actions">
           <button type="submit" disabled={!name.trim()}>
             {t("you.save")}
           </button>
@@ -182,11 +183,13 @@ export function NameAndBirthday(p: {
       <input id={`${p.id}-name`} value={p.name} required autoComplete="nickname" onChange={(e) => p.setName(e.target.value)} />
       <fieldset className="birthday">
         <legend>{p.birthdayLabel ?? t("you.birthday")}</legend>
-        <label>
-          {t("you.month")} <input type="number" min={1} max={12} inputMode="numeric" value={p.month} onChange={(e) => p.setMonth(e.target.value)} />
+        <label className="field">
+          <span>{t("you.month")}</span>
+          <input type="number" min={1} max={12} inputMode="numeric" value={p.month} onChange={(e) => p.setMonth(e.target.value)} />
         </label>
-        <label>
-          {t("you.day")} <input type="number" min={1} max={31} inputMode="numeric" value={p.day} onChange={(e) => p.setDay(e.target.value)} />
+        <label className="field">
+          <span>{t("you.day")}</span>
+          <input type="number" min={1} max={31} inputMode="numeric" value={p.day} onChange={(e) => p.setDay(e.target.value)} />
         </label>
       </fieldset>
     </>

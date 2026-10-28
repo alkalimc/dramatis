@@ -16,6 +16,8 @@
   /* text */
   --ink: #eef3f6;
   --muted: #8a9aa6;
+  /* small print on bubbles: stricter than muted, which sits on plain panels */
+  --stamp: #9fb0bc;
 
   /* accent: `--accent` is for text and icons, `--accent-fill` carries white text */
   --accent: #4fd0c0;
@@ -89,6 +91,7 @@
   --scrim: rgb(20 30 40 / 0.35);
   --ink: #1a2229;
   --muted: #566570;
+  --stamp: #3d4a54;
   --accent: #0b6f66;
   --accent-fill: #0b7a6f;
   --select: #0b7a6f;

@@ -21,6 +21,10 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
       return d({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
     case "menu":
       return d({ type: "menu", open: true });
+    case "profile":
+      return d({ type: "profile", mode: "view" });
+    case "profile-edit":
+      return d({ type: "profile", mode: "edit" });
     case "system":
       return d({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
     case "endpoints":

@@ -24,6 +24,10 @@ const PATHS = {
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20c0-4 3.6-6 8-6s8 2 8 6",
   bookmark: "M7 4h10v16l-5-4-5 4z",
   plus: "M12 5v14M5 12h14",
+  chevron: "M6 9l6 6 6-6",
+  calendar: "M5 6h14v14H5zM5 10h14M9 4v4M15 4v4",
+  profile: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6.5 18c1-2.3 3-3.5 5.5-3.5s4.5 1.2 5.5 3.5",
+  reset: "M4 12a8 8 0 1 0 3-6.2M4 4v4h4",
   unread: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
 } as const;
 

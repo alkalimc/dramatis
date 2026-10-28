@@ -35,20 +35,34 @@
   padding: var(--s-5);
 }
 
-/* ---- rail: tabs touch, no gaps ---- */
+/* ---- rail: the menu button on top, then tabs that touch, no gaps ---- */
 .rail {
   flex: none;
   width: var(--rail-w);
   background: var(--rail);
   border-right: 1px solid var(--line);
-  padding-top: var(--s-2);
 }
 .rail ul {
   display: flex;
   flex-direction: column;
 }
+button.rail-menu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 3.4rem;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  padding: 0;
+}
+button.rail-menu:hover {
+  color: var(--ink);
+  filter: none;
+}
 button.rail-item {
-  position: relative;
   width: 100%;
   flex-direction: column;
   gap: 2px;
@@ -57,7 +71,7 @@ button.rail-item {
   border-radius: 0;
   color: var(--muted);
   font-size: var(--fs-xs);
-  padding: var(--s-3) var(--s-1);
+  padding: var(--s-3) var(--s-1) var(--s-2);
 }
 button.rail-item:hover {
   background: var(--panel);
@@ -66,13 +80,29 @@ button.rail-item:hover {
 button.rail-item.on {
   color: var(--accent);
   background: var(--panel);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
-.rail-item .badge {
+.rail-icon {
+  position: relative;
+  display: inline-flex;
+}
+.rail-icon .badge {
   position: absolute;
-  top: var(--s-2);
-  left: 50%;
-  margin-left: 0.3rem;
+  top: -0.45rem;
+  left: 55%;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  line-height: 1.2rem;
+  padding: 0 0.3rem;
+  box-shadow: 0 0 0 2px var(--rail);
+}
+.rail-item.on .rail-icon .badge {
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.rail-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- chat list ---- */
@@ -282,7 +312,7 @@ button.chat-row.selected {
   margin: 0;
 }
 
-/* ---- left drawer (the hamburger) ---- */
+/* ---- left drawer (the hamburger): slides over the rail and part of the list ---- */
 .scrim {
   position: fixed;
   inset: 0;
@@ -290,28 +320,73 @@ button.chat-row.selected {
   z-index: 20;
 }
 .left-drawer {
-  width: min(20rem, 85vw);
+  width: min(17rem, 85vw);
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   box-shadow: var(--shadow);
+  animation: drawer-in 0.18s ease-out;
 }
-.left-head {
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .left-drawer {
+    animation: none;
+  }
+}
+button.left-head {
+  position: relative;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: var(--s-2);
-  padding: var(--s-5) var(--s-4) var(--s-4);
+  width: 100%;
+  padding: var(--s-5) var(--s-4) var(--s-3);
+  background: var(--panel);
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  text-align: left;
+}
+button.left-head:hover {
   background: var(--raised);
+  filter: none;
+}
+button.left-head .avatar {
+  --size: 4.4rem;
+}
+button.left-head > .icon-svg {
+  position: absolute;
+  right: var(--s-4);
+  bottom: var(--s-4);
+  color: var(--muted);
+}
+.left-who {
+  display: flex;
+  max-width: calc(100% - 2rem);
+  flex-direction: column;
+  min-width: 0;
 }
 .left-name {
-  margin: 0;
   font-weight: 600;
   font-size: var(--fs-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.left-sub {
+  color: var(--accent);
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .drawer-items {
-  flex: 1;
   padding: var(--s-2) 0;
+  border-top: 1px solid var(--line);
 }
 .drawer-item {
   display: flex;
@@ -327,7 +402,8 @@ button.chat-row.selected {
   color: var(--ink);
   cursor: pointer;
 }
-button.drawer-item:hover {
+button.drawer-item:hover,
+.switch-row:hover {
   background: var(--raised);
   filter: none;
 }
@@ -338,8 +414,13 @@ button.drawer-item:hover {
   flex: 1;
 }
 .left-foot {
-  padding: var(--s-3) var(--s-4);
-  border-top: 1px solid var(--line);
+  margin-top: auto;
+  padding: var(--s-4);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.left-foot p {
+  margin: 0;
 }
 
 /* ---- dialogs and menus ---- */

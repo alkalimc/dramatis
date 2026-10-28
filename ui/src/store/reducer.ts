@@ -252,6 +252,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, listView: a.view, menuOpen: false };
     case "menu":
       return { ...s, menuOpen: a.open };
+    case "profile":
+      return { ...s, profile: a.mode, menuOpen: false };
     case "unread":
       return { ...s, unread: a.count > 0 ? { ...s.unread, [a.channel]: a.count } : omit(s.unread, a.channel) };
     case "drawer":

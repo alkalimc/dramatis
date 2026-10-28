@@ -344,6 +344,7 @@ library.searching
 library.understood
 list.more
 list.separator
+menu.app
 menu.archived.count
 menu.contacts
 menu.label
@@ -399,7 +400,15 @@ person.voice.custom
 person.voice.default
 person.voice.save
 picture.change
+picture.default
+picture.failed
 picture.remove
+profile.birthday
+profile.birthday.none
+profile.edit
+profile.edit_title
+profile.name
+profile.save
 profile.title
 quiet.dnd
 quiet.from
@@ -516,6 +525,8 @@ typing.writing
 user.title
 user.you
 waiting.empty
+waiting.less
+waiting.more
 waiting.title
 weekday.fri
 weekday.mon
