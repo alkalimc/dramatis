@@ -193,6 +193,11 @@ impl Engine {
         self.ports.agent.wrapup(ch).await
     }
 
+    pub(crate) async fn rewind_impl(&self, ch: ChannelId, message: MessageId) -> ApiResult<String> {
+        channel::get(&self.w(), convert::world_channel(&ch)?).map_err(world_err)?;
+        self.ports.agent.rewind(ch, message).await
+    }
+
     pub(crate) async fn relay_impl(
         &self,
         excerpt: String,

@@ -321,8 +321,8 @@ impl Show {
         }
     }
 
-    /// The sources of a message, compactly: the header of each cited passage.
-    fn sources(&self, names: &Names, m: &Message) -> Option<String> {
+    /// The distinct sources of a message: the header of each cited passage.
+    fn source_list(names: &Names, m: &Message) -> Vec<String> {
         let mut seen: Vec<String> = Vec::new();
         for c in &m.cites {
             let label = names.source(c);
@@ -330,12 +330,29 @@ impl Show {
                 seen.push(label);
             }
         }
-        // Low confidence is the common case and says nothing a reader can act on, so it
-        // gets no label here.
-        if seen.is_empty() {
+        seen
+    }
+
+    /// The sources of a message folded to a count, as printed under a reply. Low
+    /// confidence is the common case and says nothing a reader can act on, so it gets no
+    /// label here.
+    fn sources(&self, names: &Names, m: &Message) -> Option<String> {
+        let n = Self::source_list(names, m).len();
+        (n > 0).then(|| format!("sources: {n}  (/sources to show)"))
+    }
+
+    /// The sources of a message in full, one per line; `None` when it cites nothing.
+    pub fn sources_in_full(&self, m: &Message) -> Option<String> {
+        let b = self.bound.get()?;
+        let list = Self::source_list(&b.names, m);
+        if list.is_empty() {
             return None;
         }
-        Some(format!("sources: {}", seen.join("; ")))
+        let mut out = format!("sources ({}):\n", list.len());
+        for s in list {
+            out.push_str(&format!("  {s}\n"));
+        }
+        Some(out)
     }
 
     /// A stored message in full: name, text, tool lines, sources.

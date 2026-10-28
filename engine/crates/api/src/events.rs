@@ -80,6 +80,14 @@ events! {
         pub status: QuotaStatus,
     }
 
+    /// The user took a message back: it and every later message of the channel are gone
+    /// (and so is what the engine wrote because of them). A UI drops them from the view
+    /// and refetches what it shows of the narrative state.
+    Rewound {
+        pub channel: ChannelId,
+        pub from: MessageId,
+    }
+
     /// Shown as a system notification when the window is closed. The text is the
     /// person's own line.
     Notification {

@@ -23,6 +23,7 @@ export interface Events {
   modeChanged: EventSource<gen.ModeChanged>;
   notification: EventSource<gen.Notification>;
   quotaChanged: EventSource<gen.QuotaChanged>;
+  rewound: EventSource<gen.Rewound>;
   rosterChanged: EventSource<gen.RosterChanged>;
   toolCalled: EventSource<gen.ToolCalled>;
   turnActivity: EventSource<gen.TurnActivity>;

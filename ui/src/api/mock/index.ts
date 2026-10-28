@@ -600,6 +600,16 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       });
       return ok(m.id);
     },
+    rewind: (channel, message) => {
+      const ch = channels.get(channel);
+      const i = ch ? ch.log.findIndex((m) => m.id === message) : -1;
+      if (!ch || i < 0) return fail({ code: "not_found" });
+      const m = ch.log[i];
+      if (m.author.kind !== "user") return fail({ code: "invalid", field: "request" });
+      ch.log.splice(i);
+      setTimeout(() => bus.rewound.emit({ channel, from: message }));
+      return ok(m.text);
+    },
     relay: (excerpt, _from, to) => {
       const p = persons.get(to);
       if (!p) return fail({ code: "not_found" });

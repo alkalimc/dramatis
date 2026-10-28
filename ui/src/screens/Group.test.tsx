@@ -55,7 +55,7 @@ test("enabled group: one person answers and at most one more adds a line like a 
   await waitFor(() => expect(header.querySelector(".mode-hint")!.textContent).toMatch(/^Enabled/));
   const before = within(log).getAllByRole("article").length;
 
-  await user.type(screen.getByRole("textbox", { name: "Message" }), "Tess, what do you know about the tide?{Enter}");
+  await user.type(screen.getByRole("textbox", { name: "Message" }), "Tess, what do you know about the tide?{Meta>}{Enter}{/Meta}");
   const interjection = await within(log).findByText("If I may add: I've seen something about that too.");
   expect(interjection.closest("article")!.className).toContain("from-other");
   const added = within(log).getAllByRole("article").slice(before);
@@ -69,7 +69,7 @@ test("frozen group: only the addressed person replies", async () => {
   const log = await screen.findByRole("log");
   await within(log).findByText("It did. I'm on nights this week.");
   const before = within(log).getAllByRole("article").length;
-  await user.type(screen.getByRole("textbox", { name: "Message" }), "Tess, what do you know about the tide?{Enter}");
+  await user.type(screen.getByRole("textbox", { name: "Message" }), "Tess, what do you know about the tide?{Meta>}{Enter}{/Meta}");
   await waitFor(() => expect(within(log).getAllByRole("article").length).toBe(before + 2));
   expect(within(log).queryByText(/If I may add/)).toBeNull();
 });

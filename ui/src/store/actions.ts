@@ -127,6 +127,17 @@ export function createActions(api: Api, store: Store) {
     await open(channel);
   }
 
+  /**
+   * Take one of the user's messages back with everything after it, and hand its text to
+   * the channel's composer. The engine refuses while a reply is being written there.
+   */
+  async function resend(channel: ChannelId, message: string) {
+    const text = await attempt(c.rewind(channel, message));
+    if (text === undefined) return;
+    d({ type: "rewound", event: { channel, from: message } });
+    d({ type: "restore", restore: { channel, text } });
+  }
+
   async function setMode(target: Target, mode: Mode) {
     // The store follows the `ModeChanged` event, which also covers changes the host makes.
     await attempt(c.setMode(target, mode));
@@ -156,6 +167,7 @@ export function createActions(api: Api, store: Store) {
     open,
     openDirect,
     openChannel,
+    resend,
     setMode,
     saveSettings,
   };
@@ -196,6 +208,11 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
     }),
     e.toolCalled.listen(({ payload }) => d({ type: "toolCalled", event: payload })),
     e.turnActivity.listen(({ payload }) => d({ type: "turnActivity", event: payload })),
+    e.rewound.listen(({ payload }) => {
+      d({ type: "rewound", event: payload });
+      void actions.refreshChannels();
+      void actions.refreshDigest();
+    }),
     e.modeChanged.listen(({ payload }) => d({ type: "modeChanged", event: payload })),
     e.rosterChanged.listen(() => {
       d({ type: "rosterChanged" });

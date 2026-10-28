@@ -16,6 +16,7 @@ import type {
   PersonId,
   PersonRef,
   QuotaStatus,
+  Rewound,
   Roster,
   Settings,
   TaskId,
@@ -105,6 +106,10 @@ export interface State {
   typing: Record<ChannelId, Record<string, Typing>>;
   /** Every person name seen in any payload, for labelling authors. */
   names: Record<PersonId, string>;
+  /** Messages whose sources are unfolded; all start folded, and it lasts the session. */
+  sourcesOpen: Record<MessageId, true>;
+  /** Text a take-back put back for a channel's composer to pick up. */
+  restore: { channel: ChannelId; text: string } | null;
   /** Bumped on each `WorldChanged`: screens holding fetched facts or tasks refetch. */
   worldVersion: number;
   /** Bumped on roster or mode changes: person pages refetch. */
@@ -144,6 +149,8 @@ export function initialState(): State {
     awaiting: {},
     typing: {},
     names: {},
+    sourcesOpen: {},
+    restore: null,
     worldVersion: 0,
     peopleVersion: 0,
     loading: {},
@@ -179,6 +186,9 @@ export type Action =
   | { type: "modeChanged"; event: ModeChanged }
   | { type: "worldChanged"; event: WorldChanged }
   | { type: "rosterChanged" }
+  | { type: "rewound"; event: Rewound }
+  | { type: "restore"; restore: { channel: ChannelId; text: string } | null }
+  | { type: "sources"; message: MessageId }
   | { type: "awaiting"; channel: ChannelId; on: boolean }
   | { type: "loading"; key: LoadKey }
   | { type: "loaded"; key: LoadKey; error: Failure | null }

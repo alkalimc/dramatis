@@ -2,8 +2,10 @@
 //!
 //! A line-based REPL over the same engine, ports and world file the app uses, through the
 //! same seam commands and events: slash commands, anything else is a message to the
-//! current channel, replies stream as they are generated. On a terminal the line is edited by rustyline, which measures wide (CJK)
-//! characters correctly; piped input is read as plain lines.
+//! current channel, replies stream as they are generated. On a terminal the input is edited
+//! by rustyline, which measures wide (CJK) characters correctly: Enter starts a new line
+//! and Ctrl-J or Alt-Enter sends (a slash command runs on Enter). Piped input, and
+//! `--plain`, is read as plain lines, one message each.
 
 mod command;
 mod render;
@@ -154,6 +156,44 @@ async fn header(engine: &api::Engine, folio: &Path, home: &Home, fresh: bool) ->
     )
 }
 
+/// Enter in the editor: a slash command runs at once, anything else gets a new line, so a
+/// message can span lines. Sending a message is Ctrl-J or Alt-Enter.
+struct EnterKey;
+
+impl rustyline::ConditionalEventHandler for EnterKey {
+    fn handle(
+        &self,
+        _: &rustyline::Event,
+        _: rustyline::RepeatCount,
+        _: bool,
+        ctx: &rustyline::EventContext,
+    ) -> Option<rustyline::Cmd> {
+        Some(if is_command_line(ctx.line()) {
+            rustyline::Cmd::AcceptLine
+        } else {
+            rustyline::Cmd::Newline
+        })
+    }
+}
+
+/// A single line that starts with a slash: a command (or `//text`), run on Enter.
+fn is_command_line(line: &str) -> bool {
+    line.starts_with('/') && !line.contains('\n')
+}
+
+/// The line editor with the key scheme: Enter newline, Ctrl-J / Alt-Enter send.
+fn editor() -> rustyline::Result<rustyline::DefaultEditor> {
+    use rustyline::{Cmd, EventHandler, KeyCode, KeyEvent, Modifiers};
+    let mut editor = rustyline::DefaultEditor::new()?;
+    editor.bind_sequence(
+        KeyEvent(KeyCode::Enter, Modifiers::NONE),
+        EventHandler::Conditional(Box::new(EnterKey)),
+    );
+    editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::ALT), Cmd::AcceptLine);
+    editor.bind_sequence(KeyEvent::ctrl('J'), Cmd::AcceptLine);
+    Ok(editor)
+}
+
 /// Where the next line comes from.
 enum Input {
     /// Line editing on a terminal; the editor travels to a blocking thread and back.
@@ -165,7 +205,7 @@ enum Input {
 impl Input {
     fn open(plain: bool) -> Result<Self> {
         if !plain && std::io::stdin().is_terminal() {
-            return Ok(Self::Edit(Box::new(rustyline::DefaultEditor::new()?)));
+            return Ok(Self::Edit(Box::new(editor()?)));
         }
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         std::thread::spawn(move || {
@@ -184,7 +224,8 @@ impl Input {
     }
 
     /// The next line, or `None` at the end of input. `Some("")` for an abandoned line.
-    async fn next(&mut self, prompt: String) -> Option<String> {
+    /// `initial` is text the line starts with, for the user to edit.
+    async fn next(&mut self, prompt: String, initial: Option<String>) -> Option<String> {
         match self {
             Self::Lines(rx) => tokio::select! {
                 l = rx.recv() => l,
@@ -192,10 +233,12 @@ impl Input {
             },
             Self::Edit(slot) => {
                 use rustyline::error::ReadlineError;
-                let mut editor =
-                    std::mem::replace(slot, Box::new(rustyline::DefaultEditor::new().ok()?));
+                let mut editor = std::mem::replace(slot, Box::new(editor().ok()?));
                 let (editor, line) = tokio::task::spawn_blocking(move || {
-                    let line = editor.readline(&prompt);
+                    let line = match &initial {
+                        Some(text) => editor.readline_with_initial(&prompt, (text, "")),
+                        None => editor.readline(&prompt),
+                    };
                     if let Ok(l) = &line
                         && !l.trim().is_empty()
                     {
@@ -220,7 +263,9 @@ async fn repl(mut session: Session, plain: bool) -> Result<()> {
     let mut input = Input::open(plain)?;
     let interactive = matches!(input, Input::Edit(_));
     if interactive {
-        println!("type /help for commands, /quit or Ctrl-D to leave");
+        println!(
+            "Enter = new line, Ctrl-J or Alt-Enter = send; /help for commands, /quit or Ctrl-D to leave"
+        );
     }
     loop {
         let prompt = if interactive {
@@ -228,12 +273,32 @@ async fn repl(mut session: Session, plain: bool) -> Result<()> {
         } else {
             String::new()
         };
-        let Some(line) = input.next(prompt).await else {
+        let initial = session.take_prefill();
+        if !interactive && let Some(text) = &initial {
+            // No editor to put it in: show it, to be typed again.
+            println!("{text}");
+        }
+        let Some(line) = input.next(prompt, initial).await else {
             println!();
             return Ok(());
         };
         if session.handle(parse(&line)).await == Flow::Quit {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod keys {
+    use super::is_command_line;
+
+    #[test]
+    fn enter_runs_a_slash_command_and_otherwise_starts_a_new_line() {
+        assert!(is_command_line("/help"));
+        assert!(is_command_line("//literal slash"));
+        assert!(!is_command_line("hello"));
+        assert!(!is_command_line(""));
+        // Once a message spans lines, a slash on the first line no longer makes it a command.
+        assert!(!is_command_line("/not a command\nsecond line"));
     }
 }

@@ -614,6 +614,9 @@ button.nav.on {
   flex-direction: column;
   gap: 0.4rem;
 }
+.composer-hint {
+  margin: 0;
+}
 .composer-actions {
   display: flex;
   gap: 0.4rem;

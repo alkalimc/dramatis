@@ -21,6 +21,7 @@ export function createBus() {
     modeChanged: make<import("../../api.gen").ModeChanged>(),
     notification: make<import("../../api.gen").Notification>(),
     quotaChanged: make<import("../../api.gen").QuotaChanged>(),
+    rewound: make<import("../../api.gen").Rewound>(),
     rosterChanged: make<import("../../api.gen").RosterChanged>(),
     toolCalled: make<import("../../api.gen").ToolCalled>(),
     turnActivity: make<import("../../api.gen").TurnActivity>(),

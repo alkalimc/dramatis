@@ -166,3 +166,36 @@ test("a failed turn drops its half-written bubble", () => {
   s = reduce(s, { type: "turnActivity", event: { channel: "c1", author, state: { kind: "failed", reason: "error" } } });
   expect(s.streams.m1).toBeUndefined();
 });
+
+test("a take-back drops that message and everything after it, and only in its channel", () => {
+  let s: State = initialState();
+  s = reduce(s, {
+    type: "history",
+    channel: "c1",
+    messages: [message("m1", "2026-01-01T10:00:00Z"), message("m2", "2026-01-01T10:01:00Z"), message("m3", "2026-01-01T10:02:00Z")],
+    older: false,
+    done: true,
+  });
+  s = reduce(s, { type: "history", channel: "c2", messages: [message("n1", "2026-01-01T10:00:00Z", { channel: "c2" })], older: false, done: true });
+  s = reduce(s, { type: "sources", message: "m3" });
+  s = reduce(s, { type: "awaiting", channel: "c1", on: true });
+  const version = s.worldVersion;
+  s = reduce(s, { type: "rewound", event: { channel: "c1", from: "m2" } });
+  expect(s.messages.c1.map((m) => m.id)).toEqual(["m1"]);
+  expect(s.messages.c2.map((m) => m.id)).toEqual(["n1"]);
+  expect(s.sourcesOpen).toEqual({});
+  expect(s.awaiting).toEqual({});
+  expect(s.worldVersion).toBe(version + 1);
+  // Repeated or for a message that is not loaded: nothing more to drop.
+  expect(reduce(s, { type: "rewound", event: { channel: "c1", from: "m2" } })).toBe(s);
+});
+
+test("sources start folded and toggle per message", () => {
+  let s: State = initialState();
+  expect(s.sourcesOpen.m1).toBeUndefined();
+  s = reduce(s, { type: "sources", message: "m1" });
+  expect(s.sourcesOpen.m1).toBe(true);
+  s = reduce(s, { type: "sources", message: "m2" });
+  s = reduce(s, { type: "sources", message: "m1" });
+  expect(s.sourcesOpen).toEqual({ m2: true });
+});

@@ -131,6 +131,13 @@ impl AgentPort for Spy {
         self.calls.lock().unwrap().push(format!("ask {} {q}", p.0));
         Ok(TaskId("1".into()))
     }
+    async fn rewind(&self, c: ChannelId, m: MessageId) -> ApiResult<String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("rewind {} {}", c.0, m.0));
+        Ok("again".into())
+    }
     async fn wrapup(&self, c: ChannelId) -> ApiResult<()> {
         self.calls.lock().unwrap().push(format!("wrapup {}", c.0));
         Ok(())
@@ -531,6 +538,13 @@ async fn people_without_a_persona_are_visible_but_cannot_be_reached() {
     assert_eq!(
         r.spy.calls.lock().unwrap().last().unwrap(),
         &format!("wrapup {}", ch.0)
+    );
+    // Taking a message back goes to the agent and returns its text.
+    let text = e.rewind(ch.clone(), MessageId("7".into())).await.unwrap();
+    assert_eq!(text, "again");
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        &format!("rewind {} 7", ch.0)
     );
 }
 

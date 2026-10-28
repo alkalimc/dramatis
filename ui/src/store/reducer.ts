@@ -185,6 +185,29 @@ export function reduce(s: State, a: Action): State {
       return { ...s, worldVersion: s.worldVersion + 1 };
     case "rosterChanged":
       return { ...s, peopleVersion: s.peopleVersion + 1 };
+    case "rewound": {
+      const { channel, from } = a.event;
+      const list = s.messages[channel];
+      const i = list?.findIndex((m) => m.id === from) ?? -1;
+      if (!list || i < 0) return s;
+      const gone = new Set(list.slice(i).map((m) => m.id));
+      const streams = Object.fromEntries(Object.entries(s.streams).filter(([id, v]) => v.channel !== channel && !gone.has(id)));
+      const keep = <V,>(rec: Record<string, V>) => Object.fromEntries(Object.entries(rec).filter(([id]) => !gone.has(id)));
+      return {
+        ...s,
+        messages: { ...s.messages, [channel]: list.slice(0, i) },
+        streams,
+        pendingActions: keep(s.pendingActions),
+        sourcesOpen: keep(s.sourcesOpen),
+        awaiting: answered(s, channel),
+        typing: omit(s.typing, channel),
+        worldVersion: s.worldVersion + 1,
+      };
+    }
+    case "restore":
+      return { ...s, restore: a.restore };
+    case "sources":
+      return { ...s, sourcesOpen: s.sourcesOpen[a.message] ? omit(s.sourcesOpen, a.message) : { ...s.sourcesOpen, [a.message]: true } };
     case "awaiting":
       return { ...s, awaiting: a.on ? { ...s.awaiting, [a.channel]: true } : answered(s, a.channel) };
     case "loading":

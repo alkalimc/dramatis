@@ -61,6 +61,8 @@ pub struct Session {
     calls: Vec<Timed>,
     /// The highest meter row already counted; rows before the session are not ours.
     metered: i64,
+    /// Text for the next input line to start with (`/resend`).
+    prefill: Option<String>,
 }
 
 fn now_ms() -> i64 {
@@ -103,6 +105,7 @@ impl Session {
             offers: Vec::new(),
             calls: Vec::new(),
             metered,
+            prefill: None,
         }
     }
 
@@ -116,6 +119,11 @@ impl Session {
             style.dim(&format!("[{channel}]")),
             style.bold(&self.names.user())
         )
+    }
+
+    /// The text `/resend` put back, for the editor to start the next line with.
+    pub fn take_prefill(&mut self) -> Option<String> {
+        self.prefill.take()
     }
 
     /// Set the user's name; a changed name rolls the channels over, as in the app.
@@ -159,6 +167,8 @@ impl Session {
             Command::Wrapup => self.wrapup().await,
             Command::Memories(who) => self.memories(who.as_deref()).await,
             Command::History(n) => self.history(n).await,
+            Command::Resend(n) => self.resend(n).await,
+            Command::Sources(n) => self.sources(n).await,
             Command::Search(query) => self.search(&query).await,
             Command::Stats => self.stats(),
         }
@@ -594,6 +604,70 @@ impl Session {
                 }
             }
             Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    /// Messages to look back through for `/resend` and `/sources`.
+    const LOOKBACK: u32 = 500;
+
+    /// Take back the user's n-th last message here and hand its text to the input line.
+    async fn resend(&mut self, n: usize) {
+        let Some(channel) = self.current_channel().await else {
+            return;
+        };
+        let messages = match self
+            .engine
+            .history(channel.clone(), None, Self::LOOKBACK)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        let Some(at) = messages
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, m)| m.author == Author::User)
+            .nth(n - 1)
+            .map(|(i, _)| i)
+        else {
+            return self.term.note("no message of yours to send again");
+        };
+        let removed = messages.len() - at;
+        match self.engine.rewind(channel, messages[at].id.clone()).await {
+            Ok(text) => {
+                self.term.note(&format!(
+                    "took back {removed} message{}; edit it and send again",
+                    if removed == 1 { "" } else { "s" }
+                ));
+                self.prefill = Some(text);
+            }
+            Err(api::ApiError::Invalid { field }) if field == "busy" => {
+                self.term
+                    .note("a reply is still being written here; try again when it ends");
+            }
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    /// Print in full the sources of the n-th last reply that cites any.
+    async fn sources(&self, n: usize) {
+        let Some(channel) = self.current_channel().await else {
+            return;
+        };
+        let messages = match self.engine.history(channel, None, Self::LOOKBACK).await {
+            Ok(m) => m,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        let found = messages
+            .iter()
+            .rev()
+            .filter(|m| m.author != Author::User && !m.cites.is_empty())
+            .nth(n - 1)
+            .and_then(|m| self.show.sources_in_full(m));
+        match found {
+            Some(text) => self.term.print(&text),
+            None => self.term.note("no reply with sources there"),
         }
     }
 

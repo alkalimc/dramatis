@@ -24,9 +24,15 @@ test("a direct channel renders scene lines apart from speech, with sources and r
   expect(scene.closest(".bubble")).toBeNull();
   expect(screen.getAllByText("Mira Vale").length).toBeGreaterThan(0);
   expect(screen.getByText(/Mira Vale ▸ asking Oren Lark to take a look/)).toBeDefined();
-  // Her own material folds under the bubble; the other passage is a quote card.
-  expect(await screen.findByRole("button", { name: "Sources (1)" })).toBeDefined();
+  // Sources start folded: her own material as a list, the other passage as a quote card.
+  const toggle = await screen.findByRole("button", { name: "Sources (2)" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText("From the archive")).toBeNull();
+  await user.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(screen.getByText("From the archive")).toBeDefined();
+  await user.click(toggle);
+  expect(screen.queryByText("From the archive")).toBeNull();
   expect(screen.getAllByRole("button", { name: "Read aloud" }).length).toBeGreaterThan(0);
 });
 
