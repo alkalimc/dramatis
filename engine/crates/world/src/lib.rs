@@ -118,10 +118,11 @@ impl World {
     /// Open (creating if absent) and migrate to the latest schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let mut conn = Connection::open(path)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
         // The app and the terminal client may hold the same file: a writer waits for the
-        // other instead of failing with "database is locked".
+        // other instead of failing with "database is locked". First, so that switching to
+        // WAL below waits too.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
         migrate(&mut conn)?;
         Ok(Self { conn })
     }
@@ -149,6 +150,43 @@ impl DerefMut for World {
     fn deref_mut(&mut self) -> &mut Connection {
         &mut self.conn
     }
+}
+
+/// Run `f` all-or-nothing: if it fails, none of its writes stay. Outside a transaction
+/// this takes the write lock up front (so a read-then-write function cannot fail midway
+/// on a stale snapshot) and commits at the end; inside one, such as a caller's or
+/// [`rewind`]'s, it is a savepoint that rolls back alone and leaves the outer
+/// transaction's decision to the caller.
+pub fn atomic<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+    let outer = conn.is_autocommit();
+    conn.execute_batch(if outer {
+        "BEGIN IMMEDIATE"
+    } else {
+        "SAVEPOINT atomic"
+    })?;
+    match f(conn) {
+        Ok(v) => {
+            let end = if outer { "COMMIT" } else { "RELEASE atomic" };
+            if let Err(e) = conn.execute_batch(end) {
+                undo(conn, outer);
+                return Err(e.into());
+            }
+            Ok(v)
+        }
+        Err(e) => {
+            undo(conn, outer);
+            Err(e)
+        }
+    }
+}
+
+fn undo(conn: &Connection, outer: bool) {
+    // Best effort: the original error is what the caller needs to see.
+    let _ = conn.execute_batch(if outer {
+        "ROLLBACK"
+    } else {
+        "ROLLBACK TO atomic; RELEASE atomic"
+    });
 }
 
 /// Open (creating if absent) and migrate to the latest schema.

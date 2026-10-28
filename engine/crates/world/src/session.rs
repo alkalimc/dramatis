@@ -6,7 +6,7 @@
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::params;
-use crate::types::{ChannelId, Mode, PersonId, TaskId};
+use crate::types::{ChannelId, PersonId, TaskId};
 use crate::{Error, Result, bond, channel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -175,25 +175,6 @@ pub fn open(
     Ok(SessionId(conn.last_insert_rowid()))
 }
 
-/// Whether he may reply in this channel now, and why not. Enabled people may always
-/// answer where they take part; anyone else needs an open session with budget left.
-pub fn may_reply(conn: &Connection, channel: ChannelId, person: &PersonId) -> Result<bool> {
-    let mode = bond::mode(conn, person)?;
-    if mode == Mode::Disabled || !channel::get(conn, channel)?.is_open() {
-        return Ok(false);
-    }
-    match current(conn, channel, person)? {
-        Some(s) => Ok(match s.budget {
-            Budget::Replies(n) => n > 0,
-            Budget::Task(t) => {
-                crate::task::get(conn, t)?.status == crate::types::TaskStatus::Active
-            }
-            Budget::User => true,
-        }),
-        None => Ok(mode == Mode::Enabled),
-    }
-}
-
 /// He replied: record the activity and spend a reply from a reply budget. A session
 /// whose replies are used up closes; the returned channel then needs a wrap-up if no
 /// other session there is still open.
@@ -319,16 +300,14 @@ mod tests {
     use super::*;
     use crate::params::Session as SessionParams;
     use crate::testing::*;
-    use crate::types::Origin;
+    use crate::types::{Mode, Origin};
 
     #[test]
     fn frozen_people_reply_only_inside_a_triggered_session() {
         let w = world();
         let c = channel::direct(&w, &p("a")).unwrap();
-        assert!(!may_reply(&w, c, &p("a")).unwrap());
         let s = open(&w, c, &p("a"), Budget::User, Cause::Addressed, T0).unwrap();
         assert!(is_thawed(&w, &p("a")).unwrap());
-        assert!(may_reply(&w, c, &p("a")).unwrap());
         assert_eq!(
             bond::mode(&w, &p("a")).unwrap(),
             Mode::Frozen,
@@ -346,7 +325,6 @@ mod tests {
             vec![c]
         );
         assert!(!is_thawed(&w, &p("a")).unwrap());
-        assert!(!may_reply(&w, c, &p("a")).unwrap());
         assert!(get(&w, s).unwrap().closed_at.is_some());
     }
 
@@ -370,26 +348,22 @@ mod tests {
         let g = channel::create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
         open(&w, g, &p("a"), Budget::User, Cause::Addressed, T0).unwrap();
         open(&w, g, &p("b"), Budget::Replies(1), Cause::Join, T0).unwrap();
-        assert!(may_reply(&w, g, &p("b")).unwrap());
         // His reply ends his session, but the channel's conversation goes on.
         assert_eq!(replied(&w, g, &p("b"), T0 + 1).unwrap(), None);
-        assert!(!may_reply(&w, g, &p("b")).unwrap());
         assert_eq!(close_channel(&w, g, T0 + 2).unwrap(), Some(g));
         assert_eq!(close_channel(&w, g, T0 + 3).unwrap(), None);
     }
 
     #[test]
-    fn disabled_cannot_be_triggered_and_enabled_need_no_session() {
+    fn a_disabled_person_cannot_be_triggered() {
         let w = world();
         let c = channel::direct(&w, &p("a")).unwrap();
         bond::set_mode(&w, &p("a"), Mode::Enabled).unwrap();
-        assert!(may_reply(&w, c, &p("a")).unwrap());
         bond::set_mode(&w, &p("a"), Mode::Disabled).unwrap();
         assert!(matches!(
             open(&w, c, &p("a"), Budget::User, Cause::Addressed, T0),
             Err(Error::Disabled(_))
         ));
-        assert!(!may_reply(&w, c, &p("a")).unwrap());
     }
 
     #[test]

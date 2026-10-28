@@ -164,15 +164,6 @@ pub fn pair_bond(conn: &Connection, p: &PersonId, q: &PersonId) -> Result<Option
         .optional()?)
 }
 
-/// Every pair bond `person` is in: the acquaintances the user's play made.
-pub fn pair_bonds_of(conn: &Connection, person: &PersonId) -> Result<Vec<Bond>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {COLUMNS} FROM bond WHERE a <> 'user' AND (a = ?1 OR b = ?1) ORDER BY a, b"
-    ))?;
-    let rows = stmt.query_map([person], read)?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
 pub(crate) fn ensure_pair_bond(conn: &Connection, p: &PersonId, q: &PersonId) -> Result<()> {
     reject_reserved(p)?;
     reject_reserved(q)?;
@@ -255,7 +246,6 @@ mod tests {
             (Actor::Person(p("a")), p("b"), 0)
         );
         assert_eq!(pair_bond(&w, &p("b"), &p("a")).unwrap(), Some(bond));
-        assert_eq!(pair_bonds_of(&w, &p("b")).unwrap().len(), 1);
         assert!(ensure_pair_bond(&w, &p("a"), &p("a")).is_err());
     }
 
