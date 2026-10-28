@@ -233,10 +233,11 @@ commands! {
     /// this process ends (a switch to it then needs no asking). `WrongPassword` leaves
     /// everything as it was.
     fn unlock(name: String, password: String) -> ();
-    /// Encrypt, re-key or decrypt the current save, which must be unlocked: `old` is its
-    /// password (`None` while it is plain), `new` the password it gets (`None` removes the
-    /// encryption). Needs the engine idle. A forgotten password cannot be recovered.
-    fn set_password(old: Option<String>, new: Option<String>) -> ();
+    /// Encrypt, re-key or decrypt the current save, which must be unlocked: `current` is
+    /// its password (`None` while it is plain), `next` the password it gets (`None`
+    /// removes the encryption). Needs the engine idle. A forgotten password cannot be
+    /// recovered.
+    fn set_password(current: Option<String>, next: Option<String>) -> ();
 
     // ---- endpoints ----
 

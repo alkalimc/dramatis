@@ -161,9 +161,23 @@ export const commands = {
 	exportSave: (name: string, path: string) => typedError<null, ApiError>(__TAURI_INVOKE("export_save", { name, path })),
 	/**
 	 *  Add the world database at `path` as a save (checked, then migrated). `name`
-	 *  defaults to the file's name. Returns the name used.
+	 *  defaults to the file's name. Returns the name used. An encrypted file needs its
+	 *  `password` (`Locked` without one, `WrongPassword` with a wrong one); the save keeps it.
 	 */
-	importSave: (path: string, name: string | null) => typedError<string, ApiError>(__TAURI_INVOKE("import_save", { path, name })),
+	importSave: (path: string, name: string | null, password: string | null) => typedError<string, ApiError>(__TAURI_INVOKE("import_save", { path, name, password })),
+	/**
+	 *  Open the encrypted save `name` with its password and remember the password until
+	 *  this process ends (a switch to it then needs no asking). `WrongPassword` leaves
+	 *  everything as it was.
+	 */
+	unlock: (name: string, password: string) => typedError<null, ApiError>(__TAURI_INVOKE("unlock", { name, password })),
+	/**
+	 *  Encrypt, re-key or decrypt the current save, which must be unlocked: `current` is
+	 *  its password (`None` while it is plain), `next` the password it gets (`None`
+	 *  removes the encryption). Needs the engine idle. A forgotten password cannot be
+	 *  recovered.
+	 */
+	setPassword: (current: string | null, next: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("set_password", { current, next })),
 	endpoints: () => typedError<EndpointsView, ApiError>(__TAURI_INVOKE("endpoints")),
 	addProfile: (profile: Profile) => typedError<null, ApiError>(__TAURI_INVOKE("add_profile", { profile })),
 	/**  Replace the profile called `name` (which may rename it). */
@@ -248,7 +262,14 @@ export type ApiError = { code: "not_implemented" } | { code: "not_found" } |
 /**  A reply or request is being written; what was asked waits for it to end. */
 { code: "busy" } | 
 /**  A save with that name is already there. */
-{ code: "exists" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
+{ code: "exists" } | 
+/**
+ *  The save is encrypted and this process has no password for it yet: ask, then
+ *  `unlock`.
+ */
+{ code: "locked" } | 
+/**  A password was given and does not open the save. */
+{ code: "wrong_password" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
 
 export type AppForm = 
 /**  No chat endpoint, or no network: roster and search only. */
@@ -261,6 +282,11 @@ export type AppStatus = {
 	corpus: CorpusState,
 	/**  No user name yet: show the first-run form. */
 	needs_setup: boolean,
+	/**
+	 *  The open save is encrypted and not unlocked: only `unlock` (or switching to another
+	 *  save) works until then.
+	 */
+	locked: boolean,
 };
 
 /**  Who can recall a fact. Shown on every row: the only place visibility surfaces. */
@@ -707,6 +733,8 @@ export type SaveInfo = {
 	played_at: Timestamp | null,
 	/**  The save this process has open. */
 	current: boolean,
+	/**  Protected by a password. */
+	encrypted: boolean,
 };
 
 /**  A line wrapped in these is scene description, rendered apart from speech. */
@@ -725,6 +753,11 @@ export type SearchResults = {
 export type Settings = {
 	user_name: string | null,
 	birthday: MonthDay | null,
+	/**
+	 *  A few lines the user writes about themselves; characters are told them. At most
+	 *  `world::settings::BIO_MAX` characters.
+	 */
+	bio: string | null,
 	/**  `None`: no quiet hours. The engine fills the register default on first run. */
 	quiet_hours: QuietHours | null,
 	notifications: boolean,

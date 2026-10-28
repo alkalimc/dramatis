@@ -655,8 +655,12 @@ impl Api for Engine {
     async fn unlock(&self, name: String, password: String) -> ApiResult<()> {
         self.unlock_impl(&name, password)
     }
-    async fn set_password(&self, old: Option<String>, new: Option<String>) -> ApiResult<()> {
-        self.set_password_impl(old, new)
+    async fn set_password(
+        &self,
+        current: Option<String>,
+        next: Option<String>,
+    ) -> ApiResult<()> {
+        self.set_password_impl(current, next)
     }
     async fn endpoints(&self) -> ApiResult<EndpointsView> {
         Ok(self.endpoints_view())

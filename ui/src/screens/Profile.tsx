@@ -10,6 +10,9 @@ import { Menu } from "../ui/Menu";
 import { UserAvatar } from "../ui/Avatar";
 import { birthday } from "./Quota";
 
+/** Longest personal bio, in characters; the engine refuses more. */
+export const BIO_MAX = 200;
+
 /** A picture control: takes a file, and can drop the current one again. */
 export function PictureButtons({ onPick, onClear, clearable }: { onPick: (f: File) => void; onClear: () => void; clearable: boolean }) {
   const t = useT();
@@ -108,6 +111,7 @@ export function ProfileCard({ mode }: { mode: "view" | "edit" }) {
             <UserAvatar size="xl" />
             <p className="pc-name">{settings.user_name?.trim() || t("user.you")}</p>
             {status && <p className="pc-status">{status}</p>}
+            {settings.bio && <p className="pc-bio">{settings.bio}</p>}
           </div>
           <div className="pc-rows">
             <InfoRow icon="profile" value={settings.user_name?.trim() || t("user.you")} label={t("profile.name")} />
@@ -131,11 +135,13 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
   const [name, setName] = useState(settings?.user_name ?? "");
   const [month, setMonth] = useState(settings?.birthday ? String(settings.birthday.month) : "");
   const [day, setDay] = useState(settings?.birthday ? String(settings.birthday.day) : "");
+  const [bio, setBio] = useState(settings?.bio ?? "");
   const [editing, setEditing] = useState<"name" | "birthday" | null>(null);
   const [failed, setFailed] = useState(false);
   const [camera, setCamera] = useState<{ x: number; y: number } | null>(null);
   if (!settings) return null;
   const when = birthday(month, day);
+  const left = BIO_MAX - Array.from(bio.trim()).length;
   const toggle = (k: "name" | "birthday") => setEditing(editing === k ? null : k);
 
   const pick = async (f: File) => {
@@ -152,8 +158,8 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
       className="pc-edit"
       onSubmit={async (e) => {
         e.preventDefault();
-        if (!name.trim()) return;
-        if (await actions.saveSettings({ ...settings, user_name: name.trim(), birthday: when })) onBack();
+        if (!name.trim() || left < 0) return;
+        if (await actions.saveSettings({ ...settings, user_name: name.trim(), birthday: when, bio: bio.trim() || null })) onBack();
       }}
     >
       <div className="pc-bar pc-bar-edit">
@@ -235,12 +241,24 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
           </div>
         )}
       </div>
+      <div className="bio-head">
+        <label htmlFor={`${id}-bio`}>{t("profile.bio")}</label>
+        <span className={left < 0 ? "bio-left over" : "bio-left"} aria-label={t("profile.bio.left", { count: left })}>
+          {left}
+        </span>
+      </div>
+      <div className="bio-box">
+        <textarea id={`${id}-bio`} rows={3} value={bio} onChange={(e) => setBio(e.target.value)} aria-describedby={`${id}-bio-hint`} />
+      </div>
+      <p id={`${id}-bio-hint`} className="muted small bio-hint">
+        {t("profile.bio.hint")}
+      </p>
       <p className="muted small pc-note">{t("you.preview", { title: userTitle(t, name) })}</p>
       <p className="row end pc-actions">
         <button type="button" className="ghost" onClick={onBack}>
           {t("group.cancel")}
         </button>
-        <button type="submit" disabled={!name.trim()}>
+        <button type="submit" disabled={!name.trim() || left < 0}>
           {t("you.save")}
         </button>
       </p>
