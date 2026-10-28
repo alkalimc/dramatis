@@ -19,11 +19,10 @@ pub mod params;
 pub mod persona;
 pub mod request;
 mod session;
-pub mod store;
 pub mod text;
 pub mod view;
 mod wrapup_json;
 
-pub use agent::{Agent, Clock, Config, Event, Frontend, NoSink, Parts, Sink, SystemClock};
+pub use agent::{Agent, Clock, Config, Event, Frontend, NoSink, Parts, Sink};
 pub use error::{Error, Result};
 pub use flows::{Posted, PresenceOutcome};

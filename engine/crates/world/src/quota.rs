@@ -258,6 +258,42 @@ pub fn spent_by_shape(conn: &Connection, now: i64, quota: &Quota) -> Result<Vec<
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Metered totals of one call shape over a span.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ShapeTotals {
+    pub calls: u64,
+    pub uncached: u64,
+    pub cached: u64,
+    pub output: u64,
+    pub points: f64,
+}
+
+/// Totals per shape over `(since, until]`, in shape order.
+pub fn totals_by_shape(
+    conn: &Connection,
+    since: i64,
+    until: i64,
+) -> Result<Vec<(Shape, ShapeTotals)>> {
+    let mut stmt = conn.prepare(
+        "SELECT shape, count(*), sum(uncached), sum(cached), sum(output), sum(points)
+         FROM meter WHERE at > ?1 AND at <= ?2 GROUP BY shape ORDER BY shape",
+    )?;
+    let rows = stmt.query_map((since, until), |r| {
+        let n = |i: usize| r.get::<_, i64>(i).map(|v| v.max(0) as u64);
+        Ok((
+            r.get::<_, Shape>(0)?,
+            ShapeTotals {
+                calls: n(1)?,
+                uncached: n(2)?,
+                cached: n(3)?,
+                output: n(4)?,
+                points: r.get(5)?,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Cached input as a share of all input over the `span_ms` ending at `now`
 /// (`inject.cache_hit`); `None` with no input.
 pub fn cache_hit(conn: &Connection, now: i64, span_ms: i64) -> Result<Option<f64>> {

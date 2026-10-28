@@ -4,7 +4,6 @@
 
 mod common;
 
-use agent::store;
 use api::endpoints::WireApi;
 use common::*;
 use serde_json::{Value, json};
@@ -1451,7 +1450,7 @@ async fn usage_is_metered_per_shape_with_cache_hits_and_quota() {
     assert!((points[1] - expect).abs() < 1e-9);
     let totals = e
         .agent
-        .with_world(|w| store::totals_by_shape(w, 0, now).unwrap());
+        .with_world(|w| world::quota::totals_by_shape(w, 0, now).unwrap());
     assert_eq!(totals[0].0, Shape::Direct);
     assert_eq!(totals[0].1.calls, 2);
 }
