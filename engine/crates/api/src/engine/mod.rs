@@ -303,7 +303,7 @@ impl Engine {
         let tier = world::settings::intensity(&w).map_err(world_err)?;
         let status =
             world::quota::status(&w, tier, now.ms, &self.params.world.quota).map_err(world_err)?;
-        convert::quota_status(&w, &status, now).map_err(world_err)
+        convert::quota_status(&w, &status, now, &self.params.world.quota).map_err(world_err)
     }
 
     fn set_tier_impl(&self, tier: Tier) -> ApiResult<()> {

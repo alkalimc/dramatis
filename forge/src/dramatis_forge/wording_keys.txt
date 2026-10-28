@@ -332,9 +332,7 @@ quota.tier.ultra
 quota.title
 quota.ultra
 quota.used
-quota.window.five_hours
-quota.window.one_hour
-quota.window.seven_days
+quota.window
 roster.band.acquainted
 roster.band.close
 roster.band.disabled

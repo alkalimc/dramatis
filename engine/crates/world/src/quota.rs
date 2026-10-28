@@ -1,6 +1,7 @@
-//! Quota: rolling 5-hour and 7-day windows of points and a 1-hour window of requests
-//! (request-billed models) over the usage meter, and the three bands of the tightest. The agent records every call's usage; this module only keeps the
-//! books and decides. The tier without windows has no bands at all.
+//! Quota: one rolling hour of calls over the usage meter, and its three bands. A call is
+//! the unit every endpoint shares: a request-billed call counts 1, a token-billed call its
+//! points over `quota.call_points`. The agent records every call's usage; this module only
+//! keeps the books and decides. The tier without a window has no bands at all.
 
 use rusqlite::Connection;
 
@@ -8,9 +9,7 @@ use crate::params::{Cost, Quota};
 use crate::types::{ChannelId, Shape, Tier};
 use crate::{Error, Result};
 
-pub const SPAN_5H_MS: i64 = 5 * 3_600_000;
-pub const SPAN_1H_MS: i64 = 3_600_000;
-pub const SPAN_7D_MS: i64 = 7 * 24 * 3_600_000;
+pub const WINDOW_MS: i64 = 3_600_000;
 
 /// Token counts of one call, from the endpoint's `usage`. Reasoning tokens count as
 /// output.
@@ -87,33 +86,14 @@ pub enum Band {
     Exhausted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Span {
-    /// Counts requests, not points.
-    OneHour,
-    FiveHours,
-    SevenDays,
-}
-
-impl Span {
-    pub fn ms(self) -> i64 {
-        match self {
-            Self::OneHour => SPAN_1H_MS,
-            Self::FiveHours => SPAN_5H_MS,
-            Self::SevenDays => SPAN_7D_MS,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
-    pub span: Span,
     pub limit: f64,
-    /// Points used; on the one-hour window, requests made.
-    pub points: f64,
-    /// `points / limit`, 0 and up.
+    /// Calls made in the window.
+    pub calls: f64,
+    /// `calls / limit`, 0 and up.
     pub used: f64,
-    /// When enough use rolls out of this window for it to leave its current band; `None`
+    /// When enough use rolls out of the window for it to leave its current band; `None`
     /// while it is open.
     pub release_at: Option<i64>,
 }
@@ -122,13 +102,11 @@ pub struct Window {
 pub struct Status {
     pub tier: Tier,
     pub band: Band,
-    /// Empty on the tier without windows.
-    pub windows: Vec<Window>,
-    /// The window deciding the band, when not open.
-    pub binding: Option<Span>,
-    /// The tighter window's use fraction (0 without windows).
+    /// `None` on the tier without a window.
+    pub window: Option<Window>,
+    /// The window's use fraction (0 without one).
     pub u: f64,
-    /// When the band next improves: the binding window's release time.
+    /// When the band next improves.
     pub release_at: Option<i64>,
 }
 
@@ -173,99 +151,76 @@ fn band_of(u: f64, quota: &Quota) -> Band {
     }
 }
 
-/// What a window sums over a meter row.
-fn column(span: Span) -> &'static str {
-    match span {
-        Span::OneHour => "requests",
-        _ => "points",
-    }
+/// What a meter row counts for in the window: one for a request-billed call, else its
+/// points over `quota.call_points`. A SQL fragment over `meter`; `?3` is `call_points`.
+const CALLS: &str = "CASE WHEN requests > 0 THEN 1.0 ELSE points / ?3 END";
+
+/// The `call_points` divisor, kept off zero so a bad value cannot make a free call.
+fn call_points(quota: &Quota) -> f64 {
+    quota.call_points.max(1.0)
 }
 
-/// `(at, amount)` of the meter rows in `(now - span, now]`, oldest first.
-fn rows(conn: &Connection, now: i64, span: Span) -> Result<Vec<(i64, f64)>> {
+/// `(at, calls)` of the meter rows in `(now - WINDOW_MS, now]`, oldest first.
+fn rows(conn: &Connection, now: i64, quota: &Quota) -> Result<Vec<(i64, f64)>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT at, {col} FROM meter WHERE at > ?1 AND at <= ?2 AND {col} > 0 ORDER BY at",
-        col = column(span)
+        "SELECT at, {CALLS} AS n FROM meter WHERE at > ?1 AND at <= ?2 AND n > 0 ORDER BY at"
     ))?;
-    let rows = stmt.query_map((now - span.ms(), now), |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map((now - WINDOW_MS, now, call_points(quota)), |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// The earliest instant at which the window's sum drops below `target`: rows leave the
-/// window `span` after they were recorded.
-fn release(rows: &[(i64, f64)], target: f64, span: i64) -> Option<i64> {
+/// window an hour after they were recorded.
+fn release(rows: &[(i64, f64)], target: f64) -> Option<i64> {
     let mut sum: f64 = rows.iter().map(|r| r.1).sum();
     if sum < target {
         return None;
     }
-    for &(at, pts) in rows {
-        sum -= pts;
+    for &(at, n) in rows {
+        sum -= n;
         if sum < target {
-            return Some(at + span);
+            return Some(at + WINDOW_MS);
         }
     }
-    rows.last().map(|r| r.0 + span)
-}
-
-fn window(conn: &Connection, span: Span, limit: f64, now: i64, quota: &Quota) -> Result<Window> {
-    let rows = rows(conn, now, span)?;
-    let pts: f64 = rows.iter().map(|r| r.1).sum();
-    let used = if limit > 0.0 {
-        pts / limit
-    } else {
-        f64::INFINITY
-    };
-    let target = match band_of(used, quota) {
-        Band::Open => None,
-        Band::Quiet => Some(limit * quota.quiet_at),
-        Band::Exhausted => Some(limit),
-    };
-    Ok(Window {
-        span,
-        limit,
-        points: pts,
-        used,
-        release_at: target.and_then(|t| release(&rows, t, span.ms())),
-    })
+    rows.last().map(|r| r.0 + WINDOW_MS)
 }
 
 pub fn status(conn: &Connection, tier: Tier, now: i64, quota: &Quota) -> Result<Status> {
-    let (Some(l5), Some(l7), Some(l1)) = (
-        quota.window_5h.get(tier),
-        quota.window_7d.get(tier),
-        quota.window_1h_requests.get(tier),
-    ) else {
+    let Some(limit) = quota.window_1h.get(tier) else {
         return Ok(Status {
             tier,
             band: Band::Open,
-            windows: Vec::new(),
-            binding: None,
+            window: None,
             u: 0.0,
             release_at: None,
         });
     };
-    let windows = vec![
-        window(conn, Span::FiveHours, l5, now, quota)?,
-        window(conn, Span::SevenDays, l7, now, quota)?,
-        window(conn, Span::OneHour, l1, now, quota)?,
-    ];
-    let tight = windows
-        .iter()
-        .max_by(|a, b| a.used.total_cmp(&b.used))
-        .expect("three windows");
-    let u = tight.used;
-    let band = band_of(u, quota);
-    // Leaving the band needs every window below its threshold: the latest release wins.
-    let release_at = match band {
-        Band::Open => None,
-        _ => windows.iter().filter_map(|w| w.release_at).max(),
+    let rows = rows(conn, now, quota)?;
+    let calls: f64 = rows.iter().map(|r| r.1).sum();
+    let used = if limit > 0.0 {
+        calls / limit
+    } else {
+        f64::INFINITY
     };
+    let band = band_of(used, quota);
+    let target = match band {
+        Band::Open => None,
+        Band::Quiet => Some(limit * quota.quiet_at),
+        Band::Exhausted => Some(limit),
+    };
+    let release_at = target.and_then(|t| release(&rows, t));
     Ok(Status {
         tier,
         band,
-        binding: (band != Band::Open).then_some(tight.span),
-        windows,
-        u,
+        window: Some(Window {
+            limit,
+            calls,
+            used,
+            release_at,
+        }),
+        u: used,
         release_at,
     })
 }
@@ -292,23 +247,23 @@ pub fn decide(status: &Status, kind: CallKind) -> Decision {
     }
 }
 
-/// Points (requests, for the one-hour span) per call shape within `(now - span, now]`,
-/// for the spending breakdown.
-pub fn spent_by_shape(conn: &Connection, now: i64, span: Span) -> Result<Vec<(Shape, f64)>> {
+/// Calls per shape in the window ending at `now`, for the spending breakdown.
+pub fn spent_by_shape(conn: &Connection, now: i64, quota: &Quota) -> Result<Vec<(Shape, f64)>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT shape, sum({}) FROM meter WHERE at > ?1 AND at <= ?2 GROUP BY shape ORDER BY shape",
-        column(span)
+        "SELECT shape, sum({CALLS}) FROM meter WHERE at > ?1 AND at <= ?2 GROUP BY shape ORDER BY shape"
     ))?;
-    let rows = stmt.query_map((now - span.ms(), now), |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map((now - WINDOW_MS, now, call_points(quota)), |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Cached input as a share of all input over the span (`inject.cache_hit`); `None`
-/// with no input.
-pub fn cache_hit(conn: &Connection, now: i64, span: Span) -> Result<Option<f64>> {
+/// Cached input as a share of all input over the `span_ms` ending at `now`
+/// (`inject.cache_hit`); `None` with no input.
+pub fn cache_hit(conn: &Connection, now: i64, span_ms: i64) -> Result<Option<f64>> {
     let (uncached, cached): (Option<i64>, Option<i64>) = conn.query_row(
         "SELECT sum(uncached), sum(cached) FROM meter WHERE at > ?1 AND at <= ?2",
-        (now - span.ms(), now),
+        (now - span_ms, now),
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let (u, c) = (uncached.unwrap_or(0) as f64, cached.unwrap_or(0) as f64);
@@ -320,6 +275,7 @@ mod tests {
     use super::*;
     use crate::testing::*;
 
+    /// A token-billed call of `pts` points.
     fn spend(conn: &Connection, at: i64, pts: u64) {
         record_usage(
             conn,
@@ -337,11 +293,25 @@ mod tests {
         .unwrap();
     }
 
-    fn small() -> Quota {
+    /// A request-billed call: no points, one request.
+    fn request(conn: &Connection, at: i64) {
+        conn.execute(
+            "INSERT INTO meter(at, shape, model, uncached, cached, output, points, requests)
+             VALUES (?1, 'direct', 'r', 0, 0, 0, 0.0, 1)",
+            [at],
+        )
+        .unwrap();
+    }
+
+    /// Middle tier at 10 calls an hour.
+    fn few() -> Quota {
         let mut q = Quota::default();
-        q.window_5h.middle = 100.0;
-        q.window_7d.middle = 1000.0;
+        q.window_1h.middle = 10.0;
         q
+    }
+
+    fn call_pts(q: &Quota) -> u64 {
+        q.call_points as u64
     }
 
     #[test]
@@ -369,70 +339,36 @@ mod tests {
     }
 
     #[test]
-    fn three_bands_and_release() {
+    fn a_token_call_of_call_points_counts_as_one() {
         let w = world();
-        let q = small();
-        let s = |now| status(&w, Tier::Middle, now, &q).unwrap();
-        assert_eq!(s(T0).band, Band::Open);
-        spend(&w, T0, 50);
-        spend(&w, T0 + HOUR, 35);
-        let st = s(T0 + HOUR);
-        assert_eq!((st.band, st.binding), (Band::Quiet, Some(Span::FiveHours)));
-        // Quiet ends once the first 50 leave: 35 < 80.
-        assert_eq!(st.release_at, Some(T0 + SPAN_5H_MS));
-        assert_eq!(decide(&st, CallKind::UserInitiated), Decision::Allow);
-        assert_eq!(decide(&st, CallKind::Opening), Decision::Quiet);
-        assert_eq!(decide(&st, CallKind::Interjection), Decision::Quiet);
-        assert_eq!(decide(&st, CallKind::HostLine), Decision::Quiet);
-        spend(&w, T0 + 2 * HOUR, 20);
-        let st = s(T0 + 2 * HOUR);
-        assert_eq!(st.band, Band::Exhausted);
-        assert_eq!(st.release_at, Some(T0 + SPAN_5H_MS), "105 - 50 = 55 < 100");
-        assert!(matches!(
-            decide(&st, CallKind::UserInitiated),
-            Decision::Exhausted {
-                release_at: Some(_)
-            }
-        ));
-        assert_eq!(
-            s(T0 + SPAN_5H_MS).band,
-            Band::Open,
-            "55 < 80 after the first leaves"
-        );
-        assert_eq!(s(T0 + 2 * HOUR + SPAN_5H_MS).band, Band::Open);
+        let q = few();
+        spend(&w, T0, call_pts(&q));
+        spend(&w, T0, call_pts(&q) / 2);
+        let st = status(&w, Tier::Middle, T0, &q).unwrap();
+        assert_eq!(st.window.unwrap().calls, 1.5);
     }
 
     #[test]
-    fn the_seven_day_window_can_bind() {
+    fn token_and_request_calls_fill_the_same_window() {
         let w = world();
-        let mut q = small();
-        q.window_7d.middle = 500.0;
-        for d in 0..6 {
-            spend(&w, T0 + d * DAY, 70);
+        let q = few();
+        for i in 0..4 {
+            request(&w, T0 + i);
         }
-        let st = status(&w, Tier::Middle, T0 + 5 * DAY, &q).unwrap();
-        assert_eq!((st.band, st.binding), (Band::Quiet, Some(Span::SevenDays)));
-        assert!(st.release_at.unwrap() > T0 + 5 * DAY);
-    }
-
-    /// A request-billed call: no points, one request.
-    fn request(conn: &Connection, at: i64) {
-        conn.execute(
-            "INSERT INTO meter(at, shape, model, uncached, cached, output, points, requests)
-             VALUES (?1, 'direct', 'r', 0, 0, 0, 0.0, 1)",
-            [at],
-        )
-        .unwrap();
-    }
-
-    fn few() -> Quota {
-        let mut q = small();
-        q.window_1h_requests.middle = 10.0;
-        q
+        for i in 0..3 {
+            spend(&w, T0 + 10 + i, call_pts(&q));
+        }
+        let st = status(&w, Tier::Middle, T0 + 100, &q).unwrap();
+        assert_eq!((st.band, st.window.unwrap().calls), (Band::Open, 7.0));
+        spend(&w, T0 + 20, call_pts(&q));
+        assert_eq!(
+            status(&w, Tier::Middle, T0 + 100, &q).unwrap().band,
+            Band::Quiet
+        );
     }
 
     #[test]
-    fn requests_fill_the_hour_window_and_release_an_hour_later() {
+    fn bands_and_release_an_hour_later() {
         let w = world();
         let q = few();
         let s = |now| status(&w, Tier::Middle, now, &q).unwrap();
@@ -442,16 +378,17 @@ mod tests {
         assert_eq!(s(T0 + 10_000).band, Band::Open);
         request(&w, T0 + 7000);
         let st = s(T0 + 10_000);
-        assert_eq!((st.band, st.binding), (Band::Quiet, Some(Span::OneHour)));
-        // Quiet ends once enough requests leave: 7 left is below 8.
+        assert_eq!(st.band, Band::Quiet);
+        // Quiet ends once enough calls leave: 7 left is below 8.
         assert_eq!(st.release_at, Some(T0 + HOUR));
+        assert_eq!(decide(&st, CallKind::UserInitiated), Decision::Allow);
+        assert_eq!(decide(&st, CallKind::Opening), Decision::Quiet);
+        assert_eq!(decide(&st, CallKind::Interjection), Decision::Quiet);
+        assert_eq!(decide(&st, CallKind::HostLine), Decision::Quiet);
         request(&w, T0 + 8000);
-        request(&w, T0 + 9000);
+        spend(&w, T0 + 9000, call_pts(&q));
         let st = s(T0 + 10_000);
-        assert_eq!(
-            (st.band, st.binding),
-            (Band::Exhausted, Some(Span::OneHour))
-        );
+        assert_eq!(st.band, Band::Exhausted);
         assert_eq!(
             st.release_at,
             Some(T0 + HOUR),
@@ -460,27 +397,14 @@ mod tests {
         assert!(!decide(&st, CallKind::UserInitiated).allowed());
         assert_eq!(s(T0 + HOUR).band, Band::Quiet, "9 left, 9 >= 8");
         assert_eq!(s(T0 + HOUR + 9000).band, Band::Open);
-        let by = spent_by_shape(&w, T0 + 10_000, Span::OneHour).unwrap();
-        assert_eq!(by, vec![(Shape::Direct, 10.0)]);
     }
 
     #[test]
-    fn token_use_alone_never_touches_the_hour_window() {
-        let w = world();
-        let q = few();
-        spend(&w, T0, 50);
-        let st = status(&w, Tier::Middle, T0, &q).unwrap();
-        let hour = st.windows.iter().find(|x| x.span == Span::OneHour).unwrap();
-        assert_eq!((hour.points, hour.used, hour.release_at), (0.0, 0.0, None));
-        assert_eq!(st.band, Band::Open);
-    }
-
-    #[test]
-    fn ultra_has_no_windows() {
+    fn ultra_has_no_window() {
         let w = world();
         spend(&w, T0, 1_000_000_000);
         let st = status(&w, Tier::Ultra, T0, &Quota::default()).unwrap();
-        assert_eq!((st.band, st.windows.len()), (Band::Open, 0));
+        assert_eq!((st.band, st.window), (Band::Open, None));
         assert!(
             can_call(&w, Tier::Ultra, CallKind::Opening, T0, &Quota::default())
                 .unwrap()
@@ -491,6 +415,7 @@ mod tests {
     #[test]
     fn breakdown_and_cache_hit() {
         let w = world();
+        let q = Quota::default();
         record_usage(
             &w,
             T0,
@@ -506,13 +431,14 @@ mod tests {
             &Cost::default(),
         )
         .unwrap();
-        spend(&w, T0, 5);
-        let by = spent_by_shape(&w, T0, Span::FiveHours).unwrap();
-        assert_eq!(by, vec![(Shape::Direct, 5.0), (Shape::Wrapup, 17.5)]);
+        spend(&w, T0, 3000);
+        request(&w, T0);
+        let by = spent_by_shape(&w, T0, &q).unwrap();
         assert_eq!(
-            cache_hit(&w, T0, Span::FiveHours).unwrap(),
-            Some(30.0 / 45.0)
+            by,
+            vec![(Shape::Direct, 2.0), (Shape::Wrapup, 17.5 / 3000.0)]
         );
-        assert_eq!(cache_hit(&w, T0 - DAY, Span::FiveHours).unwrap(), None);
+        assert_eq!(cache_hit(&w, T0, WINDOW_MS).unwrap(), Some(30.0 / 3040.0));
+        assert_eq!(cache_hit(&w, T0 - DAY, WINDOW_MS).unwrap(), None);
     }
 }

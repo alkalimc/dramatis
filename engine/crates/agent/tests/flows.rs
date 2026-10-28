@@ -1389,7 +1389,7 @@ async fn a_rename_without_the_hook_still_rolls_on_the_next_turn() {
 #[tokio::test]
 async fn usage_is_metered_per_shape_with_cache_hits_and_quota() {
     let e = env_with(endpoints(WireApi::Responses, true, None), |c| {
-        c.world.quota.window_5h.middle = 1_000_000.0;
+        c.world.quota.window_1h.middle = 1_000_000.0;
     });
     let ch = direct(&e, "ann");
     e.fake.push([say("one"), say("two")]);
@@ -1406,7 +1406,7 @@ async fn usage_is_metered_per_shape_with_cache_hits_and_quota() {
     let report = e.agent.with_world(|w| {
         let status =
             world::quota::status(w, world::Tier::Middle, now, &Default::default()).unwrap();
-        agent::meter::report(w, now, world::quota::Span::FiveHours, Some(&status)).unwrap()
+        agent::meter::report(w, now, world::quota::WINDOW_MS, Some(&status)).unwrap()
     });
     let get = |k: &str| report.iter().find(|(key, _)| key == k).map(|(_, v)| *v);
     assert!(get("inject.direct").unwrap() > 0.0);
@@ -1474,7 +1474,8 @@ async fn cache_writes_on_the_messages_protocol_cost_a_third_term() {
 #[tokio::test]
 async fn an_exhausted_window_stops_calls_with_the_hosts_fixed_line() {
     let e = env_with(endpoints(WireApi::Responses, true, None), |c| {
-        c.world.quota.window_5h.middle = 10.0;
+        c.world.quota.window_1h.middle = 10.0;
+        c.world.quota.call_points = 1.0;
     });
     let ch = direct(&e, "ann");
     e.fake.push([say("one")]);

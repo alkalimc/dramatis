@@ -1,10 +1,10 @@
 //! Conversions from engine values to the types that cross the seam.
 
 use api::types::{self as t, Author};
-use api::views::{self as v, CallShape, QuotaBand, QuotaWindow, ToolAction, WindowSpan};
+use api::views::{self as v, CallShape, QuotaBand, QuotaWindow, ToolAction};
 use folio::Folio;
 use rusqlite::Connection;
-use world::quota::{self, Band, Span};
+use world::quota::{self, Band};
 use world::{Actor, ChannelId, FactId, MessageId, PersonId, Shape, TaskId, Tier};
 
 use crate::error::{Result, timestamp};
@@ -131,37 +131,20 @@ pub fn tier(tier_: Tier) -> t::Tier {
     }
 }
 
-fn span(s: Span) -> WindowSpan {
-    match s {
-        Span::OneHour => WindowSpan::OneHour,
-        Span::FiveHours => WindowSpan::FiveHours,
-        Span::SevenDays => WindowSpan::SevenDays,
-    }
-}
-
-/// The quota panel: bands, windows and what was spent per shape in the tighter window.
+/// The quota panel: band, the window, and the calls spent per shape in it.
 pub fn quota_status(
     conn: &Connection,
     status: &quota::Status,
     now: world::clock::Now,
+    params: &world::params::Quota,
 ) -> Result<v::QuotaStatus> {
     let ts = |ms: i64| timestamp(ms, now.offset_min);
-    let tight = status
-        .binding
-        .or_else(|| {
-            status
-                .windows
-                .iter()
-                .max_by(|a, b| a.used.total_cmp(&b.used))
-                .map(|w| w.span)
-        })
-        .unwrap_or(Span::FiveHours);
     let mut spent: Vec<v::ShapeSpend> = Vec::new();
-    for (shape, points) in quota::spent_by_shape(conn, now.ms, tight)? {
+    for (shape, calls) in quota::spent_by_shape(conn, now.ms, params)? {
         let shape = call_shape(shape);
         match spent.iter_mut().find(|s| s.shape == shape) {
-            Some(s) => s.points += points,
-            None => spent.push(v::ShapeSpend { shape, points }),
+            Some(s) => s.calls += calls,
+            None => spent.push(v::ShapeSpend { shape, calls }),
         }
     }
     Ok(v::QuotaStatus {
@@ -171,16 +154,10 @@ pub fn quota_status(
             Band::Quiet => QuotaBand::Quiet,
             Band::Exhausted => QuotaBand::Exhausted,
         },
-        windows: status
-            .windows
-            .iter()
-            .map(|w| QuotaWindow {
-                span: span(w.span),
-                used: w.used,
-                release_at: w.release_at.map(ts),
-            })
-            .collect(),
-        binding: status.binding.map(span),
+        window: status.window.as_ref().map(|w| QuotaWindow {
+            used: w.used,
+            release_at: w.release_at.map(ts),
+        }),
         spent,
     })
 }

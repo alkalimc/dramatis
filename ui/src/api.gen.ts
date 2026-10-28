@@ -523,16 +523,13 @@ export type QuotaChanged = {
 export type QuotaStatus = {
 	tier: Tier,
 	band: QuotaBand,
-	/**  Empty on the tier without windows. */
-	windows: QuotaWindow[],
-	/**  The window deciding the band, when not open. */
-	binding: WindowSpan | null,
+	/**  The rolling hour; `None` on the tier without a window. */
+	window: QuotaWindow | null,
 	spent: ShapeSpend[],
 };
 
 export type QuotaWindow = {
-	span: WindowSpan,
-	/**  Fraction of the window's limit used, 0 and up. */
+	/**  Fraction of the limit used, 0 and up. */
 	used: number | null,
 	/**  When enough usage rolls out of the window to leave the current band. */
 	release_at: Timestamp | null,
@@ -623,8 +620,8 @@ export type Settings = {
 
 export type ShapeSpend = {
 	shape: CallShape,
-	/**  Quota points in the tighter window. */
-	points: number | null,
+	/**  Calls in the window. */
+	calls: number | null,
 };
 
 export type Target = { kind: "person"; id: PersonId } | { kind: "channel"; id: ChannelId };
@@ -694,10 +691,6 @@ export type Waiting = {
 	channel: ChannelId,
 	activity: Activity,
 };
-
-export type WindowSpan = 
-/**  Request-billed calls, counted rather than priced. */
-"one_hour" | "five_hours" | "seven_days";
 
 export type WireApi = 
 /**  `POST {base_url}/chat/completions` */

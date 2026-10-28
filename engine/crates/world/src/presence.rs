@@ -378,10 +378,11 @@ mod tests {
             quiet_at: 0.5,
             ..Quota::default()
         };
-        quiet.quota.window_5h.middle = 100.0;
+        quiet.quota.window_1h.middle = 100.0;
+        quiet.quota.call_points = 1.0;
         record_usage(
             &w,
-            T0,
+            T0 + HOUR,
             Shape::Direct,
             None,
             "m",

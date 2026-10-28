@@ -147,9 +147,9 @@ proptest! {
         }
     }
 
-    /// The band is a function of the tighter window's use; user-initiated calls pass
+    /// The band is a function of the window's use; user-initiated calls pass
     /// until u reaches 1; unprompted calls stop at `quota.quiet_at`; the tier without
-    /// windows never blocks.
+    /// window never blocks.
     #[test]
     fn quota_three_bands(
         quiet_at in 0.05f64..0.99,
@@ -158,8 +158,8 @@ proptest! {
     ) {
         let w = World::in_memory().unwrap();
         let mut q = Quota { quiet_at, ..Quota::default() };
-        q.window_5h.low = 1000.0;
-        q.window_7d.low = 3000.0;
+        q.window_1h.low = 10.0;
+        q.call_points = 100.0;
         let cost = params::Cost::default();
         // Only the past: release times are checked later, with nothing recorded after now.
         let spends: Vec<_> = spends.into_iter().filter(|(at, _)| *at <= probe).collect();
@@ -168,10 +168,8 @@ proptest! {
         }
         let now = T0 + probe;
         let st = quota::status(&w, Tier::Low, now, &q).unwrap();
-        let sum = |span: i64| -> f64 {
-            spends.iter().filter(|(at, _)| T0 + at > now - span && T0 + at <= now).map(|(_, n)| *n as f64).sum()
-        };
-        let u = (sum(quota::SPAN_5H_MS) / 1000.0).max(sum(quota::SPAN_7D_MS) / 3000.0);
+        let sum: f64 = spends.iter().filter(|(at, _)| T0 + at > now - quota::WINDOW_MS && T0 + at <= now).map(|(_, n)| *n as f64).sum();
+        let u = sum / 1000.0;
         prop_assert!((st.u - u).abs() < 1e-9);
         let expected = if u >= 1.0 { Band::Exhausted } else if u >= quiet_at { Band::Quiet } else { Band::Open };
         prop_assert_eq!(st.band, expected);
@@ -192,6 +190,6 @@ proptest! {
         }
         let ultra = quota::status(&w, Tier::Ultra, now, &q).unwrap();
         prop_assert_eq!(ultra.band, Band::Open);
-        prop_assert!(ultra.windows.is_empty());
+        prop_assert!(ultra.window.is_none());
     }
 }
