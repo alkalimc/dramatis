@@ -42,9 +42,13 @@ export function byActivity(channels: ChannelSummary[], messages: Record<ChannelI
     .map((x) => x.c);
 }
 
-/** What the badge counts: messages that arrived unseen, or people waiting here, whichever is more. */
+/**
+ * What the badge counts: messages that arrived unseen, or people with something unread
+ * here, whichever is more. A birthday or a due commitment is a reminder rather than an
+ * unread message and nothing the user does in the chat settles it, so it never counts.
+ */
 export function unreadOf(channel: ChannelId, unread: Record<ChannelId, number>, digest: Digest): number {
-  const waiting = digest.items.filter((w) => w.channel === channel).length;
+  const waiting = digest.items.filter((w) => w.channel === channel && w.activity.kind !== "birthday" && w.activity.kind !== "commitment_due").length;
   return Math.max(unread[channel] ?? 0, waiting);
 }
 

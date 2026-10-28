@@ -58,6 +58,41 @@ pub enum Author {
 pub struct PersonRef {
     pub id: PersonId,
     pub name: String,
+    /// `None` when the corpus does not say; screens then use the neutral pronoun.
+    #[serde(default)]
+    #[specta(optional)]
+    pub pronoun: Option<Pronoun>,
+}
+
+/// Which pronoun a sentence about a person takes. The pack names the facet that carries
+/// it and the facet values of each class (wording `gender.facet`, `gender.female`,
+/// `gender.male`: values separated by `|`); everyone else has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Pronoun {
+    Female,
+    Male,
+}
+
+impl Pronoun {
+    pub fn of(
+        wording: &std::collections::BTreeMap<String, String>,
+        facets: &std::collections::BTreeMap<String, String>,
+    ) -> Option<Self> {
+        let value = facets.get(wording.get("gender.facet")?)?.trim();
+        let listed = |key: &str| {
+            wording
+                .get(key)
+                .is_some_and(|vals| vals.split('|').any(|v| v.trim() == value))
+        };
+        if listed("gender.female") {
+            Some(Self::Female)
+        } else if listed("gender.male") {
+            Some(Self::Male)
+        } else {
+            None
+        }
+    }
 }
 
 /// Whether a person or a group may act without being addressed.
@@ -112,4 +147,33 @@ pub enum Confidence {
     High,
     Medium,
     Low,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pronoun;
+    use std::collections::BTreeMap;
+
+    fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect()
+    }
+
+    #[test]
+    fn pack_values_pick_the_class() {
+        let wording = map(&[
+            ("gender.facet", "sex"),
+            ("gender.female", "f|woman"),
+            ("gender.male", "m"),
+        ]);
+        let of = |facets| Pronoun::of(&wording, &map(facets));
+        assert_eq!(of(&[("sex", "woman")]), Some(Pronoun::Female));
+        assert_eq!(of(&[("sex", "m")]), Some(Pronoun::Male));
+        assert_eq!(of(&[("sex", "unknown")]), None);
+        assert_eq!(of(&[]), None);
+        // A pack that declares nothing yields the no class.
+        assert_eq!(Pronoun::of(&map(&[]), &map(&[("sex", "m")])), None);
+    }
 }

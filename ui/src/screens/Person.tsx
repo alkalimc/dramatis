@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { PersonId } from "../api";
-import { useT } from "../i18n";
+import { pronounOf, useT } from "../i18n";
 import { when } from "../lib/format";
 import { hasPersona } from "../lib/persona";
 import { useQuery } from "../lib/useQuery";
@@ -57,14 +57,14 @@ export function PersonDrawer({ id }: { id: PersonId }) {
         <p>
           {page.last_seen ? t("person.last_seen", { when: when(page.last_seen) }) : t("person.never")}
           {" · "}
-          {t("person.tasks", { count: page.tasks_done })}
+          {t("person.tasks", { count: page.tasks_done, ...pronounOf(t, page.person) })}
         </p>
         {page.companions.length > 0 && <p>{t("roster.companions", { names: page.companions.map((c) => c.name).join(" · ") })}</p>}
       </section>
       {error && <InlineError error={error} onRetry={reload} />}
       {!ready && (
         <p className="muted unavailable" id="unavailable-note">
-          <strong>{t("person.unavailable")}</strong> {t("person.unavailable.hint")}
+          <strong>{t("person.unavailable")}</strong> {t("person.unavailable.hint", pronounOf(t, page.person))}
         </p>
       )}
       {!off && (
@@ -79,7 +79,7 @@ export function PersonDrawer({ id }: { id: PersonId }) {
             aria-describedby={ready ? undefined : "unavailable-note"}
             onClick={() => dispatch({ type: "ask", draft: { person: id } })}
           >
-            {t("person.ask")}
+            {t("person.ask", pronounOf(t, page.person))}
           </button>
         </p>
       )}

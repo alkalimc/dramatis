@@ -446,6 +446,9 @@ profile.edit_title
 profile.name
 profile.save
 profile.title
+pronoun.female
+pronoun.male
+pronoun.other
 quiet.dnd
 quiet.from
 quiet.notifications

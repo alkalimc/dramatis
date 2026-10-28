@@ -1,4 +1,4 @@
-import type { Wording } from "../api";
+import type { PersonRef, Wording } from "../api";
 import { useStore } from "../store";
 import { en, type Key } from "./en";
 
@@ -22,6 +22,11 @@ export function makeT(wording: Pick<Wording, "entries">): T {
     people: translate(wording.entries, "person.noun_plural"),
   };
   return (key, vars) => translate(wording.entries, key, { ...globals, ...vars });
+}
+
+/** The pronoun for a sentence about this person; neutral when the corpus does not say. */
+export function pronounOf(t: T, who: { pronoun?: PersonRef["pronoun"] }): Vars {
+  return { pronoun: t(`pronoun.${who.pronoun ?? "other"}` as Key) };
 }
 
 /**

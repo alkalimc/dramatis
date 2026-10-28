@@ -610,6 +610,8 @@ export type PersonPage = {
 export type PersonRef = {
 	id: PersonId,
 	name: string,
+	/**  `None` when the corpus does not say; screens then use the neutral pronoun. */
+	pronoun?: Pronoun | null,
 };
 
 export type Profile = {
@@ -628,6 +630,13 @@ export type ProfileView = {
 	/**  A key is in the keychain. The key itself never crosses this seam. */
 	has_key: boolean,
 };
+
+/**
+ *  Which pronoun a sentence about a person takes. The pack names the facet that carries
+ *  it and the facet values of each class (wording `gender.facet`, `gender.female`,
+ *  `gender.male`: values separated by `|`); everyone else has none.
+ */
+export type Pronoun = "female" | "male";
 
 /**  Local wall-clock times, `HH:MM`; `from` after `to` spans midnight. */
 export type QuietHours = {

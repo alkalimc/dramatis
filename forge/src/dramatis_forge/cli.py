@@ -454,6 +454,21 @@ def report_figures(
         raise typer.Exit(1)
 
 
+@app.command()
+def wording(pack: PackOpt = "", home: HomeOpt = None) -> None:
+    """Stamp the pack's current wording into the existing folio, without a rebuild.
+
+    A rebuild empties the persona table; wording is only text, so it can be refreshed in
+    place. The fingerprint is recomputed because the manifest is part of what it covers.
+    """
+    pk, paths = _resolve(pack, home)
+    _need(paths.folio, "folio")
+    with Folio(paths.folio) as folio:
+        folio.set_meta("wording", dict(pk.wording))
+        folio.set_meta("build_fingerprint", corpus_mod._fingerprint(folio))
+    console.print(f"[green]{paths.folio}[/green]  {len(pk.wording)} wording keys")
+
+
 @report_app.command("wording")
 def report_wording(
     out: Annotated[Path, typer.Argument(help="JSON file to write.")],

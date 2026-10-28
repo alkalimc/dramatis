@@ -21,10 +21,10 @@ pub mod fixture;
 pub mod manifest;
 pub mod unit;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 pub use error::{Error, Result};
 pub use manifest::Manifest;
@@ -250,6 +250,17 @@ impl Folio {
             Some(person) => Ok(Some(person?)),
             None => Ok(None),
         }
+    }
+
+    /// A person's roster attributes as the pack wrote them; empty for an unknown person.
+    pub fn facets(&self, person_id: &str) -> Result<BTreeMap<String, String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT facets FROM persons WHERE person_id = ?1")?;
+        let raw: Option<String> = stmt.query_row([person_id], |r| r.get(0)).optional()?;
+        Ok(raw
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
     }
 
     /// The whole roster, ordered by id.

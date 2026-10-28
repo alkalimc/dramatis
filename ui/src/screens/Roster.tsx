@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { Candidate, RosterGroup } from "../api";
-import { useT } from "../i18n";
+import { pronounOf, useT } from "../i18n";
 import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
 import { hasPersona } from "../lib/persona";
@@ -208,7 +208,7 @@ function FindByTopic() {
                 </button>
                 <span className="reason">{c.reason}</span>
                 <button type="button" className="link" onClick={() => dispatch({ type: "ask", draft: { question: topic, person: c.person.id } })}>
-                  {t("person.ask")}
+                  {t("person.ask", pronounOf(t, c.person))}
                 </button>
               </li>
             ))}

@@ -265,6 +265,11 @@ impl Engine {
 
     pub(crate) fn person_ref(&self, id: &str) -> PersonRef {
         PersonRef {
+            pronoun: self
+                .corpus
+                .as_ref()
+                .and_then(|c| c.person(id))
+                .and_then(|p| p.pronoun),
             id: PersonId(id.to_owned()),
             name: self
                 .corpus
