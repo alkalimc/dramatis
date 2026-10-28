@@ -59,6 +59,10 @@ fn reads_the_per_person_tables() -> anyhow::Result<()> {
     assert_eq!(scope.get("d3"), None);
     assert_eq!(folio.topic_terms("ann")?, ["lighthouse"]);
     assert_eq!(folio.persons_for_alias("Annie")?, ["ann"]);
+    assert_eq!(
+        folio.aliases_for_persons()?,
+        [("Annie".to_string(), "ann".to_string())]
+    );
     Ok(())
 }
 
