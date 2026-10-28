@@ -59,7 +59,7 @@ impl Engine {
             return Ok(None);
         };
         match c.player_avatar_url() {
-            Some(url) => self.cached_avatar(c.player_avatar_page(), Some(url)).await,
+            Some(url) => self.cached_avatar("~player", Some(url)).await,
             None => Ok(None),
         }
     }

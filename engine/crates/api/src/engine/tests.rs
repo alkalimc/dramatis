@@ -52,7 +52,10 @@ fn fixture() -> TempFolio {
             r#""https://wiki.example/?oldid={revid}&p={page}""#,
         )
         .manifest("avatar_url_pattern", r#""https://img.example/{page}.png""#)
-        .manifest("player_avatar_page", r#""Player""#);
+        .manifest(
+            "player_avatar_url",
+            r#""https://img.example/{md5_1}/player.png""#,
+        );
     b.person("amy", Some("03-05"));
     b.person("kal", None);
     b.person("zed", None);
