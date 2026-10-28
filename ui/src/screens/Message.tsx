@@ -4,7 +4,7 @@ import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { blocks, splitScene, withoutCites } from "../lib/scene";
-import { useActions, useApi, useStore } from "../store";
+import { useActions, useApi, useDispatch, useStore } from "../store";
 import { CitationDetail, CitationList, useCitations } from "./Citation";
 import { SelectionMenu } from "./SelectionMenu";
 
@@ -73,13 +73,21 @@ function Speech({ text }: { text: string }) {
 export const MessageView = memo(function MessageView({ message, showPlay }: { message: Message; showPlay: boolean }) {
   const t = useT();
   const api = useApi();
-  const { attempt } = useActions();
+  const { attempt, resend } = useActions();
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
   const parts = useMemo(() => blocks(message.text, marker), [message.text, marker]);
   const { views, own, scope } = useSources(message.author, message.cites);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const sourcesOpen = useStore((s) => Boolean(s.sourcesOpen[message.id]));
+  const dispatch = useDispatch();
+  const after = useStore((s) => {
+    const list = s.messages[message.channel];
+    const i = list ? list.findIndex((m) => m.id === message.id) : -1;
+    return i >= 0 && list ? list.length - i - 1 : 0;
+  });
+  // A reply being written holds the channel; the engine would refuse the take-back.
+  const writing = useStore((s) => Boolean(s.typing[message.channel]) || Object.values(s.streams).some((v) => v.channel === message.channel));
   const [selection, setSelection] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const body = useRef<HTMLDivElement>(null);
@@ -134,22 +142,24 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
         {message.attachment && <img className="attachment" src={api.mediaUrl(message.attachment.path)} alt="" />}
       </div>
 
-      {scope.length > 0 && (
-        <div className="quote-cards">
-          {scope.map((i) => (
-            <figure key={i} className="quote-card">
-              <figcaption>{t("citation.label")}</figcaption>
-              <CitationDetail citation={message.cites[i]} view={views ? views[i] : null} />
-            </figure>
-          ))}
-        </div>
-      )}
-
       <div className="message-foot">
         <time dateTime={message.at}>{when(message.at)}</time>
-        {own.length > 0 && (
-          <button type="button" className="link" aria-expanded={sourcesOpen} onClick={() => setSourcesOpen((v) => !v)}>
-            {t("message.sources", { count: own.length })}
+        {message.cites.length > 0 && (
+          <button type="button" className="link" aria-expanded={sourcesOpen} onClick={() => dispatch({ type: "sources", message: message.id })}>
+            {t("message.sources", { count: message.cites.length })}
+          </button>
+        )}
+        {mine && (
+          <button
+            type="button"
+            className="link"
+            disabled={writing}
+            onClick={() => {
+              if (after > 0 && !window.confirm(t("message.resend.confirm", { count: after }))) return;
+              void resend(message.channel, message.id);
+            }}
+          >
+            {t("message.resend")}
           </button>
         )}
         {message.note && (
@@ -177,7 +187,21 @@ export const MessageView = memo(function MessageView({ message, showPlay }: { me
 
       {message.author.kind === "host" && <Choices actions={message.actions} />}
 
-      {sourcesOpen && <CitationList cites={own.map((i) => message.cites[i])} />}
+      {sourcesOpen && (
+        <>
+        {scope.length > 0 && (
+          <div className="quote-cards">
+            {scope.map((i) => (
+              <figure key={i} className="quote-card">
+                <figcaption>{t("citation.label")}</figcaption>
+                <CitationDetail citation={message.cites[i]} view={views ? views[i] : null} />
+              </figure>
+            ))}
+          </div>
+        )}
+          {own.length > 0 && <CitationList cites={own.map((i) => message.cites[i])} />}
+        </>
+      )}
       {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
     </article>
   );

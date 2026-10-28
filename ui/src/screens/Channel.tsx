@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Reac
 import type { ChannelId, ImagePart, Message } from "../api";
 import { useT } from "../i18n";
 import { authorName } from "../lib/format";
+import { isMac, isSendKey } from "../lib/keys";
 import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
 import { InlineError } from "../ui/ErrorBar";
@@ -130,6 +131,16 @@ export function Composer({ channel }: { channel: ChannelId }) {
   const [image, setImage] = useState<ImagePart | null>(null);
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const restore = useStore((s) => (s.restore?.channel === channel ? s.restore : null));
+
+  // A message taken back returns here: ahead of whatever was already being typed.
+  useEffect(() => {
+    if (!restore) return;
+    setText((cur) => (cur.trim() ? `${restore.text}\n${cur}` : restore.text));
+    dispatch({ type: "restore", restore: null });
+    box.current?.focus();
+  }, [restore, dispatch]);
 
   const send = async () => {
     if (busy || (!text.trim() && !image)) return;
@@ -156,18 +167,24 @@ export function Composer({ channel }: { channel: ChannelId }) {
         {t("composer.label")}
       </label>
       <textarea
+        ref={box}
         id={id}
         rows={2}
+        aria-describedby={`${id}-hint`}
+        aria-keyshortcuts={isMac() ? "Meta+Enter" : "Control+Enter"}
         value={text}
         placeholder={t("composer.placeholder")}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          if (isSendKey(e)) {
             e.preventDefault();
             void send();
           }
         }}
       />
+      <p id={`${id}-hint`} className="muted small composer-hint">
+        {t(isMac() ? "composer.hint.mac" : "composer.hint.other")}
+      </p>
       {image && (
         <p className="attached">
           <img src={`data:${image.mime};base64,${image.data_base64}`} alt="" />
