@@ -81,6 +81,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.speaker", "{name} answers."),
     ("harness.interject", "{name} may add one line."),
+    ("harness.chorus", "{name} answers too, after the others."),
+    ("harness.collective", "everyone everybody"),
     ("harness.joined", "{name} joins the conversation."),
     (
         "harness.ask",

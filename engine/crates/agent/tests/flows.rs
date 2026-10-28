@@ -928,6 +928,87 @@ async fn group_log(wire: WireApi) {
 }
 
 #[tokio::test]
+async fn a_message_to_everyone_gets_a_round_of_replies_in_order() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    // The group and both members are frozen: speaking to everyone still reaches both.
+    e.fake
+        .push([say("Ann: good morning."), say("Bo: morning.")]);
+    e.agent
+        .send(g, "good morning everyone", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 2);
+    let second = list(&json[1]).last().unwrap().to_string();
+    assert!(
+        second.contains("answers too, after the others."),
+        "{second}"
+    );
+    assert_prefix_chain(&e.fake.bodies());
+    let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
+    assert_eq!(shapes, ["group", "interject"]);
+
+    // Someone named in the same message still answers first.
+    e.fake.push([say("Bo: first."), say("Ann: then me.")]);
+    e.agent
+        .send(g, "bo, and everyone, how are you?", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 4);
+    assert!(
+        list(&json[2])
+            .last()
+            .unwrap()
+            .to_string()
+            .contains("bo answers.")
+    );
+}
+
+#[tokio::test]
+async fn the_cap_a_named_question_and_disabled_members_bound_the_round() {
+    // Cap of one: the addressed member alone.
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.group.collective_max = 1;
+    });
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Ann: hello.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+
+    // A named question in a frozen group keeps today's single reply.
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Bo: steel.")]);
+    e.agent
+        .send(g, "bo, where is the steel from?", None)
+        .await
+        .unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+
+    // A disabled member never speaks, even when everyone is addressed.
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("bo"), Mode::Disabled).unwrap());
+    e.fake.push([say("Ann: hello.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
+async fn a_round_stops_when_the_quota_band_closes_unprompted_speech() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.world.quota.quiet_at = 0.0;
+    });
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Ann: hello."), say("Bo: hi.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1, "the extra turn is unprompted");
+}
+
+#[tokio::test]
 async fn a_colleague_pulled_in_joins_the_log_as_an_entry() {
     let e = env(WireApi::Chat);
     let ch = direct(&e, "ann");

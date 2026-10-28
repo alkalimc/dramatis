@@ -472,6 +472,29 @@ impl Agent {
             .await?;
         self.replied(posted.channel, &addressed)?;
 
+        // A message to everyone gets a short round of replies, each seeing the earlier ones.
+        if self.is_collective(&posted.text) {
+            let candidates: Vec<PersonId> = members
+                .iter()
+                .filter(|p| self.has_persona(p.as_str()))
+                .cloned()
+                .collect();
+            let rest = channel::chorus(
+                &self.db(),
+                posted.channel,
+                &addressed,
+                &candidates,
+                self.config.agent.group.collective_max,
+            )?;
+            for p in rest {
+                if !self.unprompted_allowed()? {
+                    break;
+                }
+                self.interject(posted.channel, &p, "harness.chorus").await?;
+            }
+            return Ok(());
+        }
+
         // At most one more line, from the enabled member with the best own material.
         let scored: Vec<(PersonId, f64)> = people
             .persons
@@ -484,11 +507,7 @@ impl Agent {
             .interject
             .min_confidence
             .unwrap_or(self.ix().params().confidence.high_top1);
-        let status = {
-            let conn = self.db();
-            let tier = settings::intensity(&conn)?;
-            quota::status(&conn, tier, self.now().ms, &self.config.world.quota)?
-        };
+        let status = self.quota_status()?;
         let pick = channel::interjector(
             &self.db(),
             posted.channel,
@@ -498,9 +517,37 @@ impl Agent {
             &status,
         )?;
         if let Some(p) = pick.filter(|p| self.has_persona(p.as_str())) {
-            self.interject(posted.channel, &p).await?;
+            self.interject(posted.channel, &p, "harness.interject")
+                .await?;
         }
         Ok(())
+    }
+
+    fn quota_status(&self) -> Result<quota::Status> {
+        let conn = self.db();
+        let tier = settings::intensity(&conn)?;
+        Ok(quota::status(
+            &conn,
+            tier,
+            self.now().ms,
+            &self.config.world.quota,
+        )?)
+    }
+
+    /// Whether the quota band still lets extra turns through; the user's own turn
+    /// always proceeds.
+    fn unprompted_allowed(&self) -> Result<bool> {
+        Ok(quota::decide(&self.quota_status()?, quota::CallKind::Interjection).allowed())
+    }
+
+    /// Whether the text speaks to the whole group: it holds one of the corpus's
+    /// collective address words (`harness.collective`, whitespace separated).
+    fn is_collective(&self, text: &str) -> bool {
+        self.corpus
+            .wording
+            .get("harness.collective")
+            .split_whitespace()
+            .any(|w| text.contains(w))
     }
 
     /// The participant the user named: the longest display name or id in the text.
@@ -520,7 +567,7 @@ impl Agent {
         Ok(best.map(|(_, p)| p))
     }
 
-    async fn interject(&self, ch: ChannelId, person: &PersonId) -> Result<()> {
+    async fn interject(&self, ch: ChannelId, person: &PersonId, key: &str) -> Result<()> {
         let seg = self.current_segment(ch)?;
         let names = self.segment_names(seg)?;
         let name = self.display(person.as_str())?;
@@ -532,12 +579,7 @@ impl Agent {
             .find(|m| m.author == Actor::User)
             .map(|m| m.text)
             .unwrap_or_default();
-        let mut lines =
-            vec![
-                self.corpus
-                    .wording
-                    .fill("harness.interject", &names, &[("name", &name)]),
-            ];
+        let mut lines = vec![self.corpus.wording.fill(key, &names, &[("name", &name)])];
         lines.extend(self.attachment(seg, &mut turn, &last_user, vec![person.0.clone()])?);
         self.append_user(
             seg,

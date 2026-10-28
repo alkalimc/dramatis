@@ -176,3 +176,25 @@ async fn channels_keep_their_own_activity() {
         .unwrap();
     assert!(thinking.len() == 2 && thinking.iter().all(|&i| i < first_done));
 }
+
+#[tokio::test]
+async fn a_round_of_replies_reports_each_speaker_in_turn() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Ann: hello."), say("Bo: hi.")]);
+    e.agent.send(g, "hello everyone", None).await.unwrap();
+    let id: ChannelId = agent::view::channel_id(g);
+    let seen: Vec<(Author, ActivityState)> = e
+        .sink
+        .take()
+        .iter()
+        .filter_map(|ev| match ev {
+            Event::TurnActivity(a) if a.channel == id && a.state == ActivityState::Done => {
+                Some((a.author.clone(), a.state.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(seen.len(), 2);
+    assert_ne!(seen[0].0, seen[1].0);
+}

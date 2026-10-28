@@ -395,6 +395,41 @@ pub fn interjector(
     Ok(best.map(|(p, _)| p.clone()))
 }
 
+/// Who answers after `addressed` when the user spoke to the whole group: up to
+/// `max - 1` of `candidates` (those still in the group and not disabled), the ones
+/// who spoke least recently first, never-spoken ahead of all, ties in the order given.
+/// Mode is not consulted: the user spoke to them directly, so frozen members count as
+/// addressed. Quota is the caller's to check per turn.
+pub fn chorus(
+    conn: &Connection,
+    channel: ChannelId,
+    addressed: &PersonId,
+    candidates: &[PersonId],
+    max: u32,
+) -> Result<Vec<PersonId>> {
+    let ch = get(conn, channel)?;
+    let members = bond::filter_disabled(conn, ch.persons())?;
+    let mut stmt = conn.prepare(
+        "SELECT author, MAX(id) FROM message WHERE channel = ?1
+         AND author NOT IN ('user', 'host') GROUP BY author",
+    )?;
+    let last: std::collections::HashMap<PersonId, i64> = stmt
+        .query_map([channel], |r| {
+            Ok((r.get::<_, PersonId>(0)?, r.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut rest: Vec<&PersonId> = candidates
+        .iter()
+        .filter(|p| *p != addressed && members.contains(p))
+        .collect();
+    rest.sort_by_key(|p| last.get(*p).copied());
+    Ok(rest
+        .into_iter()
+        .take((max as usize).saturating_sub(1))
+        .cloned()
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +518,29 @@ mod tests {
         assert_eq!(address(&w, g, None, &[]).unwrap(), Some(p("a")));
         bond::set_mode(&w, &p("a"), Mode::Disabled).unwrap();
         assert_eq!(address(&w, g, Some(&p("a")), &[p("a")]).unwrap(), None);
+    }
+
+    #[test]
+    fn chorus_orders_by_least_recent_speech_and_respects_the_cap() {
+        let w = world();
+        let g = create_group(&w, &[p("a"), p("b"), p("c"), p("d")], None, Origin::User).unwrap();
+        let say = |who: &str, at: i64| {
+            crate::message::append(&w, g, &Actor::Person(p(who)), "hi", None, None, at).unwrap();
+        };
+        say("c", 1);
+        say("b", 2);
+        let all = [p("a"), p("b"), p("c"), p("d")];
+        // `a` is addressed; `d` never spoke, then `c`, then `b`.
+        assert_eq!(
+            chorus(&w, g, &p("a"), &all, 4).unwrap(),
+            vec![p("d"), p("c"), p("b")]
+        );
+        assert_eq!(chorus(&w, g, &p("a"), &all, 2).unwrap(), vec![p("d")]);
+        assert!(chorus(&w, g, &p("a"), &all, 1).unwrap().is_empty());
+        // Frozen members take part; disabled ones and strangers do not.
+        bond::set_mode(&w, &p("d"), Mode::Disabled).unwrap();
+        let more = [p("a"), p("b"), p("d"), p("x")];
+        assert_eq!(chorus(&w, g, &p("a"), &more, 4).unwrap(), vec![p("b")]);
     }
 
     #[test]

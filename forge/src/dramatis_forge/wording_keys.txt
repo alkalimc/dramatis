@@ -199,6 +199,8 @@ harness.digest.came_by
 harness.digest.commitment_due
 harness.digest.messaged
 harness.digest.replied
+harness.chorus
+harness.collective
 harness.done
 harness.error.arguments
 harness.error.not_asked
