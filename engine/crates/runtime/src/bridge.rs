@@ -93,11 +93,15 @@ pub struct AgentBridge {
 }
 
 /// The agent's own parameter groups, from the same optional `params.toml`.
-fn agent_params(home: &Home) -> agent::params::Params {
-    std::fs::read_to_string(home.params())
-        .ok()
-        .and_then(|text| toml::from_str(&text).ok())
-        .unwrap_or_default()
+/// Malformed or unreadable is an error, as for the api's own groups: an ignored override
+/// would make a calibration run meaningless.
+fn agent_params(home: &Home) -> ApiResult<agent::params::Params> {
+    let path = home.params();
+    match std::fs::read_to_string(&path) {
+        Ok(text) => toml::from_str(&text).map_err(|e| io(format!("{}: {e}", path.display()))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+        Err(e) => Err(io(format!("{}: {e}", path.display()))),
+    }
 }
 
 fn io(e: impl std::fmt::Display) -> ApiError {
@@ -107,9 +111,9 @@ fn io(e: impl std::fmt::Display) -> ApiError {
 }
 
 impl AgentBridge {
-    pub fn new(parts: BridgeParts) -> Arc<Self> {
-        Arc::new(Self {
-            agent_params: agent_params(&parts.home),
+    pub fn new(parts: BridgeParts) -> ApiResult<Arc<Self>> {
+        Ok(Arc::new(Self {
+            agent_params: agent_params(&parts.home)?,
             world: Mutex::new(parts.home.world()),
             endpoints: Mutex::new(parts.endpoints.clone()),
             parts,
@@ -118,7 +122,7 @@ impl AgentBridge {
             tasks: Mutex::default(),
             failures: Mutex::default(),
             busy: watch::channel(0).0,
-        })
+        }))
     }
 
     fn failed(&self, what: &str, e: impl std::fmt::Display) {
@@ -377,5 +381,41 @@ impl AgentPort for Port {
     fn switch_world(&self, path: &std::path::Path) {
         *self.0.world.lock().unwrap_or_else(|e| e.into_inner()) = path.to_owned();
         *self.0.agent.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn home_with(tag: &str, params: Option<&str>) -> Home {
+        let root =
+            std::env::temp_dir().join(format!("dramatis-bridge-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let home = Home::new(root);
+        home.create().unwrap();
+        if let Some(text) = params {
+            std::fs::write(home.params(), text).unwrap();
+        }
+        home
+    }
+
+    #[test]
+    fn the_agents_parameters_follow_the_file_and_a_bad_one_is_an_error() {
+        let absent = home_with("absent", None);
+        assert_eq!(agent_params(&absent).unwrap(), Default::default());
+
+        // Keys of other crates' groups sit in the same file.
+        let mixed = home_with(
+            "mixed",
+            Some("[roll]\nk = 100.0\n[media]\ncache_gb = 0.5\n"),
+        );
+        assert_eq!(agent_params(&mixed).unwrap().roll.k, 100.0);
+
+        let bad = home_with("bad", Some("[roll]\nk = \"many\"\n"));
+        assert!(matches!(agent_params(&bad), Err(ApiError::Io { .. })));
+        for h in [absent, mixed, bad] {
+            std::fs::remove_dir_all(h.root()).unwrap();
+        }
     }
 }
