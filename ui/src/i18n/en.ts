@@ -76,6 +76,8 @@ export const en = {
   "typing.writing": "{name} is typing…",
   "typing.tool": "{name} is looking things up…",
   "typing.marker": "typing",
+  "list.separator": ", ",
+  "list.more": "{names} +{count}",
   "action.line": "{name} ▸ {action}",
   "action.search": "looking up \"{query}\"",
   "action.get_chunk": "reading a passage",

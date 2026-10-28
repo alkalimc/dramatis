@@ -1,7 +1,7 @@
 import { memo, useMemo, useRef, useState } from "react";
 import type { Author, Citation, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
-import { actionText, authorName, choicesOf, when } from "../lib/format";
+import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { blocks, splitScene, withoutCites } from "../lib/scene";
 import { useActions, useApi, useStore } from "../store";
@@ -39,7 +39,7 @@ function Choices({ actions }: { actions: ToolAction[] }) {
           </button>
         ) : (
           <button key={`g:${c.channel}`} type="button" className="ghost" onClick={() => acts.openChannel(c.channel)}>
-            {t("choice.group", { names: c.names.join(", ") })}
+            {t("choice.group", { names: nameList(c.names, t) })}
           </button>
         ),
       )}

@@ -95,6 +95,29 @@ pub fn working_text(agent: &Agent, who: &str, what: Working) -> String {
     }
 }
 
+/// Most names a group label spells out before it counts the rest.
+const LABEL_NAMES: usize = 3;
+
+/// The corpus's wording for `key`, else `default`.
+fn wording_or(agent: &Agent, key: &str, default: &str) -> String {
+    match agent.wording().get(key) {
+        k if k == key => default.to_owned(),
+        template => template.to_owned(),
+    }
+}
+
+/// Names for a group in the corpus's list separator, the first few and then a count.
+pub fn group_label(agent: &Agent, names: &[String]) -> String {
+    let sep = wording_or(agent, "list.separator", ", ");
+    let shown = names[..names.len().min(LABEL_NAMES)].join(&sep);
+    match names.len() - names.len().min(LABEL_NAMES) {
+        0 => shown,
+        more => wording_or(agent, "list.more", "{names} +{count}")
+            .replace("{names}", &shown)
+            .replace("{count}", &more.to_string()),
+    }
+}
+
 /// One tool call as a short English line; the contents are the model's and the corpus's.
 pub fn action_line(action: &ToolAction) -> String {
     match action {
@@ -165,10 +188,10 @@ pub enum Offer {
 }
 
 impl Offer {
-    pub fn text(&self) -> String {
+    pub fn text(&self, agent: &Agent) -> String {
         match self {
             Offer::Person { name, .. } => format!("talk to {name}"),
-            Offer::Group { names, .. } => format!("open group: {}", names.join(", ")),
+            Offer::Group { names, .. } => format!("open group: {}", group_label(agent, names)),
         }
     }
 }
@@ -181,6 +204,8 @@ struct State {
     /// The message whose name has been written, so a stream resumed after a tool line
     /// does not repeat it.
     named: Option<MessageId>,
+    /// Whose "is typing" line is showing, so one turn says it once.
+    typing: Option<Author>,
 }
 
 /// Prints replies as they stream. Built before the agent (which takes it), bound to the
@@ -225,6 +250,7 @@ impl Show {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         self.close(&mut st);
         st.named = None;
+        st.typing = None;
     }
 
     fn close(&self, st: &mut State) {
@@ -288,12 +314,27 @@ impl Sink for Show {
         let Some(agent) = self.agent() else { return };
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Event::TurnActivity(a) = &event {
-            // The session already said who is typing; a tool round is the one change worth
-            // a line of its own.
-            if matches!(a.state, ActivityState::Tool { .. }) && st.live.is_none() {
-                let who = author_name(&agent, &a.author);
-                self.term
-                    .note(&working_text(&agent, &who, Working::Searching));
+            // Whoever is generating gets the line, not the channel: in a group the one who
+            // answers is not known before the turn starts.
+            let who = author_name(&agent, &a.author);
+            match &a.state {
+                ActivityState::Thinking | ActivityState::Writing => {
+                    if st.typing.as_ref() != Some(&a.author) {
+                        st.typing = Some(a.author.clone());
+                        self.term.note(&working_text(&agent, &who, Working::Typing));
+                    }
+                }
+                ActivityState::Tool { .. } => {
+                    if st.live.is_none() {
+                        self.term
+                            .note(&working_text(&agent, &who, Working::Searching));
+                    }
+                }
+                ActivityState::Done | ActivityState::Failed { .. } => {
+                    if st.typing.as_ref() == Some(&a.author) {
+                        st.typing = None;
+                    }
+                }
             }
             return;
         }

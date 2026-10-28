@@ -9,7 +9,7 @@ use api::types::{Author, PersonId as ApiPerson};
 use world::{Actor, ChannelId, PersonId};
 
 use super::command::{Command, HELP};
-use super::show::{self, Offer, Show, Term, Working, person_name};
+use super::show::{self, Offer, Show, Term, Working, group_label, person_name};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -307,11 +307,12 @@ impl Session {
                     .iter()
                     .map(|p| person_name(&self.agent, p.as_str()))
                     .collect();
-                self.term.note(&format!("group with {}", names.join(", ")));
+                let label = group_label(&self.agent, &names);
+                self.term.note(&format!("group with {label}"));
                 self.current = Some(Current {
                     channel,
                     kind: Kind::Group(members),
-                    label: names.join("+"),
+                    label,
                 });
             }
             Err(e) => self.term.error(&e.to_string()),
@@ -341,11 +342,12 @@ impl Session {
                     .iter()
                     .map(|p| person_name(&self.agent, p.as_str()))
                     .collect();
-                self.term.note(&format!("group with {}", names.join(", ")));
+                let label = group_label(&self.agent, &names);
+                self.term.note(&format!("group with {label}"));
                 self.current = Some(Current {
                     channel: id,
                     kind: Kind::Group(members),
-                    label: names.join("+"),
+                    label,
                 });
             }
         }
@@ -363,7 +365,8 @@ impl Session {
             return;
         }
         for (i, o) in offers.iter().enumerate() {
-            self.term.note(&format!("  {} {}", i + 1, o.text()));
+            self.term
+                .note(&format!("  {} {}", i + 1, o.text(&self.agent)));
         }
         self.term.note("  /go <n> takes you there");
         self.offers = offers;
@@ -410,9 +413,7 @@ impl Session {
                 .print("no channel yet: /talk <person> or /host first\n");
         };
         let (agent, started, at) = (self.agent.clone(), Instant::now(), now_ms());
-        let who = self.current.as_ref().map_or("", |c| c.label.as_str());
-        self.term
-            .note(&show::working_text(&self.agent, who, Working::Typing));
+        // The typing line comes from the turn's own activity events, naming who writes.
         let result = self
             .interruptible(async move {
                 let posted = agent.post(channel, text, None)?;

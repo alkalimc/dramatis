@@ -298,7 +298,7 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
     );
     assert!(r.run("/go 3").await.contains("no such choice"));
     assert!(r.run("/go 2").await.contains("group with ann, bo"));
-    assert!(r.session.prompt().starts_with("[ann+bo]"));
+    assert!(r.session.prompt().starts_with("[ann, bo]"));
     assert!(r.run("/go 1").await.contains("talking to ann"));
     assert!(r.session.prompt().starts_with("[ann]"));
 
@@ -313,4 +313,53 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
         "{}",
         r.session.prompt()
     );
+}
+
+fn activity(who: &str, state: api::events::ActivityState) -> agent::Event {
+    agent::Event::TurnActivity(api::events::TurnActivity {
+        channel: api::types::ChannelId("1".into()),
+        author: api::types::Author::Person {
+            id: api::types::PersonId(who.into()),
+        },
+        state,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_typing_line_names_whoever_generates_once_per_turn() {
+    use agent::Sink;
+    use api::events::ActivityState::{Done, Thinking, Tool, Writing};
+    let r = rig();
+    // A group: ann answers (thinking, a lookup, thinking, writing), then bo.
+    for (who, state) in [
+        ("ann", Thinking),
+        (
+            "ann",
+            Tool {
+                name: "search".into(),
+            },
+        ),
+        ("ann", Thinking),
+        ("ann", Writing),
+        ("ann", Done),
+        ("bo", Thinking),
+        ("bo", Writing),
+        ("bo", Done),
+    ] {
+        r.show.emit(activity(who, state));
+    }
+    assert_eq!(
+        r.out.take(),
+        "ann is typing...\nann is looking things up...\nbo is typing...\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_label_lists_three_names_and_counts_the_rest() {
+    let r = rig();
+    let names = |n: usize| (0..n).map(|i| format!("p{i}")).collect::<Vec<_>>();
+    let label = |n| super::show::group_label(&r.agent, &names(n));
+    assert_eq!(label(2), "p0, p1");
+    assert_eq!(label(3), "p0, p1, p2");
+    assert_eq!(label(5), "p0, p1, p2 +2");
 }

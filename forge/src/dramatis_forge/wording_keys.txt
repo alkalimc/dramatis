@@ -254,6 +254,8 @@ library.search.placeholder
 library.search.submit
 library.searching
 library.understood
+list.more
+list.separator
 message.actions
 message.author
 message.awaiting

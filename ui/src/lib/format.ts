@@ -39,8 +39,17 @@ export function activityText(a: Activity, t: T): string {
   }
 }
 
+/** Most names a list spells out before it counts the rest. */
+const LIST_NAMES = 3;
+
+export function nameList(names: string[], t: T): string {
+  const shown = names.slice(0, LIST_NAMES).join(t("list.separator"));
+  const more = names.length - LIST_NAMES;
+  return more > 0 ? t("list.more", { names: shown, count: more }) : shown;
+}
+
 export function actionText(a: ToolAction, t: T, names: Names): string {
-  const list = (ps: { name: string }[]) => ps.map((p) => p.name).join(", ");
+  const list = (ps: { name: string }[]) => nameList(ps.map((p) => p.name), t);
   switch (a.tool) {
     case "search":
       return t("action.search", { query: a.query });
