@@ -31,6 +31,11 @@ export function Menu({ at, items, label, onClose }: { at: { x: number; y: number
 
   useEffect(() => {
     ref.current?.querySelector<HTMLElement>("button")?.focus();
+    // Some webviews report a blur as a right click lands; only a blur that follows is a real one.
+    const openedAt = performance.now();
+    const leave = () => {
+      if (performance.now() - openedAt > 400) onClose();
+    };
     const away = (e: Event) => {
       // A right click that another handler took (it opened its own menu) is not ours to close on.
       if (e.type === "contextmenu" && e.defaultPrevented) return;
@@ -41,14 +46,14 @@ export function Menu({ at, items, label, onClose }: { at: { x: number; y: number
     const arm = setTimeout(() => {
       document.addEventListener("mousedown", away);
       document.addEventListener("contextmenu", away);
-      window.addEventListener("blur", onClose);
+      window.addEventListener("blur", leave);
       window.addEventListener("resize", onClose);
     }, 0);
     return () => {
       clearTimeout(arm);
       document.removeEventListener("mousedown", away);
       document.removeEventListener("contextmenu", away);
-      window.removeEventListener("blur", onClose);
+      window.removeEventListener("blur", leave);
       window.removeEventListener("resize", onClose);
     };
   }, [onClose]);

@@ -216,6 +216,9 @@ button.chat-row.selected {
   gap: var(--s-1);
   font-weight: 600;
 }
+.chat-name .icon-svg {
+  flex: none;
+}
 .chat-time,
 .chat-pin {
   flex: none;
@@ -468,9 +471,9 @@ button.drawer-item:hover,
   overflow: hidden;
 }
 .menu-sep {
-  height: 0.5rem;
+  height: 1px;
   margin: var(--s-1) 0;
-  background: var(--line);
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
 }
 .menu-pop button {
   display: flex;
@@ -482,12 +485,15 @@ button.drawer-item:hover,
   border: none;
   border-radius: 0;
   color: var(--ink);
-  padding: var(--s-2) var(--s-4);
+  height: 2.9rem;
+  padding: 0 var(--s-4);
+  font-size: var(--fs-md);
   text-align: left;
 }
 .menu-pop button .icon-svg {
   flex: none;
   color: var(--muted);
+  stroke-width: 1.4;
 }
 .menu-pop button.danger .icon-svg {
   color: inherit;
