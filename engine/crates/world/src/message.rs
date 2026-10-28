@@ -22,7 +22,15 @@ const COLUMNS: &str = "id, channel, author, text, tool_calls, attachment, at";
 fn read(row: &Row<'_>) -> rusqlite::Result<Message> {
     let json = |col: &str| -> rusqlite::Result<Option<Value>> {
         let raw: Option<String> = row.get(col)?;
-        Ok(raw.and_then(|s| serde_json::from_str(&s).ok()))
+        raw.map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })
     };
     Ok(Message {
         id: row.get("id")?,
@@ -253,5 +261,32 @@ mod tests {
             seen.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
             ["to a"]
         );
+    }
+
+    #[test]
+    fn a_person_speaking_unarchives_in_the_same_unit_as_the_insert() {
+        let w = world();
+        let a = p("a");
+        let c = channel::direct(&w, &a).unwrap();
+        channel::set_archived(&w, c, true).unwrap();
+        append(&w, c, &Actor::User, "hi", None, None, 1).unwrap();
+        assert!(
+            channel::get(&w, c).unwrap().archived,
+            "the user's words do not"
+        );
+
+        // If clearing the flag fails, the message is not stored either.
+        w.execute_batch(
+            "CREATE TRIGGER keep BEFORE UPDATE OF archived ON channel
+             BEGIN SELECT RAISE(ABORT, 'keep'); END;",
+        )
+        .unwrap();
+        assert!(append(&w, c, &Actor::Person(a.clone()), "yo", None, None, 2).is_err());
+        assert_eq!(history(&w, c, None, 10).unwrap().len(), 1);
+        assert_eq!(bond::user_bond(&w, &a).unwrap().last_seen, Some(1));
+        w.execute_batch("DROP TRIGGER keep").unwrap();
+
+        append(&w, c, &Actor::Person(a), "yo", None, None, 3).unwrap();
+        assert!(!channel::get(&w, c).unwrap().archived);
     }
 }
