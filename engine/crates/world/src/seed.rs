@@ -263,7 +263,7 @@ fn queued_candidates(conn: &Connection) -> Result<Vec<Candidate>> {
             last_seen: last_seen(conn, &person)?,
             person,
             kind,
-            material: serde_json::from_str(&material).unwrap_or_default(),
+            material: serde_json::from_str(&material)?,
             involved: Vec::new(),
             origin: None,
         });
@@ -292,12 +292,17 @@ fn daily_candidates(conn: &Connection, now: Now, words: &[WordsHit]) -> Result<V
         if birthday.is_some() && !used(conn, Some(p), &SeedKind::Birthday(today.year))? {
             push(SeedKind::Birthday(today.year), Vec::new())?;
         }
-        let memory = fact::visible_to_person(conn, p)?
-            .into_iter()
-            .filter(|f| f.kind == FactKind::Fact && f.about == Some(About::User))
-            .rev()
-            .map(|f| SeedKind::Memory(f.id))
-            .find(|k| !used(conn, None, k).unwrap_or(true));
+        let mut memory = None;
+        for f in fact::visible_to_person(conn, p)?.into_iter().rev() {
+            if f.kind != FactKind::Fact || f.about != Some(About::User) {
+                continue;
+            }
+            let k = SeedKind::Memory(f.id);
+            if !used(conn, None, &k)? {
+                memory = Some(k);
+                break;
+            }
+        }
         if let Some(k) = memory {
             push(k, Vec::new())?;
         }

@@ -76,7 +76,9 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Task> {
         granted: row.get("granted")?,
         status: row.get("status")?,
         pinned: row.get("pinned")?,
-        cites: serde_json::from_str(&cites).unwrap_or_default(),
+        cites: serde_json::from_str(&cites).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(e))
+        })?,
         note_path: row.get("note_path")?,
         channel: row.get("channel")?,
         reply: row.get("reply")?,

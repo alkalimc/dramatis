@@ -35,12 +35,9 @@ pub struct Rewound {
 }
 
 /// Take back `message`, which must be the user's own in `channel`. The caller makes sure no
-/// turn is running there. One transaction: nothing changes if any step fails.
+/// turn is running there. All or nothing, also when called inside a caller's transaction.
 pub fn rewind(conn: &Connection, channel: ChannelId, message: MessageId) -> Result<Rewound> {
-    let tx = conn.unchecked_transaction()?;
-    let out = rewind_in(&tx, channel, message)?;
-    tx.commit()?;
-    Ok(out)
+    crate::atomic(conn, |conn| rewind_in(conn, channel, message))
 }
 
 fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound> {
@@ -356,5 +353,87 @@ mod tests {
         assert!(matches!(rewind(&w, other, mine), Err(Error::Invalid(_))));
         assert!(rewind(&w, c, MessageId(999)).is_err());
         assert!(message::get(&w, mine).is_ok());
+    }
+
+    fn count(w: &Connection, table: &str) -> i64 {
+        w.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// Failed request, archived channel, announced items for removed messages: the
+    /// rewind removes whole rows only, and the announced record never blocks news.
+    #[test]
+    fn rewinds_an_archived_channel_after_a_failed_request_with_announced_items() {
+        use crate::presence::{self, Birthdays};
+        use crate::task::Failure;
+        let w = world();
+        let a = p("a");
+        let c = channel::direct(&w, &a).unwrap();
+        say(&w, c, &Actor::User, "one", 100);
+        let m2 = say(&w, c, &Actor::User, "two", 200);
+        say(&w, c, &Actor::Person(a.clone()), "reply", 210);
+        let t = task::open_case(&w, "q", 207).unwrap();
+        w.execute("UPDATE task SET channel = ?2 WHERE id = ?1", (t, c))
+            .unwrap();
+        task::fail(&w, t, Failure::Failed, 220).unwrap();
+        channel::set_archived(&w, c, true).unwrap();
+
+        let none: Vec<(crate::PersonId, crate::types::MonthDay)> = Vec::new();
+        let now = crate::clock::Now::utc(crate::testing::T0);
+        let before = presence::digest(&w, now, &none as &dyn Birthdays).unwrap();
+        assert!(!before.is_empty());
+        presence::mark_announced(&w, &before, &before, now.local_date()).unwrap();
+
+        let out = rewind(&w, c, m2).unwrap();
+        assert_eq!((out.removed, out.tasks.clone()), (2, vec![t]));
+        assert!(task::get(&w, t).is_err());
+        assert!(task::untold_failures(&w).unwrap().is_empty());
+        assert!(
+            channel::get(&w, c).unwrap().archived,
+            "rewind leaves the list as it was"
+        );
+        assert_eq!(message::history(&w, c, None, 10).unwrap().len(), 1);
+
+        // The next record drops keys of items that are gone; until then they are inert.
+        let after = presence::digest(&w, now, &none as &dyn Birthdays).unwrap();
+        presence::mark_announced(&w, &after, &presence::Digest::default(), now.local_date())
+            .unwrap();
+        let kept: Vec<String> = crate::settings::get(&w, "presence.announced")
+            .unwrap()
+            .unwrap_or_default();
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+
+    #[test]
+    fn a_failure_midway_removes_nothing() {
+        let w = world();
+        let a = p("a");
+        let c = channel::direct(&w, &a).unwrap();
+        let m = say(&w, c, &Actor::User, "one", 100);
+        say(&w, c, &Actor::Person(a), "r", 101);
+        let t = task::open_case(&w, "q", 102).unwrap();
+        w.execute("UPDATE task SET channel = ?2 WHERE id = ?1", (t, c))
+            .unwrap();
+        // The last step deletes messages; make it fail after the earlier steps ran.
+        w.execute_batch(
+            "CREATE TRIGGER stop BEFORE DELETE ON message BEGIN SELECT RAISE(ABORT, 'stop'); END;",
+        )
+        .unwrap();
+        assert!(rewind(&w, c, m).is_err());
+        assert!(w.is_autocommit());
+        assert_eq!(count(&w, "message"), 2);
+        assert_eq!(count(&w, "task"), 1);
+    }
+
+    #[test]
+    fn rewind_inside_a_caller_transaction_is_a_savepoint() {
+        let w = world();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let m = say(&w, c, &Actor::User, "one", 100);
+        let tx = w.unchecked_transaction().unwrap();
+        rewind(&w, c, m).unwrap();
+        assert_eq!(count(&w, "message"), 0);
+        drop(tx);
+        assert_eq!(count(&w, "message"), 1, "the caller decides");
     }
 }

@@ -439,6 +439,165 @@ mod tests {
         assert_eq!(st.window.unwrap().calls, 3.0);
     }
 
+    /// Every step from every older version keeps the rows and defaults the new columns.
+    #[test]
+    fn every_older_schema_with_data_migrates_to_latest() {
+        for from in 1..SCHEMA_VERSION {
+            let mut conn = Connection::open_in_memory().unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            for m in &MIGRATIONS[..from as usize] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.pragma_update(None, "user_version", from).unwrap();
+            conn.execute_batch(
+                "INSERT INTO channel(id, kind, origin) VALUES (1, 'direct', 'user');
+                 INSERT INTO channel_participant VALUES (1, 'p1');
+                 INSERT INTO bond(a, b, trust, mode) VALUES ('user', 'p1', 120, 'enabled');
+                 INSERT INTO message(channel, author, text, at) VALUES (1, 'p1', 'hi', 5);
+                 INSERT INTO task(question, assignee, turns_left, channel)
+                     VALUES ('q', 'p1', 3, 1);
+                 INSERT INTO fact(author, audience_kind, audience_ref, kind, text, created_at)
+                     VALUES ('user', 'participants', '1', 'fact', 't', 0);
+                 INSERT INTO meter(at, shape, model, uncached, cached, output, points)
+                     VALUES (1, 'direct', 'm', 1, 0, 0, 1.0);
+                 INSERT INTO settings VALUES ('user.name', '\"someone\"');",
+            )
+            .unwrap();
+            if from >= 2 {
+                conn.execute_batch(
+                    "INSERT INTO seed(person, kind, ref, created_at, material)
+                         VALUES ('p1', 'memory', '1', 0, '[\"c\"]');
+                     INSERT INTO session(channel, person, cause, opened_at, last_at)
+                         VALUES (1, 'p1', 'addressed', 1, 1);",
+                )
+                .unwrap();
+            }
+            migrate(&mut conn).unwrap();
+            assert_eq!(version(&conn), SCHEMA_VERSION, "from {from}");
+            let count = |t: &str| -> i64 {
+                conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
+                    .unwrap()
+            };
+            for t in [
+                "channel", "bond", "message", "task", "fact", "meter", "settings",
+            ] {
+                assert_eq!(count(t), 1, "{t} from {from}");
+            }
+            if from >= 2 {
+                assert_eq!((count("seed"), count("session")), (1, 1), "from {from}");
+            }
+            let ch = channel::get(&conn, ChannelId(1)).unwrap();
+            assert_eq!((ch.name, ch.avatar, ch.archived), (None, None, false));
+            let t = task::get(&conn, TaskId(1)).unwrap();
+            assert_eq!((t.failure, t.failure_told), (None, false));
+            let requests: i64 = conn
+                .query_row("SELECT requests FROM meter", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(requests, 0);
+            assert_eq!(
+                message::history(&conn, ChannelId(1), None, 10)
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+
+    /// A migration that fails halfway leaves the database at its old version, untouched.
+    #[test]
+    fn a_failed_step_leaves_the_old_version() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for m in &MIGRATIONS[..4] {
+            conn.execute_batch(m).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        // Step 5 adds `name`; a clashing column makes it fail after the statement ran.
+        conn.execute_batch("ALTER TABLE channel ADD COLUMN avatar TEXT;")
+            .unwrap();
+        assert!(migrate(&mut conn).is_err());
+        assert_eq!(version(&conn), 4);
+        let has_name: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('channel') WHERE name = 'name'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_name, 0, "the step rolled back whole");
+    }
+
+    fn setting_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT count(*) FROM settings", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn put(conn: &Connection, key: &str) -> Result<()> {
+        conn.execute("INSERT INTO settings VALUES (?1, '1')", [key])?;
+        Ok(())
+    }
+
+    fn fail_with(conn: &Connection) -> Result<()> {
+        put(conn, "inner")?;
+        Err(Error::Invalid("boom".into()))
+    }
+
+    #[test]
+    fn atomic_commits_and_rolls_back_outside_a_transaction() {
+        let w = World::in_memory().unwrap();
+        atomic(&w, |c| put(c, "a")).unwrap();
+        assert!(atomic(&w, fail_with).is_err());
+        assert_eq!(setting_count(&w), 1);
+        assert!(w.is_autocommit(), "no transaction left open");
+    }
+
+    #[test]
+    fn an_inner_atomic_failure_rolls_back_only_itself() {
+        let w = World::in_memory().unwrap();
+        atomic(&w, |c| {
+            put(c, "outer-before")?;
+            assert!(atomic(c, fail_with).is_err());
+            // A nested success is kept, and a failure two deep undoes only the deepest.
+            atomic(c, |c| {
+                put(c, "mid")?;
+                assert!(atomic(c, fail_with).is_err());
+                Ok(())
+            })?;
+            put(c, "outer-after")?;
+            Ok(())
+        })
+        .unwrap();
+        let keys: Vec<String> = w
+            .prepare("SELECT key FROM settings ORDER BY key")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(keys, ["mid", "outer-after", "outer-before"]);
+    }
+
+    #[test]
+    fn an_outer_failure_undoes_a_committed_inner_atomic() {
+        let w = World::in_memory().unwrap();
+        let r: Result<()> = atomic(&w, |c| {
+            atomic(c, |c| put(c, "inner-ok"))?;
+            Err(Error::Invalid("outer".into()))
+        });
+        assert!(r.is_err());
+        assert_eq!(setting_count(&w), 0);
+        assert!(w.is_autocommit());
+    }
+
+    #[test]
+    fn atomic_inside_a_caller_transaction_leaves_commit_to_the_caller() {
+        let w = World::in_memory().unwrap();
+        let tx = w.unchecked_transaction().unwrap();
+        atomic(&w, |c| put(c, "kept")).unwrap();
+        assert!(atomic(&w, fail_with).is_err());
+        drop(tx); // rolls back the caller's transaction
+        assert_eq!(setting_count(&w), 0);
+    }
+
     #[test]
     fn migrating_again_is_a_no_op() {
         let mut conn = migrated();
