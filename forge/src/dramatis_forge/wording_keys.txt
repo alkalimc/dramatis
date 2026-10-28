@@ -90,6 +90,8 @@ coldstart.roster
 coldstart.title
 composer.ask
 composer.group
+composer.hint.mac
+composer.hint.other
 composer.image
 composer.image.remove
 composer.label
@@ -267,6 +269,8 @@ message.note
 message.play
 message.playing
 message.relayed
+message.resend
+message.resend.confirm
 message.sources
 message.streaming
 mode.disabled
