@@ -86,7 +86,7 @@ fn ms(t: SystemTime) -> Option<i64> {
 }
 
 /// Every save, the most recently played first. A write-ahead log newer than the file
-/// counts: that is where play lands until a checkpoint.
+/// counts: a save last opened by an older build keeps its play there until a checkpoint.
 pub fn list(home: &Home, current: &str, now: Now) -> Vec<SaveInfo> {
     let mut rows: Vec<(Option<i64>, SaveInfo)> = names(home)
         .into_iter()
@@ -103,6 +103,7 @@ pub fn list(home: &Home, current: &str, now: Now) -> Vec<SaveInfo> {
             let info = SaveInfo {
                 current: name == current,
                 name,
+                encrypted: world::cipher::is_encrypted(&path),
                 size_kb: u32::try_from(size.div_ceil(1024)).unwrap_or(u32::MAX),
                 played_at: at.map(|a| convert::ts(a, now.offset_min)),
             };
@@ -146,8 +147,8 @@ pub fn create(home: &Home, name: &str) -> ApiResult<()> {
     built
 }
 
-/// A consistent copy of `from` as a new save `to`.
-pub fn copy(home: &Home, from: &str, to: &str) -> ApiResult<()> {
+/// A consistent copy of `from` as a new save `to`, under the same `key` (its password).
+pub fn copy(home: &Home, from: &str, to: &str, key: Option<&str>) -> ApiResult<()> {
     let src = path_of(home, from)?;
     check_name(to)?;
     if taken(home, to) {
@@ -155,7 +156,7 @@ pub fn copy(home: &Home, from: &str, to: &str) -> ApiResult<()> {
     }
     let dest = home.save_path(to);
     let part = staging(&dest);
-    let copied = world::copy_file(&src, &part).map_err(world_err);
+    let copied = world::copy_file(&src, &part, key).map_err(world_err);
     if copied.is_ok() {
         std::fs::rename(&part, &dest).map_err(io)?;
     }
@@ -188,15 +189,16 @@ pub fn delete(home: &Home, name: &str) -> ApiResult<()> {
     Ok(())
 }
 
-/// Write a consistent single-file copy of the save to `dest`, replacing a file there.
-pub fn export(home: &Home, name: &str, dest: &Path) -> ApiResult<()> {
+/// Write a consistent single-file copy of the save to `dest`, replacing a file there. An
+/// encrypted save stays encrypted under the same password (`key`).
+pub fn export(home: &Home, name: &str, dest: &Path, key: Option<&str>) -> ApiResult<()> {
     let src = path_of(home, name)?;
     if dest.is_dir() || dest.file_name().is_none() {
         return Err(invalid("path"));
     }
     let part = staging(dest);
     let _ = std::fs::remove_file(&part);
-    let copied = world::copy_file(&src, &part).map_err(world_err);
+    let copied = world::copy_file(&src, &part, key).map_err(world_err);
     if copied.is_ok() {
         std::fs::rename(&part, dest).map_err(io)?;
     }
@@ -205,8 +207,14 @@ pub fn export(home: &Home, name: &str, dest: &Path) -> ApiResult<()> {
 }
 
 /// Bring a world database from `file` in as a new save, migrated to this build's schema.
-/// `name` defaults to the file's name without its extension. Returns the name used.
-pub fn import(home: &Home, file: &Path, name: Option<&str>) -> ApiResult<String> {
+/// `name` defaults to the file's name without its extension. An encrypted file needs its
+/// `password` and keeps it. Returns the name used.
+pub fn import(
+    home: &Home,
+    file: &Path,
+    name: Option<&str>,
+    password: Option<&str>,
+) -> ApiResult<String> {
     let name = match name {
         Some(n) => n.to_owned(),
         None => file
@@ -222,14 +230,16 @@ pub fn import(home: &Home, file: &Path, name: Option<&str>) -> ApiResult<String>
     if !file.is_file() {
         return Err(ApiError::NotFound);
     }
-    world::check_file(file).map_err(|e| match e {
+    world::check_file(file, password).map_err(|e| match e {
         world::Error::Invalid(_) | world::Error::TooNew { .. } => invalid("file"),
+        // A file that is not even a database reads as locked: ask for the password, and a
+        // wrong one then says so.
         other => world_err(other),
     })?;
     let dest = home.save_path(&name);
     let part = staging(&dest);
-    let built = world::copy_file(file, &part)
-        .and_then(|()| world::World::open(&part).map(drop))
+    let built = world::copy_file(file, &part, password)
+        .and_then(|()| world::World::open_with(&part, password).map(drop))
         .map_err(world_err);
     if built.is_ok() {
         std::fs::rename(&part, &dest).map_err(io)?;
@@ -309,9 +319,9 @@ mod tests {
         assert_eq!(create(&h, "ONE"), Err(ApiError::Exists));
         assert_eq!(create(&h, "../x"), Err(invalid("name")));
         marker(&h, "one", "Doc");
-        copy(&h, "one", "two").unwrap();
-        assert_eq!(copy(&h, "one", "two"), Err(ApiError::Exists));
-        assert_eq!(copy(&h, "nope", "three"), Err(ApiError::NotFound));
+        copy(&h, "one", "two", None).unwrap();
+        assert_eq!(copy(&h, "one", "two", None), Err(ApiError::Exists));
+        assert_eq!(copy(&h, "nope", "three", None), Err(ApiError::NotFound));
         assert_eq!(marked(&h, "two").as_deref(), Some("\"Doc\""));
         // The copy is its own world.
         marker(&h, "two", "Other");
@@ -344,20 +354,20 @@ mod tests {
         marker(&h, "one", "Doc");
         let out = h.root().join("out.sqlite");
         std::fs::write(&out, b"old").unwrap();
-        export(&h, "one", &out).unwrap();
+        export(&h, "one", &out, None).unwrap();
         assert!(!h.root().join("out.sqlite.part").exists());
-        assert_eq!(export(&h, "one", h.root()), Err(invalid("path")));
+        assert_eq!(export(&h, "one", h.root(), None), Err(invalid("path")));
 
-        assert_eq!(import(&h, &out, None).unwrap(), "out");
+        assert_eq!(import(&h, &out, None, None).unwrap(), "out");
         assert_eq!(marked(&h, "out").as_deref(), Some("\"Doc\""));
-        assert_eq!(import(&h, &out, Some("out")), Err(ApiError::Exists));
-        assert_eq!(import(&h, &out, Some("renamed")).unwrap(), "renamed");
+        assert_eq!(import(&h, &out, Some("out"), None), Err(ApiError::Exists));
+        assert_eq!(import(&h, &out, Some("renamed"), None).unwrap(), "renamed");
 
         let junk = h.root().join("junk.sqlite");
         std::fs::write(&junk, b"not a database").unwrap();
-        assert_eq!(import(&h, &junk, None), Err(invalid("file")));
+        assert_eq!(import(&h, &junk, None, None), Err(invalid("file")));
         assert_eq!(
-            import(&h, &h.root().join("absent.db"), Some("x")),
+            import(&h, &h.root().join("absent.db"), Some("x"), None),
             Err(ApiError::NotFound)
         );
         // Nothing half-built is left behind.

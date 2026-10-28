@@ -164,9 +164,13 @@ impl AgentPort for Spy {
     fn idle(&self) -> bool {
         !self.busy.load(Ordering::Relaxed)
     }
-    fn switch_world(&self, path: &std::path::Path) {
+    fn switch_world(&self, path: &std::path::Path, key: Option<&str>) {
         let name = path.file_stem().unwrap().to_string_lossy();
-        self.calls.lock().unwrap().push(format!("world {name}"));
+        let locked = if key.is_some() { " locked" } else { "" };
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("world {name}{locked}"));
     }
 }
 
@@ -1033,7 +1037,7 @@ async fn saves_switch_keep_their_own_worlds_and_guard_the_open_one() {
         .await
         .unwrap();
     let name = e
-        .import_save(out.display().to_string(), None)
+        .import_save(out.display().to_string(), None, None)
         .await
         .unwrap();
     assert_eq!(name, "backup");
@@ -1090,9 +1094,11 @@ async fn the_user_avatar_defaults_to_the_player_portrait_and_can_be_replaced() {
     assert_eq!(*net.1.lock().unwrap(), 1, "cached like a person's avatar");
 
     let own = e.set_user_avatar(Some(png_part(1))).await.unwrap().unwrap();
-    assert!(own.path.contains("uploads"));
+    // Their own lives in the save, not in a file beside it.
+    assert!(own.path.starts_with("data:image/png;base64,"));
+    assert_eq!(std::fs::read_dir(e.home.uploads()).unwrap().count(), 0);
     assert_eq!(e.user_avatar().await.unwrap().unwrap(), own);
-    // The same picture again is the same file.
+    // The same picture again reads back the same.
     assert_eq!(
         e.set_user_avatar(Some(png_part(1))).await.unwrap().unwrap(),
         own
@@ -1413,7 +1419,7 @@ async fn export_while_another_connection_writes_is_a_consistent_copy() {
 }
 
 #[tokio::test]
-async fn a_picture_used_twice_is_stored_once_and_clearing_one_use_keeps_the_other() {
+async fn a_group_picture_is_a_file_and_the_users_own_stays_in_the_save() {
     let r = rig();
     let e = &r.engine;
     let g = e
@@ -1426,10 +1432,229 @@ async fn a_picture_used_twice_is_stored_once_and_clearing_one_use_keeps_the_othe
         .unwrap()
         .unwrap();
     let own = e.set_user_avatar(Some(png_part(7))).await.unwrap().unwrap();
-    assert_eq!(group, own);
+    assert_ne!(group, own);
     assert_eq!(std::fs::read_dir(e.home.uploads()).unwrap().count(), 1);
 
     e.set_channel_avatar(g, None).await.unwrap();
-    assert!(std::path::Path::new(&own.path).is_file());
     assert_eq!(e.user_avatar().await.unwrap(), Some(own));
+}
+
+#[tokio::test]
+async fn a_picture_from_before_pictures_lived_in_the_save_is_adopted_once() {
+    let r = rig();
+    let e = &r.engine;
+    let png = [0x89, b'P', b'N', b'G', 13, 10, 26, 10, 9];
+    std::fs::write(e.home.uploads().join("old.png"), png).unwrap();
+    world::settings::set(&e.w(), world::settings::USER_AVATAR_FILE, "old.png").unwrap();
+    let own = e.user_avatar().await.unwrap().unwrap();
+    assert_eq!(own.path, format!("data:image/png;base64,{}", b64(&png)));
+    assert_eq!(
+        world::settings::get::<String>(&e.w(), world::settings::USER_AVATAR_FILE).unwrap(),
+        None,
+        "the setting is gone"
+    );
+    assert_eq!(e.user_avatar().await.unwrap().unwrap(), own);
+}
+
+#[tokio::test]
+async fn the_bio_is_trimmed_bounded_and_rolls_the_logs_over_when_it_changes() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+    r.spy.calls.lock().unwrap().clear();
+    let mut s = e.settings().await.unwrap();
+    assert_eq!(s.bio, None);
+    s.bio = Some("  Runs the night shift.  ".into());
+    Api::update_settings(e, s.clone()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().bio.as_deref(),
+        Some("Runs the night shift.")
+    );
+    assert_eq!(*r.spy.calls.lock().unwrap(), ["rename"]);
+    // The same bio again changes nothing and rolls nothing.
+    Api::update_settings(e, e.settings().await.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(r.spy.calls.lock().unwrap().len(), 1);
+
+    s.bio = Some("x".repeat(world::settings::BIO_MAX + 1));
+    assert_eq!(
+        Api::update_settings(e, s.clone()).await,
+        Err(ApiError::Invalid {
+            field: "bio".into()
+        })
+    );
+    s.bio = Some("   ".into());
+    Api::update_settings(e, s).await.unwrap();
+    assert_eq!(e.settings().await.unwrap().bio, None);
+    assert_eq!(r.spy.calls.lock().unwrap().len(), 2);
+}
+
+/// A second engine on the same home, as a restarted process would be.
+fn reopen(r: &Rig, password: Option<&str>) -> Engine {
+    let ports = Ports {
+        agent: r.spy.clone(),
+        clock: Arc::new(FixedClock(at("2026-03-05T12:00:00+00:00"))),
+        ..Ports::default()
+    };
+    Engine::open_with_password(
+        r.engine.home().clone(),
+        Some(r._folio.path().to_path_buf()),
+        ports,
+        password.map(str::to_owned),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_password() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+    e.set_user_avatar(Some(png_part(3))).await.unwrap();
+    let file = e.home.save_path("default");
+    assert!(!e.saves().await.unwrap()[0].encrypted);
+
+    // Needs a password that is a password, and one that fits the file's state.
+    assert!(matches!(
+        e.set_password(None, None).await,
+        Err(ApiError::Invalid { .. })
+    ));
+    assert!(matches!(
+        e.set_password(Some("x".into()), Some("y".into())).await,
+        Err(ApiError::Invalid { .. })
+    ));
+    assert!(matches!(
+        e.set_password(None, Some(String::new())).await,
+        Err(ApiError::Invalid { .. })
+    ));
+    r.spy.busy.store(true, Ordering::Relaxed);
+    assert_eq!(
+        e.set_password(None, Some("one".into())).await,
+        Err(ApiError::Busy)
+    );
+    r.spy.busy.store(false, Ordering::Relaxed);
+
+    e.set_password(None, Some("one".into())).await.unwrap();
+    assert!(e.saves().await.unwrap()[0].encrypted);
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        "world default locked"
+    );
+    // The engine goes on over the encrypted file.
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
+    name_user(e, "Bea").await;
+
+    // Nothing but the one file; its words are not readable.
+    let names: Vec<_> = std::fs::read_dir(e.home.saves())
+        .unwrap()
+        .map(|f| f.unwrap().file_name())
+        .collect();
+    assert_eq!(names.len(), 1, "{names:?}");
+    assert!(
+        !std::fs::read(&file)
+            .unwrap()
+            .windows(3)
+            .any(|w| w == b"Bea")
+    );
+
+    // A restart without the password is locked; with a wrong one too; with it, open.
+    let locked = reopen(&r, None);
+    assert!(locked.app_status().await.unwrap().locked);
+    let wrong = reopen(&r, Some("nope"));
+    assert!(wrong.app_status().await.unwrap().locked);
+    assert_eq!(
+        wrong.unlock("default".into(), "nope".into()).await,
+        Err(ApiError::WrongPassword)
+    );
+    assert!(
+        wrong.app_status().await.unwrap().locked,
+        "a wrong password changes nothing"
+    );
+    wrong.unlock("default".into(), "one".into()).await.unwrap();
+    assert!(!wrong.app_status().await.unwrap().locked);
+    assert_eq!(
+        wrong.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
+    assert!(
+        wrong
+            .user_avatar()
+            .await
+            .unwrap()
+            .unwrap()
+            .path
+            .starts_with("data:image/png")
+    );
+    assert!(!reopen(&r, Some("one")).app_status().await.unwrap().locked);
+
+    // A locked engine does not turn encryption on, off or over.
+    assert_eq!(
+        locked.set_password(Some("one".into()), None).await,
+        Err(ApiError::Locked)
+    );
+
+    // Change it: the old one stops working, and the old one is asked for.
+    assert_eq!(
+        e.set_password(Some("bad".into()), Some("two".into())).await,
+        Err(ApiError::WrongPassword)
+    );
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
+    e.set_password(Some("one".into()), Some("two".into()))
+        .await
+        .unwrap();
+    assert!(reopen(&r, Some("one")).app_status().await.unwrap().locked);
+    assert!(!reopen(&r, Some("two")).app_status().await.unwrap().locked);
+
+    // Export stays encrypted under the same password; importing it asks for that.
+    let out = e.home.root().join("backup.sqlite");
+    e.export_save("default".into(), out.display().to_string())
+        .await
+        .unwrap();
+    assert!(world::cipher::is_encrypted(&out));
+    assert_eq!(
+        e.import_save(out.display().to_string(), None, None).await,
+        Err(ApiError::Locked)
+    );
+    assert_eq!(
+        e.import_save(out.display().to_string(), None, Some("one".into()))
+            .await,
+        Err(ApiError::WrongPassword)
+    );
+    assert_eq!(
+        e.import_save(out.display().to_string(), None, Some("two".into()))
+            .await
+            .unwrap(),
+        "backup"
+    );
+    assert!(e.saves().await.unwrap().iter().all(|s| s.encrypted));
+    // Another save needs its password to be switched to once this process forgets it.
+    let again = reopen(&r, Some("two"));
+    assert_eq!(
+        again.switch_save("backup".into()).await,
+        Err(ApiError::Locked)
+    );
+    again.unlock("backup".into(), "two".into()).await.unwrap();
+    again.switch_save("backup".into()).await.unwrap();
+
+    // Off again: plain, one file, the data intact.
+    assert_eq!(
+        e.set_password(Some("bad".into()), None).await,
+        Err(ApiError::WrongPassword)
+    );
+    e.set_password(Some("two".into()), None).await.unwrap();
+    assert!(!world::cipher::is_encrypted(&file));
+    // (`again` switched the home's current save to the import.)
+    e.home.set_current_save("default").unwrap();
+    assert!(!reopen(&r, None).app_status().await.unwrap().locked);
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
 }

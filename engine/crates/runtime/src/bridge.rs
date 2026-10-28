@@ -2,8 +2,8 @@
 //! types, so `api` cannot name it; this crate sits above both and joins them.
 //!
 //! The agent is built on first use (its retrieval index takes longer to set up than the
-//! first screen may), on a blocking thread, with its own database connection: the file is
-//! in WAL mode, so it interleaves with the engine's. Model-driven work runs as background
+//! first screen may), on a blocking thread, with its own database connection: a busy
+//! timeout makes it take turns with the engine's. Model-driven work runs as background
 //! tokio tasks; the front end learns what happened from events, and may also wait for the
 //! work to finish or abandon it.
 
@@ -53,6 +53,8 @@ pub struct BridgeParts {
     pub quiet: bool,
     /// Which front end the user is on.
     pub frontend: Frontend,
+    /// The password of the save the process starts on, if it is encrypted.
+    pub password: Option<String>,
 }
 
 /// The background work in flight.
@@ -86,6 +88,8 @@ pub struct AgentBridge {
     building: tokio::sync::Mutex<()>,
     /// The world database the agent opens: the save this process was started on.
     world: Mutex<PathBuf>,
+    /// Its password, if encrypted; memory only.
+    password: Mutex<Option<String>>,
     tasks: Mutex<Tasks>,
     failures: Mutex<Vec<String>>,
     /// How many background tasks are running.
@@ -115,6 +119,7 @@ impl AgentBridge {
         Ok(Arc::new(Self {
             agent_params: agent_params(&parts.home)?,
             world: Mutex::new(parts.home.world()),
+            password: Mutex::new(parts.password.clone()),
             endpoints: Mutex::new(parts.endpoints.clone()),
             parts,
             agent: Mutex::new(None),
@@ -171,7 +176,15 @@ impl AgentBridge {
         if !path.is_file() {
             return Err(ApiError::NotFound);
         }
-        let world = world::World::open(path).map_err(io)?;
+        let key = self
+            .password
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let world = world::World::open_with(path, key.as_deref()).map_err(|e| match e {
+            world::Error::Locked => ApiError::Locked,
+            other => io(other),
+        })?;
         let index = index::Index::open(&p.corpus, p.params.retrieve.clone()).map_err(io)?;
         Ok(Parts {
             world,
@@ -378,8 +391,9 @@ impl AgentPort for Port {
             .is_empty()
     }
 
-    fn switch_world(&self, path: &std::path::Path) {
+    fn switch_world(&self, path: &std::path::Path, key: Option<&str>) {
         *self.0.world.lock().unwrap_or_else(|e| e.into_inner()) = path.to_owned();
+        *self.0.password.lock().unwrap_or_else(|e| e.into_inner()) = key.map(str::to_owned);
         *self.0.agent.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }

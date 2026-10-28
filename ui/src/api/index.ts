@@ -33,7 +33,7 @@ export interface Api {
 
 /** The generated bindings, as the webview sees them. */
 export function tauriApi(): Api {
-  return { commands: gen.commands, events: gen.events, mediaUrl: (p) => convertFileSrc(p), mock: false };
+  return { commands: gen.commands, events: gen.events, mediaUrl: (p) => (p.startsWith("data:") ? p : convertFileSrc(p)), mock: false };
 }
 
 export function mockApi(params: URLSearchParams, opts?: MockOptions): Api {
@@ -68,6 +68,8 @@ const CODES: Record<gen.ApiError["code"], true> = {
   io: true,
   busy: true,
   exists: true,
+  locked: true,
+  wrong_password: true,
 };
 
 export function asFailure(e: unknown): Failure {

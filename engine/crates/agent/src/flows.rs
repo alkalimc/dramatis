@@ -1098,8 +1098,8 @@ impl Agent {
 
     // ---- rename ----
 
-    /// The user's name changed: every channel with a log rolls over, so no segment keeps
-    /// talking about the user under the old name. A log with nothing appended yet is
+    /// The user's name or bio changed: every channel with a log rolls over, so no segment
+    /// keeps talking about the user under the old name or words. A log with nothing appended yet is
     /// simply replaced.
     pub async fn on_rename(&self) -> Result<()> {
         let mut channels: Vec<_> = world::channel::list(&self.db())?
@@ -1115,7 +1115,7 @@ impl Agent {
                 continue;
             };
             let names = self.names_now(&self.db())?;
-            let stale = request::Shape::parse(&seg.shape).is_none_or(|s| s.user != names.user());
+            let stale = request::Shape::parse(&seg.shape).is_none_or(|s| !s.knows(&names));
             if !stale {
                 continue;
             }

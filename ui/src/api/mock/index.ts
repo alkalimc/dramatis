@@ -116,15 +116,21 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let settings: Settings = {
     user_name: params.get("first") === "1" ? null : "Rowan",
     birthday: null,
+    bio: null,
     quiet_hours: { from: "23:00", to: "07:00" },
     notifications: true,
   };
   let introPending = settings.user_name === null;
   let openSave = "default";
+  // `?locked=1` starts on an encrypted save; its password is "hunter2".
+  let locked = params.get("locked") === "1";
   let saves: SaveInfo[] = [
-    { name: "default", size_kb: 412, played_at: iso(5), current: true },
-    { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false },
+    { name: "default", size_kb: 412, played_at: iso(5), current: true, encrypted: locked },
+    { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false, encrypted: false },
   ];
+  /** Passwords of encrypted saves, and the ones entered in this session. */
+  const passwords = new Map<string, string>(locked ? [["default", "hunter2"]] : []);
+  const known = new Set<string>(locked ? [] : saves.map((s) => s.name));
   const saveNameError = (name: string): ApiError | null => {
     if (!name.trim() || name !== name.trim() || /[/\\:*?"<>|]/.test(name) || name.startsWith(".")) {
       return { code: "invalid", field: "name" };
@@ -501,6 +507,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         form: library ? "library" : "full",
         corpus: { state: "loaded", name: "demo" },
         needs_setup: settings.user_name === null,
+        locked,
       }),
     wording: () => ok({ entries: Object.values(localWording)[0] ?? {}, scene_marker: scene }),
     presence: async () => {
@@ -852,19 +859,44 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     settings: () => ok({ ...settings }),
     updateSettings: (next) => {
       if (next.user_name !== null && !next.user_name.trim()) return fail({ code: "invalid", field: "user_name" });
-      settings = { ...next };
+      if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
+      settings = { ...next, bio: next.bio?.trim() || null };
       return ok(null);
     },
     saves: () => ok(saves.map((s) => ({ ...s, current: s.name === openSave }))),
     newSave: (name) => {
       const bad = saveNameError(name);
       if (bad) return fail(bad);
-      saves.push({ name, size_kb: 96, played_at: iso(), current: false });
+      saves.push({ name, size_kb: 96, played_at: iso(), current: false, encrypted: false });
+      known.add(name);
       return ok(null);
     },
     switchSave: (name) => {
-      if (!saves.some((s) => s.name === name)) return fail({ code: "not_found" });
+      const target = saves.find((s) => s.name === name);
+      if (!target) return fail({ code: "not_found" });
+      if (target.encrypted && !known.has(name)) return fail({ code: "locked" });
       openSave = name;
+      return ok(null);
+    },
+    unlock: (name, password) => {
+      const target = saves.find((s) => s.name === name);
+      if (!target) return fail({ code: "not_found" });
+      if (target.encrypted && passwords.get(name) !== password) return fail({ code: "wrong_password" });
+      known.add(name);
+      if (name === openSave) locked = false;
+      return ok(null);
+    },
+    setPassword: (old, next) => {
+      const current = saves.find((s) => s.name === openSave);
+      if (!current) return fail({ code: "not_found" });
+      if (locked) return fail({ code: "locked" });
+      if (old === null && next === null) return fail({ code: "invalid", field: "password" });
+      if (current.encrypted !== (old !== null)) return fail({ code: "invalid", field: "old" });
+      if (old !== null && passwords.get(current.name) !== old) return fail({ code: "wrong_password" });
+      if (next === "") return fail({ code: "invalid", field: "new" });
+      current.encrypted = next !== null;
+      if (next === null) passwords.delete(current.name);
+      else passwords.set(current.name, next);
       return ok(null);
     },
     copySave: (from, to) => {
@@ -873,6 +905,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const bad = saveNameError(to);
       if (bad) return fail(bad);
       saves.push({ ...src, name: to, played_at: iso(), current: false });
+      if (passwords.has(from)) passwords.set(to, passwords.get(from) as string);
+      if (known.has(from)) known.add(to);
       return ok(null);
     },
     renameSave: (from, to) => {
@@ -881,6 +915,9 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const bad = saveNameError(to);
       if (bad) return fail(bad);
       src.name = to;
+      if (passwords.has(from)) passwords.set(to, passwords.get(from) as string);
+      passwords.delete(from);
+      if (known.delete(from)) known.add(to);
       if (openSave === from) openSave = to;
       return ok(null);
     },
@@ -894,11 +931,17 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!saves.some((s) => s.name === name)) return fail({ code: "not_found" });
       return path.trim() ? ok(null) : fail({ code: "invalid", field: "path" });
     },
-    importSave: (path, name) => {
+    importSave: (path, name, password) => {
       const used = name ?? path.split(/[\\/]/).pop()?.replace(/\.[^.]*$/, "") ?? "";
       const bad = saveNameError(used);
       if (bad) return fail(bad);
-      saves.push({ name: used, size_kb: 128, played_at: iso(), current: false });
+      // A file with "vault" in its name stands for an encrypted export ("hunter2").
+      const encrypted = path.includes("vault");
+      if (encrypted && password === null) return fail({ code: "locked" });
+      if (encrypted && password !== "hunter2") return fail({ code: "wrong_password" });
+      saves.push({ name: used, size_kb: 128, played_at: iso(), current: false, encrypted });
+      known.add(used);
+      if (encrypted) passwords.set(used, "hunter2");
       return ok(used);
     },
     endpoints: () => ok(structuredClone(endpoints)),

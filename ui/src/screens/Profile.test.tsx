@@ -72,3 +72,27 @@ test("my profile shows the card, and the pencil edits the name, the birthday and
   expect(store.getState().settings?.birthday).toEqual({ month: 3, day: 14 });
   expect((await within(screen.getByRole("dialog")).findAllByText("Rowan Hale")).length).toBeGreaterThan(0);
 });
+
+test("the bio is edited with a counter, limited to 200 characters, and shown on the card", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp();
+  const drawer = await openMenu(user);
+  await user.click(within(drawer).getByRole("button", { name: "My profile" }));
+  const dialog = await screen.findByRole("dialog", { name: "My profile" });
+  await user.click(within(dialog).getByRole("button", { name: "Edit" }));
+  const bio = within(dialog).getByRole("textbox", { name: "Bio" });
+  expect(within(dialog).getByLabelText("200 characters left")).toBeDefined();
+  await user.type(bio, "Keeps bees");
+  expect(within(dialog).getByLabelText("190 characters left")).toBeDefined();
+  // Over the limit: the counter goes negative and saving waits.
+  await user.clear(bio);
+  await user.click(bio);
+  await user.paste("x".repeat(201));
+  expect(within(dialog).getByLabelText("-1 characters left")).toBeDefined();
+  expect((within(dialog).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  await user.clear(bio);
+  await user.type(bio, "Keeps bees on the roof.");
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(store.getState().settings?.bio).toBe("Keeps bees on the roof."));
+  expect(await within(dialog).findByText("Keeps bees on the roof.")).toBeDefined();
+});

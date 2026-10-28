@@ -86,6 +86,7 @@ commands! {
         form: AppForm::Library,
         corpus: CorpusState::Missing,
         needs_setup: true,
+        locked: false,
     });
     /// The corpus's runtime phrasing.
     fn wording() -> Wording = Ok(Wording::default());
@@ -222,8 +223,21 @@ commands! {
     /// before overwriting.
     fn export_save(name: String, path: String) -> ();
     /// Add the world database at `path` as a save (checked, then migrated). `name`
-    /// defaults to the file's name. Returns the name used.
-    fn import_save(path: String, name: Option<String>) -> String;
+    /// defaults to the file's name. Returns the name used. An encrypted file needs its
+    /// `password` (`Locked` without one, `WrongPassword` with a wrong one); the save keeps it.
+    fn import_save(path: String, name: Option<String>, password: Option<String>) -> String;
+
+    // ---- encryption ----
+
+    /// Open the encrypted save `name` with its password and remember the password until
+    /// this process ends (a switch to it then needs no asking). `WrongPassword` leaves
+    /// everything as it was.
+    fn unlock(name: String, password: String) -> ();
+    /// Encrypt, re-key or decrypt the current save, which must be unlocked: `current` is
+    /// its password (`None` while it is plain), `next` the password it gets (`None`
+    /// removes the encryption). Needs the engine idle. A forgotten password cannot be
+    /// recovered.
+    fn set_password(current: Option<String>, next: Option<String>) -> ();
 
     // ---- endpoints ----
 

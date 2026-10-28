@@ -19,6 +19,7 @@ import { LeftDrawer, ProfileCard } from "./screens/Profile";
 import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
+import { UnlockScreen } from "./screens/Unlock";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -85,6 +86,7 @@ function Shell() {
       </p>
     );
   }
+  if (status.locked) return <UnlockScreen />;
   const corpus = status.corpus;
   if (corpus.state === "missing" || corpus.state === "unsupported_version" || corpus.state === "missing_requirement") {
     return (

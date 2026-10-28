@@ -2,7 +2,8 @@
 //! world database and the corpus, and every command that does, handed to the ports.
 //!
 //! One [`Engine`] per opened home directory. It owns its own connections (the agent opens
-//! its own too; the database is in WAL mode, so the two interleave).
+//! its own too; the database uses a rollback journal and a busy timeout, so the two take
+//! turns).
 
 mod chat;
 mod endpoints;
@@ -13,6 +14,7 @@ mod saves;
 mod tasks;
 mod uploads;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -77,6 +79,10 @@ pub struct Engine {
     world: Mutex<World>,
     /// The name of the save `world` is.
     save: Mutex<String>,
+    /// The open save is encrypted and was not unlocked: `world` is an empty stand-in.
+    locked: AtomicBool,
+    /// Passwords entered in this process, by save name. Memory only, never written.
+    passwords: Mutex<HashMap<String, String>>,
     corpus: Option<Arc<Corpus>>,
     state: CorpusState,
     endpoints: Mutex<Endpoints>,
@@ -101,10 +107,30 @@ impl Engine {
     /// absent, refused or unreadable does not fail the open: the state says why and the
     /// corpus commands answer `NotFound`.
     pub fn open(home: Home, folio: Option<PathBuf>, ports: Ports) -> ApiResult<Self> {
+        Self::open_with_password(home, folio, ports, None)
+    }
+
+    /// [`Engine::open`] with the password of the current save, if it is encrypted. Without
+    /// the right one the engine still comes up, locked (see `AppStatus::locked`), so a
+    /// front end can ask for it.
+    pub fn open_with_password(
+        home: Home,
+        folio: Option<PathBuf>,
+        ports: Ports,
+        password: Option<String>,
+    ) -> ApiResult<Self> {
         home.create().map_err(io)?;
         let params = Params::load(&home.params()).map_err(io)?;
         let save = home.current_save();
-        let world = World::open(home.save_path(&save)).map_err(world_err)?;
+        let mut passwords = HashMap::new();
+        let (world, locked) = match World::open_with(home.save_path(&save), password.as_deref()) {
+            Ok(w) => {
+                passwords.extend(password.map(|p| (save.clone(), p)));
+                (w, false)
+            }
+            Err(world::Error::Locked) => (World::in_memory().map_err(world_err)?, true),
+            Err(e) => return Err(world_err(e)),
+        };
         let endpoints = match std::fs::read_to_string(home.endpoints()) {
             Ok(text) => Endpoints::from_toml(&text).map_err(io)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Endpoints::default(),
@@ -129,6 +155,8 @@ impl Engine {
             ports,
             world: Mutex::new(world),
             save: Mutex::new(save),
+            locked: AtomicBool::new(locked),
+            passwords: Mutex::new(passwords),
             corpus,
             state,
             endpoints: Mutex::new(endpoints),
@@ -286,6 +314,7 @@ impl Engine {
                 .ok()
                 .flatten()
                 .is_none(),
+            locked: self.locked.load(Ordering::Relaxed),
         }
     }
 
@@ -349,6 +378,7 @@ impl Engine {
                     month: d.month,
                     day: d.day,
                 }),
+            bio: world::settings::user_bio(&w).map_err(world_err)?,
             quiet_hours: world::settings::quiet_hours(&w, &self.params.world.seed)
                 .map_err(world_err)?
                 .map(|q| QuietHours {
@@ -375,10 +405,18 @@ impl Engine {
         {
             return Err(invalid("quiet_hours"));
         }
+        if s.bio
+            .as_ref()
+            .is_some_and(|b| b.trim().chars().count() > world::settings::BIO_MAX)
+        {
+            return Err(invalid("bio"));
+        }
         let renamed = {
             let w = self.w();
+            // Both sit in the cached prefix, so a change of either starts new segments.
             let renamed =
                 world::settings::set_user_name(&w, s.user_name.as_deref()).map_err(world_err)?;
+            let rebio = world::settings::set_user_bio(&w, s.bio.as_deref()).map_err(world_err)?;
             match birthday {
                 Some(d) => world::settings::set(&w, world::settings::USER_BIRTHDAY, &d),
                 None => world::settings::unset(&w, world::settings::USER_BIRTHDAY),
@@ -391,7 +429,7 @@ impl Engine {
             world::settings::set(&w, world::settings::QUIET_HOURS, &quiet).map_err(world_err)?;
             world::settings::set(&w, world::settings::NOTIFICATIONS, &s.notifications)
                 .map_err(world_err)?;
-            renamed
+            renamed || rebio
         };
         if renamed {
             // Segments are never rewritten, so a new name reaches the model by rolling over.
@@ -595,7 +633,7 @@ impl Api for Engine {
         self.switch_save_impl(&name)
     }
     async fn copy_save(&self, from: String, to: String) -> ApiResult<()> {
-        crate::saves::copy(&self.home, &from, &to)
+        crate::saves::copy(&self.home, &from, &to, self.password_of(&from).as_deref())
     }
     async fn rename_save(&self, from: String, to: String) -> ApiResult<()> {
         self.rename_save_impl(&from, &to)
@@ -606,8 +644,19 @@ impl Api for Engine {
     async fn export_save(&self, name: String, path: String) -> ApiResult<()> {
         self.export_save_impl(&name, &path)
     }
-    async fn import_save(&self, path: String, name: Option<String>) -> ApiResult<String> {
-        self.import_save_impl(&path, name.as_deref())
+    async fn import_save(
+        &self,
+        path: String,
+        name: Option<String>,
+        password: Option<String>,
+    ) -> ApiResult<String> {
+        self.import_save_impl(&path, name.as_deref(), password)
+    }
+    async fn unlock(&self, name: String, password: String) -> ApiResult<()> {
+        self.unlock_impl(&name, password)
+    }
+    async fn set_password(&self, current: Option<String>, next: Option<String>) -> ApiResult<()> {
+        self.set_password_impl(current, next)
     }
     async fn endpoints(&self) -> ApiResult<EndpointsView> {
         Ok(self.endpoints_view())

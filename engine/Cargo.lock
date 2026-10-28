@@ -1049,6 +1049,7 @@ dependencies = [
  "futures",
  "index",
  "llm",
+ "rpassword",
  "runtime",
  "rustyline",
  "serde_json",
@@ -2439,6 +2440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
 dependencies = [
  "cc",
+ "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
@@ -2978,6 +2980,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "openssl-src"
+version = "300.6.1+3.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46eb8fb9fb3b61ce1c0f8a026c4c1a0714d3a9e138e7fbde78753ce2babc3846"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2985,6 +2996,7 @@ checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
 dependencies = [
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -3570,6 +3582,27 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "rpassword"
+version = "7.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66d4c8b64f049c6721ec8ccec37ddfc3d641c4a7fca57e8f2a89de509c73df39"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "runtime"

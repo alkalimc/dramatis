@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import type { SaveInfo } from "../api";
+import { settle, type Failure, type SaveInfo } from "../api";
 import { useT } from "../i18n";
 import { when } from "../lib/format";
-import { useActions, useApi } from "../store";
+import { useActions, useApi, useDispatch } from "../store";
 import { Dialog } from "../ui/Dialog";
+import { Icon } from "../ui/Icon";
+import { PasswordDialog } from "./Unlock";
 
 type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
 
@@ -15,6 +17,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
   const t = useT();
   const api = useApi();
   const actions = useActions();
+  const dispatch = useDispatch();
   const id = useId();
   const [saves, setSaves] = useState<SaveInfo[] | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -24,6 +27,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
   const [source, setSource] = useState("");
   const [importName, setImportName] = useState("");
   const [note, setNote] = useState("");
+  const [prompt, setPrompt] = useState<{ title: string; submit: (password: string) => Promise<Failure | null> } | null>(null);
 
   const refresh = useCallback(async () => {
     const list = await actions.attempt(api.commands.saves());
@@ -43,6 +47,50 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
     return true;
   };
 
+  /** Open another save. An encrypted one not yet unlocked in this window asks for its password first. */
+  const open = async (name: string) => {
+    const r = await settle(api.commands.switchSave(name));
+    if (r.ok) {
+      await refresh();
+      onSwitched();
+    } else if (r.error.code === "locked") {
+      setPrompt({
+        title: t("saves.unlock.title", { name }),
+        submit: async (password) => {
+          const unlocked = await settle(api.commands.unlock(name, password));
+          if (!unlocked.ok) return unlocked.error;
+          const switched = await settle(api.commands.switchSave(name));
+          if (!switched.ok) return switched.error;
+          setPrompt(null);
+          await refresh();
+          onSwitched();
+          return null;
+        },
+      });
+    } else {
+      dispatch({ type: "error", error: r.error });
+    }
+  };
+
+  /** Import the file; an encrypted one asks for the password it was exported with. */
+  const importFile = async (password: string | null): Promise<Failure | null> => {
+    const r = await settle(api.commands.importSave(source.trim(), importName.trim() || null, password));
+    if (r.ok) {
+      setPrompt(null);
+      setNote(t("saves.imported", { name: r.data }));
+      setSource("");
+      setImportName("");
+      await refresh();
+      return null;
+    }
+    if (r.error.code === "locked" && password === null) {
+      setPrompt({ title: t("saves.import.password"), submit: importFile });
+      return null;
+    }
+    if (password === null) dispatch({ type: "error", error: r.error });
+    return r.error;
+  };
+
   return (
     <section className="saves" aria-labelledby={`${id}-h`}>
       <h3 id={`${id}-h`}>{t("saves.title")}</h3>
@@ -53,7 +101,12 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
           <li key={s.name} className={s.current ? "save current" : "save"}>
             <div className="save-main">
               <strong>{s.name}</strong>{" "}
-              {s.current && <span className="badge">{t("saves.current")}</span>}
+              {s.current && <span className="badge">{t("saves.current")}</span>}{" "}
+              {s.encrypted && (
+                <span className="badge lock-badge">
+                  <Icon name="lock" size={12} /> {t("saves.encrypted")}
+                </span>
+              )}
               <div className="muted small">
                 {t("saves.size", { kb: s.size_kb })}
                 {s.played_at && <> · {t("saves.played", { when: when(s.played_at) })}</>}
@@ -63,9 +116,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
               {!s.current && (
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (await run(api.commands.switchSave(s.name))) onSwitched();
-                  }}
+                  onClick={() => void open(s.name)}
                 >
                   {t("saves.switch")}
                 </button>
@@ -120,12 +171,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
         onSubmit={async (e) => {
           e.preventDefault();
           if (!source.trim()) return;
-          const added = await actions.attempt(api.commands.importSave(source.trim(), importName.trim() || null));
-          if (added === undefined) return;
-          setNote(t("saves.imported", { name: added }));
-          setSource("");
-          setImportName("");
-          await refresh();
+          await importFile(null);
         }}
       >
         <input aria-label={t("saves.import.path")} placeholder={t("saves.import.path")} value={source} onChange={(e) => setSource(e.target.value)} />
@@ -137,6 +183,8 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
       <p role="status" className="muted">
         {note}
       </p>
+
+      {prompt && <PasswordDialog title={prompt.title} submit={prompt.submit} onClose={() => setPrompt(null)} />}
 
       {ask && (
         <Dialog title={t(`saves.${ask.kind}.title`, { name: ask.save.name })} onClose={() => setAsk(null)}>

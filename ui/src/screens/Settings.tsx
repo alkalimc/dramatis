@@ -8,6 +8,7 @@ import { Menu } from "../ui/Menu";
 import { UserAvatar } from "../ui/Avatar";
 import { EndpointsPage } from "./Endpoints";
 import { QuietSection, QuotaSection } from "./Quota";
+import { PrivacyPage } from "./Privacy";
 import { SavesPage } from "./Saves";
 import { statusLine, useCurrentSave } from "./Profile";
 
@@ -16,6 +17,7 @@ const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
   { page: "quiet", icon: "bell" },
   { page: "endpoints", icon: "server" },
   { page: "saves", icon: "bookmark" },
+  { page: "privacy", icon: "lock" },
 ];
 
 function Row({ icon, label, value, onClick }: { icon: IconName; label: string; value?: string; onClick: () => void }) {
@@ -124,6 +126,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           {page === "quiet" && <QuietSection />}
           {page === "endpoints" && <EndpointsPage />}
           {page === "saves" && <SavesPage />}
+          {page === "privacy" && <PrivacyPage />}
         </div>
       )}
     </Dialog>

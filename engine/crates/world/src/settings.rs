@@ -10,8 +10,12 @@ use crate::{Error, Result};
 
 pub const USER_NAME: &str = "user.name";
 pub const USER_BIRTHDAY: &str = "user.birthday";
-/// File name of the user's own picture under the home's uploads directory.
-pub const USER_AVATAR: &str = "user.avatar";
+/// File name of the user's own picture under the home's uploads directory, from before
+/// the picture lived in the save (see [`user_avatar`]).
+pub const USER_AVATAR_FILE: &str = "user.avatar";
+pub const USER_BIO: &str = "user.bio";
+/// Longest personal bio, in characters.
+pub const BIO_MAX: usize = 200;
 pub const INTENSITY: &str = "intensity";
 pub const QUIET_HOURS: &str = "quiet_hours";
 pub const NOTIFICATIONS: &str = "notifications";
@@ -63,6 +67,49 @@ pub fn set_user_name(conn: &Connection, name: Option<&str>) -> Result<bool> {
         None => unset(conn, USER_NAME)?,
     }
     Ok(true)
+}
+
+pub fn user_bio(conn: &Connection) -> Result<Option<String>> {
+    Ok(get::<Option<String>>(conn, USER_BIO)?.flatten())
+}
+
+/// Set (or with `None` / blank, clear) the personal bio. Returns whether it changed, which
+/// like a rename means the channels' logs must roll over: it sits in the cached prefix.
+pub fn set_user_bio(conn: &Connection, bio: Option<&str>) -> Result<bool> {
+    let bio = bio.map(str::trim).filter(|b| !b.is_empty());
+    if bio.is_some_and(|b| b.chars().count() > BIO_MAX) {
+        return Err(Error::Invalid("the bio is too long".into()));
+    }
+    if user_bio(conn)?.as_deref() == bio {
+        return Ok(false);
+    }
+    match bio {
+        Some(b) => set(conn, USER_BIO, b)?,
+        None => unset(conn, USER_BIO)?,
+    }
+    Ok(true)
+}
+
+/// The user's own picture: its MIME type and bytes. It lives in the save, so it is
+/// encrypted with it and travels with an export.
+pub fn user_avatar(conn: &Connection) -> Result<Option<(String, Vec<u8>)>> {
+    Ok(conn
+        .query_row("SELECT mime, data FROM user_avatar WHERE id = 1", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .optional()?)
+}
+
+pub fn set_user_avatar(conn: &Connection, image: Option<(&str, &[u8])>) -> Result<()> {
+    match image {
+        Some((mime, data)) => conn.execute(
+            "INSERT INTO user_avatar(id, mime, data) VALUES (1, ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET mime = excluded.mime, data = excluded.data",
+            (mime, data),
+        )?,
+        None => conn.execute("DELETE FROM user_avatar", [])?,
+    };
+    Ok(())
 }
 
 pub fn user_birthday(conn: &Connection) -> Result<Option<MonthDay>> {
@@ -132,5 +179,37 @@ mod tests {
         assert!(quiet_hours(&w, &seed).unwrap().is_some());
         set(&w, USER_BIRTHDAY, "13-40").unwrap();
         assert!(user_birthday(&w).is_err());
+    }
+
+    #[test]
+    fn bio_trims_bounds_and_reports_change() {
+        let w = world();
+        assert_eq!(user_bio(&w).unwrap(), None);
+        assert!(set_user_bio(&w, Some("  likes tea ")).unwrap());
+        assert_eq!(user_bio(&w).unwrap().as_deref(), Some("likes tea"));
+        assert!(!set_user_bio(&w, Some("likes tea")).unwrap());
+        let long = "x".repeat(BIO_MAX + 1);
+        assert!(set_user_bio(&w, Some(&long)).is_err());
+        assert!(
+            set_user_bio(&w, Some(&"é".repeat(BIO_MAX))).is_ok(),
+            "characters, not bytes"
+        );
+        assert!(set_user_bio(&w, Some(" ")).unwrap());
+        assert_eq!(user_bio(&w).unwrap(), None);
+        assert!(!set_user_bio(&w, None).unwrap());
+    }
+
+    #[test]
+    fn avatar_blob_round_trips_and_clears() {
+        let w = world();
+        assert_eq!(user_avatar(&w).unwrap(), None);
+        set_user_avatar(&w, Some(("image/png", &[0, 1, 2, 255]))).unwrap();
+        set_user_avatar(&w, Some(("image/jpeg", &[9, 8]))).unwrap();
+        assert_eq!(
+            user_avatar(&w).unwrap(),
+            Some(("image/jpeg".to_owned(), vec![9, 8]))
+        );
+        set_user_avatar(&w, None).unwrap();
+        assert_eq!(user_avatar(&w).unwrap(), None);
     }
 }

@@ -54,8 +54,38 @@ pub fn image_ext(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// The MIME type for an extension [`image_ext`] returned.
+pub fn image_mime(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        _ => "image/webp",
+    }
+}
+
 /// Largest picture a user may set; the UI downsizes first, so this only stops abuse.
 pub const UPLOAD_MAX: usize = 8 << 20;
+
+/// Standard base64 with padding.
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
 
 /// Standard base64, padding optional, whitespace ignored. `None` on any other byte.
 pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
@@ -188,6 +218,10 @@ mod tests {
 
     #[test]
     fn base64_round_trips() {
+        for sample in [&b""[..], b"h", b"hi", b"hel", b"hello", &[0, 255, 254, 1]] {
+            assert_eq!(base64_decode(&base64_encode(sample)).unwrap(), sample);
+        }
+        assert_eq!(base64_encode(b"hi"), "aGk=");
         assert_eq!(base64_decode("aGk=").unwrap(), b"hi");
         assert_eq!(base64_decode("aGk").unwrap(), b"hi");
         assert_eq!(base64_decode("aG\nVsbG8=").unwrap(), b"hello");

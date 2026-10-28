@@ -45,7 +45,7 @@ export type Drawer =
 export type ProfileMode = "view" | "edit";
 
 /** The pages of the settings card; `root` is its list. */
-export type SystemPage = "root" | "quota" | "quiet" | "endpoints" | "saves";
+export type SystemPage = "root" | "quota" | "quiet" | "endpoints" | "saves" | "privacy";
 
 export type Theme = "system" | "light" | "dark";
 

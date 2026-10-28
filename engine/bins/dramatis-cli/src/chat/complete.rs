@@ -8,9 +8,9 @@ use rustyline::completion::Pair;
 
 /// Every command's primary name, in the order `/help` lists them.
 const COMMANDS: &[&str] = &[
-    "list", "talk", "group", "host", "go", "name", "wrapup", "memories", "forget", "restore",
-    "edit", "tier", "quiet", "save", "history", "resend", "sources", "search", "stats", "help",
-    "quit",
+    "list", "talk", "group", "host", "go", "name", "bio", "wrapup", "memories", "forget",
+    "restore", "edit", "tier", "quiet", "password", "save", "history", "resend", "sources",
+    "search", "stats", "help", "quit",
 ];
 
 const SAVE_VERBS: &[&str] = &[

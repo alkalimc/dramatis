@@ -12,6 +12,7 @@ mod command;
 mod complete;
 mod interrupt;
 mod render;
+mod secret;
 mod session;
 mod show;
 #[cfg(test)]
@@ -88,6 +89,12 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
     } else {
         None
     };
+    // An encrypted save is unlocked before anything opens it.
+    let password = if args.fresh {
+        None
+    } else {
+        start_password(&home)?
+    };
     let folio = folio.or_else(|| home.resolve_folio()).with_context(|| {
         format!(
             "no corpus found: pass --folio <path>, set DRAMATIS_FOLIO, or put a .folio file in {}",
@@ -106,6 +113,7 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         let options = Options {
             quiet: true,
             frontend: runtime::Frontend::Terminal,
+            password,
             ..Options::default()
         };
         let runtime = Runtime::open(home.clone(), Some(folio.clone()), show.clone(), options)
@@ -151,6 +159,27 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         }
         repl(session, args.plain, typing, intro, interrupt).await
     })
+}
+
+/// The password of the save the process starts on, asked for (hidden, three tries) when
+/// that save is encrypted.
+fn start_password(home: &Home) -> Result<Option<String>> {
+    let path = home.world();
+    if !world::cipher::is_encrypted(&path) {
+        return Ok(None);
+    }
+    for _ in 0..3 {
+        let prompt = format!("password for {}: ", home.current_save());
+        let Some(password) = secret::read(&prompt) else {
+            bail!("the save is encrypted and no password was given");
+        };
+        match world::check_file(&path, Some(&password)) {
+            Ok(()) => return Ok(Some(password)),
+            Err(world::Error::Locked) => eprintln!("wrong password"),
+            Err(e) => bail!("cannot open {}: {e}", path.display()),
+        }
+    }
+    bail!("wrong password three times")
 }
 
 /// The line printed at start: which corpus, which world, and the models in use.

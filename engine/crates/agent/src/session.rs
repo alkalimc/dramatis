@@ -180,6 +180,7 @@ impl Agent {
             reasoning,
             tools,
             user: names.user().to_owned(),
+            about: names.about().unwrap_or_default().to_owned(),
         }
     }
 
@@ -332,11 +333,13 @@ impl Agent {
 
     pub(crate) fn names_now(&self, conn: &rusqlite::Connection) -> Result<Names> {
         let name = world::settings::user_name(conn)?;
+        let bio = world::settings::user_bio(conn)?;
         Ok(Names::new(
             &self.corpus.placeholder,
             name.as_deref(),
             &self.corpus.wording,
-        ))
+        )
+        .with_about(bio.as_deref()))
     }
 
     /// Open the next segment of a channel. A rollover passes the old segment's summary
@@ -375,7 +378,7 @@ impl Agent {
         let Some(stored) = request::Shape::parse(&seg.shape) else {
             return Ok(Some(Roll::Unreadable));
         };
-        if stored.user != names.user() {
+        if !stored.knows(&names) {
             return Ok(Some(Roll::Rename));
         }
         let entries = log::entries(&conn, seg.id)?;

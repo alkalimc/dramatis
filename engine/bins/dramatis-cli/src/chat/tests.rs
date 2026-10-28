@@ -227,6 +227,7 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
             )]))),
             quiet: true,
             frontend: runtime::Frontend::Terminal,
+            password: None,
         },
     )
     .unwrap();
@@ -847,4 +848,135 @@ async fn resend_after_a_failed_turn_takes_back_the_unanswered_message() {
     assert!(out.contains("took back 1 message;"), "{out}");
     assert_eq!(r.session.take_prefill().as_deref(), Some("how is the tea?"));
     assert!(!r.run("/history 10").await.contains("how is the tea?"));
+}
+
+/// Passwords the session will be asked for, in order; each prompt is recorded.
+fn answers(r: &mut Rig, typed: &[&str]) -> Arc<std::sync::Mutex<Vec<String>>> {
+    let queue: std::collections::VecDeque<String> = typed.iter().map(|s| (*s).to_owned()).collect();
+    let queue = std::sync::Mutex::new(queue);
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = asked.clone();
+    r.session.set_secret(move |prompt| {
+        log.lock().unwrap().push(prompt.to_owned());
+        queue.lock().unwrap().pop_front()
+    });
+    asked
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn password_turns_encryption_on_changes_it_and_turns_it_off() {
+    let mut r = rig().await;
+    let file = r._home.0.join("saves/default.sqlite");
+    assert!(r.run("/password").await.contains("not encrypted"));
+    assert!(r.run("/password off").await.contains("not encrypted"));
+
+    // The warning comes before the question, and a no changes nothing.
+    let asked = answers(&mut r, &["one", "one"]);
+    let ask = r.run("/password on").await;
+    assert!(
+        ask.contains("cannot be recovered") && ask.contains("(y/n)"),
+        "{ask}"
+    );
+    assert!(r.run("n").await.contains("cancelled"));
+    assert!(!world::cipher::is_encrypted(&file));
+    r.run("/password on").await;
+    assert!(r.run("y").await.contains("is encrypted now"));
+    assert_eq!(*asked.lock().unwrap(), ["new password: ", "again: "]);
+    assert!(world::cipher::is_encrypted(&file));
+    assert!(r.run("/save").await.contains("encrypted"));
+    assert!(r.run("/password").await.contains("is encrypted"));
+    assert!(r.run("/password on").await.contains("already encrypted"));
+    // Play goes on over the encrypted file.
+    assert!(r.run("/name Dr. Doc").await.contains("Dr. Doc"));
+
+    // Two different new passwords change nothing; a wrong current one is refused.
+    answers(&mut r, &["one", "two", "three"]);
+    assert!(r.run("/password change").await.contains("did not match"));
+    answers(&mut r, &["bad", "two", "two"]);
+    assert!(r.run("/password change").await.contains("wrong password"));
+    let asked = answers(&mut r, &["one", "two", "two"]);
+    assert!(r.run("/password change").await.contains("password changed"));
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["current password: ", "new password: ", "again: "]
+    );
+    assert!(world::check_file(&file, Some("one")).is_err());
+    world::check_file(&file, Some("two")).unwrap();
+
+    answers(&mut r, &["nope"]);
+    r.run("/password off").await;
+    assert!(r.run("y").await.contains("wrong password"));
+    answers(&mut r, &["two"]);
+    r.run("/password off").await;
+    assert!(r.run("y").await.contains("is not encrypted now"));
+    assert!(!world::cipher::is_encrypted(&file));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn switching_to_an_encrypted_save_asks_for_its_password() {
+    let mut r = rig().await;
+    r.run("/save new vault").await;
+    let vault = r._home.0.join("saves/vault.sqlite");
+    world::cipher::encrypt(&vault, "key").unwrap();
+    let listed = r.run("/save").await;
+    assert!(
+        listed
+            .lines()
+            .any(|l| l.contains("vault") && l.contains("encrypted")),
+        "{listed}"
+    );
+
+    // Cancelling, then a wrong password three times, leave the current save as it was.
+    let asked = answers(&mut r, &[]);
+    assert!(r.run("/save switch vault").await.contains("cancelled"));
+    answers(&mut r, &["a", "b", "c"]);
+    let out = r.run("/save switch vault").await;
+    assert_eq!(out.matches("wrong password").count(), 3, "{out}");
+    assert!(r.run("/save").await.contains("* default"));
+    assert_eq!(asked.lock().unwrap()[0], "password for vault: ");
+
+    answers(&mut r, &["bad", "key"]);
+    let out = r.run("/save switch vault").await;
+    assert!(
+        out.contains("wrong password") && out.contains("now playing vault"),
+        "{out}"
+    );
+    assert!(r.run("/save").await.contains("* vault"));
+
+    // Copying a save keeps its password; importing an encrypted file asks for it.
+    assert!(r.run("/save copy vault twin").await.contains("copied"));
+    assert!(world::cipher::is_encrypted(
+        r._home.0.join("saves/twin.sqlite")
+    ));
+    let out = r._home.0.join("out.sqlite");
+    r.run(&format!("/save export vault \"{}\"", out.display()))
+        .await;
+    answers(&mut r, &["wrong", "key"]);
+    let imported = r
+        .run(&format!("/save import \"{}\" copy2", out.display()))
+        .await;
+    assert!(
+        imported.contains("wrong password") && imported.contains("imported as copy2"),
+        "{imported}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bio_shows_sets_clears_and_is_bounded() {
+    let mut r = rig().await;
+    assert!(r.run("/bio").await.contains("no bio"));
+    assert!(
+        r.run("/bio Runs the night shift.")
+            .await
+            .contains("bio saved")
+    );
+    assert!(r.run("/bio").await.contains("bio: Runs the night shift."));
+    let long = "x".repeat(world::settings::BIO_MAX + 1);
+    assert!(
+        r.run(&format!("/bio {long}"))
+            .await
+            .contains("at most 200 characters")
+    );
+    assert!(r.run("/bio clear").await.contains("bio cleared"));
+    assert!(r.run("/bio").await.contains("no bio"));
 }

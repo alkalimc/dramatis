@@ -1429,6 +1429,67 @@ async fn a_rename_without_the_hook_still_rolls_on_the_next_turn() {
 }
 
 #[tokio::test]
+async fn the_bio_reaches_every_log_when_set_and_nothing_is_said_when_empty() {
+    let e = env(WireApi::Chat);
+    let ann = direct(&e, "ann");
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([say("a"), say("h")]);
+    e.agent.send(ann, "hi", None).await.unwrap();
+    e.agent.send(host, "hi", None).await.unwrap();
+    for b in e.fake.bodies() {
+        assert!(
+            !body_text(&b).contains("about themselves"),
+            "no bio, no line"
+        );
+    }
+    assert_eq!(
+        segments(&e.agent, ann)[0]
+            .shape
+            .matches("\"about\":\"\"")
+            .count(),
+        1
+    );
+
+    e.agent.with_world(|w| {
+        assert!(settings::set_user_bio(w, Some("Keeps bees on the roof.")).unwrap())
+    });
+    e.fake.push([
+        call("wrapup", json!({"facts": [], "summary": "hi"})),
+        call("wrapup", json!({"facts": [], "summary": "hi"})),
+    ]);
+    e.agent.on_rename().await.unwrap();
+    for c in [ann, host] {
+        let segs = segments(&e.agent, c);
+        assert_eq!(segs.len(), 2, "channel {c} rolled for the new bio");
+        // The segment before it keeps its bytes; the new one carries the user's words as typed.
+        assert!(!body_text(&segs[0].prefix_a).contains("bees"));
+        let a = body_text(&segs[1].prefix_a);
+        assert!(
+            a.contains("says this about themselves: Keeps bees on the roof."),
+            "{a}"
+        );
+    }
+    // Setting the same bio again rolls nothing.
+    e.agent.with_world(|w| {
+        assert!(!settings::set_user_bio(w, Some("Keeps bees on the roof.")).unwrap())
+    });
+    e.agent.on_rename().await.unwrap();
+    assert_eq!(segments(&e.agent, ann).len(), 2);
+
+    // Clearing it rolls again and the line is gone.
+    e.agent
+        .with_world(|w| assert!(settings::set_user_bio(w, None).unwrap()));
+    e.fake.push([
+        call("wrapup", json!({"facts": [], "summary": "hi"})),
+        call("wrapup", json!({"facts": [], "summary": "hi"})),
+    ]);
+    e.agent.on_rename().await.unwrap();
+    let segs = segments(&e.agent, ann);
+    assert_eq!(segs.len(), 3);
+    assert!(!body_text(&segs[2].prefix_a).contains("about themselves"));
+}
+
+#[tokio::test]
 async fn usage_is_metered_per_shape_with_cache_hits_and_quota() {
     let e = env_with(endpoints(WireApi::Responses, true, None), |c| {
         c.world.quota.window_1h.middle = 1_000_000.0;

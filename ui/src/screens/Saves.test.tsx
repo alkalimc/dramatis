@@ -78,3 +78,19 @@ test("export names the file; import adds a save", async () => {
   expect(await screen.findByText("Added old story.")).toBeDefined();
   await screen.findAllByText("old story");
 });
+
+test("an encrypted save is marked, and opening one asks for its password once", async () => {
+  const { user } = await open();
+  // A password-protected save imported with its password is known to this window.
+  await user.type(screen.getByPlaceholderText("Path of the file"), "/tmp/vault.sqlite");
+  await user.click(screen.getByRole("button", { name: "Import" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.type(within(dialog).getByLabelText("Password"), "nope");
+  await user.click(within(dialog).getByRole("button", { name: "Unlock" }));
+  expect(await within(dialog).findByText("Wrong password.")).toBeDefined();
+  await user.type(within(dialog).getByLabelText("Password"), "hunter2");
+  await user.click(within(dialog).getByRole("button", { name: "Unlock" }));
+  expect(await screen.findByText("Added vault.")).toBeDefined();
+  expect(within(row("vault")).getByText("Encrypted")).toBeDefined();
+  expect(within(row("default")).queryByText("Encrypted")).toBeNull();
+});

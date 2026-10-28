@@ -19,6 +19,9 @@ pub struct AppStatus {
     pub corpus: CorpusState,
     /// No user name yet: show the first-run form.
     pub needs_setup: bool,
+    /// The open save is encrypted and not unlocked: only `unlock` (or switching to another
+    /// save) works until then.
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -549,6 +552,9 @@ pub struct QuietHours {
 pub struct Settings {
     pub user_name: Option<String>,
     pub birthday: Option<MonthDay>,
+    /// A few lines the user writes about themselves; characters are told them. At most
+    /// `world::settings::BIO_MAX` characters.
+    pub bio: Option<String>,
     /// `None`: no quiet hours. The engine fills the register default on first run.
     pub quiet_hours: Option<QuietHours>,
     pub notifications: bool,
@@ -560,6 +566,7 @@ impl Default for Settings {
         Self {
             user_name: None,
             birthday: None,
+            bio: None,
             quiet_hours: None,
             notifications: true,
         }
@@ -578,6 +585,8 @@ pub struct SaveInfo {
     pub played_at: Option<Timestamp>,
     /// The save this process has open.
     pub current: bool,
+    /// Protected by a password.
+    pub encrypted: bool,
 }
 
 // ---- endpoints ----
