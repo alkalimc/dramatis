@@ -59,6 +59,7 @@ anything else       send it to the current channel
 /search <query>     retrieval only, as the current speaker would see it
 /stats              model calls made in this session
 /help, /quit        this text; leave (Ctrl-D also works)
+Tab completes command names, person names (/talk, /group) and save names (/save).
 A line that starts with a slash is a command and Enter runs it. With --plain each input
 line is one message.",
     ),
