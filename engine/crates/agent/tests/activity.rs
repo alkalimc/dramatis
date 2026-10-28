@@ -198,3 +198,26 @@ async fn a_round_of_replies_reports_each_speaker_in_turn() {
     assert_eq!(seen.len(), 2);
     assert_ne!(seen[0].0, seen[1].0);
 }
+
+#[tokio::test]
+async fn a_hand_off_reports_each_speaker_in_turn() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake
+        .push([say("Ann: hello.\n\u{2192} bo"), say("Bo: hi.")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    let id: ChannelId = agent::view::channel_id(g);
+    let authors: Vec<Author> = e
+        .sink
+        .take()
+        .iter()
+        .filter_map(|ev| match ev {
+            Event::TurnActivity(a) if a.channel == id && a.state == ActivityState::Done => {
+                Some(a.author.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(authors.len(), 2);
+    assert_ne!(authors[0], authors[1]);
+}

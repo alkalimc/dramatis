@@ -70,6 +70,8 @@ pub(crate) struct Turn {
     pub wrapped: Option<world::wrapup::Args>,
     /// The last activity announced for this turn, so only changes are sent.
     pub activity: Option<ActivityState>,
+    /// Names the reply's closing hand-off line listed (group replies only).
+    pub hand_off: Vec<String>,
 }
 
 impl Turn {
@@ -91,7 +93,13 @@ impl Turn {
             closed: false,
             wrapped: None,
             activity: None,
+            hand_off: Vec::new(),
         }
+    }
+
+    /// Whether this turn is a reply in a group, where the closing hand-off line applies.
+    fn in_group(&self) -> bool {
+        matches!(self.shape, Shape::Group | Shape::Interject)
     }
 }
 
@@ -211,7 +219,7 @@ impl Agent {
             );
             return Ok([a, String::new(), c_block]);
         }
-        let a = assemble::block_a(&ctx);
+        let a = assemble::block_a(&ctx, c.kind == ChannelKind::Group);
         let folio_guard = self.ix();
         let folio = folio_guard.folio();
         // Owner first, then everyone else in id order.
@@ -578,6 +586,13 @@ impl Agent {
             // refusal never reaches the screen.
             let mut held = String::new();
             let mut holding = true;
+            // A group reply's trailing hand-off line, held back until it is known not to be.
+            let mark = if turn.in_group() {
+                assemble::hand_off_mark(&self.corpus.wording)
+            } else {
+                ""
+            };
+            let mut tail = String::new();
             while let Some(event) = events.next().await {
                 match event {
                     Ok(LlmEvent::TextDelta(delta)) if !turn.wrapup => {
@@ -586,10 +601,10 @@ impl Agent {
                             if assemble::refusal(&held) == assemble::Refusal::No {
                                 holding = false;
                                 let all = std::mem::take(&mut held);
-                                self.stream_delta(turn, &mut streamed, all)?;
+                                self.stream_text(turn, &mut streamed, &mut tail, mark, all)?;
                             }
                         } else {
-                            self.stream_delta(turn, &mut streamed, delta)?;
+                            self.stream_text(turn, &mut streamed, &mut tail, mark, delta)?;
                         }
                     }
                     Ok(LlmEvent::Done(r)) => done = Some(r),
@@ -619,7 +634,15 @@ impl Agent {
             let refused = reply.tool_calls().next().is_none()
                 && assemble::refusal(&reply.text()) == assemble::Refusal::Is;
             if !refused && !held.is_empty() {
-                self.stream_delta(turn, &mut streamed, held)?;
+                self.stream_text(turn, &mut streamed, &mut tail, mark, held)?;
+            }
+            // What is still held at the end is the closing line itself, or a start of
+            // speech that only looked like one.
+            if !refused && !tail.is_empty() {
+                let (_, names) = assemble::split_hand_off(&tail, mark);
+                if names.is_empty() && !tail.trim_start().starts_with(mark) {
+                    self.stream_delta(turn, &mut streamed, std::mem::take(&mut tail))?;
+                }
             }
             if refused && !retried {
                 // A fresh request, paid like any other; the refusal is not kept.
@@ -684,6 +707,29 @@ impl Agent {
             &self.config.agent.cost,
         )?;
         self.emit_quota()
+    }
+
+    /// Show a piece of a reply as it arrives, keeping back a trailing line that is or may
+    /// become the hand-off line. With no marker it passes straight through.
+    fn stream_text(
+        &self,
+        turn: &mut Turn,
+        streamed: &mut bool,
+        tail: &mut String,
+        mark: &str,
+        delta: String,
+    ) -> Result<()> {
+        if mark.is_empty() {
+            return self.stream_delta(turn, streamed, delta);
+        }
+        tail.push_str(&delta);
+        let n = assemble::shown_len(tail, mark);
+        if n > 0 {
+            let rest = tail.split_off(n);
+            let shown = std::mem::replace(tail, rest);
+            self.stream_delta(turn, streamed, shown)?;
+        }
+        Ok(())
     }
 
     /// Show a piece of the reply as it arrives. A later step's text joins the earlier
@@ -1017,6 +1063,19 @@ impl Agent {
             turn.text.clear();
             turn.actions.clear();
             return Ok(());
+        }
+        if turn.in_group() {
+            let mark = assemble::hand_off_mark(&self.corpus.wording);
+            let (text, names) = assemble::split_hand_off(&turn.text, mark);
+            turn.text = text;
+            turn.hand_off = names;
+            // Only the hand-off line was written: nothing to keep as a message.
+            if turn.text.trim().is_empty() && turn.actions.is_empty() {
+                if let Some(id) = turn.message.take() {
+                    store::discard_message(&self.db(), id)?;
+                }
+                return Ok(());
+            }
         }
         let id = self.message_for(turn)?;
         let meta = MessageMeta {

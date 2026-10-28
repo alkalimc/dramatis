@@ -28,23 +28,27 @@ impl Ctx<'_> {
     }
 }
 
-/// Block A: the global static text, identical for every person of this user.
-pub fn block_a(ctx: &Ctx<'_>) -> String {
-    [
+/// Block A: the global static text, identical for every person of this user. A group's
+/// log adds how a member hands the turn on.
+pub fn block_a(ctx: &Ctx<'_>, group: bool) -> String {
+    let mut parts = vec![
         ctx.fill("harness.rules", &[]),
         ctx.fill(
             "harness.output",
             &[("open", ctx.scene.0), ("close", ctx.scene.1)],
         ),
         ctx.fill("harness.citation", &[]),
-    ]
-    .join("\n\n")
+    ];
+    if group {
+        parts.push(ctx.fill("harness.next", &[("mark", hand_off_mark(ctx.wording))]));
+    }
+    parts.join("\n\n")
 }
 
 /// Block A of the host's own session: the same, then both of its layers. Only this
 /// block ever carries the meta layer.
 pub fn block_a_host(ctx: &Ctx<'_>, host_name: &str, layers: &HostLayers) -> String {
-    let mut parts = vec![block_a(ctx), heading(ctx, host_name)];
+    let mut parts = vec![block_a(ctx, false), heading(ctx, host_name)];
     for layer in [&layers.in_world, &layers.meta] {
         if !layer.trim().is_empty() {
             parts.push(ctx.names.sub(layer.trim()).into_owned());
@@ -291,6 +295,55 @@ pub fn entry(parts: &[&str]) -> String {
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// The marker a group reply's closing hand-off line starts with (`harness.next_mark`).
+pub fn hand_off_mark(wording: &Wording) -> &str {
+    wording.get("harness.next_mark").trim()
+}
+
+/// A reply without its closing hand-off line, and the names that line listed. The line
+/// is the last non-empty one and starts with `mark`; names are separated by commas
+/// (ASCII or full-width), enumeration commas or semicolons. A marker anywhere else is
+/// speech and stays.
+pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
+    let kept = text.trim_end();
+    let (head, last) = match kept.rfind('\n') {
+        Some(i) => (&kept[..i], &kept[i + 1..]),
+        None => ("", kept),
+    };
+    let Some(list) = last
+        .trim_start()
+        .strip_prefix(mark)
+        .filter(|_| !mark.is_empty())
+    else {
+        return (text.to_owned(), Vec::new());
+    };
+    let names = list
+        .split([',', '\u{ff0c}', '\u{3001}', ';', '\u{ff1b}'])
+        .map(|n| n.trim().trim_matches(['"', '\'', '`']).trim())
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned)
+        .collect();
+    (head.trim_end().to_owned(), names)
+}
+
+/// How much of the streamed text is safe to show: everything except a trailing line that
+/// is, or may still turn out to be, the hand-off line. A marker line followed by more
+/// speech was never a closing line and is released.
+pub fn shown_len(pending: &str, mark: &str) -> usize {
+    if mark.is_empty() {
+        return pending.len();
+    }
+    let body = pending.trim_end();
+    let start = body.rfind('\n').map_or(0, |i| i + 1);
+    let line = body[start..].trim_start();
+    let held = line.starts_with(mark) || (pending.len() == body.len() && mark.starts_with(line));
+    if held && !line.is_empty() {
+        start
+    } else {
+        pending.len()
+    }
 }
 
 /// Every id cited in a text, in order. A bracket holds one id or a comma-separated list
@@ -563,6 +616,43 @@ pub fn resolve_id<'a>(id: &str, known: impl IntoIterator<Item = &'a String>) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_closing_hand_off_line_is_split_off() {
+        let m = "\u{2192}";
+        let (t, n) = split_hand_off("Hi.\n\u{2192} Ann, Bo\n", m);
+        assert_eq!(
+            (t.as_str(), n),
+            ("Hi.", vec!["Ann".to_owned(), "Bo".to_owned()])
+        );
+        let (t, n) = split_hand_off("\u{2192} \u{201c}x\u{201d}", m);
+        assert!(t.is_empty() && n == ["\u{201c}x\u{201d}"]);
+        // Not the last line, or no marker: speech.
+        let kept = "a \u{2192} b\n\u{2192} Ann\nmore";
+        assert_eq!(split_hand_off(kept, m), (kept.to_owned(), vec![]));
+        assert_eq!(split_hand_off("plain", m).1, Vec::<String>::new());
+        assert_eq!(split_hand_off("x\n\u{2192}", m), ("x".to_owned(), vec![]));
+        assert_eq!(split_hand_off("x\n-> Ann", "").1.len(), 0);
+    }
+
+    #[test]
+    fn the_stream_holds_back_only_a_possible_hand_off_line() {
+        let m = "\u{2192}";
+        let at = |s: &str| shown_len(s, m);
+        assert_eq!(at("Hello"), 5);
+        assert_eq!(at("Hello\n"), 6);
+        assert_eq!(at("Hello\n\u{2192}"), 6);
+        assert_eq!(at("Hello\n\u{2192} An"), 6);
+        assert_eq!(at("Hello\n\u{2192} Ann\n"), 6);
+        assert_eq!(
+            at("Hello\n\u{2192} Ann\nmore"),
+            "Hello\n\u{2192} Ann\nmore".len()
+        );
+        assert_eq!(at("\u{2192} Ann"), 0);
+        // A multi-character marker is held while it could still complete.
+        assert_eq!(shown_len("Hi\n=", "=>"), 3);
+        assert_eq!(shown_len("Hi\n=x", "=>"), 5);
+    }
+
     use super::*;
 
     fn visible(raw: &str) -> String {

@@ -1846,3 +1846,158 @@ async fn host_tool_actions_carry_what_a_front_end_needs_to_offer_a_switch() {
     let old: ToolAction = serde_json::from_str(r#"{"tool":"create_group","members":[]}"#).unwrap();
     assert!(matches!(old, ToolAction::CreateGroup { channel: None, .. }));
 }
+
+// ---- hand-offs: a reply may end with a line naming who speaks next ----
+
+fn texts(e: &Env, ch: world::ChannelId) -> Vec<(api::types::Author, String)> {
+    e.agent
+        .history(ch, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| (m.author, m.text))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_reply_can_hand_the_turn_to_another_member() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.fake
+        .push([say("Ann: bo knows.\n\u{2192} bo"), say("Bo: steel.")]);
+    e.agent
+        .send(g, "ann, where is the steel?", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 2);
+    let second = list(&json[1]).last().unwrap().to_string();
+    assert!(second.contains("bo answers too"), "{second}");
+    // The group's log explains the line; the stored words never carry it.
+    let segs = segments(&e.agent, g);
+    assert!(body_text(&segs[0].prefix_a).contains("hand the turn on"));
+    let said = texts(&e, g);
+    assert!(
+        said.iter().all(|(_, t)| !t.contains('\u{2192}')),
+        "{said:?}"
+    );
+    assert!(said.iter().any(|(_, t)| t == "Ann: bo knows."));
+    assert!(said.iter().any(|(_, t)| t == "Bo: steel."));
+    let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
+    assert_eq!(shapes, ["group", "interject"]);
+}
+
+#[tokio::test]
+async fn a_chain_never_repeats_a_speaker() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.fake.push([
+        say("Ann: over to bo.\n\u{2192} bo"),
+        say("Bo: back to ann.\n\u{2192} ann, bo"),
+        say("Ann: never asked."),
+    ]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 2);
+    assert_eq!(e.fake.left(), 1);
+}
+
+#[tokio::test]
+async fn a_hand_off_chain_stops_at_the_cap() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.group.collective_max = 2;
+    });
+    let g = three(&e);
+    e.fake.push([
+        say("Ann: to bo.\n\u{2192} bo"),
+        say("Bo: to dee.\n\u{2192} dee"),
+        say("Dee: too late."),
+    ]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 2);
+
+    // Handed members queue behind the remaining first speakers, then the cap counts all.
+    let e = classifying(3);
+    let g = three(&e);
+    e.fake.push([
+        say(r#"{"addressed": ["ann", "bo"]}"#),
+        say("Ann: to dee.\n\u{2192} dee"),
+        say("Bo: second."),
+        say("Dee: third."),
+        say("unused"),
+    ]);
+    e.agent.send(g, "ann and bo, hello", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 4, "address call plus three replies");
+    let said: Vec<String> = texts(&e, g).into_iter().map(|(_, t)| t).collect();
+    let pos = |s: &str| said.iter().position(|t| t.starts_with(s)).unwrap();
+    assert!(pos("Ann") < pos("Bo") && pos("Bo") < pos("Dee"), "{said:?}");
+}
+
+#[tokio::test]
+async fn hand_offs_to_strangers_the_user_and_the_host_are_ignored() {
+    let e = env(WireApi::Chat);
+    // Cy has no persona and is not in the group; bo is not either.
+    let g = e.agent.create_group(&[p("ann"), p("dee")], None).unwrap();
+    e.fake.push([
+        say("Ann: hm.\n\u{2192} bo, cy, Doc, Hostess, nobody"),
+        say("unused"),
+    ]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+    let said = texts(&e, g);
+    assert!(
+        said.iter().all(|(_, t)| !t.contains('\u{2192}')),
+        "{said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_disabled_member_is_not_handed_the_turn() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("bo"), Mode::Disabled).unwrap());
+    e.fake.push([say("Ann: hm.\n\u{2192} bo"), say("unused")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
+async fn a_hand_off_round_ends_with_the_quota_band() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.world.quota.quiet_at = 0.0;
+    });
+    let g = three(&e);
+    e.fake.push([say("Ann: hm.\n\u{2192} bo"), say("unused")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
+async fn the_hand_off_line_is_never_streamed() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.fake
+        .push([say("Ann: bo knows.\n\u{2192} bo"), say("Bo: steel.")]);
+    e.agent
+        .send(g, "ann, where is the steel?", None)
+        .await
+        .unwrap();
+    let streamed: Vec<String> = e
+        .sink
+        .take()
+        .into_iter()
+        .filter_map(|ev| match ev {
+            agent::Event::MessageDelta(d) => Some(d.delta),
+            _ => None,
+        })
+        .collect();
+    assert!(!streamed.is_empty());
+    assert!(
+        streamed.iter().all(|d| !d.contains('\u{2192}')),
+        "{streamed:?}"
+    );
+    let all = streamed.concat();
+    assert!(
+        all.contains("Ann: bo knows.") && all.contains("Bo: steel."),
+        "{all}"
+    );
+}

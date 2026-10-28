@@ -221,6 +221,8 @@ harness.low_match
 harness.memories
 harness.memories.shared
 harness.must_report
+harness.next
+harness.next_mark
 harness.nothing_found
 harness.opening
 harness.opening.birthday

@@ -10,7 +10,7 @@
 //! change is the model's reading; that only the user's own turn can carry it is the
 //! harness's guarantee.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use api::events::{MessageAdded, Notification, WorldChange};
 use world::presence::{Activity, Digest};
@@ -482,15 +482,15 @@ impl Agent {
             .await?;
         self.replied(posted.channel, &addressed)?;
 
-        // A message to several of them gets a short round of replies, each seeing the
-        // earlier ones; it ends the user's turn, so no interjection follows.
-        if turns.len() > 1 {
-            for p in &turns[1..] {
-                if !self.unprompted_allowed()? {
-                    break;
-                }
-                self.interject(posted.channel, p, "harness.chorus").await?;
-            }
+        // The round: the first speakers the address call chose, then whoever each reply
+        // hands the turn to. It ends on an empty queue or the cap, and the user's next
+        // message is the only thing that starts another.
+        let handed = std::mem::take(&mut turn.hand_off);
+        let mut spoken = vec![addressed.clone()];
+        let queue = turns.iter().skip(1).cloned().collect();
+        self.round(posted.channel, &mut spoken, queue, &handed)
+            .await?;
+        if spoken.len() > 1 {
             return Ok(());
         }
 
@@ -516,8 +516,51 @@ impl Agent {
             &status,
         )?;
         if let Some(p) = pick.filter(|p| self.has_persona(p.as_str())) {
-            self.interject(posted.channel, &p, "harness.interject")
+            let handed = self
+                .interject(posted.channel, &p, "harness.interject")
                 .await?;
+            spoken.push(p);
+            self.round(posted.channel, &mut spoken, VecDeque::new(), &handed)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Let the queued members answer in turn, each reply's hand-off line appending its
+    /// named members after those already waiting. `spoken` holds everyone who replied to
+    /// this user message so far: nobody speaks twice, and its length against
+    /// `group.collective_max` bounds the round. Each extra reply passes the quota band.
+    async fn round(
+        &self,
+        ch: ChannelId,
+        spoken: &mut Vec<PersonId>,
+        mut queue: VecDeque<PersonId>,
+        first_hand_off: &[String],
+    ) -> Result<()> {
+        let cap = self.config.agent.group.collective_max as usize;
+        let mut handed = self.hand_off_targets(ch, first_hand_off, spoken)?;
+        loop {
+            for p in handed {
+                if !queue.contains(&p) {
+                    queue.push_back(p);
+                }
+            }
+            let Some(next) = queue.pop_front() else {
+                break;
+            };
+            if spoken.len() >= cap {
+                break;
+            }
+            if spoken.contains(&next) {
+                handed = Vec::new();
+                continue;
+            }
+            if !self.unprompted_allowed()? {
+                break;
+            }
+            let names = self.interject(ch, &next, "harness.chorus").await?;
+            spoken.push(next);
+            handed = self.hand_off_targets(ch, &names, spoken)?;
         }
         Ok(())
     }
@@ -626,7 +669,7 @@ impl Agent {
         Ok(best.map(|(_, p)| p))
     }
 
-    async fn interject(&self, ch: ChannelId, person: &PersonId, key: &str) -> Result<()> {
+    async fn interject(&self, ch: ChannelId, person: &PersonId, key: &str) -> Result<Vec<String>> {
         let seg = self.current_segment(ch)?;
         let names = self.segment_names(seg)?;
         let name = self.display(person.as_str())?;
@@ -647,7 +690,7 @@ impl Agent {
         )?;
         self.run(&mut turn, 1).await?;
         self.replied(ch, person)?;
-        Ok(())
+        Ok(std::mem::take(&mut turn.hand_off))
     }
 
     // ---- channels and modes ----
