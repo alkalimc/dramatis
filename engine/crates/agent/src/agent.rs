@@ -72,22 +72,6 @@ pub trait Clock: Send + Sync {
     fn now(&self) -> Now;
 }
 
-/// The system clock at a fixed offset. The app supplies the local offset (it changes
-/// with daylight saving, which this crate does not track).
-pub struct SystemClock {
-    pub offset_min: i32,
-}
-
-impl Clock for SystemClock {
-    fn now(&self) -> Now {
-        let ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        Now::new(ms, self.offset_min)
-    }
-}
-
 /// The front end the user is on. The host's usage guide covers only that one's operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Frontend {

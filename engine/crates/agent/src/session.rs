@@ -32,7 +32,6 @@ use crate::error::{Error, Result};
 use crate::meter;
 use crate::persona;
 use crate::request::{self, Call, Image};
-use crate::store;
 use crate::text::Names;
 
 /// Whose session a channel's log is: which prefix and which tool list it gets.
@@ -653,7 +652,7 @@ impl Agent {
                     if let Some(id) = turn.message
                         && turn.text.is_empty()
                     {
-                        store::discard_message(&self.db(), id)?;
+                        world::message::discard(&self.db(), id)?;
                         turn.message = None;
                     }
                     return Err(failure.unwrap_or_else(|| Error::Endpoint {
@@ -972,7 +971,7 @@ impl Agent {
             && !turn.text.trim().is_empty()
         {
             let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
-            store::close_task_with(&self.db(), task, id, &cites, now.ms)?;
+            world::task::close_with(&self.db(), task, id, &cites, now.ms)?;
             turn.closed = true;
             let meta = MessageMeta {
                 cites,
@@ -1000,7 +999,10 @@ impl Agent {
             .then(|| serde_json::to_value(&turn.actions))
             .transpose()?;
         let conn = self.db();
-        store::complete_message(&conn, id, &turn.text, actions.as_ref(), meta)?;
+        let meta = (!meta.is_empty())
+            .then(|| serde_json::to_value(meta))
+            .transpose()?;
+        world::message::complete(&conn, id, &turn.text, actions.as_ref(), meta.as_ref())?;
         let stored = world::message::get(&conn, id)?;
         drop(conn);
         turn.message = None;
@@ -1025,7 +1027,7 @@ impl Agent {
         turn.closed = true;
         if let Some(x) = turn.message {
             if turn.text.trim().is_empty() {
-                store::discard_message(&self.db(), x)?;
+                world::message::discard(&self.db(), x)?;
                 turn.message = None;
             } else {
                 let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
@@ -1107,7 +1109,7 @@ impl Agent {
         // no empty bubble stays behind.
         if turn.joined.is_some() && turn.text.trim().is_empty() {
             if let Some(id) = turn.message.take() {
-                store::discard_message(&self.db(), id)?;
+                world::message::discard(&self.db(), id)?;
             }
             turn.text.clear();
             turn.actions.clear();
@@ -1132,7 +1134,7 @@ impl Agent {
             // Only the hand-off line was written: nothing to keep as a message.
             if turn.text.trim().is_empty() && turn.actions.is_empty() {
                 if let Some(id) = turn.message.take() {
-                    store::discard_message(&self.db(), id)?;
+                    world::message::discard(&self.db(), id)?;
                 }
                 return Ok(());
             }

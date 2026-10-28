@@ -492,6 +492,25 @@ pub fn force_close(
     report(conn, &person, id, text, cites, None, office, now)
 }
 
+/// Close a request with a message already in its channel as the reply: the forced close
+/// of a request whose reply was streamed before the turns ran out. Same effects as
+/// [`force_close`] without writing a second message.
+pub fn close_with(
+    conn: &Connection,
+    id: TaskId,
+    reply: MessageId,
+    cites: &[Citation],
+    now: i64,
+) -> Result<()> {
+    crate::atomic(conn, |conn| {
+        conn.execute(
+            "UPDATE task SET status = 'done', cites = ?2, reply = ?3, turns_left = 0 WHERE id = ?1",
+            (id, serde_json::to_string(cites)?, reply),
+        )?;
+        crate::session::close_for_task(conn, id, now).map(drop)
+    })
+}
+
 /// End an open request that has no answer coming: it is done with no reply, its
 /// session closes and `why` is kept for the host and the UI. Does nothing to a request
 /// that is already done. Returns whether it changed.

@@ -18,9 +18,20 @@
 
 use std::sync::Arc;
 
-use agent::{Agent, Config, NoSink, Parts, SystemClock};
+use agent::{Agent, Clock, Config, NoSink, Parts};
 use futures::StreamExt;
 use llm::transport::{Http, HttpRequest, HttpResponse, StreamResponse, Transport};
+
+struct UtcClock;
+
+impl Clock for UtcClock {
+    fn now(&self) -> world::clock::Now {
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64);
+        world::clock::Now::new(ms, 0)
+    }
+}
 
 /// Real HTTP that echoes the `usage` part of every reply and, with
 /// `DRAMATIS_SMOKE_DUMP=<dir>`, writes each request body there as `<n>.json` and its
@@ -121,7 +132,7 @@ async fn two_turns_and_a_wrapup_hit_the_cache() {
             llm::Llm::http().unwrap()
         },
         sink: Arc::new(NoSink),
-        clock: Arc::new(SystemClock { offset_min: 0 }),
+        clock: Arc::new(UtcClock),
     })
     .unwrap();
     let person = std::env::var("DRAMATIS_SMOKE_PERSON").unwrap_or_else(|_| {
