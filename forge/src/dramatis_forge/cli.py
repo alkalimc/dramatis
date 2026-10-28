@@ -5,7 +5,6 @@
     baseline   accept or show the counts the guards compare against
     report     regenerate one report, or inspect a page
     persona    network: generate, gate and write personas (maintainer only)
-    research   offline: training pairs, held-out sets; network only for `synth`
 
 `sync` is the only command that talks to the wiki; `persona` is the only one that calls a
 model endpoint. The first run (no watermark) and
@@ -37,7 +36,6 @@ from .guards import HIGH
 from .params import Params
 from .pack import Pack, load_pack, pack_dir
 from .persona import cli as persona_cli
-from .research import cli as research_cli
 from .report import attribution as attribution_mod
 from .report import coverage as coverage_mod
 from .report import figures as figures_mod
@@ -493,7 +491,6 @@ def report_attribution(
 
 
 persona_cli.register(app, resolve=_resolve, die=_die, console=console)
-research_cli.register(app, resolve=_resolve, die=_die, console=console)
 
 
 def main() -> None:  # pragma: no cover - entry point

@@ -43,9 +43,7 @@ async-trait = "=0.1.92"
 toml = "=1.1.6"
 
 [profile.release]
-# The dense path is an exact full scan over every vector. LTO and a single codegen unit
-# are what make that competitive with an approximate index, so they are not optional
-# niceties here — the latency benchmark measures this profile.
+# The latency benchmark measures this profile.
 lto = "fat"
 codegen-units = 1
 panic = "abort"

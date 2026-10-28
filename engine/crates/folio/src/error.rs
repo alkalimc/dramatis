@@ -41,17 +41,6 @@ pub enum Error {
     /// declaration exists to prevent, so it is fatal rather than a warning.
     #[error("corpus requires capability {requirement:?}, which this build does not implement")]
     UnmetRequirement { requirement: String },
-
-    #[error("vector store is {actual} bytes, but {count} units x {dim} dims x 2 needs {expected}")]
-    VectorSizeMismatch {
-        actual: usize,
-        expected: usize,
-        count: usize,
-        dim: usize,
-    },
-
-    #[error("query dimension {query} does not match corpus dimension {corpus}")]
-    DimMismatch { query: usize, corpus: usize },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

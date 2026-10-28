@@ -36,8 +36,6 @@ pub enum CorpusState {
     Missing,
     Loaded {
         name: String,
-        /// The local encoder differs from the corpus's: show a banner, keep going.
-        encoder_mismatch: bool,
     },
     /// Refused: unknown format version. The user needs a newer app.
     UnsupportedVersion {

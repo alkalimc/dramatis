@@ -81,7 +81,6 @@ function Shell() {
     <div className="app">
       <Header />
       {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
-      {corpus.encoder_mismatch && <p className="banner">{t("app.corpus.encoder")}</p>}
       <div className="body">
         <Main />
         {drawer && <DrawerPane drawer={drawer} />}

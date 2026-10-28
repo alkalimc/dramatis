@@ -200,13 +200,6 @@ def _d_folio_mb(src: _Sources, _m: str | None):
     return _mb(src.folio_path.stat().st_size)
 
 
-def _d_vectors_mb(src: _Sources, member: str | None):
-    """f16 vectors at the given dimension (default 1024): computed, not measured."""
-    assert src.folio is not None
-    dim = int(member) if member else 1024
-    return _mb(src.folio.execute("select count(*) from chunks").fetchone()[0] * dim * 2)
-
-
 def _d_redundancy(src: _Sources, member: str | None):
     """Highest positional redundancy over all templates, or one template's."""
     table = src.meta["folio"].get("redundancy") or {}
@@ -562,7 +555,6 @@ DERIVED: dict[str, tuple[tuple[str, ...], Callable[[_Sources, str | None], objec
     "units_attributed": (("folio",), _d_units_attributed),
     "units_per_person": (("folio",), _d_units_per_person),
     "folio_mb": (("folio",), _d_folio_mb),
-    "vectors_mb": (("folio",), _d_vectors_mb),
     "redundancy": (("folio",), _d_redundancy),
     "boundary_aligned": (("archive", "folio"), _d_boundary_aligned),
     "boundary_split": (("archive", "folio"), _d_boundary_split),

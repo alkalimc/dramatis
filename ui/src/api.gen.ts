@@ -282,9 +282,7 @@ export type Clock = {
 /**  How much the corpus supports an answer, as retrieval measured it. */
 export type Confidence = "high" | "medium" | "low";
 
-export type CorpusState = { state: "missing" } | { state: "loaded"; name: string; 
-/**  The local encoder differs from the corpus's: show a banner, keep going. */
-encoder_mismatch: boolean } | 
+export type CorpusState = { state: "missing" } | { state: "loaded"; name: string } | 
 /**  Refused: unknown format version. The user needs a newer app. */
 { state: "unsupported_version"; format_version: number } | 
 /**  Refused: the corpus requires a reader feature this build lacks. */

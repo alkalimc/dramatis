@@ -18,8 +18,6 @@ CREATE TABLE chunks (id TEXT PRIMARY KEY, ord INTEGER NOT NULL, template TEXT NO
 CREATE UNIQUE INDEX idx_chunks_ord ON chunks(ord);
 CREATE INDEX idx_chunks_span ON chunks(span_of, span_from);
 CREATE VIRTUAL TABLE chunks_fts USING fts5(tokens, content='');
-CREATE TABLE vectors (id INTEGER PRIMARY KEY CHECK (id = 0), dim INTEGER NOT NULL,
-    count INTEGER NOT NULL, dtype TEXT NOT NULL, data BLOB NOT NULL);
 CREATE TABLE persons (person_id TEXT PRIMARY KEY, primary_page TEXT NOT NULL,
     display TEXT NOT NULL, forms TEXT NOT NULL, facets TEXT NOT NULL,
     material INTEGER NOT NULL, persona_confidence REAL NOT NULL DEFAULT 0.0, birthday TEXT);

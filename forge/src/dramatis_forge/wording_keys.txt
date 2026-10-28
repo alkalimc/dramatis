@@ -17,7 +17,6 @@ activity.came_by
 activity.commitment_due
 activity.messaged
 activity.replied
-app.corpus.encoder
 app.corpus.missing
 app.corpus.requirement
 app.corpus.unsupported
