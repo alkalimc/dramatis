@@ -190,9 +190,12 @@ group.who
 group.who.add
 group.who.remove
 group.who.search
+harness.address
 harness.ask
 harness.asked
+harness.chorus
 harness.citation
+harness.collective
 harness.context
 harness.context.turns
 harness.digest
@@ -201,9 +204,6 @@ harness.digest.came_by
 harness.digest.commitment_due
 harness.digest.messaged
 harness.digest.replied
-harness.address
-harness.chorus
-harness.collective
 harness.done
 harness.error.arguments
 harness.error.not_asked
