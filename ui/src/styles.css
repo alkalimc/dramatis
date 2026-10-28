@@ -1045,3 +1045,23 @@ button.nav.on {
     scroll-behavior: smooth;
   }
 }
+
+/* ---- saves ---- */
+.save-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 1rem;
+}
+.save {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.save .badge {
+  font-size: 0.75rem;
+  color: var(--accent);
+}
