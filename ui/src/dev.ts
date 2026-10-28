@@ -18,7 +18,7 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
   switch (view) {
     case "light":
       actions.setTheme("light");
-      return d({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
+      return d({ type: "drawer", drawer: { kind: "system", tab: "root" } });
     case "menu":
       return d({ type: "menu", open: true });
     case "profile":
@@ -26,9 +26,20 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
     case "profile-edit":
       return d({ type: "profile", mode: "edit" });
     case "system":
-      return d({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
+      return d({ type: "drawer", drawer: { kind: "system", tab: "root" } });
+    case "settings-quiet":
+      return d({ type: "drawer", drawer: { kind: "system", tab: "quiet" } });
     case "endpoints":
       return d({ type: "drawer", drawer: { kind: "system", tab: "endpoints" } });
+    case "contacts":
+      return d({ type: "drawer", drawer: { kind: "contacts" } });
+    case "newgroup":
+      return d({ type: "groupDialog", open: true });
+    case "find":
+      return d({ type: "find", query: "" });
+    case "attach":
+      document.querySelector<HTMLElement>('button[aria-label="Attach"]')?.click();
+      return;
     case "roster":
       return d({ type: "drawer", drawer: { kind: "roster" } });
     case "cases":

@@ -77,7 +77,8 @@ test("ask card: candidates with reasons, turns hidden under more", async () => {
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getAllByRole("button", { name: /Ask someone/ })[0]);
+  await user.click(screen.getByRole("button", { name: "Attach" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Ask someone" }));
   const dialog = await screen.findByRole("dialog", { name: "Ask someone" });
   await user.type(within(dialog).getByLabelText("What do you want to know?"), "the tide gates repair");
   expect(await within(dialog).findByText("Her own reports describe the gate repairs.")).toBeDefined();
@@ -155,7 +156,7 @@ test("endpoints: a failed model fetch shows the endpoint's own text and a manual
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "Menu" }));
   await user.click(within(await screen.findByRole("complementary", { name: "Menu" })).getByRole("button", { name: "Settings" }));
-  await user.click(await screen.findByRole("tab", { name: "Endpoints" }));
+  await user.click(await screen.findByRole("button", { name: "Endpoints" }));
   const card = (await screen.findByRole("heading", { name: "deepseek" })).closest("li")!;
   await user.click(within(card).getByRole("button", { name: "Fetch models" }));
   expect(await within(card).findByText(/401 Unauthorized/)).toBeDefined();

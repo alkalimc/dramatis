@@ -41,7 +41,7 @@ export function PictureButtons({ onPick, onClear, clearable }: { onPick: (f: Fil
 }
 
 /** The name of the save this window has open, once the engine says; `null` until then. */
-function useCurrentSave(): string | null {
+export function useCurrentSave(): string | null {
   const api = useApi();
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
@@ -59,7 +59,7 @@ function useCurrentSave(): string | null {
 const monthDay = (b: { month: number; day: number }) => new Date(2000, b.month - 1, b.day).toLocaleDateString(undefined, { month: "long", day: "numeric" });
 
 /** The line under the name: the in-world title when it says more than the name, else the save in play. */
-function statusLine(t: ReturnType<typeof useT>, name: string | null, save: string | null): string | null {
+export function statusLine(t: ReturnType<typeof useT>, name: string | null, save: string | null): string | null {
   const title = userTitle(t, name);
   return name?.trim() && title !== name.trim() ? title : save;
 }
@@ -291,11 +291,11 @@ export function LeftDrawer() {
         </ul>
         <ul className="drawer-items">
           <Row icon="group" label={t("roster.new_group")} onClick={go(() => dispatch({ type: "groupDialog", open: true }))} />
-          <Row icon="people" label={t("menu.contacts")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "roster" } }))} />
+          <Row icon="people" label={t("menu.contacts")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "contacts" } }))} />
           <Row icon="archive" label={archivedCount > 0 ? t("menu.archived.count", { count: archivedCount }) : t("chatlist.archived")} onClick={go(() => dispatch({ type: "listView", view: "archived" }))} />
           <Row icon="cases" label={t("nav.cases")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "cases" } }))} />
           <Row icon="bookmark" label={t("system.tab.saves")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "saves" } }))} />
-          <Row icon="system" label={t("menu.settings")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "quota" } }))} />
+          <Row icon="system" label={t("menu.settings")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "root" } }))} />
           <li>
             <label className="drawer-item switch-row">
               <Icon name="moon" size={24} />

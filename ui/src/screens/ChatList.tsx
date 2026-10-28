@@ -47,6 +47,80 @@ function ClockLine() {
   );
 }
 
+/** Search inside the open conversation: takes over the list column, as in the reference. */
+function SearchPanel({ query }: { query: string }) {
+  const t = useT();
+  const dispatch = useDispatch();
+  const id = useId();
+  const channel = useStore((s) => s.channel ?? s.hostChannel);
+  const messages = useStore((s) => (channel ? (s.messages[channel] ?? []) : []));
+  const summary = useStore((s) => s.channels.find((c) => c.id === channel));
+  const names = useStore((s) => s.names);
+  const user = useStore((s) => s.settings?.user_name ?? null);
+  const needle = query.trim().toLowerCase();
+  const results = needle ? messages.filter((m) => m.text.toLowerCase().includes(needle)) : [];
+  const stand = summary ?? ({ id: channel ?? "", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary);
+  const close = () => dispatch({ type: "find", query: null });
+
+  const jump = (mid: string) => {
+    const el = document.getElementById(`m-${mid}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1600);
+  };
+
+  return (
+    <nav className="chat-list search-panel" aria-label={t("channel.find")}>
+      <header className="list-head">
+        <div className="search-field">
+          <Icon name="search" size={18} />
+          <label htmlFor={id} className="sr-only">
+            {t("channel.find")}
+          </label>
+          <input id={id} type="search" autoFocus value={query} placeholder={t("chatlist.search")} onChange={(e) => dispatch({ type: "find", query: e.target.value })} onKeyDown={(e) => e.key === "Escape" && close()} />
+        </div>
+      </header>
+      <p className="scope-title">{t("search.scope")}</p>
+      <div className="scope-row">
+        <ChannelAvatar channel={stand} size="s" />
+        <span className="scope-name">{channelTitle(stand, t)}</span>
+        <button type="button" className="round small" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={close}>
+          <Icon name="close" size={18} />
+        </button>
+      </div>
+      <div className="list-scroll">
+        {needle && results.length === 0 && <p className="muted pad">{t("channel.find.none")}</p>}
+        {results.length > 0 && (
+          <ul>
+            {results.map((m) => (
+              <li key={m.id}>
+                <button type="button" className="chat-row result" onClick={() => jump(m.id)}>
+                  <span className="chat-main">
+                    <span className="chat-top">
+                      <span className="chat-name">{authorName(m.author, t, names, user)}</span>
+                      <time className="chat-time" dateTime={m.at}>{when(m.at)}</time>
+                    </span>
+                    <span className="chat-bottom">
+                      <span className="chat-preview">{m.text}</span>
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!needle && (
+          <div className="search-empty">
+            <Icon name="search" size={72} />
+            <p className="muted">{t("search.hint")}</p>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
+
 /** The channels, most recent first: pinned on top, then direct chats, groups and the host. */
 export function ChatList() {
   const t = useT();
@@ -61,6 +135,7 @@ export function ChatList() {
   const pinned = useStore((s) => s.pinned);
   const view = useStore((s) => s.listView);
   const [query, setQuery] = useState("");
+  const find = useStore((s) => s.find);
 
   const all = useMemo(() => {
     const list: ChannelSummary[] = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary, ...channels] : channels;
@@ -85,6 +160,7 @@ export function ChatList() {
   }, [actions, ids]);
 
   const menu = useChatMenu();
+  if (find !== null) return <SearchPanel query={find} />;
   const archivedView = view === "archived" && !q;
 
   return (
@@ -193,7 +269,10 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
         <ChannelAvatar channel={channel} size="l" />
         <span className="chat-main">
           <span className="chat-top">
-            <span className="chat-name">{title}</span>
+            <span className="chat-name">
+              {channel.kind === "group" && <Icon name="group" size={16} />}
+              {title}
+            </span>
             {pinned && (
               <span className="chat-pin" role="img" aria-label={t("chatlist.pinned")}>
                 <Icon name="pin" size={14} />

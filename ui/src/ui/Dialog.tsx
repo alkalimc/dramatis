@@ -10,6 +10,8 @@ export function Dialog({ title, onClose, children, className = "", hideTitle = f
 
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
+    // A field that took focus itself (autoFocus) keeps it.
+    if (ref.current?.contains(document.activeElement)) return () => before?.focus?.();
     const first = ref.current?.querySelector<HTMLElement>("[autofocus], input:not([type=file]), textarea, select, button");
     first?.focus();
     return () => before?.focus?.();

@@ -235,6 +235,7 @@ export function reduce(s: State, a: Action): State {
         channel: a.channel,
         drawer: null,
         menuOpen: false,
+        find: null,
         temp: s.temp && s.temp.id === a.channel ? s.temp : null,
         unread: omit(s.unread, a.channel ?? s.hostChannel ?? ""),
       };
@@ -252,6 +253,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, listView: a.view, menuOpen: false };
     case "menu":
       return { ...s, menuOpen: a.open };
+    case "find":
+      return { ...s, find: a.query };
     case "profile":
       return { ...s, profile: a.mode, menuOpen: false };
     case "unread":

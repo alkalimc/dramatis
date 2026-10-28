@@ -112,7 +112,10 @@ test("group dialog: topic may stay empty and says so; no member cap; frozen by d
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getAllByRole("button", { name: /Bring people in/ })[0]);
+  await user.click(screen.getByRole("button", { name: "Attach" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Bring people in" }));
+  // First the group's name, then who is in it.
+  await user.click(await screen.findByRole("button", { name: "Next" }));
   const dialog = await screen.findByRole("dialog", { name: "Bring people in" });
   expect(within(dialog).getByText("Leave empty for small talk.")).toBeDefined();
   expect(within(dialog).getByText(/Frozen: someone answers only when you speak/)).toBeDefined();

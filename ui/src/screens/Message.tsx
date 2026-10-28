@@ -217,7 +217,7 @@ export const MessageView = memo(function MessageView({
   );
 
   return (
-    <article className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}>
+    <article id={`m-${message.id}`} className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}>
       {!mine && <div className="message-avatar">{last && <SpeakerAvatar author={message.author} name={name} />}</div>}
       <div className="message-stack">
         <ActionLines author={message.author} actions={message.actions} />

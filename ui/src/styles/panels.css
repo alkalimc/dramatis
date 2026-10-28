@@ -598,3 +598,7 @@ button.info-row:hover {
   margin: var(--s-1) 0 0 var(--s-1);
   font-size: var(--fs-sm);
 }
+
+.info-panel .info-head {
+  padding-top: var(--s-5);
+}

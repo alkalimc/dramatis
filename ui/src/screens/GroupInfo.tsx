@@ -76,6 +76,17 @@ export function GroupInfo({ id }: { id: string }) {
         <PictureButtons onPick={async (f) => actions.setChannelAvatar(id, await readAvatar(f))} onClear={() => void actions.setChannelAvatar(id, null)} clearable={Boolean(group.avatar)} />
       </header>
 
+      <div className="info-squares">
+        <button type="button" className="square" onClick={() => void actions.archive(id, !group.archived)}>
+          <Icon name="archive" size={24} />
+          <span>{t(group.archived ? "chatmenu.unarchive" : "chatmenu.archive")}</span>
+        </button>
+        <button type="button" className="square danger" onClick={remove}>
+          <Icon name="trash" size={24} />
+          <span>{t("channel.delete")}</span>
+        </button>
+      </div>
+
       <section className="info-section">
         <h3>{t("group.mode")}</h3>
         <ModeSwitch kind="group" mode={group.mode} hints="all" label={t("mode.label.group")} onChange={(m) => actions.setMode({ kind: "channel", id }, m)} />
@@ -102,14 +113,6 @@ export function GroupInfo({ id }: { id: string }) {
         </ul>
       </section>
 
-      <section className="info-actions">
-        <button type="button" className="ghost" onClick={() => void actions.archive(id, !group.archived)}>
-          <Icon name="archive" size={18} /> {t(group.archived ? "chatmenu.unarchive" : "chatmenu.archive")}
-        </button>
-        <button type="button" className="ghost danger" onClick={remove}>
-          <Icon name="trash" size={18} /> {t("channel.delete")}
-        </button>
-      </section>
     </div>
   );
 }

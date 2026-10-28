@@ -21,7 +21,8 @@ test("the hamburger opens the drawer: the user, the places to go, night mode, th
 
   await user.click(within(drawer).getByRole("button", { name: "Contacts" }));
   expect(screen.queryByRole("complementary", { name: "Menu" })).toBeNull();
-  expect(await screen.findByRole("complementary", { name: "Roster" })).toBeDefined();
+  const contacts = await screen.findByRole("dialog", { name: "Contacts" });
+  expect(await within(contacts).findByText("Mira Vale")).toBeDefined();
 });
 
 test("night mode switches the theme and the choice is kept", async () => {

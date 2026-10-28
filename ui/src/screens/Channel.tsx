@@ -7,7 +7,7 @@ import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
 import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
-import { ChannelAvatar } from "../ui/Avatar";
+import { Menu } from "../ui/Menu";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
 import { ActionLines, MessageView, StreamView } from "./Message";
@@ -31,6 +31,7 @@ function continues(a: Message, b: Message): boolean {
 export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pinned?: ReactNode; after?: (m: Message, i: number) => ReactNode }) {
   const t = useT();
   const actions = useActions();
+  const dispatch = useDispatch();
   const messages = useStore((s) => s.messages[channel] ?? NO_MESSAGES);
   const done = useStore((s) => s.historyDone[channel] ?? false);
   const tts = useStore((s) => Boolean(s.endpoints?.roles?.tts));
@@ -44,9 +45,8 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
   const quota = useStore((s) => s.quota);
   const exhausted = isHost ? quotaExhaustedLine(quota, t) : null;
   const lastMessage = messages[messages.length - 1];
-  const [find, setFind] = useState<string | null>(null);
-  const needle = find?.trim().toLowerCase() ?? "";
-  const shown = useMemo(() => (needle ? messages.filter((m) => m.text.toLowerCase().includes(needle)) : messages), [messages, needle]);
+  const find = useStore((s) => s.find);
+  const shown = messages;
 
   useEffect(() => {
     void actions.loadHistory(channel);
@@ -58,16 +58,34 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, streams, waiting]);
 
+  // How far from the newest message the reader is, and how many arrived while away.
+  const [away, setAway] = useState(0);
+  const [unseen, setUnseen] = useState(0);
+  const seen = useRef(messages.length);
+  useEffect(() => {
+    if (stick.current) setUnseen(0);
+    else setUnseen((n) => n + Math.max(0, messages.length - seen.current));
+    seen.current = messages.length;
+  }, [messages.length]);
+
   const onScroll = () => {
     const el = log.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stick.current = gap < 48;
+    setAway(gap < 160 ? 0 : gap);
+    if (gap < 48) setUnseen(0);
+  };
+  const toBottom = () => {
+    const el = log.current;
+    if (el) el.scrollTop = el.scrollHeight;
   };
 
   return (
     <section className="channel" aria-label={t("composer.label")}>
-      <ChannelHeader channel={channel} finding={find !== null} onFind={() => setFind((f) => (f === null ? "" : null))} />
-      {find !== null && <FindBar value={find} count={shown.length} onChange={setFind} onClose={() => setFind(null)} />}
+      <ChannelHeader channel={channel} finding={find !== null} onFind={() => dispatch({ type: "find", query: find === null ? "" : null })} />
       {pinned}
+      <div className="log-wrap">
       <div ref={log} className="log" onScroll={onScroll} role="log" aria-live="polite" aria-relevant="additions" tabIndex={0}>
         {!done && messages.length > 0 && (
           <button type="button" className="link earlier" onClick={() => actions.loadHistory(channel, true)}>
@@ -75,7 +93,6 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
           </button>
         )}
         {messages.length === 0 && streams.length === 0 && <p className="muted empty">{t("channel.empty")}</p>}
-        {needle && shown.length === 0 && <p className="muted empty">{t("channel.find.none")}</p>}
         {shown.map((m, i) => (
           <div key={m.id} className="log-item">
             <MessageView
@@ -98,6 +115,13 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
         <TurnFailed channel={channel} />
         {exhausted && <p className="host-line">{exhausted}</p>}
         {historyError && <InlineError error={historyError} onRetry={() => void actions.loadHistory(channel)} />}
+      </div>
+      {away > 0 && (
+        <button type="button" className="to-bottom round" aria-label={t("channel.latest")} title={t("channel.latest")} onClick={toBottom}>
+          {unseen > 0 && <span className="badge to-bottom-count">{unseen}</span>}
+          <Icon name="down" size={24} />
+        </button>
+      )}
       </div>
       <Composer channel={channel} />
     </section>
@@ -137,6 +161,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<ImagePart | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attach, setAttach] = useState<{ x: number; y: number } | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const restore = useStore((s) => (s.restore?.channel === channel ? s.restore : null));
@@ -200,9 +225,31 @@ export function Composer({ channel }: { channel: ChannelId }) {
             e.target.value = "";
           }}
         />
-        <button type="button" className="round" aria-label={t("composer.image")} title={t("composer.image")} onClick={() => file.current?.click()}>
+        <button
+          type="button"
+          className="round"
+          aria-label={t("composer.attach")}
+          title={t("composer.attach")}
+          aria-haspopup="menu"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setAttach({ x: r.left, y: r.top - 150 });
+          }}
+        >
           <Icon name="attach" />
         </button>
+        {attach && (
+          <Menu
+            at={attach}
+            label={t("composer.attach")}
+            onClose={() => setAttach(null)}
+            items={[
+              { label: t("composer.image"), icon: "image", onSelect: () => file.current?.click() },
+              { label: t("composer.ask"), icon: "people", onSelect: () => dispatch({ type: "ask", draft: {} }) },
+              { label: t("composer.group"), icon: "group", onSelect: () => dispatch({ type: "groupDialog", open: true }) },
+            ]}
+          />
+        )}
         <label htmlFor={id} className="sr-only">
           {t("composer.label")}
         </label>
@@ -233,45 +280,10 @@ export function Composer({ channel }: { channel: ChannelId }) {
           <Icon name="send" />
         </button>
       </div>
-      <div className="composer-meta">
-        <p id={`${id}-hint`} className="muted small composer-hint">
-          {t(isMac() ? "composer.hint.mac" : "composer.hint.other")}
-        </p>
-        <span className="spacer" />
-        <button type="button" className="link" onClick={() => dispatch({ type: "ask", draft: {} })}>
-          ⊕ {t("composer.ask")}
-        </button>
-        <button type="button" className="link" onClick={() => dispatch({ type: "groupDialog", open: true })}>
-          ⊕ {t("composer.group")}
-        </button>
-      </div>
+      <p id={`${id}-hint`} className="sr-only">
+        {t(isMac() ? "composer.hint.mac" : "composer.hint.other")}
+      </p>
     </form>
-  );
-}
-
-function FindBar({ value, count, onChange, onClose }: { value: string; count: number; onChange: (v: string) => void; onClose: () => void }) {
-  const t = useT();
-  const id = useId();
-  return (
-    <div className="find-bar" role="search">
-      <Icon name="search" size={18} />
-      <label htmlFor={id} className="sr-only">
-        {t("channel.find")}
-      </label>
-      <input
-        id={id}
-        type="search"
-        autoFocus
-        value={value}
-        placeholder={t("channel.find")}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
-      />
-      {value.trim() && <span className="muted small">{t("channel.find.count", { count })}</span>}
-      <button type="button" className="round small" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={onClose}>
-        <Icon name="close" size={18} />
-      </button>
-    </div>
   );
 }
 
@@ -299,7 +311,6 @@ export function ChannelHeader({ channel, finding = false, onFind }: { channel: C
 
   return (
     <header className="channel-header">
-      <ChannelAvatar channel={summary} />
       <div className="titles">
         <h2>{channelTitle(summary, t)}</h2>
         <p className={`subtitle${typing ? " typing" : ""}`} role="status">

@@ -76,6 +76,7 @@ channel.find.none
 channel.group.untitled
 channel.group_info
 channel.host
+channel.latest
 channel.more
 channel.person_page
 chatlist.archived
@@ -124,6 +125,7 @@ coldstart.go_roster
 coldstart.roster
 coldstart.title
 composer.ask
+composer.attach
 composer.group
 composer.hint.mac
 composer.hint.other
@@ -234,8 +236,11 @@ group.list.empty
 group.members
 group.members.count
 group.mode
+group.name.label
 group.name.more
 group.name.separator
+group.new
+group.next
 group.rename
 group.start
 group.title
@@ -483,6 +488,8 @@ saves.rename.to
 saves.size
 saves.switch
 saves.title
+search.hint
+search.scope
 select.check
 select.check.prefill
 select.close
@@ -497,6 +504,11 @@ select.where
 select.who
 select.who.empty
 select.whole
+settings.page.endpoints
+settings.page.quiet
+settings.page.quota
+settings.page.saves
+settings.page.you
 sources.title
 span.days
 span.hours

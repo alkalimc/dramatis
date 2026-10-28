@@ -196,33 +196,34 @@ export function NameAndBirthday(p: {
   );
 }
 
-/** System drawer, first tab: quota, quiet hours and notifications, and the user. */
-export function QuotaAndQuiet() {
+/** The quota page of the settings card; loads the numbers when it opens. */
+export function QuotaSection() {
   const api = useApi();
   const actions = useActions();
   const quota = useStore((s) => s.quota);
-  const settings = useStore((s) => s.settings);
 
   useEffect(() => {
     void actions.refreshQuota();
   }, [actions]);
 
-  return (
-    <>
-      {quota && (
-        <QuotaPanel
-          quota={quota}
-          onTier={async (tier) => {
-            if ((await actions.attempt(api.commands.setTier(tier))) !== undefined) void actions.refreshQuota();
-          }}
-        />
-      )}
-      {settings && (
-        <>
-          <QuietPanel settings={settings} save={(s) => void actions.saveSettings(s)} />
-          <YouPanel settings={settings} save={actions.saveSettings} />
-        </>
-      )}
-    </>
-  );
+  return quota ? (
+    <QuotaPanel
+      quota={quota}
+      onTier={async (tier) => {
+        if ((await actions.attempt(api.commands.setTier(tier))) !== undefined) void actions.refreshQuota();
+      }}
+    />
+  ) : null;
+}
+
+export function QuietSection() {
+  const actions = useActions();
+  const settings = useStore((s) => s.settings);
+  return settings ? <QuietPanel settings={settings} save={(s) => void actions.saveSettings(s)} /> : null;
+}
+
+export function YouSection() {
+  const actions = useActions();
+  const settings = useStore((s) => s.settings);
+  return settings ? <YouPanel settings={settings} save={actions.saveSettings} /> : null;
 }

@@ -8,10 +8,11 @@
 .channel-header {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  border-bottom: 1px solid var(--line);
+  gap: var(--s-1);
+  height: var(--head-h);
+  padding: 0 var(--s-4);
   background: var(--panel);
+  flex: none;
 }
 .channel-header .avatar {
   margin-right: var(--s-1);
@@ -23,6 +24,7 @@
 .channel-header h2 {
   margin: 0;
   font-size: var(--fs-md);
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -50,9 +52,11 @@
 
 /* ---- who is waiting: pinned under the header ---- */
 .waiting {
-  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
   background: var(--panel);
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) var(--s-4) var(--s-2) var(--s-3);
+  border-left: 3px solid var(--accent);
+  margin: 0;
   max-height: 30vh;
   overflow-y: auto;
 }
@@ -93,6 +97,7 @@
   padding: var(--s-3) var(--s-4);
   display: flex;
   flex-direction: column;
+  background: var(--bg);
 }
 .log .empty {
   margin: auto;
@@ -161,7 +166,7 @@
 }
 .bubble {
   background: var(--other);
-  border-radius: var(--r-md);
+  border-radius: var(--bubble-r);
   padding: var(--s-2) var(--s-3) var(--s-1);
   min-width: 0;
   overflow-wrap: anywhere;
@@ -390,9 +395,8 @@
 
 /* ---- composer ---- */
 .composer {
-  border-top: 1px solid var(--line);
   background: var(--panel);
-  padding: var(--s-2) var(--s-4) var(--s-1);
+  padding: var(--s-2) var(--s-4);
   display: flex;
   flex-direction: column;
   gap: var(--s-1);
@@ -401,13 +405,10 @@
   display: flex;
   align-items: flex-end;
   gap: var(--s-1);
-  padding: 0 var(--s-1);
-  background: var(--field);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  padding: 0;
 }
 .composer-row:focus-within {
-  border-color: var(--accent);
+  border-color: transparent;
 }
 .composer textarea {
   flex: 1;
@@ -471,4 +472,36 @@
   .log {
     scroll-behavior: smooth;
   }
+}
+
+/* ---- jump to the newest message ---- */
+.log-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+button.to-bottom {
+  position: absolute;
+  right: var(--s-4);
+  bottom: var(--s-4);
+  width: 2.9rem;
+  height: 2.9rem;
+  background: var(--pill);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+button.to-bottom:hover:not(:disabled) {
+  background: var(--pill);
+  filter: brightness(1.15);
+}
+.to-bottom-count {
+  position: absolute;
+  top: -0.9rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.message.flash .bubble {
+  outline: 2px solid var(--accent);
 }

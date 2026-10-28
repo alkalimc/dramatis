@@ -16,8 +16,9 @@ import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
 import { PersonDrawer } from "./screens/Person";
 import { LeftDrawer, ProfileCard } from "./screens/Profile";
+import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
-import { SystemDrawer } from "./screens/System";
+import { SettingsCard } from "./screens/Settings";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -108,11 +109,13 @@ function Shell() {
         {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
         <div className="body">
           <Main />
-          {drawer && <DrawerPane drawer={drawer} />}
+          {drawer && drawer.kind !== "system" && drawer.kind !== "contacts" && <DrawerPane drawer={drawer} />}
         </div>
       </div>
       <ErrorBar />
       {menuOpen && <LeftDrawer />}
+      {drawer?.kind === "contacts" && <ContactsCard />}
+      {drawer?.kind === "system" && <SettingsCard page={drawer.tab} />}
       {profile && <ProfileCard mode={profile} />}
       {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
@@ -158,7 +161,7 @@ const NAV: { key: "roster" | "cases" | "world"; icon: IconName; drawer: Drawer }
 ];
 
 function drawerKey(d: Drawer | null): "roster" | "cases" | "world" | "system" | null {
-  if (!d || d.kind === "channel") return null;
+  if (!d || d.kind === "channel" || d.kind === "contacts") return null;
   if (d.kind === "person") return "roster";
   if (d.kind === "case") return "cases";
   return d.kind;
@@ -175,7 +178,9 @@ function Rail() {
     for (const id of ids) if (unreadOf(id, s.unread, s.digest) > 0) n += 1;
     return n;
   });
-  const current = drawerKey(drawer);
+  const key = drawerKey(drawer);
+  // Settings is a card over the app, not a section: the rail keeps showing the chats.
+  const current = key === "system" ? null : key;
 
   return (
     <header className="rail">
@@ -240,7 +245,6 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       {drawer.kind === "cases" && <CasesDrawer />}
       {drawer.kind === "case" && <CaseDrawer id={drawer.id} />}
       {drawer.kind === "world" && <WorldDrawer />}
-      {drawer.kind === "system" && <SystemDrawer tab={drawer.tab} />}
     </aside>
   );
 }
