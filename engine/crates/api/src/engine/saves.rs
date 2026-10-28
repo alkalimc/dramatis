@@ -221,10 +221,12 @@ impl Engine {
         name: Option<&str>,
         password: Option<String>,
     ) -> ApiResult<String> {
-        let name = saves::import(&self.home, Path::new(path), name, password.as_deref())
-            .map_err(|e| match e {
-                ApiError::Locked if password.is_some() => ApiError::WrongPassword,
-                other => other,
+        let name =
+            saves::import(&self.home, Path::new(path), name, password.as_deref()).map_err(|e| {
+                match e {
+                    ApiError::Locked if password.is_some() => ApiError::WrongPassword,
+                    other => other,
+                }
             })?;
         self.remember(&name, password.as_deref());
         Ok(name)

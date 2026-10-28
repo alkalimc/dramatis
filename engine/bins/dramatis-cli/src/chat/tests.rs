@@ -873,7 +873,10 @@ async fn password_turns_encryption_on_changes_it_and_turns_it_off() {
     // The warning comes before the question, and a no changes nothing.
     let asked = answers(&mut r, &["one", "one"]);
     let ask = r.run("/password on").await;
-    assert!(ask.contains("cannot be recovered") && ask.contains("(y/n)"), "{ask}");
+    assert!(
+        ask.contains("cannot be recovered") && ask.contains("(y/n)"),
+        "{ask}"
+    );
     assert!(r.run("n").await.contains("cancelled"));
     assert!(!world::cipher::is_encrypted(&file));
     r.run("/password on").await;
@@ -916,7 +919,12 @@ async fn switching_to_an_encrypted_save_asks_for_its_password() {
     let vault = r._home.0.join("saves/vault.sqlite");
     world::cipher::encrypt(&vault, "key").unwrap();
     let listed = r.run("/save").await;
-    assert!(listed.lines().any(|l| l.contains("vault") && l.contains("encrypted")), "{listed}");
+    assert!(
+        listed
+            .lines()
+            .any(|l| l.contains("vault") && l.contains("encrypted")),
+        "{listed}"
+    );
 
     // Cancelling, then a wrong password three times, leave the current save as it was.
     let asked = answers(&mut r, &[]);
@@ -929,27 +937,46 @@ async fn switching_to_an_encrypted_save_asks_for_its_password() {
 
     answers(&mut r, &["bad", "key"]);
     let out = r.run("/save switch vault").await;
-    assert!(out.contains("wrong password") && out.contains("now playing vault"), "{out}");
+    assert!(
+        out.contains("wrong password") && out.contains("now playing vault"),
+        "{out}"
+    );
     assert!(r.run("/save").await.contains("* vault"));
 
     // Copying a save keeps its password; importing an encrypted file asks for it.
     assert!(r.run("/save copy vault twin").await.contains("copied"));
-    assert!(world::cipher::is_encrypted(&r._home.0.join("saves/twin.sqlite")));
+    assert!(world::cipher::is_encrypted(
+        r._home.0.join("saves/twin.sqlite")
+    ));
     let out = r._home.0.join("out.sqlite");
-    r.run(&format!("/save export vault \"{}\"", out.display())).await;
+    r.run(&format!("/save export vault \"{}\"", out.display()))
+        .await;
     answers(&mut r, &["wrong", "key"]);
-    let imported = r.run(&format!("/save import \"{}\" copy2", out.display())).await;
-    assert!(imported.contains("wrong password") && imported.contains("imported as copy2"), "{imported}");
+    let imported = r
+        .run(&format!("/save import \"{}\" copy2", out.display()))
+        .await;
+    assert!(
+        imported.contains("wrong password") && imported.contains("imported as copy2"),
+        "{imported}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn bio_shows_sets_clears_and_is_bounded() {
     let mut r = rig().await;
     assert!(r.run("/bio").await.contains("no bio"));
-    assert!(r.run("/bio Runs the night shift.").await.contains("bio saved"));
+    assert!(
+        r.run("/bio Runs the night shift.")
+            .await
+            .contains("bio saved")
+    );
     assert!(r.run("/bio").await.contains("bio: Runs the night shift."));
     let long = "x".repeat(world::settings::BIO_MAX + 1);
-    assert!(r.run(&format!("/bio {long}")).await.contains("at most 200 characters"));
+    assert!(
+        r.run(&format!("/bio {long}"))
+            .await
+            .contains("at most 200 characters")
+    );
     assert!(r.run("/bio clear").await.contains("bio cleared"));
     assert!(r.run("/bio").await.contains("no bio"));
 }

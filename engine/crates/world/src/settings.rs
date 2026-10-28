@@ -190,7 +190,10 @@ mod tests {
         assert!(!set_user_bio(&w, Some("likes tea")).unwrap());
         let long = "x".repeat(BIO_MAX + 1);
         assert!(set_user_bio(&w, Some(&long)).is_err());
-        assert!(set_user_bio(&w, Some(&"é".repeat(BIO_MAX))).is_ok(), "characters, not bytes");
+        assert!(
+            set_user_bio(&w, Some(&"é".repeat(BIO_MAX))).is_ok(),
+            "characters, not bytes"
+        );
         assert!(set_user_bio(&w, Some(" ")).unwrap());
         assert_eq!(user_bio(&w).unwrap(), None);
         assert!(!set_user_bio(&w, None).unwrap());

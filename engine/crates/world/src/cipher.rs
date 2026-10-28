@@ -87,7 +87,10 @@ pub(crate) fn export_to(conn: &Connection, dest: &Path, key: Option<&str>) -> Re
     }
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     // An empty key attaches a plain database.
-    conn.execute("ATTACH DATABASE ?1 AS next KEY ?2", (dest, key.unwrap_or("")))?;
+    conn.execute(
+        "ATTACH DATABASE ?1 AS next KEY ?2",
+        (dest, key.unwrap_or("")),
+    )?;
     let done = conn
         .query_row("SELECT sqlcipher_export('next')", [], |_| Ok(()))
         .and_then(|()| conn.execute_batch(&format!("PRAGMA next.user_version = {version}")));
@@ -192,7 +195,10 @@ mod tests {
         assert_eq!(files(&dir), ["a.sqlite"], "no staging file is left");
         // Without the password, or with another, it does not open.
         assert!(matches!(World::open(&path), Err(Error::Locked)));
-        assert!(matches!(World::open_with(&path, Some("nope")), Err(Error::Locked)));
+        assert!(matches!(
+            World::open_with(&path, Some("nope")),
+            Err(Error::Locked)
+        ));
         assert!(is_encrypted(&path), "a refused open changes nothing");
         let w = World::open_with(&path, Some("pw one")).unwrap();
         assert_eq!(marked(&w).as_deref(), Some("plain"));
@@ -208,9 +214,15 @@ mod tests {
         let bytes = std::fs::read(&path).unwrap();
         assert!(!bytes.windows(7).any(|w| w == b"written"));
 
-        assert!(matches!(rekey(&path, "wrong", "pw two"), Err(Error::Locked)));
+        assert!(matches!(
+            rekey(&path, "wrong", "pw two"),
+            Err(Error::Locked)
+        ));
         rekey(&path, "pw one", "pw two").unwrap();
-        assert!(matches!(World::open_with(&path, Some("pw one")), Err(Error::Locked)));
+        assert!(matches!(
+            World::open_with(&path, Some("pw one")),
+            Err(Error::Locked)
+        ));
         let w = World::open_with(&path, Some("pw two")).unwrap();
         assert_eq!(marked(&w).as_deref(), Some("written while encrypted"));
         drop(w);
@@ -252,11 +264,17 @@ mod tests {
         let copy = dir.join("b.sqlite");
         // The first open handle is still there: the copy is consistent and encrypted.
         crate::copy_file(&path, &copy, Some("k")).unwrap();
-        assert!(crate::copy_file(&path, &copy, Some("k")).is_err(), "never overwrites");
+        assert!(
+            crate::copy_file(&path, &copy, Some("k")).is_err(),
+            "never overwrites"
+        );
         drop(w);
         assert!(is_encrypted(&copy));
         assert!(matches!(crate::check_file(&copy, None), Err(Error::Locked)));
-        assert!(matches!(crate::check_file(&copy, Some("x")), Err(Error::Locked)));
+        assert!(matches!(
+            crate::check_file(&copy, Some("x")),
+            Err(Error::Locked)
+        ));
         crate::check_file(&copy, Some("k")).unwrap();
         assert_eq!(files(&dir), ["a.sqlite", "b.sqlite"]);
         std::fs::remove_dir_all(dir).unwrap();
@@ -275,9 +293,39 @@ mod tests {
         mark(&terminal, "from terminal");
         assert_eq!(marked(&app).as_deref(), Some("from terminal"));
         // While both are open, at most a transient journal sits beside the file.
-        assert!(files(&dir).iter().all(|f| f == "a.sqlite" || f.ends_with("-journal")));
+        assert!(
+            files(&dir)
+                .iter()
+                .all(|f| f == "a.sqlite" || f.ends_with("-journal"))
+        );
         drop((app, terminal));
         assert_eq!(files(&dir), ["a.sqlite"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_save_left_in_wal_mode_by_an_older_build_becomes_one_file() {
+        let dir = scratch("wal");
+        let live = dir.join("live");
+        let left = dir.join("left");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::create_dir_all(&left).unwrap();
+        let c = Connection::open(live.join("a.sqlite")).unwrap();
+        c.pragma_update(None, "journal_mode", "WAL").unwrap();
+        c.execute_batch("CREATE TABLE mine(x); INSERT INTO mine VALUES (7);")
+            .unwrap();
+        // What a crashed older build leaves behind: the file with its log beside it.
+        for f in files(&live) {
+            std::fs::copy(live.join(&f), left.join(&f)).unwrap();
+        }
+        drop(c);
+        assert_eq!(files(&left).len(), 3, "{:?}", files(&left));
+
+        drop(World::open(left.join("a.sqlite")).unwrap());
+        assert_eq!(files(&left), ["a.sqlite"]);
+        let w = World::open(left.join("a.sqlite")).unwrap();
+        let x: i64 = w.query_row("SELECT x FROM mine", [], |r| r.get(0)).unwrap();
+        assert_eq!(x, 7, "what was in the log is in the file");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

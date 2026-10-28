@@ -70,7 +70,8 @@ impl Engine {
     /// in a setting: move it in, once. The file stays (a group may share it).
     fn adopt_legacy_avatar(&self) -> ApiResult<()> {
         let w = self.w();
-        let Some(name) = settings::get::<String>(&w, settings::USER_AVATAR_FILE).map_err(world_err)?
+        let Some(name) =
+            settings::get::<String>(&w, settings::USER_AVATAR_FILE).map_err(world_err)?
         else {
             return Ok(());
         };

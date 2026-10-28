@@ -333,8 +333,12 @@ impl Agent {
     pub(crate) fn names_now(&self, conn: &rusqlite::Connection) -> Result<Names> {
         let name = world::settings::user_name(conn)?;
         let bio = world::settings::user_bio(conn)?;
-        Ok(Names::new(&self.corpus.placeholder, name.as_deref(), &self.corpus.wording)
-            .with_about(bio.as_deref()))
+        Ok(Names::new(
+            &self.corpus.placeholder,
+            name.as_deref(),
+            &self.corpus.wording,
+        )
+        .with_about(bio.as_deref()))
     }
 
     /// Open the next segment of a channel. A rollover passes the old segment's summary

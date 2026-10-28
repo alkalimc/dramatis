@@ -73,8 +73,11 @@ pub struct Session {
     /// What the next line answers (y/n), when a command asked.
     pending: Option<Pending>,
     /// Asks for a password with nothing echoed; `None` is no answer. Replaced in tests.
-    secret: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
+    secret: Secret,
 }
+
+/// Asks for a password and returns what was typed.
+type Secret = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// What `/forget`, `/restore` and `/edit` do to a listed memory.
 enum Change {
@@ -95,7 +98,8 @@ enum Pending {
 const TRIES: usize = 3;
 
 /// A password cannot be recovered; the person turning it on must hear that first.
-const FORGET_WARNING: &str = "A forgotten password cannot be recovered: nobody can open this save without it.\n";
+const FORGET_WARNING: &str =
+    "A forgotten password cannot be recovered: nobody can open this save without it.\n";
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -957,7 +961,8 @@ impl Session {
                 self.pending = Some(Pending::PasswordOn);
             }
             (Some(PasswordAct::Off), true) => {
-                self.term.print("remove the password from this save? (y/n) ");
+                self.term
+                    .print("remove the password from this save? (y/n) ");
                 self.pending = Some(Pending::PasswordOff);
             }
             (Some(PasswordAct::Change), true) => {
@@ -967,9 +972,11 @@ impl Session {
                 let Some(new) = self.new_password() else {
                     return;
                 };
-                self.set_password(Some(old), Some(new), "password changed").await;
+                self.set_password(Some(old), Some(new), "password changed")
+                    .await;
             }
-            (Some(PasswordAct::On), true) | (Some(PasswordAct::Change | PasswordAct::Off), false) => {
+            (Some(PasswordAct::On), true)
+            | (Some(PasswordAct::Change | PasswordAct::Off), false) => {
                 self.term.print(if encrypted {
                     "this save is already encrypted; /password change or /password off\n"
                 } else {
@@ -1237,7 +1244,10 @@ impl Session {
 
     /// Import a file, asking for its password when it is encrypted.
     async fn import(&self, path: String, name: Option<String>) -> api::error::ApiResult<String> {
-        let mut result = self.engine.import_save(path.clone(), name.clone(), None).await;
+        let mut result = self
+            .engine
+            .import_save(path.clone(), name.clone(), None)
+            .await;
         for _ in 0..TRIES {
             if result != Err(api::ApiError::Locked) && result != Err(api::ApiError::WrongPassword) {
                 break;
@@ -1303,7 +1313,8 @@ impl Session {
                 let Some(new) = self.new_password() else {
                     return;
                 };
-                self.set_password(None, Some(new), "this save is encrypted now").await;
+                self.set_password(None, Some(new), "this save is encrypted now")
+                    .await;
             }
             Pending::PasswordOff => {
                 let Some(old) = (self.secret)("password: ") else {

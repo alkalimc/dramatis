@@ -251,12 +251,24 @@ mod tests {
         assert_eq!(parse("/open 1"), Command::Go(1));
         assert_eq!(parse("/name  Dr. Doc "), Command::Name("Dr. Doc".into()));
         assert_eq!(parse("/bio"), Command::Bio(None));
-        assert_eq!(parse("/bio  Likes tea "), Command::Bio(Some("Likes tea".into())));
+        assert_eq!(
+            parse("/bio  Likes tea "),
+            Command::Bio(Some("Likes tea".into()))
+        );
         assert_eq!(parse("/bio clear"), Command::Bio(Some(String::new())));
         assert_eq!(parse("/password"), Command::Password(None));
-        assert_eq!(parse("/password on"), Command::Password(Some(PasswordAct::On)));
-        assert_eq!(parse("/password change"), Command::Password(Some(PasswordAct::Change)));
-        assert_eq!(parse("/password off"), Command::Password(Some(PasswordAct::Off)));
+        assert_eq!(
+            parse("/password on"),
+            Command::Password(Some(PasswordAct::On))
+        );
+        assert_eq!(
+            parse("/password change"),
+            Command::Password(Some(PasswordAct::Change))
+        );
+        assert_eq!(
+            parse("/password off"),
+            Command::Password(Some(PasswordAct::Off))
+        );
         assert_eq!(parse("/forget 2"), Command::Forget(2));
         assert_eq!(parse("/restore 3"), Command::Restore(3));
         assert_eq!(

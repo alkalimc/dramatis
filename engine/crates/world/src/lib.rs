@@ -713,7 +713,10 @@ mod tests {
         c.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
             .unwrap();
         drop(c);
-        assert!(matches!(check_file(&newer, None), Err(Error::TooNew { .. })));
+        assert!(matches!(
+            check_file(&newer, None),
+            Err(Error::TooNew { .. })
+        ));
 
         // An older schema is accepted: opening it migrates.
         let old = dir.join("old.sqlite");

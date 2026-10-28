@@ -90,7 +90,11 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         None
     };
     // An encrypted save is unlocked before anything opens it.
-    let password = if args.fresh { None } else { start_password(&home)? };
+    let password = if args.fresh {
+        None
+    } else {
+        start_password(&home)?
+    };
     let folio = folio.or_else(|| home.resolve_folio()).with_context(|| {
         format!(
             "no corpus found: pass --folio <path>, set DRAMATIS_FOLIO, or put a .folio file in {}",

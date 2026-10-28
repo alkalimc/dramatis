@@ -1437,9 +1437,18 @@ async fn the_bio_reaches_every_log_when_set_and_nothing_is_said_when_empty() {
     e.agent.send(ann, "hi", None).await.unwrap();
     e.agent.send(host, "hi", None).await.unwrap();
     for b in e.fake.bodies() {
-        assert!(!body_text(&b).contains("about themselves"), "no bio, no line");
+        assert!(
+            !body_text(&b).contains("about themselves"),
+            "no bio, no line"
+        );
     }
-    assert_eq!(segments(&e.agent, ann)[0].shape.matches("\"about\":\"\"").count(), 1);
+    assert_eq!(
+        segments(&e.agent, ann)[0]
+            .shape
+            .matches("\"about\":\"\"")
+            .count(),
+        1
+    );
 
     e.agent.with_world(|w| {
         assert!(settings::set_user_bio(w, Some("Keeps bees on the roof.")).unwrap())
@@ -1455,11 +1464,15 @@ async fn the_bio_reaches_every_log_when_set_and_nothing_is_said_when_empty() {
         // The segment before it keeps its bytes; the new one carries the user's words as typed.
         assert!(!body_text(&segs[0].prefix_a).contains("bees"));
         let a = body_text(&segs[1].prefix_a);
-        assert!(a.contains("says this about themselves: Keeps bees on the roof."), "{a}");
+        assert!(
+            a.contains("says this about themselves: Keeps bees on the roof."),
+            "{a}"
+        );
     }
     // Setting the same bio again rolls nothing.
-    e.agent
-        .with_world(|w| assert!(!settings::set_user_bio(w, Some("Keeps bees on the roof.")).unwrap()));
+    e.agent.with_world(|w| {
+        assert!(!settings::set_user_bio(w, Some("Keeps bees on the roof.")).unwrap())
+    });
     e.agent.on_rename().await.unwrap();
     assert_eq!(segments(&e.agent, ann).len(), 2);
 

@@ -54,7 +54,10 @@ const DEFAULTS: &[(&str, &str)] = &[
          shaped to have something to cite; most replies cite nothing, and tone and common \
          knowledge are never cited.",
     ),
-    ("harness.about", "{user} says this about themselves: {about}"),
+    (
+        "harness.about",
+        "{user} says this about themselves: {about}",
+    ),
     ("harness.persona", "## {name}"),
     (
         "harness.lines",
@@ -345,7 +348,10 @@ impl Names {
 
     /// With the user's own words about themselves (blank counts as none).
     pub fn with_about(mut self, about: Option<&str>) -> Self {
-        self.about = about.map(str::trim).filter(|a| !a.is_empty()).map(str::to_owned);
+        self.about = about
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_owned);
         self
     }
 

@@ -1472,13 +1472,17 @@ async fn the_bio_is_trimmed_bounded_and_rolls_the_logs_over_when_it_changes() {
     );
     assert_eq!(*r.spy.calls.lock().unwrap(), ["rename"]);
     // The same bio again changes nothing and rolls nothing.
-    Api::update_settings(e, e.settings().await.unwrap()).await.unwrap();
+    Api::update_settings(e, e.settings().await.unwrap())
+        .await
+        .unwrap();
     assert_eq!(r.spy.calls.lock().unwrap().len(), 1);
 
     s.bio = Some("x".repeat(world::settings::BIO_MAX + 1));
     assert_eq!(
         Api::update_settings(e, s.clone()).await,
-        Err(ApiError::Invalid { field: "bio".into() })
+        Err(ApiError::Invalid {
+            field: "bio".into()
+        })
     );
     s.bio = Some("   ".into());
     Api::update_settings(e, s).await.unwrap();
@@ -1525,14 +1529,23 @@ async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_pa
         Err(ApiError::Invalid { .. })
     ));
     r.spy.busy.store(true, Ordering::Relaxed);
-    assert_eq!(e.set_password(None, Some("one".into())).await, Err(ApiError::Busy));
+    assert_eq!(
+        e.set_password(None, Some("one".into())).await,
+        Err(ApiError::Busy)
+    );
     r.spy.busy.store(false, Ordering::Relaxed);
 
     e.set_password(None, Some("one".into())).await.unwrap();
     assert!(e.saves().await.unwrap()[0].encrypted);
-    assert_eq!(r.spy.calls.lock().unwrap().last().unwrap(), "world default locked");
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        "world default locked"
+    );
     // The engine goes on over the encrypted file.
-    assert_eq!(e.settings().await.unwrap().user_name.as_deref(), Some("Ada"));
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
     name_user(e, "Bea").await;
 
     // Nothing but the one file; its words are not readable.
@@ -1541,54 +1554,92 @@ async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_pa
         .map(|f| f.unwrap().file_name())
         .collect();
     assert_eq!(names.len(), 1, "{names:?}");
-    assert!(!std::fs::read(&file).unwrap().windows(3).any(|w| w == b"Bea"));
+    assert!(
+        !std::fs::read(&file)
+            .unwrap()
+            .windows(3)
+            .any(|w| w == b"Bea")
+    );
 
     // A restart without the password is locked; with a wrong one too; with it, open.
     let locked = reopen(&r, None);
     assert!(locked.app_status().await.unwrap().locked);
     let wrong = reopen(&r, Some("nope"));
     assert!(wrong.app_status().await.unwrap().locked);
-    assert_eq!(wrong.unlock("default".into(), "nope".into()).await, Err(ApiError::WrongPassword));
-    assert!(wrong.app_status().await.unwrap().locked, "a wrong password changes nothing");
+    assert_eq!(
+        wrong.unlock("default".into(), "nope".into()).await,
+        Err(ApiError::WrongPassword)
+    );
+    assert!(
+        wrong.app_status().await.unwrap().locked,
+        "a wrong password changes nothing"
+    );
     wrong.unlock("default".into(), "one".into()).await.unwrap();
     assert!(!wrong.app_status().await.unwrap().locked);
-    assert_eq!(wrong.settings().await.unwrap().user_name.as_deref(), Some("Bea"));
-    assert!(wrong.user_avatar().await.unwrap().unwrap().path.starts_with("data:image/png"));
+    assert_eq!(
+        wrong.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
+    assert!(
+        wrong
+            .user_avatar()
+            .await
+            .unwrap()
+            .unwrap()
+            .path
+            .starts_with("data:image/png")
+    );
     assert!(!reopen(&r, Some("one")).app_status().await.unwrap().locked);
 
     // A locked engine does not turn encryption on, off or over.
-    assert_eq!(locked.set_password(Some("one".into()), None).await, Err(ApiError::Locked));
+    assert_eq!(
+        locked.set_password(Some("one".into()), None).await,
+        Err(ApiError::Locked)
+    );
 
     // Change it: the old one stops working, and the old one is asked for.
     assert_eq!(
         e.set_password(Some("bad".into()), Some("two".into())).await,
         Err(ApiError::WrongPassword)
     );
-    assert_eq!(e.settings().await.unwrap().user_name.as_deref(), Some("Bea"));
-    e.set_password(Some("one".into()), Some("two".into())).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
+    e.set_password(Some("one".into()), Some("two".into()))
+        .await
+        .unwrap();
     assert!(reopen(&r, Some("one")).app_status().await.unwrap().locked);
     assert!(!reopen(&r, Some("two")).app_status().await.unwrap().locked);
 
     // Export stays encrypted under the same password; importing it asks for that.
     let out = e.home.root().join("backup.sqlite");
-    e.export_save("default".into(), out.display().to_string()).await.unwrap();
+    e.export_save("default".into(), out.display().to_string())
+        .await
+        .unwrap();
     assert!(world::cipher::is_encrypted(&out));
     assert_eq!(
         e.import_save(out.display().to_string(), None, None).await,
         Err(ApiError::Locked)
     );
     assert_eq!(
-        e.import_save(out.display().to_string(), None, Some("one".into())).await,
+        e.import_save(out.display().to_string(), None, Some("one".into()))
+            .await,
         Err(ApiError::WrongPassword)
     );
     assert_eq!(
-        e.import_save(out.display().to_string(), None, Some("two".into())).await.unwrap(),
+        e.import_save(out.display().to_string(), None, Some("two".into()))
+            .await
+            .unwrap(),
         "backup"
     );
     assert!(e.saves().await.unwrap().iter().all(|s| s.encrypted));
     // Another save needs its password to be switched to once this process forgets it.
     let again = reopen(&r, Some("two"));
-    assert_eq!(again.switch_save("backup".into()).await, Err(ApiError::Locked));
+    assert_eq!(
+        again.switch_save("backup".into()).await,
+        Err(ApiError::Locked)
+    );
     again.unlock("backup".into(), "two".into()).await.unwrap();
     again.switch_save("backup".into()).await.unwrap();
 
@@ -1602,5 +1653,8 @@ async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_pa
     // (`again` switched the home's current save to the import.)
     e.home.set_current_save("default").unwrap();
     assert!(!reopen(&r, None).app_status().await.unwrap().locked);
-    assert_eq!(e.settings().await.unwrap().user_name.as_deref(), Some("Bea"));
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Bea")
+    );
 }

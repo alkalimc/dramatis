@@ -176,7 +176,11 @@ impl AgentBridge {
         if !path.is_file() {
             return Err(ApiError::NotFound);
         }
-        let key = self.password.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let key = self
+            .password
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let world = world::World::open_with(path, key.as_deref()).map_err(|e| match e {
             world::Error::Locked => ApiError::Locked,
             other => io(other),
