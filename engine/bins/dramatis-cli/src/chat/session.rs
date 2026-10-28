@@ -12,7 +12,7 @@ use api::views::{Audience, FactFilter, FactScope, FactView, QuietHours, RosterRo
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
 
-use super::command::{Command, Save, parse};
+use super::command::{Command, PasswordAct, Save, parse};
 use super::complete::{Completions, Snapshot};
 use super::interrupt::Interrupt;
 use super::show::{Names, Offer, Show, Term, Working};
@@ -72,6 +72,8 @@ pub struct Session {
     listed: Vec<FactView>,
     /// What the next line answers (y/n), when a command asked.
     pending: Option<Pending>,
+    /// Asks for a password with nothing echoed; `None` is no answer. Replaced in tests.
+    secret: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
 }
 
 /// What `/forget`, `/restore` and `/edit` do to a listed memory.
@@ -85,7 +87,15 @@ enum Change {
 enum Pending {
     DeleteSave(String),
     Overwrite { name: String, path: String },
+    PasswordOn,
+    PasswordOff,
 }
+
+/// How many times a password is asked for before giving up.
+const TRIES: usize = 3;
+
+/// A password cannot be recovered; the person turning it on must hear that first.
+const FORGET_WARNING: &str = "A forgotten password cannot be recovered: nobody can open this save without it.\n";
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -143,6 +153,7 @@ impl Session {
             prefill: None,
             listed: Vec::new(),
             pending: None,
+            secret: Box::new(super::secret::read),
         };
         session.refresh_completions().await;
         session
@@ -158,6 +169,12 @@ impl Session {
             style.dim(&format!("[{channel}]")),
             style.bold(&self.names.user())
         )
+    }
+
+    /// Where passwords come from (tests supply them).
+    #[cfg(test)]
+    pub fn set_secret(&mut self, ask: impl Fn(&str) -> Option<String> + Send + Sync + 'static) {
+        self.secret = Box::new(ask);
     }
 
     /// The text `/resend` put back, for the editor to start the next line with.
@@ -216,6 +233,8 @@ impl Session {
                     self.term.note(&format!("you are called {name} now"));
                 }
             }
+            Command::Bio(text) => self.bio(text).await,
+            Command::Password(act) => self.password(act).await,
             Command::Say(text) => self.say(&text).await,
             Command::Wrapup => self.wrapup().await,
             Command::Memories(who) => self.memories(who.as_deref()).await,
@@ -890,6 +909,110 @@ impl Session {
         }
     }
 
+    // ---- encryption ----
+
+    /// The new password, typed twice.
+    fn new_password(&self) -> Option<String> {
+        let first = (self.secret)("new password: ");
+        let again = first.as_ref().and_then(|_| (self.secret)("again: "));
+        match (first, again) {
+            (Some(a), Some(b)) if a == b => Some(a),
+            (Some(_), Some(_)) => {
+                self.term.print("the two did not match\n");
+                None
+            }
+            _ => {
+                self.term.note("cancelled");
+                None
+            }
+        }
+    }
+
+    async fn set_password(&self, old: Option<String>, new: Option<String>, done: &str) {
+        match self.engine.set_password(old, new).await {
+            Ok(()) => self.term.note(done),
+            Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+        }
+    }
+
+    /// `/password`: whether the open save is encrypted, or turn it on, change it, off.
+    async fn password(&mut self, act: Option<PasswordAct>) {
+        let encrypted = self
+            .engine
+            .saves()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|s| s.current && s.encrypted);
+        match (act, encrypted) {
+            (None, true) => self
+                .term
+                .note("this save is encrypted; /password change or /password off"),
+            (None, false) => self
+                .term
+                .note("this save is not encrypted; /password on turns it on"),
+            (Some(PasswordAct::On), false) => {
+                self.term.print(FORGET_WARNING);
+                self.term.print("encrypt this save with a password? (y/n) ");
+                self.pending = Some(Pending::PasswordOn);
+            }
+            (Some(PasswordAct::Off), true) => {
+                self.term.print("remove the password from this save? (y/n) ");
+                self.pending = Some(Pending::PasswordOff);
+            }
+            (Some(PasswordAct::Change), true) => {
+                let Some(old) = (self.secret)("current password: ") else {
+                    return self.term.note("cancelled");
+                };
+                let Some(new) = self.new_password() else {
+                    return;
+                };
+                self.set_password(Some(old), Some(new), "password changed").await;
+            }
+            (Some(PasswordAct::On), true) | (Some(PasswordAct::Change | PasswordAct::Off), false) => {
+                self.term.print(if encrypted {
+                    "this save is already encrypted; /password change or /password off\n"
+                } else {
+                    "this save is not encrypted; /password on first\n"
+                })
+            }
+        }
+    }
+
+    /// `/bio`: what the people are told about you.
+    async fn bio(&self, text: Option<String>) {
+        let settings = match self.engine.settings().await {
+            Ok(s) => s,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        let Some(text) = text else {
+            return self.term.note(&match settings.bio {
+                Some(b) => format!("bio: {b}"),
+                None => "no bio; /bio <text> sets one".to_owned(),
+            });
+        };
+        let next = Settings {
+            bio: Some(text).filter(|t| !t.is_empty()),
+            ..settings
+        };
+        match self.engine.update_settings(next.clone()).await {
+            // A change rolls the channels over, which may ask the model for a summary.
+            Ok(()) => {
+                self.interruptible(self.bridge.idle()).await;
+                self.term.note(if next.bio.is_some() {
+                    "bio saved"
+                } else {
+                    "bio cleared"
+                })
+            }
+            Err(api::ApiError::Invalid { .. }) => self.term.print(&format!(
+                "a bio is at most {} characters\n",
+                world::settings::BIO_MAX
+            )),
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
     // ---- help and settings ----
 
     /// `/help`: the groups in the corpus's wording, then how to send.
@@ -990,6 +1113,13 @@ impl Session {
         match e {
             api::ApiError::Busy => "a reply is still being written; try again when it ends".into(),
             api::ApiError::Exists => "a save with that name already exists".into(),
+            api::ApiError::Locked => {
+                "that save is encrypted; /save switch to it and enter its password".into()
+            }
+            api::ApiError::WrongPassword => "wrong password".into(),
+            api::ApiError::Invalid { field } if field == "new" => {
+                "that is not a usable password".into()
+            }
             api::ApiError::NotFound => "no such save (or file)".into(),
             api::ApiError::Invalid { field } if field == "name" => {
                 "that is not a usable name (no slashes, no leading dot, at most 48 characters)"
@@ -1024,8 +1154,7 @@ impl Session {
             Save::Delete(n) => return self.ask_delete(n).await,
             Save::Export(n, path) => return self.export_save(n, path).await,
             Save::Import(path, name) => self
-                .engine
-                .import_save(expand(&path), name)
+                .import(expand(&path), name)
                 .await
                 .map(|n| format!("imported as {n}; /save switch {n} opens it")),
         };
@@ -1046,10 +1175,11 @@ impl Session {
                 |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
             );
             self.term.print(&format!(
-                "{} {:<24} {:>8} KB  {played}\n",
+                "{} {:<24} {:>8} KB  {played}{}\n",
                 if s.current { "*" } else { " " },
                 s.name,
-                s.size_kb
+                s.size_kb,
+                if s.encrypted { "  encrypted" } else { "" }
             ));
         }
     }
@@ -1057,7 +1187,14 @@ impl Session {
     /// Close this world and open another: what the session held about the old one (the
     /// channel, the choices the host offered, the numbered memories, the call counts) goes.
     async fn switch_save(&mut self, name: &str) {
-        if let Err(e) = self.engine.switch_save(name.to_owned()).await {
+        let mut switched = self.engine.switch_save(name.to_owned()).await;
+        if switched == Err(api::ApiError::Locked) {
+            if !self.unlock(name).await {
+                return;
+            }
+            switched = self.engine.switch_save(name.to_owned()).await;
+        }
+        if let Err(e) = switched {
             return self.term.print(&format!("{}\n", Self::why(&e)));
         }
         self.current = None;
@@ -1077,6 +1214,46 @@ impl Session {
         self.term.note(&format!(
             "now playing {name}; /talk <person> or /host to begin"
         ));
+    }
+
+    /// Ask for the password of save `name` until it opens it or the tries run out.
+    async fn unlock(&self, name: &str) -> bool {
+        for _ in 0..TRIES {
+            let Some(password) = (self.secret)(&format!("password for {name}: ")) else {
+                self.term.note("cancelled");
+                return false;
+            };
+            match self.engine.unlock(name.to_owned(), password).await {
+                Ok(()) => return true,
+                Err(api::ApiError::WrongPassword) => self.term.print("wrong password\n"),
+                Err(e) => {
+                    self.term.print(&format!("{}\n", Self::why(&e)));
+                    return false;
+                }
+            }
+        }
+        false
+    }
+
+    /// Import a file, asking for its password when it is encrypted.
+    async fn import(&self, path: String, name: Option<String>) -> api::error::ApiResult<String> {
+        let mut result = self.engine.import_save(path.clone(), name.clone(), None).await;
+        for _ in 0..TRIES {
+            if result != Err(api::ApiError::Locked) && result != Err(api::ApiError::WrongPassword) {
+                break;
+            }
+            if result == Err(api::ApiError::WrongPassword) {
+                self.term.print("wrong password\n");
+            }
+            let Some(password) = (self.secret)("password of that file: ") else {
+                break;
+            };
+            result = self
+                .engine
+                .import_save(path.clone(), name.clone(), Some(password))
+                .await;
+        }
+        result
     }
 
     async fn ask_delete(&mut self, name: String) {
@@ -1122,6 +1299,19 @@ impl Session {
                 Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
             },
             Pending::Overwrite { name, path } => self.export_now(&name, path).await,
+            Pending::PasswordOn => {
+                let Some(new) = self.new_password() else {
+                    return;
+                };
+                self.set_password(None, Some(new), "this save is encrypted now").await;
+            }
+            Pending::PasswordOff => {
+                let Some(old) = (self.secret)("password: ") else {
+                    return self.term.note("cancelled");
+                };
+                self.set_password(Some(old), None, "this save is not encrypted now")
+                    .await;
+            }
         }
     }
 

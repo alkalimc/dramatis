@@ -203,6 +203,7 @@ pub fn quota_status(
 pub fn world_err(e: world::Error) -> ApiError {
     match e {
         world::Error::NotFound { .. } => ApiError::NotFound,
+        world::Error::Locked => ApiError::Locked,
         world::Error::Disabled(p) => ApiError::Disabled {
             person: person_id(&p),
         },

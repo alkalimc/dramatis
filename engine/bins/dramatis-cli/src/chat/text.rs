@@ -49,6 +49,10 @@ anything else       send it to the current channel
         "cli.help.settings",
         "Settings
 /name <new name>    change the name you are called by
+/bio [text|clear]   show, set or clear what the people are told about you (200 characters)
+/password [on|change|off]
+                    encrypt this save with a password, change it, or remove it; asked for
+                    at start when a save is encrypted
 /tier [level]       how much the people may do on their own: low, middle, high,
                     extra_high, max, ultra
 /quiet [on|off|HH:MM-HH:MM]  hours when nobody comes to you unprompted",

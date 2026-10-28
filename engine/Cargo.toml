@@ -21,10 +21,12 @@ license = "Apache-2.0"
 repository = "https://github.com/alkalimc/dramatis"
 
 [workspace.dependencies]
-# One SQLite for the whole workspace. `bundled` so a user's platform SQLite — which may
+# One SQLite for the whole workspace. Bundled, so a user's platform SQLite — which may
 # lack FTS5, or refuse to load extensions — cannot change retrieval behaviour. The corpus
-# records which segmenter built its index; the reader must not also be a variable.
-rusqlite = { version = "0.37", features = ["bundled", "blob"] }
+# records which segmenter built its index; the reader must not also be a variable. It is
+# SQLCipher (a plain SQLite until a key is given, which only a save ever gets) with its
+# own OpenSSL, so no system library is needed.
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl", "blob"] }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

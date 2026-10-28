@@ -210,6 +210,8 @@ pub struct Shape {
     pub tools: Vec<api::tools::ToolSpec>,
     /// What the user-name placeholder became in this segment's bytes.
     pub user: String,
+    /// The user's bio as this segment's bytes carry it (empty: none).
+    pub about: String,
 }
 
 /// A segment's `shape` column: the shape with the tool list as a digest.
@@ -220,6 +222,9 @@ pub struct StoredShape {
     pub reasoning: Option<String>,
     pub tools: String,
     pub user: String,
+    /// Absent in segments written before bios existed: none.
+    #[serde(default)]
+    pub about: String,
 }
 
 impl Shape {
@@ -230,6 +235,7 @@ impl Shape {
             reasoning: self.reasoning.clone(),
             tools: digest(&serde_json::to_vec(&self.tools).expect("tools serialise")),
             user: self.user.clone(),
+            about: self.about.clone(),
         }
     }
 
@@ -239,6 +245,13 @@ impl Shape {
 
     pub fn parse(s: &str) -> Option<StoredShape> {
         serde_json::from_str(s).ok()
+    }
+}
+
+impl StoredShape {
+    /// Whether the segment's bytes already say who the user is, as `names` has it now.
+    pub fn knows(&self, names: &crate::text::Names) -> bool {
+        self.user == names.user() && self.about == names.about().unwrap_or_default()
     }
 }
 
@@ -411,6 +424,7 @@ mod tests {
             reasoning: Some("high".into()),
             tools: api::tools::shared_tools(&Default::default()),
             user: "u".into(),
+            about: String::new(),
         }
     }
 

@@ -85,9 +85,10 @@ pub trait AgentPort: Send + Sync + 'static {
         true
     }
 
-    /// Work on the world database at `path` from now on (a different save). Only called
+    /// Work on the world database at `path` from now on (a different save, or the same one
+    /// after its password changed; `key` is the password of an encrypted one). Only called
     /// while [`idle`](Self::idle).
-    fn switch_world(&self, _path: &std::path::Path) {}
+    fn switch_world(&self, _path: &std::path::Path, _key: Option<&str>) {}
 }
 
 /// Synthesised speech, ready to cache.

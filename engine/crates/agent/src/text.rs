@@ -54,6 +54,7 @@ const DEFAULTS: &[(&str, &str)] = &[
          shaped to have something to cite; most replies cite nothing, and tone and common \
          knowledge are never cited.",
     ),
+    ("harness.about", "{user} says this about themselves: {about}"),
     ("harness.persona", "## {name}"),
     (
         "harness.lines",
@@ -323,6 +324,8 @@ impl Wording {
 pub struct Names {
     placeholder: String,
     user: String,
+    /// What the user wrote about themselves; `None` when nothing.
+    about: Option<String>,
 }
 
 impl Names {
@@ -336,7 +339,14 @@ impl Names {
         Self {
             placeholder: placeholder.to_owned(),
             user,
+            about: None,
         }
+    }
+
+    /// With the user's own words about themselves (blank counts as none).
+    pub fn with_about(mut self, about: Option<&str>) -> Self {
+        self.about = about.map(str::trim).filter(|a| !a.is_empty()).map(str::to_owned);
+        self
     }
 
     /// A segment's names: what its bytes already say the user is called.
@@ -344,12 +354,18 @@ impl Names {
         Self {
             placeholder: placeholder.to_owned(),
             user: user.to_owned(),
+            about: None,
         }
     }
 
     /// What the placeholder becomes.
     pub fn user(&self) -> &str {
         &self.user
+    }
+
+    /// The user's own words about themselves, if any.
+    pub fn about(&self) -> Option<&str> {
+        self.about.as_deref()
     }
 
     /// Replace every placeholder. A corpus without one is returned as is.

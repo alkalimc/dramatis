@@ -14,6 +14,10 @@ pub enum Command {
     Go(usize),
     /// Set the user's display name.
     Name(String),
+    /// Show the personal bio, set it, or (empty text) clear it.
+    Bio(Option<String>),
+    /// Encryption of the open save: its state, or turn it on, change the password, turn it off.
+    Password(Option<PasswordAct>),
     Wrapup,
     /// Numbered list of memories, all or those a person may recall.
     Memories(Option<String>),
@@ -38,6 +42,13 @@ pub enum Command {
     Quit,
     /// A known command used wrongly, or an unknown one: the text to show.
     Invalid(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordAct {
+    On,
+    Change,
+    Off,
 }
 
 /// What `/save` was asked to do. Names and paths may be "double quoted" to hold spaces.
@@ -140,6 +151,18 @@ pub fn parse(line: &str) -> Command {
         },
         "name" if args.is_empty() => Command::Invalid("usage: /name <new name>".into()),
         "name" => Command::Name(args.to_owned()),
+        "bio" => Command::Bio(match args {
+            "" => None,
+            "clear" => Some(String::new()),
+            text => Some(text.to_owned()),
+        }),
+        "password" => match args {
+            "" => Command::Password(None),
+            "on" => Command::Password(Some(PasswordAct::On)),
+            "change" => Command::Password(Some(PasswordAct::Change)),
+            "off" => Command::Password(Some(PasswordAct::Off)),
+            _ => Command::Invalid("usage: /password [on | change | off]".into()),
+        },
         "wrapup" => Command::Wrapup,
         "memories" | "mem" => Command::Memories(optional(args)),
         "forget" | "restore" => match args.parse::<usize>() {
@@ -227,6 +250,13 @@ mod tests {
         assert_eq!(parse("/go 2"), Command::Go(2));
         assert_eq!(parse("/open 1"), Command::Go(1));
         assert_eq!(parse("/name  Dr. Doc "), Command::Name("Dr. Doc".into()));
+        assert_eq!(parse("/bio"), Command::Bio(None));
+        assert_eq!(parse("/bio  Likes tea "), Command::Bio(Some("Likes tea".into())));
+        assert_eq!(parse("/bio clear"), Command::Bio(Some(String::new())));
+        assert_eq!(parse("/password"), Command::Password(None));
+        assert_eq!(parse("/password on"), Command::Password(Some(PasswordAct::On)));
+        assert_eq!(parse("/password change"), Command::Password(Some(PasswordAct::Change)));
+        assert_eq!(parse("/password off"), Command::Password(Some(PasswordAct::Off)));
         assert_eq!(parse("/forget 2"), Command::Forget(2));
         assert_eq!(parse("/restore 3"), Command::Restore(3));
         assert_eq!(
@@ -290,6 +320,7 @@ mod tests {
             "/save new",
             "/save copy a",
             "/save frobnicate",
+            "/password secret",
             "/nope",
         ] {
             assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");

@@ -11,6 +11,7 @@
 
 pub mod bond;
 pub mod channel;
+pub mod cipher;
 pub mod clock;
 pub mod fact;
 pub mod leakcheck;
@@ -31,7 +32,7 @@ pub mod wrapup;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 
 pub use types::*;
 
@@ -43,6 +44,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003.sql"),
     include_str!("../migrations/0004.sql"),
     include_str!("../migrations/0005.sql"),
+    include_str!("../migrations/0006.sql"),
 ];
 
 /// The schema version a fully migrated database reports.
@@ -92,6 +94,10 @@ pub enum Error {
 
     #[error("invalid: {0}")]
     Invalid(String),
+
+    /// The file is encrypted and no key, or a wrong one, was given.
+    #[error("the database is locked: password missing or wrong")]
+    Locked,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -118,12 +124,17 @@ pub struct World {
 impl World {
     /// Open (creating if absent) and migrate to the latest schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let mut conn = Connection::open(path)?;
-        // The app and the terminal client may hold the same file: a writer waits for the
-        // other instead of failing with "database is locked". First, so that switching to
-        // WAL below waits too.
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        Self::open_with(path, None)
+    }
+
+    /// [`World::open`] on an encrypted file: `key` is the password. Without one the file
+    /// is a plain SQLite file. A missing or wrong password is [`Error::Locked`].
+    pub fn open_with(path: impl AsRef<Path>, key: Option<&str>) -> Result<Self> {
+        let mut conn = cipher::connect(path.as_ref(), key)?;
+        // One file at rest: a rollback journal exists only while a write is in flight, so
+        // a save is never a file plus a log. A file written in WAL mode is converted; if
+        // another process still holds it open that waits or keeps WAL, and either is safe.
+        let _ = conn.pragma_update_and_check(None, "journal_mode", "DELETE", |_| Ok(()));
         migrate(&mut conn)?;
         Ok(Self { conn })
     }
@@ -232,10 +243,12 @@ const CORE_TABLES: &[&str] = &[
 
 /// Whether `path` is a world database this build can migrate: readable, intact, with the
 /// core tables and a schema version no newer than this build's. Nothing is written.
-pub fn check_file(path: impl AsRef<Path>) -> Result<()> {
+pub fn check_file(path: impl AsRef<Path>, key: Option<&str>) -> Result<()> {
     let invalid = |why: &str| Error::Invalid(why.to_owned());
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
-        .map_err(|_| invalid("not a readable database"))?;
+    let conn = cipher::connect_existing(path.as_ref(), key).map_err(|e| match e {
+        Error::Locked if cipher::is_encrypted(path.as_ref()) => Error::Locked,
+        _ => invalid("not a readable database"),
+    })?;
     let quick: String = conn
         .pragma_query_value(None, "quick_check", |row| row.get(0))
         .map_err(|_| invalid("not a database"))?;
@@ -268,17 +281,11 @@ pub fn check_file(path: impl AsRef<Path>) -> Result<()> {
 }
 
 /// A consistent single-file copy of the database at `src` (`VACUUM INTO`, so a WAL that
-/// has not been checkpointed is included and the copy needs no side files). `dest` must
-/// not exist.
-pub fn copy_file(src: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
-    let conn = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
-    let dest = dest
-        .as_ref()
-        .to_str()
-        .ok_or_else(|| Error::Invalid("path is not text".into()))?;
-    conn.execute("VACUUM INTO ?1", [dest])?;
-    Ok(())
+/// has not been checkpointed is included and the copy needs no side files), encrypted
+/// under the same `key` as the source. `dest` must not exist.
+pub fn copy_file(src: impl AsRef<Path>, dest: impl AsRef<Path>, key: Option<&str>) -> Result<()> {
+    let conn = cipher::connect_existing(src.as_ref(), key)?;
+    cipher::export_to(&conn, dest.as_ref(), key)
 }
 
 pub(crate) fn not_found(kind: &'static str, id: impl ToString) -> Error {
@@ -329,6 +336,7 @@ mod tests {
         "settings",
         "seed",
         "session",
+        "user_avatar",
     ];
 
     fn migrated() -> Connection {
@@ -668,9 +676,9 @@ mod tests {
             .unwrap();
         // `w` stays open, so the row may still sit in the WAL.
         let dest = dir.join("b.sqlite");
-        copy_file(&src, &dest).unwrap();
-        assert!(copy_file(&src, &dest).is_err(), "never overwrites");
-        check_file(&dest).unwrap();
+        copy_file(&src, &dest, None).unwrap();
+        assert!(copy_file(&src, &dest, None).is_err(), "never overwrites");
+        check_file(&dest, None).unwrap();
         let copy = Connection::open(&dest).unwrap();
         let n: i64 = copy
             .query_row(
@@ -692,12 +700,12 @@ mod tests {
         c.execute_batch("CREATE TABLE t(x); PRAGMA user_version = 1;")
             .unwrap();
         drop(c);
-        assert!(matches!(check_file(&other), Err(Error::Invalid(_))));
+        assert!(matches!(check_file(&other, None), Err(Error::Invalid(_))));
 
         let text = dir.join("text.sqlite");
         std::fs::write(&text, b"just some text, not a database at all").unwrap();
-        assert!(check_file(&text).is_err());
-        assert!(check_file(dir.join("absent.sqlite")).is_err());
+        assert!(check_file(&text, None).is_err());
+        assert!(check_file(dir.join("absent.sqlite"), None).is_err());
 
         let newer = dir.join("newer.sqlite");
         drop(World::open(&newer).unwrap());
@@ -705,7 +713,7 @@ mod tests {
         c.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
             .unwrap();
         drop(c);
-        assert!(matches!(check_file(&newer), Err(Error::TooNew { .. })));
+        assert!(matches!(check_file(&newer, None), Err(Error::TooNew { .. })));
 
         // An older schema is accepted: opening it migrates.
         let old = dir.join("old.sqlite");
@@ -713,7 +721,7 @@ mod tests {
         c.execute_batch(MIGRATIONS[0]).unwrap();
         c.pragma_update(None, "user_version", 1).unwrap();
         drop(c);
-        check_file(&old).unwrap();
+        check_file(&old, None).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

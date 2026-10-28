@@ -289,12 +289,7 @@ impl Agent {
 
     /// How the user is named in corpus text right now (for display as well).
     pub fn names(&self) -> Result<Names> {
-        let name = world::settings::user_name(&self.db())?;
-        Ok(Names::new(
-            &self.corpus.placeholder,
-            name.as_deref(),
-            &self.corpus.wording,
-        ))
+        self.names_now(&self.db())
     }
 
     pub fn wording(&self) -> &Wording {

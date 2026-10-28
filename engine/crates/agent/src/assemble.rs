@@ -32,14 +32,16 @@ impl Ctx<'_> {
 /// Block A: the global static text, identical for every person of this user. A group's
 /// log adds how a member hands the turn on.
 pub fn block_a(ctx: &Ctx<'_>, group: bool) -> String {
-    let mut parts = vec![
-        ctx.fill("harness.rules", &[]),
-        ctx.fill(
-            "harness.output",
-            &[("open", ctx.scene.0), ("close", ctx.scene.1)],
-        ),
-        ctx.fill("harness.citation", &[]),
-    ];
+    let mut parts = vec![ctx.fill("harness.rules", &[])];
+    // The user's words go in as written, so the line is filled, never substituted into.
+    if let Some(about) = ctx.names.about() {
+        parts.push(ctx.fill("harness.about", &[("about", about)]));
+    }
+    parts.push(ctx.fill(
+        "harness.output",
+        &[("open", ctx.scene.0), ("close", ctx.scene.1)],
+    ));
+    parts.push(ctx.fill("harness.citation", &[]));
     if group {
         parts.push(ctx.fill("harness.next", &[("mark", hand_off_mark(ctx.wording))]));
     }
@@ -933,5 +935,26 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn the_bio_goes_in_block_a_as_typed_and_only_when_there_is_one() {
+        let w = Wording::new(&BTreeMap::new());
+        let ctx_for = |names: &Names| block_a(&Ctx {
+            wording: &w,
+            names,
+            scene: ("*", "*"),
+        }, false);
+        let none = Names::new("<U>", Some("Rhea"), &w);
+        assert!(!ctx_for(&none).contains("about themselves"));
+        let blank = Names::new("<U>", Some("Rhea"), &w).with_about(Some("  "));
+        assert_eq!(ctx_for(&blank), ctx_for(&none));
+        // Its own braces and the placeholder are not substituted into.
+        let set = Names::new("<U>", Some("Rhea"), &w).with_about(Some("Calls me {user} <U>"));
+        let a = ctx_for(&set);
+        assert!(a.contains("Rhea says this about themselves: Calls me {user} <U>"), "{a}");
+        // After the rules, before the output format: a stable place in the cached block.
+        assert!(a.find("themselves").unwrap() > a.find("talks with").unwrap());
+        assert!(a.find("themselves").unwrap() < a.find("speech").unwrap());
     }
 }

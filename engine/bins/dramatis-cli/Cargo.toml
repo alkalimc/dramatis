@@ -21,6 +21,8 @@ serde_json.workspace = true
 api = { path = "../../crates/api" }
 runtime = { path = "../../crates/runtime" }
 world = { path = "../../crates/world" }
+# Reads a password without echoing it.
+rpassword = "=7.4.0"
 rustyline = { version = "=19.0.0", default-features = false, features = ["custom-bindings"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 

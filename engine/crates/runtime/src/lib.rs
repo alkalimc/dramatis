@@ -41,6 +41,9 @@ pub struct Options {
     pub quiet: bool,
     /// Which front end this is; the host explains only that one's operations.
     pub frontend: Frontend,
+    /// The password of the current save, when it is encrypted and the front end has it
+    /// (the terminal asks before it starts; the app unlocks later through `unlock`).
+    pub password: Option<String>,
 }
 
 /// Hands the agent's events to the engine's sink, as the seam's own event type.
@@ -108,13 +111,19 @@ impl Runtime {
                     keys: options.keys,
                     quiet: options.quiet,
                     frontend: options.frontend,
+                    password: options.password.clone(),
                 })
             })
             .transpose()?;
         if let Some(b) = &bridge {
             ports.agent = Arc::new(bridge::Port(b.clone()));
         }
-        let engine = Arc::new(Engine::open(home, folio, ports)?);
+        let engine = Arc::new(Engine::open_with_password(
+            home,
+            folio,
+            ports,
+            options.password,
+        )?);
         Ok(Self { engine, bridge })
     }
 }

@@ -34,6 +34,13 @@ pub enum ApiError {
     /// A save with that name is already there.
     #[error("already exists")]
     Exists,
+    /// The save is encrypted and this process has no password for it yet: ask, then
+    /// `unlock`.
+    #[error("locked")]
+    Locked,
+    /// A password was given and does not open the save.
+    #[error("wrong password")]
+    WrongPassword,
     #[error("endpoint error: {detail}")]
     Endpoint { detail: String },
     #[error("keychain error: {detail}")]
