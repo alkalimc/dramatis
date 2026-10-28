@@ -943,7 +943,11 @@ impl Agent {
                     }
                     _ => {}
                 }
-                world::task::spend_turn(&self.db(), task)?;
+                let conn = self.db();
+                world::task::spend_turn(&conn, task)?;
+                // Tells another process that shares the save this request is alive.
+                world::task::touch(&conn, task, self.now().ms)?;
+                drop(conn);
             }
             let last = step + 1 == max_steps;
             let choice = if last && turn.task.is_none() && self.may_vary_choice(turn.channel)? {

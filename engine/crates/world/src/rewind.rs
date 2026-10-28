@@ -436,4 +436,31 @@ mod tests {
         drop(tx);
         assert_eq!(count(&w, "message"), 1, "the caller decides");
     }
+
+    #[test]
+    fn a_rewind_takes_the_write_lock_up_front_so_another_connection_cannot_split_it() {
+        let dir = std::env::temp_dir().join(format!("world-rewind-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("w.sqlite");
+        let w = crate::World::open(&path).unwrap();
+        let other = crate::World::open(&path).unwrap();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let m = say(&w, c, &Actor::User, "one", 100);
+        w.busy_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        // Another connection holds the write lock: the rewind is refused outright instead
+        // of reading a snapshot that the other's commit would then invalidate.
+        other.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(rewind(&w, c, m).is_err());
+        assert!(w.is_autocommit());
+        other.execute_batch("COMMIT").unwrap();
+        // A write the other connection committed meanwhile is seen, not a stale snapshot.
+        let later = say(&other, c, &Actor::Person(p("a")), "r", 101);
+        let out = rewind(&w, c, m).unwrap();
+        assert_eq!(out.removed, 2, "{later:?}");
+        assert_eq!(count(&w, "message"), 0);
+        drop((w, other));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

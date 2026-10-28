@@ -160,31 +160,66 @@ impl Sink for NoSink {
     fn emit(&self, _: Event) {}
 }
 
-/// The ids of the messages already announced to the window (`MessageAdded`), newest
-/// last and bounded. Lets the engine tell a message its own agent wrote, which the
-/// window knows, from one another process wrote, which it does not.
+/// The messages already announced to the window (`MessageAdded`), newest last and
+/// bounded. Lets the engine tell a message its own agent wrote, which the window knows,
+/// from one another process wrote, which it does not. A rewind forgets the ids it frees,
+/// since they are handed out again.
 #[derive(Debug, Default)]
-pub struct Seen(Mutex<std::collections::VecDeque<String>>);
+pub struct Seen {
+    ids: Mutex<std::collections::VecDeque<(String, String)>>,
+    /// The lowest message id freed by a rewind since the last [`Seen::take_rewound`].
+    rewound: Mutex<Option<i64>>,
+}
 
 impl Seen {
     const KEEP: usize = 1024;
 
     pub fn record(&self, event: &Event) {
-        if let Event::MessageAdded(e) = event {
-            let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
-            ids.push_back(e.message.id.0.clone());
-            if ids.len() > Self::KEEP {
-                ids.pop_front();
+        let mut ids = self.ids.lock().unwrap_or_else(|e| e.into_inner());
+        match event {
+            Event::MessageAdded(e) => {
+                ids.push_back((e.message.channel.0.clone(), e.message.id.0.clone()));
+                if ids.len() > Self::KEEP {
+                    ids.pop_front();
+                }
             }
+            Event::Rewound(e) => {
+                if let Ok(from) = e.from.0.parse::<i64>() {
+                    let mut low = self.rewound.lock().unwrap_or_else(|e| e.into_inner());
+                    *low = Some(low.map_or(from - 1, |l| l.min(from - 1)));
+                    ids.retain(|(ch, id)| {
+                        *ch != e.channel.0 || id.parse::<i64>().is_ok_and(|id| id < from)
+                    });
+                }
+            }
+            _ => {}
         }
     }
 
+    /// Forget every id above `newest`: the world no longer holds them (another process
+    /// rewound), so a later message may carry the same id.
+    pub fn forget_above(&self, newest: i64) {
+        self.ids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, id)| id.parse::<i64>().is_ok_and(|id| id <= newest));
+    }
+
+    /// The newest id that survived the rewinds since the last call, if there were any: a
+    /// watcher's cursor must not stay above it, or a message reusing a freed id is skipped.
+    pub fn take_rewound(&self) -> Option<i64> {
+        self.rewound
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+
     pub fn has(&self, id: &str) -> bool {
-        self.0
+        self.ids
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .any(|i| i == id)
+            .any(|(_, i)| i == id)
     }
 }
 

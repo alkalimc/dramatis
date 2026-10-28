@@ -67,6 +67,8 @@ impl Engine {
             (version, now)
         };
         drop(open);
+        // This process's own rewind: ids from the cut on are free again.
+        let rewound = self.ports.seen.take_rewound();
         if watch.save != save || watch.version.is_none() {
             *watch = Watch {
                 save,
@@ -78,6 +80,10 @@ impl Engine {
             };
             return Ok(0);
         }
+        if let Some(floor) = rewound {
+            watch.message = watch.message.min(floor);
+            watch.dirty = true;
+        }
         if watch.version != Some(version) {
             watch.version = Some(version);
             watch.dirty = true;
@@ -86,6 +92,9 @@ impl Engine {
             return Ok(0);
         }
         // A rewind frees ids that are then handed out again.
+        if now.0 < watch.message {
+            self.ports.seen.forget_above(now.0);
+        }
         watch.message = watch.message.min(now.0);
         watch.fact = watch.fact.min(now.1);
         watch.task = watch.task.min(now.2);

@@ -168,11 +168,17 @@ pub fn copy(home: &Home, from: &str, to: &str, key: Option<&str>) -> ApiResult<(
 pub fn rename(home: &Home, from: &str, to: &str) -> ApiResult<()> {
     let src = path_of(home, from)?;
     check_name(to)?;
-    // Changing only the case of a name is allowed: it is the same save.
-    if from != to && taken(home, to) && from.to_lowercase() != to.to_lowercase() {
+    let dest = home.save_path(to);
+    // Changing only the case of a name is allowed when it is the same save: another save
+    // that differs from `to` only by case is in the way, and so is a file that `dest`
+    // names which is not this one (they are the same file on a case-insensitive disk).
+    let want = to.to_lowercase();
+    let other = names(home)
+        .iter()
+        .any(|n| n != from && n.to_lowercase() == want);
+    if from != to && (other || (dest.exists() && !same_file(&src, &dest))) {
         return Err(ApiError::Exists);
     }
-    let dest = home.save_path(to);
     std::fs::rename(&src, &dest).map_err(io)?;
     for suffix in ["-wal", "-shm"] {
         let side = PathBuf::from(format!("{}{suffix}", src.display()));
@@ -181,6 +187,15 @@ pub fn rename(home: &Home, from: &str, to: &str) -> ApiResult<()> {
         }
     }
     Ok(())
+}
+
+/// Whether two paths are one file on disk (resolved paths agree, which on a
+/// case-insensitive disk is how two spellings of a name meet).
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// Delete a save for good.
@@ -310,6 +325,27 @@ mod tests {
         ] {
             assert!(!valid_name(bad), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_case_only_rename_never_overwrites_another_save() {
+        let h = home("case");
+        create(&h, "Beta").unwrap();
+        // A second file differing only by case can exist only on a case-sensitive disk.
+        let both = !h.save_path("beta").exists();
+        if both {
+            std::fs::copy(h.save_path("Beta"), h.save_path("beta")).unwrap();
+        }
+        marker(&h, "Beta", "first");
+        if both {
+            assert_eq!(rename(&h, "Beta", "beta"), Err(ApiError::Exists));
+            assert_ne!(marked(&h, "beta").as_deref(), Some("\"first\""));
+        } else {
+            // One file under two spellings: the rename is just a new spelling.
+            rename(&h, "Beta", "beta").unwrap();
+            assert_eq!(marked(&h, "beta").as_deref(), Some("\"first\""));
+        }
+        done(&h);
     }
 
     #[test]

@@ -182,15 +182,21 @@ impl Agent {
     async fn run_asks(&self, asks: Vec<world::task::Asked>, skip: bool) -> Result<()> {
         let mut stop = skip;
         let mut first: Result<()> = Ok(());
+        // Dropped mid-way (the work was cancelled), the requests not yet ended are marked.
+        let mut guards: Vec<_> = asks.iter().map(|a| self.guard(a.task)).collect();
+        guards.reverse();
         for asked in asks {
+            let mut guard = guards.pop().expect("one guard per request");
             if stop {
                 self.fail_request(asked.task, world::task::Failure::Failed);
+                guard.disarm();
                 continue;
             }
             let ran = {
                 let _turn = self.lock_channel(asked.channel).await;
                 self.run_ask(asked.task, asked.channel).await
             };
+            guard.disarm();
             if let Err(e) = ran {
                 self.fail_request(asked.task, world::task::Failure::Failed);
                 stop = true;
@@ -920,6 +926,8 @@ impl Agent {
 
     /// Work on a request until it is answered or its turns run out.
     pub async fn run_request(&self, asked: world::task::Asked) -> Result<()> {
+        // Cancelled (the future dropped) before it ended, the request is marked interrupted.
+        let mut guard = self.guard(asked.task);
         let ran = async {
             let _turn = self.lock_channel(asked.channel).await;
             if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
@@ -928,10 +936,19 @@ impl Agent {
             self.run_ask(asked.task, asked.channel).await
         }
         .await;
+        guard.disarm();
         if ran.is_err() {
             self.fail_request(asked.task, world::task::Failure::Failed);
         }
         ran
+    }
+
+    fn guard(&self, task: TaskId) -> OpenRequest<'_> {
+        OpenRequest {
+            agent: self,
+            task,
+            armed: true,
+        }
     }
 
     async fn run_ask(&self, task: TaskId, ch: ChannelId) -> Result<()> {
@@ -1270,8 +1287,20 @@ impl Agent {
             // A channel with a flow in progress is not idle, however long the flow takes.
             for ch in self.busy_channels() {
                 session::touch_channel(&conn, ch, now)?;
+                world::task::touch_channel(&conn, ch, now)?;
             }
-            session::expire_idle(&conn, now, &self.config.world.session)?
+            let ended = session::expire_idle(&conn, now, &self.config.world.session)?;
+            // A request whose process is gone (a crash, or another process that quit).
+            let cut = world::task::interrupt_open(&conn, now)?;
+            drop(conn);
+            self.changed(
+                cut.into_iter()
+                    .map(|t| WorldChange::Task {
+                        id: view::task_id(t),
+                    })
+                    .collect(),
+            );
+            ended
         };
         if self.chat().is_ok() {
             for ch in &ended {
@@ -1514,5 +1543,28 @@ impl seed::TopicMatch for TopicHits<'_> {
         resp.hits
             .iter()
             .any(|h| seed.material.iter().any(|m| m == h.item.id()))
+    }
+}
+
+/// A request being worked on. If dropped while armed, the work was cancelled before the
+/// request ended, so it is marked interrupted instead of staying open for good.
+pub(crate) struct OpenRequest<'a> {
+    agent: &'a Agent,
+    task: TaskId,
+    armed: bool,
+}
+
+impl OpenRequest<'_> {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for OpenRequest<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.agent
+                .fail_request(self.task, world::task::Failure::Interrupted);
+        }
     }
 }

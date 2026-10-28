@@ -2472,7 +2472,7 @@ async fn the_host_sees_each_open_request_with_its_turns_left() {
 }
 
 #[tokio::test]
-async fn requests_left_open_by_a_stopped_app_are_marked_interrupted_at_start() {
+async fn only_requests_no_live_process_owns_are_interrupted_at_start() {
     let folio_file = corpus();
     let index = index::Index::open(folio_file.path(), retrieve()).unwrap();
     let world = world::World::in_memory().unwrap();
@@ -2484,7 +2484,19 @@ async fn requests_left_open_by_a_stopped_app_are_marked_interrupted_at_start() {
         None,
         world::Tier::Middle,
         &world::params::Ask::default(),
-        T0,
+        T0 - world::task::LEASE_MS,
+    )
+    .unwrap();
+    // Another process (the terminal next to the app) is working on this one right now.
+    let alive = world::task::ask(
+        &world,
+        &p("bo"),
+        "in flight",
+        Some(3),
+        None,
+        world::Tier::Middle,
+        &world::params::Ask::default(),
+        T0 - 1000,
     )
     .unwrap();
     let agent = agent::Agent::new(agent::Parts {
@@ -2506,6 +2518,8 @@ async fn requests_left_open_by_a_stopped_app_are_marked_interrupted_at_start() {
             Some(world::task::Failure::Interrupted)
         )
     );
+    let t = agent.with_world(|w| world::task::get(w, alive.task).unwrap());
+    assert_eq!((t.status, t.failure), (world::TaskStatus::Active, None));
 }
 
 /// The user entries of the last request, as texts.

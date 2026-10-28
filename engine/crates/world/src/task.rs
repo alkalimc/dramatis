@@ -167,8 +167,8 @@ fn insert(
     now: i64,
 ) -> Result<TaskId> {
     conn.execute(
-        "INSERT INTO task(question, assignee, parent, turns_left, granted, pinned, channel, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO task(question, assignee, parent, turns_left, granted, pinned, channel, created_at, lease_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
         rusqlite::params![question, assignee, parent, turns, granted, pinned, channel, now],
     )?;
     Ok(TaskId(conn.last_insert_rowid()))
@@ -425,7 +425,10 @@ pub fn report(
     office: &Path,
     now: i64,
 ) -> Result<Reported> {
-    crate::atomic(conn, |conn| {
+    // The note is a file, which a rollback cannot take back: remove it when the commit
+    // does not happen.
+    let written = std::cell::RefCell::new(None::<PathBuf>);
+    let done = crate::atomic(conn, |conn| {
         let t = get(conn, id)?;
         let (Some(ch), true, true) = (
             t.channel,
@@ -445,6 +448,7 @@ pub fn report(
                     fs::create_dir_all(dir)?;
                 }
                 fs::write(&full, body)?;
+                *written.borrow_mut() = Some(full.clone());
                 Some((rel, full))
             }
             None => None,
@@ -473,7 +477,13 @@ pub fn report(
             message: msg,
             note: note_path.map(|(_, full)| full),
         })
-    })
+    });
+    if done.is_err()
+        && let Some(full) = written.into_inner()
+    {
+        let _ = fs::remove_file(full);
+    }
+    done
 }
 
 /// Turns ran out: the caller sends what was found as the reply (`text`, possibly the
@@ -554,14 +564,39 @@ pub fn mark_told(conn: &Connection, id: TaskId) -> Result<()> {
     Ok(())
 }
 
-/// App start: nothing is running, so every open request is a leftover of a crash or a
-/// quit. They are marked interrupted rather than resumed: a resume would spend model
-/// calls the user did not just ask for. Returns the ones changed.
+/// How long a request may go without a sign of life before no process is taken to be
+/// behind it. A model call can run for minutes (its read timeout is ten), and every step
+/// of a running request renews the lease.
+pub const LEASE_MS: i64 = 15 * 60_000;
+
+/// Show that a process is working on `id`: renews the lease of its whole delegation tree.
+pub fn touch(conn: &Connection, id: TaskId, now: i64) -> Result<()> {
+    let root = tree_root(conn, id)?;
+    for t in tree(conn, root.id)? {
+        conn.execute("UPDATE task SET lease_at = ?2 WHERE id = ?1", (t.id, now))?;
+    }
+    Ok(())
+}
+
+/// Renew the lease of every open request in a channel a flow of this process is working in.
+pub fn touch_channel(conn: &Connection, channel: ChannelId, now: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE task SET lease_at = ?2 WHERE channel = ?1 AND status = 'active'",
+        (channel, now),
+    )?;
+    Ok(())
+}
+
+/// Mark open requests that no process is working on as interrupted: a crash or a quit
+/// cut them off. They are not resumed, which would spend model calls the user did not
+/// just ask for. A request whose lease is current belongs to another live process (the
+/// app and the terminal share a save) and is left alone. Returns the ones changed.
 pub fn interrupt_open(conn: &Connection, now: i64) -> Result<Vec<TaskId>> {
     let open: Vec<Task> = query(
         conn,
-        "status = 'active' AND pinned = 0 AND assignee IS NOT NULL",
-        [],
+        "status = 'active' AND pinned = 0 AND assignee IS NOT NULL
+         AND coalesce(lease_at, created_at, 0) <= ?1",
+        [now - LEASE_MS],
     )?;
     let mut out = Vec::new();
     for t in open {
@@ -779,8 +814,15 @@ mod tests {
         mark_told(&w, x.task).unwrap();
         assert!(untold_failures(&w).unwrap().is_empty());
         assert_eq!(done_count(&w, &p("a")).unwrap(), 0);
-        // App start: what is still open is interrupted; a pinned question is left alone.
-        assert_eq!(interrupt_open(&w, T0).unwrap(), vec![y.task]);
+        // A request another process is working on is not swept; one whose lease ran out
+        // is, and a pinned question is left alone.
+        assert!(interrupt_open(&w, T0 + LEASE_MS - 1).unwrap().is_empty());
+        touch(&w, y.task, T0 + 1000).unwrap();
+        assert!(interrupt_open(&w, T0 + LEASE_MS).unwrap().is_empty());
+        assert_eq!(
+            interrupt_open(&w, T0 + 1000 + LEASE_MS).unwrap(),
+            vec![y.task]
+        );
         assert_eq!(get(&w, y.task).unwrap().failure, Some(Failure::Interrupted));
         assert_eq!(get(&w, pinned).unwrap().status, TaskStatus::Active);
         assert!(open_requests(&w).unwrap().is_empty());
@@ -866,6 +908,32 @@ mod tests {
             Err(Error::NoTask { .. })
         ));
         assert_eq!(done_count(&w, &p("a")).unwrap(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_report_that_fails_leaves_no_note_behind() {
+        let w = world();
+        let a = ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(3),
+            None,
+            Tier::Middle,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
+        let dir = office();
+        w.execute_batch(
+            "CREATE TRIGGER refuse BEFORE UPDATE ON task
+             BEGIN SELECT RAISE(ABORT, 'refused'); END",
+        )
+        .unwrap();
+        assert!(report(&w, &p("a"), a.task, "x", &[], Some("# Note"), &dir, T0).is_err());
+        assert!(!dir.join(note_rel_path(a.task)).exists());
+        assert_eq!(get(&w, a.task).unwrap().status, TaskStatus::Active);
         fs::remove_dir_all(dir).unwrap();
     }
 
