@@ -7,14 +7,13 @@ import { Icon, type IconName } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { UserAvatar } from "../ui/Avatar";
 import { EndpointsPage } from "./Endpoints";
-import { QuietSection, QuotaSection, YouSection } from "./Quota";
+import { QuietSection, QuotaSection } from "./Quota";
 import { SavesPage } from "./Saves";
 import { statusLine, useCurrentSave } from "./Profile";
 
 const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
   { page: "quota", icon: "gauge" },
   { page: "quiet", icon: "bell" },
-  { page: "you", icon: "user" },
   { page: "endpoints", icon: "server" },
   { page: "saves", icon: "bookmark" },
 ];
@@ -44,7 +43,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
   const close = () => dispatch({ type: "drawer", drawer: null });
   const go = (p: SystemPage) => dispatch({ type: "drawer", drawer: { kind: "system", tab: p } });
   const name = settings?.user_name?.trim() || t("user.you");
-  const status = statusLine(t, settings?.user_name ?? null, save);
+  const status = statusLine(t, settings?.user_name ?? null);
   const label = (p: Exclude<SystemPage, "root">) => t(`settings.page.${p}`);
 
   return (
@@ -106,7 +105,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           <ul className="settings-list settings-gap">
             <Row icon="profile" label={t("menu.profile")} onClick={() => dispatch({ type: "profile", mode: "view" })} />
             {PAGES.map((p) => (
-              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : undefined} onClick={() => go(p.page)} />
+              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : p.page === "saves" ? (save ?? undefined) : undefined} onClick={() => go(p.page)} />
             ))}
           </ul>
           <ul className="settings-list settings-gap">
@@ -123,7 +122,6 @@ export function SettingsCard({ page }: { page: SystemPage }) {
         <div className="settings-page" role="region" aria-label={label(page)}>
           {page === "quota" && <QuotaSection />}
           {page === "quiet" && <QuietSection />}
-          {page === "you" && <YouSection />}
           {page === "endpoints" && <EndpointsPage />}
           {page === "saves" && <SavesPage />}
         </div>

@@ -35,7 +35,7 @@
   /* state */
   --warn: #f0b36a;
   --danger: #ff8a7d;
-  --focus: #8ab8ff;
+  --focus: #3ee2cc;
 
   /* speaker name colours */
   --hue-0: #5ec8bd;
@@ -107,7 +107,7 @@
   --other: #ffffff;
   --warn: #8a4b00;
   --danger: #a3261b;
-  --focus: #1a64d6;
+  --focus: #0b6f66;
   --hue-0: #0b7a70;
   --hue-1: #a8500f;
   --hue-2: #2a5fb8;

@@ -72,6 +72,19 @@ button.member:hover {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
+  min-width: 0;
+}
+.voice select,
+.voice form {
+  min-width: 0;
+  max-width: 100%;
+}
+.voice form {
+  flex-wrap: wrap;
+}
+.voice input {
+  flex: 1;
+  min-width: 6rem;
 }
 
 /* ---- choice pills: the mode switch and the intensity use the same control ---- */
@@ -592,8 +605,8 @@ button.camera-btn:hover:not(:disabled) {
 .info-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--s-3);
+  justify-content: flex-start;
+  gap: var(--s-4);
   width: 100%;
   padding: var(--s-3) var(--s-4);
   background: none;
@@ -608,19 +621,19 @@ button.info-row:hover {
 }
 .info-row .icon-svg {
   flex: none;
-  color: var(--accent);
-}
-.info-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.info-value {
-  overflow-wrap: anywhere;
+  color: var(--muted);
 }
 .info-label {
-  font-size: var(--fs-sm);
-  color: var(--muted);
+  flex: none;
+}
+.info-value {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pc-field {
   display: flex;

@@ -22,7 +22,7 @@ test("settings is a card with a list of sections; each opens its page and back r
   expect(within(page).getByLabelText("From")).toBeDefined();
   expect(within(page).getByLabelText("To")).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Back" }));
-  expect(within(card).getByRole("button", { name: "Saves" })).toBeDefined();
+  expect(within(card).getByRole("button", { name: /^Saves/ })).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("dialog")).toBeNull();
 });
@@ -48,4 +48,11 @@ test("the search icon turns the list column into a search of this chat", async (
   expect((await within(panel).findAllByText(/flood/)).length).toBeGreaterThan(0);
   await user.click(within(panel).getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("navigation", { name: "Search in this chat" })).toBeNull();
+});
+
+test("opening the card focuses the card itself, not an icon button", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const card = await openSettings(user);
+  expect(document.activeElement).toBe(card);
 });

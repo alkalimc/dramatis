@@ -655,7 +655,6 @@ button.square.danger {
 }
 .dialog.settings-card {
   width: min(32.5rem, 100%);
-  height: min(44rem, 90vh);
   display: flex;
   flex-direction: column;
 }
@@ -665,7 +664,7 @@ button.square.danger {
 }
 .settings-root,
 .settings-page {
-  flex: 1;
+  flex: 0 1 auto;
   overflow-y: auto;
   min-height: 0;
 }

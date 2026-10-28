@@ -321,7 +321,6 @@ export const en = {
   "system.tab.quota": "Quota and quiet",
   "settings.page.quota": "Quota and intensity",
   "settings.page.quiet": "Quiet hours and notifications",
-  "settings.page.you": "Name and birthday",
   "settings.page.endpoints": "Endpoints",
   "settings.page.saves": "Saves",
   "system.tab.endpoints": "Endpoints",

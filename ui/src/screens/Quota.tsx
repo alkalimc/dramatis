@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { QuietHours, QuotaStatus, Settings, Tier } from "../api";
-import { useT, userTitle } from "../i18n";
+import { useT } from "../i18n";
 import { when } from "../lib/format";
 import { quotaExhaustedLine } from "../lib/quota";
 import { useActions, useApi, useStore } from "../store";
@@ -125,39 +125,6 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
   );
 }
 
-export function YouPanel({ settings, save }: { settings: Settings; save: (s: Settings) => Promise<boolean> }) {
-  const t = useT();
-  const id = useId();
-  const [name, setName] = useState(settings.user_name ?? "");
-  const [month, setMonth] = useState(settings.birthday ? String(settings.birthday.month) : "");
-  const [day, setDay] = useState(settings.birthday ? String(settings.birthday.day) : "");
-  const [saved, setSaved] = useState(false);
-  return (
-    <section className="you" aria-labelledby={`${id}-h`}>
-      <h3 id={`${id}-h`}>{t("you.title")}</h3>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!name.trim()) return;
-          const ok = await save({ ...settings, user_name: name.trim(), birthday: birthday(month, day) });
-          setSaved(ok);
-        }}
-      >
-        <NameAndBirthday id={id} name={name} setName={setName} month={month} setMonth={setMonth} day={day} setDay={setDay} />
-        <p className="muted">{t("you.preview", { title: userTitle(t, name) })}</p>
-        <p className="row form-actions">
-          <button type="submit" disabled={!name.trim()}>
-            {t("you.save")}
-          </button>
-          <span role="status" className="muted">
-            {saved ? t("you.saved") : ""}
-          </span>
-        </p>
-      </form>
-    </section>
-  );
-}
-
 export function birthday(month: string, day: string): Settings["birthday"] {
   const m = Number.parseInt(month, 10);
   const d = Number.parseInt(day, 10);
@@ -220,10 +187,4 @@ export function QuietSection() {
   const actions = useActions();
   const settings = useStore((s) => s.settings);
   return settings ? <QuietPanel settings={settings} save={(s) => void actions.saveSettings(s)} /> : null;
-}
-
-export function YouSection() {
-  const actions = useActions();
-  const settings = useStore((s) => s.settings);
-  return settings ? <YouPanel settings={settings} save={actions.saveSettings} /> : null;
 }

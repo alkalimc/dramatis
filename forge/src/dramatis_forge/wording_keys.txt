@@ -508,7 +508,6 @@ settings.page.endpoints
 settings.page.quiet
 settings.page.quota
 settings.page.saves
-settings.page.you
 sources.title
 span.days
 span.hours

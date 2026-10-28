@@ -6,6 +6,7 @@ import { isDark } from "../lib/prefs";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
 import { Icon, type IconName } from "../ui/Icon";
+import { Menu } from "../ui/Menu";
 import { UserAvatar } from "../ui/Avatar";
 import { birthday } from "./Quota";
 
@@ -58,21 +59,18 @@ export function useCurrentSave(): string | null {
 
 const monthDay = (b: { month: number; day: number }) => new Date(2000, b.month - 1, b.day).toLocaleDateString(undefined, { month: "long", day: "numeric" });
 
-/** The line under the name: the in-world title when it says more than the name, else the save in play. */
-export function statusLine(t: ReturnType<typeof useT>, name: string | null, save: string | null): string | null {
-  const title = userTitle(t, name);
-  return name?.trim() && title !== name.trim() ? title : save;
+/** The line under the name: the in-world title, when the name is set. */
+export function statusLine(t: ReturnType<typeof useT>, name: string | null): string | null {
+  return name?.trim() ? userTitle(t, name) : null;
 }
 
-/** One info row: the value over a muted label, an icon at the right edge. */
+/** One info row: the icon, the label, and the value at the right edge. */
 function InfoRow({ icon, value, label, onClick, open }: { icon: IconName; value: string; label: string; onClick?: () => void; open?: boolean }) {
   const body = (
     <>
-      <span className="info-text">
-        <span className="info-value">{value}</span>
-        <span className="info-label">{label}</span>
-      </span>
-      <Icon name={icon} size={22} />
+      <Icon name={icon} size={24} />
+      <span className="info-label">{label}</span>
+      <span className="info-value">{value}</span>
     </>
   );
   return onClick ? (
@@ -92,7 +90,7 @@ export function ProfileCard({ mode }: { mode: "view" | "edit" }) {
   const settings = useStore((s) => s.settings);
   const save = useCurrentSave();
   if (!settings) return null;
-  const status = statusLine(t, settings.user_name, save);
+  const status = statusLine(t, settings.user_name);
   const avatarId = "profile-avatar";
   return (
     <Dialog title={t("profile.title")} onClose={close} className="profile-card" hideTitle>
@@ -135,6 +133,7 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
   const [day, setDay] = useState(settings?.birthday ? String(settings.birthday.day) : "");
   const [editing, setEditing] = useState<"name" | "birthday" | null>(null);
   const [failed, setFailed] = useState(false);
+  const [camera, setCamera] = useState<{ x: number; y: number } | null>(null);
   if (!settings) return null;
   const when = birthday(month, day);
   const toggle = (k: "name" | "birthday") => setEditing(editing === k ? null : k);
@@ -185,13 +184,31 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
               if (f) void pick(f);
             }}
           />
-          <button type="button" className="camera-btn" aria-label={t("picture.change")} title={t("picture.change")} onClick={() => file.current?.click()}>
+          <button
+            type="button"
+            className="camera-btn"
+            aria-label={t("picture.change")}
+            title={t("picture.change")}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setCamera({ x: r.left, y: r.bottom + 4 });
+            }}
+          >
             <Icon name="camera" size={22} />
           </button>
+          {camera && (
+            <Menu
+              at={camera}
+              label={t("picture.change")}
+              onClose={() => setCamera(null)}
+              items={[
+                { label: t("picture.change"), icon: "camera", onSelect: () => file.current?.click() },
+                { label: t("picture.default"), icon: "reset", onSelect: () => void actions.setUserAvatar(null) },
+              ]}
+            />
+          )}
         </div>
-        <button type="button" className="link" onClick={() => void actions.setUserAvatar(null)}>
-          <Icon name="reset" size={16} /> {t("picture.default")}
-        </button>
         {failed && (
           <p role="alert" className="pc-failed">
             {t("picture.failed")}
@@ -262,14 +279,13 @@ export function LeftDrawer() {
   const archivedCount = useStore((s) => s.channels.filter((c) => c.archived).length);
   const ref = useRef<HTMLElement>(null);
   const version = useAppVersion();
-  const save = useCurrentSave();
   const close = () => dispatch({ type: "menu", open: false });
   const go = (fn: () => void) => () => {
     close();
     fn();
   };
   const dark = isDark(theme);
-  const sub = statusLine(t, name, save);
+  const sub = statusLine(t, name);
 
   useEffect(() => {
     ref.current?.focus();

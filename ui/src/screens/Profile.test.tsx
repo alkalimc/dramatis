@@ -13,7 +13,7 @@ test("the hamburger opens the drawer: the user, the places to go, night mode, th
   const user = userEvent.setup();
   renderApp();
   const drawer = await openMenu(user);
-  expect(within(drawer).getByText("Rowan")).toBeDefined();
+  expect(within(drawer).getAllByText("Rowan").length).toBeGreaterThan(0);
   for (const name of ["My profile", "New group", "Contacts", "Archived chats", "Settings"]) {
     expect(within(drawer).getByRole("button", { name })).toBeDefined();
   }
@@ -53,11 +53,11 @@ test("my profile shows the card, and the pencil edits the name, the birthday and
   const dialog = await screen.findByRole("dialog", { name: "My profile" });
   expect(within(dialog).getByText("Birthday")).toBeDefined();
   await user.click(within(dialog).getByRole("button", { name: "Edit" }));
-  await user.click(within(dialog).getByRole("button", { name: /^Rowan/ }));
+  await user.click(within(dialog).getByRole("button", { name: /^Name/ }));
   const name = within(dialog).getByRole("textbox", { name: "What should they call you?" });
   await user.clear(name);
   await user.type(name, "Rowan Hale");
-  await user.click(within(dialog).getByRole("button", { name: /^Not set/ }));
+  await user.click(within(dialog).getByRole("button", { name: /^Birthday/ }));
   await user.type(within(dialog).getByLabelText("Month"), "3");
   await user.type(within(dialog).getByLabelText("Day"), "14");
   // The camera button hands the click to the hidden file input, which Tauri needs a real click for.
@@ -65,6 +65,7 @@ test("my profile shows the card, and the pencil edits the name, the birthday and
   const clicked = vi.fn();
   input.addEventListener("click", clicked);
   await user.click(within(dialog).getByRole("button", { name: "Change picture" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Change picture" }));
   expect(clicked).toHaveBeenCalled();
   await user.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(store.getState().settings?.user_name).toBe("Rowan Hale"));
