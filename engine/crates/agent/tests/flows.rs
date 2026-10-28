@@ -795,6 +795,23 @@ async fn short_replies_and_replies_in_cjk_text_are_not_boilerplate() {
 }
 
 #[tokio::test]
+async fn a_name_alone_and_a_long_english_answer_are_not_held_as_boilerplate() {
+    let e = env_cjk(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    let long = "The steel comes from the northern hold, where it is smelted twice and \
+                then folded by hand before it is ever sent south to the forge, and the \
+                forge keeps the finished blades in a locked room until the buyer comes.";
+    assert!(long.chars().count() > 200);
+    e.fake.push([say("Ann Lee."), say(long)]);
+    e.agent.send(ch, "who is it?", None).await.unwrap();
+    e.agent.send(ch, "and the steel?", None).await.unwrap();
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist[1].text, "Ann Lee.");
+    assert_eq!(hist.last().unwrap().text, long);
+    assert_eq!(meter(&e.agent).len(), 2);
+}
+
+#[tokio::test]
 async fn an_english_corpus_keeps_english_replies() {
     let e = env(WireApi::Chat);
     let ch = direct(&e, "ann");
@@ -2332,6 +2349,52 @@ async fn a_request_that_fails_to_run_is_marked_failed_and_later_ones_are_not_run
 }
 
 #[tokio::test]
+async fn a_failed_first_request_also_fails_the_second_and_the_host_hears_each_once() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        host_ask("ann", "first question?"),
+        host_ask("bo", "second question?"),
+        say("Both asked."),
+        Reply::Fail("boom".into()),
+    ]);
+    assert!(e.agent.send(host, "ask ann and bo", None).await.is_err());
+    let tasks = e.agent.with_world(|w| world::task::list(w).unwrap());
+    assert_eq!(tasks.len(), 2);
+    for t in &tasks {
+        assert_eq!(
+            (t.status, t.failure),
+            (world::TaskStatus::Done, Some(world::task::Failure::Failed))
+        );
+    }
+    // Neither person's channel saw a request.
+    for who in ["ann", "bo"] {
+        assert!(
+            e.agent
+                .history(direct(&e, who), None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert!(
+        e.agent
+            .with_world(|w| world::task::open_requests(w).unwrap())
+            .is_empty()
+    );
+
+    e.fake.push([say("Neither ran."), say("Still neither.")]);
+    e.agent.send(host, "any news?", None).await.unwrap();
+    let entry = last_entry(&e);
+    for q in ["first question?", "second question?"] {
+        assert_eq!(entry.matches(q).count(), 1, "{entry}");
+    }
+    assert_eq!(entry.matches("did not run").count(), 2, "{entry}");
+    e.agent.send(host, "and now?", None).await.unwrap();
+    let entry = last_entry(&e);
+    assert!(!entry.contains("first question?") && !entry.contains("did not run"));
+}
+
+#[tokio::test]
 async fn the_host_sees_each_open_request_with_its_turns_left() {
     let e = env(WireApi::Chat);
     let host = e.agent.with_world(|w| channel::host(w).unwrap());
@@ -2441,5 +2504,104 @@ async fn a_late_hour_reads_as_night_and_days_are_counted_from_two() {
     assert!(
         last.ends_with("[2026-03-13 Friday 23:30, night] (Doc's previous message was 3 days ago)"),
         "{last}"
+    );
+}
+
+const CLOCK_NOON: &str = "[2026-03-10 Tuesday 12:00, midday]";
+
+#[tokio::test]
+async fn the_clock_line_is_in_group_and_interject_entries_and_never_in_the_prefix() {
+    let e = env(WireApi::Chat);
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("smithing"))
+        .unwrap();
+    e.agent.with_world(|w| {
+        channel::set_mode(w, g, Mode::Enabled).unwrap();
+        bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap();
+        bond::set_mode(w, &p("bo"), Mode::Enabled).unwrap();
+    });
+    e.fake.push([
+        say("Ann: by name."),
+        say("Bo: a line."),
+        say("Ann: later."),
+        say("Bo: later too."),
+    ]);
+    e.agent
+        .send(g, "ann, jasmine tea at the forge blade?", None)
+        .await
+        .unwrap();
+    let before = segments(&e.agent, g).remove(0);
+    e.clock.advance(20 * 60_000);
+    e.agent
+        .send(g, "ann, jasmine tea at the forge blade again?", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    assert_eq!(json.len(), 4);
+    let last = |i: usize| list(&json[i]).last().unwrap()["content"].to_string();
+    for i in [0, 1] {
+        assert!(last(i).ends_with(&format!("{CLOCK_NOON}\"")), "{}", last(i));
+    }
+    assert!(last(1).contains("may add one line"), "{}", last(1));
+    for i in [2, 3] {
+        assert!(
+            last(i).ends_with("[2026-03-10 Tuesday 12:20, midday]\""),
+            "{}",
+            last(i)
+        );
+    }
+    // The same prefix bytes on every turn: the clock is only ever in entries.
+    let after = segments(&e.agent, g).remove(0);
+    assert_eq!(
+        (&before.prefix_a, &before.prefix_b, &before.prefix_c),
+        (&after.prefix_a, &after.prefix_b, &after.prefix_c)
+    );
+    for block in [&after.prefix_a, &after.prefix_b, &after.prefix_c] {
+        assert!(!body_text(block).contains("Tuesday"));
+    }
+    assert_prefix_chain(&e.fake.bodies());
+}
+
+#[tokio::test]
+async fn a_chorus_reply_carries_the_clock_line_too() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    e.fake
+        .push([say("Ann: bo knows.\n\u{2192} bo"), say("Bo: steel.")]);
+    e.agent
+        .send(g, "ann, where is the steel?", None)
+        .await
+        .unwrap();
+    let json = e.fake.json();
+    let second = list(&json[1]).last().unwrap()["content"].to_string();
+    assert!(second.contains("bo answers too"), "{second}");
+    assert!(second.ends_with(&format!("{CLOCK_NOON}\"")), "{second}");
+}
+
+#[tokio::test]
+async fn a_reply_may_open_with_a_short_quote_and_a_new_round_never_trims_against_an_old_one() {
+    let e = env(WireApi::Chat);
+    let g = three(&e);
+    // The user's message is shorter than the guard's threshold: a quote of it stays.
+    e.fake.push([
+        say("Ann, hi to you. The steel is in the hold.\n\u{2192} bo"),
+        say("Bo: and the hold is locked."),
+        // Next round: the first speaker opens with the last reply of the round before.
+        say("Bo: and the hold is locked. I agree."),
+    ]);
+    e.agent.send(g, "Ann, hi", None).await.unwrap();
+    e.agent
+        .send(g, "bo, any news on the hold?", None)
+        .await
+        .unwrap();
+    let said: Vec<String> = texts(&e, g).into_iter().map(|(_, t)| t).collect();
+    assert!(
+        said.contains(&"Ann, hi to you. The steel is in the hold.".to_owned()),
+        "{said:?}"
+    );
+    assert!(
+        said.contains(&"Bo: and the hold is locked. I agree.".to_owned()),
+        "{said:?}"
     );
 }

@@ -62,23 +62,24 @@ pub(crate) fn parse(reply: &str, members: &[PersonId]) -> Option<Audience> {
 pub(crate) fn member_named(
     name: &str,
     members: &[(PersonId, String)],
-    by_alias: impl Fn(&str) -> Vec<String>,
-) -> Option<PersonId> {
+    by_alias: impl Fn(&str) -> Result<Vec<String>>,
+) -> Result<Option<PersonId>> {
     if let Some((p, _)) = members
         .iter()
         .find(|(p, d)| d.eq_ignore_ascii_case(name) || p.as_str().eq_ignore_ascii_case(name))
     {
-        return Some(p.clone());
+        return Ok(Some(p.clone()));
     }
+    let aliased = by_alias(name)?;
     let hit: Vec<&PersonId> = members
         .iter()
         .map(|(p, _)| p)
-        .filter(|p| by_alias(name).iter().any(|a| a == p.as_str()))
+        .filter(|p| aliased.iter().any(|a| a == p.as_str()))
         .collect();
-    match hit[..] {
+    Ok(match hit[..] {
         [one] => Some(one.clone()),
         _ => None,
-    }
+    })
 }
 
 impl Agent {
@@ -105,10 +106,10 @@ impl Agent {
             members.push((p, display));
         }
         let ix = self.ix();
-        let by_alias = |n: &str| ix.folio().persons_for_alias(n).unwrap_or_default();
+        let by_alias = |n: &str| Ok(ix.folio().persons_for_alias(n)?);
         let mut out: Vec<PersonId> = Vec::new();
         for n in names {
-            if let Some(p) = member_named(n, &members, by_alias)
+            if let Some(p) = member_named(n, &members, by_alias)?
                 && !skip.contains(&p)
                 && !out.contains(&p)
             {
@@ -204,15 +205,24 @@ mod tests {
             (PersonId::from("p2"), "Bo".to_owned()),
         ];
         let alias = |n: &str| match n {
-            "Annie" => vec!["p1".to_owned()],
-            "Both" => vec!["p1".to_owned(), "p2".to_owned()],
-            _ => Vec::new(),
+            "Annie" => Ok(vec!["p1".to_owned()]),
+            "Both" => Ok(vec!["p1".to_owned(), "p2".to_owned()]),
+            _ => Ok(Vec::new()),
         };
-        assert_eq!(member_named("ann", &m, alias), Some(PersonId::from("p1")));
-        assert_eq!(member_named("P2", &m, alias), Some(PersonId::from("p2")));
-        assert_eq!(member_named("Annie", &m, alias), Some(PersonId::from("p1")));
-        assert_eq!(member_named("Both", &m, alias), None);
-        assert_eq!(member_named("Cy", &m, alias), None);
+        assert_eq!(
+            member_named("ann", &m, alias).unwrap(),
+            Some(PersonId::from("p1"))
+        );
+        assert_eq!(
+            member_named("P2", &m, alias).unwrap(),
+            Some(PersonId::from("p2"))
+        );
+        assert_eq!(
+            member_named("Annie", &m, alias).unwrap(),
+            Some(PersonId::from("p1"))
+        );
+        assert_eq!(member_named("Both", &m, alias).unwrap(), None);
+        assert_eq!(member_named("Cy", &m, alias).unwrap(), None);
     }
 
     #[test]

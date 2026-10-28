@@ -747,10 +747,10 @@ impl Agent {
         if candidates.len() < 2 || group.collective_max < 2 {
             return Ok(Vec::new());
         }
-        let many_named = candidates
-            .iter()
-            .filter(|p| self.is_named(&posted.text, p).unwrap_or(false))
-            .count();
+        let mut many_named = 0;
+        for p in &candidates {
+            many_named += usize::from(self.is_named(&posted.text, p)?);
+        }
         let collective = self.is_collective(&posted.text);
         let audience = if many_named == 1 && !collective {
             None
@@ -816,6 +816,7 @@ impl Agent {
             .unwrap_or_default();
         let mut lines = vec![self.corpus.wording.fill(key, &names, &[("name", &name)])];
         lines.extend(self.attachment(seg, &mut turn, &last_user, vec![person.0.clone()])?);
+        lines.push(self.context_line(seg, None, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
