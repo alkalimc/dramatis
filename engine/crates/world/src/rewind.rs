@@ -227,7 +227,7 @@ mod tests {
         let c = channel::direct(&w, &a).unwrap();
         let person = Actor::Person(a.clone());
         let s0 = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 10).unwrap();
-        let m1 = say(&w, c, &Actor::User, "one", 100);
+        say(&w, c, &Actor::User, "one", 100);
         log::append(&w, s0, Role::User, b"u1", 101).unwrap();
         say(&w, c, &person, "r1", 102);
         log::append(&w, s0, Role::Assistant, b"a1", 102).unwrap();
@@ -291,7 +291,6 @@ mod tests {
         assert_eq!(left, ["one", "r1"]);
         let cur = log::current(&w, c).unwrap().unwrap();
         assert_eq!(cur.id, s0);
-        assert!(log::current(&w, c).unwrap().is_some());
         let bytes: Vec<_> = log::entries(&w, s0)
             .unwrap()
             .into_iter()
@@ -308,7 +307,6 @@ mod tests {
             .query_row("SELECT count(*) FROM seed", [], |r| r.get(0))
             .unwrap();
         assert_eq!(seeds, 0);
-        let _ = m1;
     }
 
     #[test]
