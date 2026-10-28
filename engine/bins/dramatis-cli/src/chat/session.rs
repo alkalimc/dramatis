@@ -14,6 +14,7 @@ use runtime::{AgentBridge, Call};
 
 use super::command::{Command, Save, parse};
 use super::complete::{Completions, Snapshot};
+use super::interrupt::Interrupt;
 use super::show::{Names, Offer, Show, Term, Working};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -57,6 +58,7 @@ pub struct Session {
     show: Arc<Show>,
     names: Arc<Names>,
     completions: Completions,
+    interrupt: Arc<Interrupt>,
     current: Option<Current>,
     /// The host's latest choices, numbered from 1 for `/go`.
     offers: Vec<Offer>,
@@ -117,7 +119,9 @@ impl Session {
         show: Arc<Show>,
         names: Arc<Names>,
         completions: Completions,
+        interrupt: Arc<Interrupt>,
     ) -> Self {
+        interrupt.attach(bridge.clone());
         let metered = bridge
             .calls_after(0)
             .await
@@ -131,6 +135,7 @@ impl Session {
             show,
             names,
             completions,
+            interrupt,
             current: None,
             offers: Vec::new(),
             calls: Vec::new(),
@@ -489,9 +494,10 @@ impl Session {
     /// the session. What was already stored stays stored, so the cancelled turn may leave
     /// the user's line without a reply.
     async fn interruptible<T>(&self, work: impl Future<Output = T>) -> Option<T> {
+        self.interrupt.clear();
         tokio::select! {
             r = work => Some(r),
-            _ = tokio::signal::ctrl_c() => {
+            _ = self.interrupt.wait() => {
                 self.bridge.cancel();
                 self.show.abort();
                 self.term.note("cancelled; the message stays in the history");
