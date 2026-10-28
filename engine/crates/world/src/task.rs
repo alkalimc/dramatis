@@ -194,45 +194,47 @@ pub fn ask(
     params: &Ask,
     now: i64,
 ) -> Result<Asked> {
-    bond::ensure_available(conn, person)?;
-    if question.trim().is_empty() {
-        return Err(Error::Invalid("a request needs a question".into()));
-    }
-    let turns = turns.unwrap_or_else(|| params.turns.get(tier));
-    if turns == 0 {
-        return Err(Error::Invalid("a request needs at least one turn".into()));
-    }
-    if let Some(p) = parent {
-        let parent = get(conn, p)?;
-        if !parent.pinned {
-            return Err(Error::Invalid(format!(
-                "request {p} is not a pinned question"
-            )));
+    crate::atomic(conn, |conn| {
+        bond::ensure_available(conn, person)?;
+        if question.trim().is_empty() {
+            return Err(Error::Invalid("a request needs a question".into()));
         }
-    }
-    let ch = channel::direct(conn, person)?;
-    let id = insert(
-        conn,
-        question.trim(),
-        Some(person),
-        parent,
-        turns,
-        Some(turns),
-        false,
-        Some(ch),
-        now,
-    )?;
-    session::open(
-        conn,
-        ch,
-        person,
-        session::Budget::Task(id),
-        session::Cause::Ask,
-        now,
-    )?;
-    Ok(Asked {
-        task: id,
-        channel: ch,
+        let turns = turns.unwrap_or_else(|| params.turns.get(tier));
+        if turns == 0 {
+            return Err(Error::Invalid("a request needs at least one turn".into()));
+        }
+        if let Some(p) = parent {
+            let parent = get(conn, p)?;
+            if !parent.pinned {
+                return Err(Error::Invalid(format!(
+                    "request {p} is not a pinned question"
+                )));
+            }
+        }
+        let ch = channel::direct(conn, person)?;
+        let id = insert(
+            conn,
+            question.trim(),
+            Some(person),
+            parent,
+            turns,
+            Some(turns),
+            false,
+            Some(ch),
+            now,
+        )?;
+        session::open(
+            conn,
+            ch,
+            person,
+            session::Budget::Task(id),
+            session::Cause::Ask,
+            now,
+        )?;
+        Ok(Asked {
+            task: id,
+            channel: ch,
+        })
     })
 }
 
@@ -302,57 +304,59 @@ pub fn request_join(
     turns: Option<u32>,
     now: i64,
 ) -> Result<Joined> {
-    bond::ensure_available(conn, candidate)?;
-    if caller == candidate {
-        return Err(Error::Invalid("cannot pull oneself in".into()));
-    }
-    let ch = channel::get(conn, channel)?;
-    if !ch.has(&Actor::Person(caller.clone())) {
-        return Err(Error::NotParticipant {
-            person: caller.clone(),
-            channel,
-        });
-    }
-    let asked = turns.unwrap_or(1);
-    if asked == 0 {
-        return Err(Error::Invalid("hand over at least one turn".into()));
-    }
-    let task = match active_for(conn, caller, channel)? {
-        Some(mine) => {
-            // Keep the turn being spent on this call.
-            let spare = mine.turns_left.saturating_sub(1);
-            if asked > spare {
-                return Err(Error::NotEnoughTurns { asked, spare });
-            }
-            conn.execute(
-                "UPDATE task SET turns_left = turns_left - ?2 WHERE id = ?1",
-                (mine.id, asked),
-            )?;
-            let child = insert(
-                conn,
-                &mine.question,
-                Some(candidate),
-                Some(mine.id),
-                asked,
-                None,
-                false,
-                Some(channel),
-                now,
-            )?;
-            Some(child)
+    crate::atomic(conn, |conn| {
+        bond::ensure_available(conn, candidate)?;
+        if caller == candidate {
+            return Err(Error::Invalid("cannot pull oneself in".into()));
         }
-        None => None,
-    };
-    channel::add_participant(conn, channel, &Actor::Person(candidate.clone()))?;
-    let budget = match task {
-        Some(t) => session::Budget::Task(t),
-        None => session::Budget::Replies(1),
-    };
-    session::open(conn, channel, candidate, budget, session::Cause::Join, now)?;
-    Ok(Joined {
-        person: candidate.clone(),
-        task,
-        turns: if task.is_some() { asked } else { 1 },
+        let ch = channel::get(conn, channel)?;
+        if !ch.has(&Actor::Person(caller.clone())) {
+            return Err(Error::NotParticipant {
+                person: caller.clone(),
+                channel,
+            });
+        }
+        let asked = turns.unwrap_or(1);
+        if asked == 0 {
+            return Err(Error::Invalid("hand over at least one turn".into()));
+        }
+        let task = match active_for(conn, caller, channel)? {
+            Some(mine) => {
+                // Keep the turn being spent on this call.
+                let spare = mine.turns_left.saturating_sub(1);
+                if asked > spare {
+                    return Err(Error::NotEnoughTurns { asked, spare });
+                }
+                conn.execute(
+                    "UPDATE task SET turns_left = turns_left - ?2 WHERE id = ?1",
+                    (mine.id, asked),
+                )?;
+                let child = insert(
+                    conn,
+                    &mine.question,
+                    Some(candidate),
+                    Some(mine.id),
+                    asked,
+                    None,
+                    false,
+                    Some(channel),
+                    now,
+                )?;
+                Some(child)
+            }
+            None => None,
+        };
+        channel::add_participant(conn, channel, &Actor::Person(candidate.clone()))?;
+        let budget = match task {
+            Some(t) => session::Budget::Task(t),
+            None => session::Budget::Replies(1),
+        };
+        session::open(conn, channel, candidate, budget, session::Cause::Join, now)?;
+        Ok(Joined {
+            person: candidate.clone(),
+            task,
+            turns: if task.is_some() { asked } else { 1 },
+        })
     })
 }
 
@@ -419,39 +423,40 @@ pub fn report(
     office: &Path,
     now: i64,
 ) -> Result<Reported> {
-    let t = get(conn, id)?;
-    let (Some(ch), true, true) = (
-        t.channel,
-        t.assignee.as_ref() == Some(person),
-        t.status == TaskStatus::Active,
-    ) else {
-        return Err(Error::NoTask {
-            person: person.clone(),
-            task: id,
-        });
-    };
-    let note_path = match note.filter(|n| !n.trim().is_empty()) {
-        Some(body) => {
-            let rel = note_rel_path(id);
-            let full = office.join(&rel);
-            if let Some(dir) = full.parent() {
-                fs::create_dir_all(dir)?;
+    crate::atomic(conn, |conn| {
+        let t = get(conn, id)?;
+        let (Some(ch), true, true) = (
+            t.channel,
+            t.assignee.as_ref() == Some(person),
+            t.status == TaskStatus::Active,
+        ) else {
+            return Err(Error::NoTask {
+                person: person.clone(),
+                task: id,
+            });
+        };
+        let note_path = match note.filter(|n| !n.trim().is_empty()) {
+            Some(body) => {
+                let rel = note_rel_path(id);
+                let full = office.join(&rel);
+                if let Some(dir) = full.parent() {
+                    fs::create_dir_all(dir)?;
+                }
+                fs::write(&full, body)?;
+                Some((rel, full))
             }
-            fs::write(&full, body)?;
-            Some((rel, full))
-        }
-        None => None,
-    };
-    let msg = message::append(
-        conn,
-        ch,
-        &Actor::Person(person.clone()),
-        text,
-        None,
-        None,
-        now,
-    )?;
-    conn.execute(
+            None => None,
+        };
+        let msg = message::append(
+            conn,
+            ch,
+            &Actor::Person(person.clone()),
+            text,
+            None,
+            None,
+            now,
+        )?;
+        conn.execute(
         "UPDATE task SET status = 'done', cites = ?2, note_path = ?3, reply = ?4, turns_left = 0
          WHERE id = ?1",
         (
@@ -461,10 +466,11 @@ pub fn report(
             msg,
         ),
     )?;
-    session::close_for_task(conn, id, now)?;
-    Ok(Reported {
-        message: msg,
-        note: note_path.map(|(_, full)| full),
+        session::close_for_task(conn, id, now)?;
+        Ok(Reported {
+            message: msg,
+            note: note_path.map(|(_, full)| full),
+        })
     })
 }
 
@@ -490,15 +496,17 @@ pub fn force_close(
 /// session closes and `why` is kept for the host and the UI. Does nothing to a request
 /// that is already done. Returns whether it changed.
 pub fn fail(conn: &Connection, id: TaskId, why: Failure, now: i64) -> Result<bool> {
-    let n = conn.execute(
-        "UPDATE task SET status = 'done', turns_left = 0, failure = ?2
+    crate::atomic(conn, |conn| {
+        let n = conn.execute(
+            "UPDATE task SET status = 'done', turns_left = 0, failure = ?2
          WHERE id = ?1 AND status = 'active'",
-        (id, why.as_str()),
-    )?;
-    if n > 0 {
-        session::close_for_task(conn, id, now)?;
-    }
-    Ok(n > 0)
+            (id, why.as_str()),
+        )?;
+        if n > 0 {
+            session::close_for_task(conn, id, now)?;
+        }
+        Ok(n > 0)
+    })
 }
 
 /// Requests a person was given that are still open: the user's and the host's, not
@@ -666,6 +674,40 @@ mod tests {
                 .unwrap()
                 .has(&Actor::Person(p("c")))
         );
+    }
+
+    #[test]
+    fn a_failed_request_join_leaves_nothing_behind() {
+        let w = world();
+        let a = ask(
+            &w,
+            &p("a"),
+            "q",
+            Some(4),
+            None,
+            Tier::Middle,
+            &Ask::default(),
+            T0,
+        )
+        .unwrap();
+        // The last statement of the join (the colleague's session) fails.
+        w.execute_batch(
+            "CREATE TRIGGER boom BEFORE INSERT ON session
+             BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        )
+        .unwrap();
+        assert!(request_join(&w, a.channel, &p("a"), &p("b"), Some(2), T0).is_err());
+        assert_eq!(get(&w, a.task).unwrap().turns_left, 4);
+        let tasks: i64 = w
+            .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tasks, 1);
+        assert!(
+            !channel::get(&w, a.channel)
+                .unwrap()
+                .has(&Actor::Person(p("b")))
+        );
+        assert!(w.is_autocommit(), "no transaction is left open");
     }
 
     #[test]

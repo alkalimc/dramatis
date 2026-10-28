@@ -256,54 +256,60 @@ pub fn get(conn: &Connection, id: FactId) -> Result<Fact> {
 /// Delete: gone from retrieval, seeds and every reader; restorable. Retracting a hurt
 /// gives back the trust it took.
 pub fn retract(conn: &Connection, id: FactId) -> Result<()> {
-    let f = get(conn, id)?;
-    if f.retracted {
-        return Ok(());
-    }
-    conn.execute("UPDATE fact SET retracted = 1 WHERE id = ?1", [id])?;
-    if f.kind == FactKind::Hurt {
-        trust::undo_hurt(conn, &f)?;
-    }
-    Ok(())
+    crate::atomic(conn, |conn| {
+        let f = get(conn, id)?;
+        if f.retracted {
+            return Ok(());
+        }
+        conn.execute("UPDATE fact SET retracted = 1 WHERE id = ?1", [id])?;
+        if f.kind == FactKind::Hurt {
+            trust::undo_hurt(conn, &f)?;
+        }
+        Ok(())
+    })
 }
 
 /// Undo a delete. Restoring a hurt takes its trust again.
 pub fn restore(conn: &Connection, id: FactId) -> Result<()> {
-    let f = get(conn, id)?;
-    if !f.retracted {
-        return Ok(());
-    }
-    conn.execute("UPDATE fact SET retracted = 0 WHERE id = ?1", [id])?;
-    if f.kind == FactKind::Hurt {
-        trust::redo_hurt(conn, &f)?;
-    }
-    Ok(())
+    crate::atomic(conn, |conn| {
+        let f = get(conn, id)?;
+        if !f.retracted {
+            return Ok(());
+        }
+        conn.execute("UPDATE fact SET retracted = 0 WHERE id = ?1", [id])?;
+        if f.kind == FactKind::Hurt {
+            trust::redo_hurt(conn, &f)?;
+        }
+        Ok(())
+    })
 }
 
 /// Edit = retract + a new fact by the user with the same kind, audience, subject and due.
 /// When the new text repeats an existing fact, that fact is returned (restored if it was
 /// deleted: the user wrote it again on purpose).
 pub fn edit(conn: &Connection, id: FactId, text: &str, now: i64) -> Result<FactId> {
-    let old = get(conn, id)?;
-    let new = NewFact {
-        author: Actor::User,
-        audience: old.audience.clone(),
-        kind: old.kind,
-        about: old.about.clone(),
-        due: old.due,
-        text: text.to_owned(),
-    };
-    if normalize(text).is_empty() {
-        return Err(Error::Invalid("a memory needs some text".into()));
-    }
-    retract(conn, id)?;
-    match write(conn, &new, now)? {
-        Written::New(n) => Ok(n),
-        Written::Duplicate { existing, .. } => {
-            restore(conn, existing)?;
-            Ok(existing)
+    crate::atomic(conn, |conn| {
+        let old = get(conn, id)?;
+        let new = NewFact {
+            author: Actor::User,
+            audience: old.audience.clone(),
+            kind: old.kind,
+            about: old.about.clone(),
+            due: old.due,
+            text: text.to_owned(),
+        };
+        if normalize(text).is_empty() {
+            return Err(Error::Invalid("a memory needs some text".into()));
         }
-    }
+        retract(conn, id)?;
+        match write(conn, &new, now)? {
+            Written::New(n) => Ok(n),
+            Written::Duplicate { existing, .. } => {
+                restore(conn, existing)?;
+                Ok(existing)
+            }
+        }
+    })
 }
 
 /// Every fact, oldest first; retracted ones only when asked for (the drawer's view).
@@ -430,23 +436,25 @@ pub fn conclusion_of(conn: &Connection, task: TaskId) -> Result<Option<Fact>> {
 /// Write or replace the user's conclusion on a question: visible to everyone; replacing
 /// retracts the old one.
 pub fn write_conclusion(conn: &Connection, task: TaskId, text: &str, now: i64) -> Result<FactId> {
-    crate::task::get(conn, task)?;
-    let old = conclusion_of(conn, task)?;
-    let new = NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, text)
-        .about(About::Task(task));
-    if let Some(old) = &old {
-        if normalize(&old.text) == normalize(text) {
-            return Ok(old.id);
+    crate::atomic(conn, |conn| {
+        crate::task::get(conn, task)?;
+        let old = conclusion_of(conn, task)?;
+        let new = NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, text)
+            .about(About::Task(task));
+        if let Some(old) = &old {
+            if normalize(&old.text) == normalize(text) {
+                return Ok(old.id);
+            }
+            retract(conn, old.id)?;
         }
-        retract(conn, old.id)?;
-    }
-    match write(conn, &new, now)? {
-        Written::New(id) => Ok(id),
-        Written::Duplicate { existing, .. } => {
-            restore(conn, existing)?;
-            Ok(existing)
+        match write(conn, &new, now)? {
+            Written::New(id) => Ok(id),
+            Written::Duplicate { existing, .. } => {
+                restore(conn, existing)?;
+                Ok(existing)
+            }
         }
-    }
+    })
 }
 
 /// The drawer's filter.

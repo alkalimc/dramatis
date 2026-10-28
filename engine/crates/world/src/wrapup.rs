@@ -93,88 +93,91 @@ pub fn apply(
     params: &WrapupParams,
     trust_params: &Trust,
 ) -> Result<Outcome> {
-    let ch = channel::get(conn, channel)?;
-    let audience = fact::channel_audience(channel);
-    let mut out = Outcome {
-        facts: Vec::new(),
-        hurt: None,
-        summary: None,
-        skipped: Vec::new(),
-    };
-
-    for m in &args.facts {
-        let text = m.text.trim();
-        if fact::normalize(text).is_empty() {
-            out.skipped.push(Skipped::Empty);
-            continue;
-        }
-        if out.facts.len() as u32 >= params.max_facts {
-            out.skipped.push(Skipped::OverLimit { text: text.into() });
-            continue;
-        }
-        let new = match m.kind {
-            MemoryKind::Fact => {
-                NewFact::new(author.clone(), audience.clone(), FactKind::Fact, text)
-                    .about(About::User)
-            }
-            MemoryKind::Commitment => {
-                let Some(due) = m.due.as_deref().and_then(|d| clock::parse_due(d, now)) else {
-                    out.skipped.push(Skipped::NoDue { text: text.into() });
-                    continue;
-                };
-                NewFact::new(author.clone(), audience.clone(), FactKind::Commitment, text).due(due)
-            }
+    crate::atomic(conn, |conn| {
+        let ch = channel::get(conn, channel)?;
+        let audience = fact::channel_audience(channel);
+        let mut out = Outcome {
+            facts: Vec::new(),
+            hurt: None,
+            summary: None,
+            skipped: Vec::new(),
         };
-        match fact::write(conn, &new, now.ms)? {
-            Written::New(id) => out.facts.push(id),
-            Written::Duplicate { existing, .. } => out.skipped.push(Skipped::Duplicate {
-                text: text.into(),
-                existing,
-            }),
-        }
-    }
 
-    if let Some(h) = &args.hurt {
-        let quote = h.quote.trim();
-        let target = h.person.clone().or_else(|| ch.person().cloned());
-        let valid = match &target {
-            Some(p) => ch.has(&Actor::Person(p.clone())) && !bond::is_disabled(conn, p)?,
-            None => false,
-        };
-        if fact::normalize(quote).is_empty() {
-            out.skipped.push(Skipped::Empty);
-        } else if !valid {
-            out.skipped.push(Skipped::NoTarget {
-                quote: quote.into(),
-            });
-        } else {
-            let person = target.expect("valid");
-            let new = NewFact::new(Actor::User, audience.clone(), FactKind::Hurt, quote)
-                .about(About::Person(person));
-            match fact::write(conn, &new, now.ms)? {
-                Written::New(id) => {
-                    trust::take_hurt(conn, &fact::get(conn, id)?, trust_params)?;
-                    out.hurt = Some(id);
+        for m in &args.facts {
+            let text = m.text.trim();
+            if fact::normalize(text).is_empty() {
+                out.skipped.push(Skipped::Empty);
+                continue;
+            }
+            if out.facts.len() as u32 >= params.max_facts {
+                out.skipped.push(Skipped::OverLimit { text: text.into() });
+                continue;
+            }
+            let new = match m.kind {
+                MemoryKind::Fact => {
+                    NewFact::new(author.clone(), audience.clone(), FactKind::Fact, text)
+                        .about(About::User)
                 }
+                MemoryKind::Commitment => {
+                    let Some(due) = m.due.as_deref().and_then(|d| clock::parse_due(d, now)) else {
+                        out.skipped.push(Skipped::NoDue { text: text.into() });
+                        continue;
+                    };
+                    NewFact::new(author.clone(), audience.clone(), FactKind::Commitment, text)
+                        .due(due)
+                }
+            };
+            match fact::write(conn, &new, now.ms)? {
+                Written::New(id) => out.facts.push(id),
                 Written::Duplicate { existing, .. } => out.skipped.push(Skipped::Duplicate {
-                    text: quote.into(),
+                    text: text.into(),
                     existing,
                 }),
             }
         }
-    }
 
-    out.summary = args
-        .summary
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|text| Summary {
-            channel,
-            audience,
-            text: text.into(),
-        });
-    Ok(out)
+        if let Some(h) = &args.hurt {
+            let quote = h.quote.trim();
+            let target = h.person.clone().or_else(|| ch.person().cloned());
+            let valid = match &target {
+                Some(p) => ch.has(&Actor::Person(p.clone())) && !bond::is_disabled(conn, p)?,
+                None => false,
+            };
+            if fact::normalize(quote).is_empty() {
+                out.skipped.push(Skipped::Empty);
+            } else if !valid {
+                out.skipped.push(Skipped::NoTarget {
+                    quote: quote.into(),
+                });
+            } else {
+                let person = target.expect("valid");
+                let new = NewFact::new(Actor::User, audience.clone(), FactKind::Hurt, quote)
+                    .about(About::Person(person));
+                match fact::write(conn, &new, now.ms)? {
+                    Written::New(id) => {
+                        trust::take_hurt(conn, &fact::get(conn, id)?, trust_params)?;
+                        out.hurt = Some(id);
+                    }
+                    Written::Duplicate { existing, .. } => out.skipped.push(Skipped::Duplicate {
+                        text: quote.into(),
+                        existing,
+                    }),
+                }
+            }
+        }
+
+        out.summary = args
+            .summary
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|text| Summary {
+                channel,
+                audience,
+                text: text.into(),
+            });
+        Ok(out)
+    })
 }
 
 /// The summary may open a new segment of `channel` only. Any other use is a leak.

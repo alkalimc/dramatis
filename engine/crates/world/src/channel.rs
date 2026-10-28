@@ -137,16 +137,18 @@ fn find_direct(conn: &Connection, owner: &str) -> Result<Option<ChannelId>> {
 }
 
 fn create_direct(conn: &Connection, owner: &str) -> Result<ChannelId> {
-    conn.execute(
-        "INSERT INTO channel(kind, origin, direct_with) VALUES ('direct', 'system', ?1)",
-        [owner],
-    )?;
-    let id = ChannelId(conn.last_insert_rowid());
-    conn.execute(
-        "INSERT INTO channel_participant(channel, participant) VALUES (?1, ?2)",
-        (id, owner),
-    )?;
-    Ok(id)
+    crate::atomic(conn, |conn| {
+        conn.execute(
+            "INSERT INTO channel(kind, origin, direct_with) VALUES ('direct', 'system', ?1)",
+            [owner],
+        )?;
+        let id = ChannelId(conn.last_insert_rowid());
+        conn.execute(
+            "INSERT INTO channel_participant(channel, participant) VALUES (?1, ?2)",
+            (id, owner),
+        )?;
+        Ok(id)
+    })
 }
 
 /// A person's direct channel, if it exists yet.
@@ -180,25 +182,27 @@ pub fn create_group(
     topic: Option<&str>,
     origin: Origin,
 ) -> Result<ChannelId> {
-    if members.is_empty() {
-        return Err(Error::Invalid("a group needs at least one member".into()));
-    }
-    for m in members {
-        bond::ensure_available(conn, m)?;
-    }
-    conn.execute(
-        "INSERT INTO channel(kind, origin, topic) VALUES ('group', ?1, ?2)",
-        (origin, topic),
-    )?;
-    let id = ChannelId(conn.last_insert_rowid());
-    for m in members {
+    crate::atomic(conn, |conn| {
+        if members.is_empty() {
+            return Err(Error::Invalid("a group needs at least one member".into()));
+        }
+        for m in members {
+            bond::ensure_available(conn, m)?;
+        }
         conn.execute(
-            "INSERT INTO channel_participant(channel, participant) VALUES (?1, ?2)
-             ON CONFLICT DO NOTHING",
-            (id, m),
+            "INSERT INTO channel(kind, origin, topic) VALUES ('group', ?1, ?2)",
+            (origin, topic),
         )?;
-    }
-    Ok(id)
+        let id = ChannelId(conn.last_insert_rowid());
+        for m in members {
+            conn.execute(
+                "INSERT INTO channel_participant(channel, participant) VALUES (?1, ?2)
+             ON CONFLICT DO NOTHING",
+                (id, m),
+            )?;
+        }
+        Ok(id)
+    })
 }
 
 /// Bring someone into a channel (a colleague pulled in, or the host appearing in a
@@ -239,25 +243,27 @@ pub fn set_mode(conn: &Connection, channel: ChannelId, mode: Mode) -> Result<()>
 /// Delete a group: its messages, sessions and logs go; the row and its participants stay,
 /// so memories scoped to it remain with the people who were there.
 pub fn delete_group(conn: &Connection, channel: ChannelId, now: i64) -> Result<()> {
-    let ch = get(conn, channel)?;
-    if ch.kind != ChannelKind::Group {
-        return Err(Error::Invalid(format!("channel {channel} is not a group")));
-    }
-    conn.execute(
-        "UPDATE channel SET deleted_at = ?2, log_segment = NULL WHERE id = ?1",
-        (channel, now),
-    )?;
-    conn.execute("DELETE FROM log_segment WHERE channel = ?1", [channel])?;
-    conn.execute(
+    crate::atomic(conn, |conn| {
+        let ch = get(conn, channel)?;
+        if ch.kind != ChannelKind::Group {
+            return Err(Error::Invalid(format!("channel {channel} is not a group")));
+        }
+        conn.execute(
+            "UPDATE channel SET deleted_at = ?2, log_segment = NULL WHERE id = ?1",
+            (channel, now),
+        )?;
+        conn.execute("DELETE FROM log_segment WHERE channel = ?1", [channel])?;
+        conn.execute(
         "UPDATE task SET reply = NULL WHERE reply IN (SELECT id FROM message WHERE channel = ?1)",
         [channel],
     )?;
-    conn.execute("DELETE FROM message WHERE channel = ?1", [channel])?;
-    conn.execute(
-        "UPDATE session SET closed_at = ?2 WHERE channel = ?1 AND closed_at IS NULL",
-        (channel, now),
-    )?;
-    Ok(())
+        conn.execute("DELETE FROM message WHERE channel = ?1", [channel])?;
+        conn.execute(
+            "UPDATE session SET closed_at = ?2 WHERE channel = ?1 AND closed_at IS NULL",
+            (channel, now),
+        )?;
+        Ok(())
+    })
 }
 
 /// Everything up to `up_to` has been seen. Never moves backwards.
@@ -276,15 +282,6 @@ pub fn set_log_segment(conn: &Connection, channel: ChannelId, segment: SegmentId
         (channel, segment),
     )?;
     Ok(())
-}
-
-/// Channels a person takes part in (deleted groups included: participation is history).
-pub fn channels_of(conn: &Connection, person: &PersonId) -> Result<Vec<ChannelId>> {
-    let mut stmt = conn.prepare(
-        "SELECT channel FROM channel_participant WHERE participant = ?1 ORDER BY channel",
-    )?;
-    let rows = stmt.query_map([person], |r| r.get(0))?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Live enabled groups a person is in: where he may speak unprompted.
@@ -445,6 +442,34 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_group_delete_leaves_the_group_whole() {
+        let w = world();
+        let g = create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        crate::message::append(&w, g, &Actor::User, "hi", None, None, 1).unwrap();
+        crate::log::open_segment(&w, g, [b"a", b"b", b"c"], "{}", None, 1).unwrap();
+        crate::session::open(
+            &w,
+            g,
+            &p("a"),
+            crate::session::Budget::User,
+            crate::session::Cause::Addressed,
+            1,
+        )
+        .unwrap();
+        // The last statement of the delete (closing sessions) fails.
+        w.execute_batch(
+            "CREATE TRIGGER boom BEFORE UPDATE ON session
+             BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        )
+        .unwrap();
+        assert!(delete_group(&w, g, 5).is_err());
+        let ch = get(&w, g).unwrap();
+        assert!(ch.deleted_at.is_none() && ch.log_segment.is_some());
+        assert_eq!(crate::message::last(&w, g).unwrap().unwrap().text, "hi");
+        assert!(crate::log::current(&w, g).unwrap().is_some());
+    }
+
+    #[test]
     fn groups_start_frozen_and_refuse_disabled_members() {
         let w = world();
         bond::set_mode(&w, &p("off"), Mode::Disabled).unwrap();
@@ -472,7 +497,6 @@ mod tests {
         let w = world();
         let g = create_group(&w, &[p("a")], None, Origin::User).unwrap();
         delete_group(&w, g, 5).unwrap();
-        assert_eq!(channels_of(&w, &p("a")).unwrap(), vec![g]);
         assert!(list(&w).unwrap().is_empty());
         assert!(matches!(
             add_participant(&w, g, &Actor::Person(p("b"))),
