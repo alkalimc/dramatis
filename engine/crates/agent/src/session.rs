@@ -261,17 +261,16 @@ impl Agent {
         }
         let b = assemble::block_b(&ctx, &members);
 
-        let tones: Vec<(&str, world::trust::Tone)> = people
-            .iter()
-            .zip(&names_of)
-            .map(|(p, name)| {
-                let trust = bond::user_bond(conn, p).map(|b| b.trust).unwrap_or(100);
-                (
-                    name.as_str(),
-                    world::trust::tone(trust, &self.config.world.trust),
-                )
-            })
-            .collect::<Vec<_>>();
+        // These bytes are fixed for the segment's life: a failed read is an error, not a
+        // default tone.
+        let mut tones: Vec<(&str, world::trust::Tone)> = Vec::new();
+        for (p, name) in people.iter().zip(&names_of) {
+            let trust = bond::user_bond(conn, p)?.trust;
+            tones.push((
+                name.as_str(),
+                world::trust::tone(trust, &self.config.world.trust),
+            ));
+        }
         let reader = people.first();
         let mut memories = match reader {
             Some(p) => log::opening_memories(conn, ch, Some(p))?,
