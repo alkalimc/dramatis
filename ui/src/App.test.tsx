@@ -9,9 +9,12 @@ test("full form: header clock, waiting panel, host channel with action lines", a
   expect(screen.getByLabelText("In-world date and local time").closest("footer")).not.toBeNull();
   const panel = screen.getByRole("heading", { name: "Who's waiting" }).closest("section")!;
   expect(await within(panel).findByText("Mira Vale")).toBeDefined();
-  // Two rows at first; the rest are one click away.
+  // One pinned line at first; the list opens with two rows and the rest are one click away.
   expect(within(panel).queryByText("birthday today")).toBeNull();
-  await userEvent.setup().click(within(panel).getByRole("button", { name: "Show 2 more" }));
+  const user = userEvent.setup();
+  await user.click(within(panel).getByRole("button", { name: "Show the list" }));
+  expect(within(panel).queryByText("birthday today")).toBeNull();
+  await user.click(within(panel).getByRole("button", { name: "Show 2 more" }));
   expect(within(panel).getByText("birthday today")).toBeDefined();
   expect(await screen.findByText(/Host ▸ finding who knows/)).toBeDefined();
   // No unread badges or counts on the panel.
@@ -58,6 +61,7 @@ test("selection menu: where from, and who knows this", async () => {
   const user = userEvent.setup();
   renderApp();
   const panel = (await screen.findByRole("heading", { name: "Who's waiting" })).closest("section")!;
+  await user.click(await within(panel).findByRole("button", { name: "Show the list" }));
   await user.click(await within(panel).findByRole("button", { name: "Show 2 more" }));
   await user.click(await within(panel).findByText("Tess Arden"));
   await within(await screen.findByRole("log")).findByText(/Take the stairs by the fish market/);

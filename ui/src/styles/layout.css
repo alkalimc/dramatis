@@ -71,7 +71,7 @@ button.rail-item {
   color: var(--muted);
   font-size: var(--fs-xs);
   padding: var(--s-3) var(--s-1) var(--s-2);
-  min-height: 4.4rem;
+  min-height: 5.4rem;
 }
 button.rail-item:hover {
   background: var(--panel);
@@ -87,8 +87,8 @@ button.rail-item.on {
 }
 .rail-icon .badge {
   position: absolute;
-  top: -0.45rem;
-  left: 55%;
+  top: -0.5rem;
+  left: 58%;
   min-width: 1.2rem;
   height: 1.2rem;
   line-height: 1.2rem;
@@ -201,6 +201,12 @@ button.chat-row.selected {
   align-items: center;
   gap: var(--s-2);
 }
+.chat-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-name {
   flex: 1;
   min-width: 0;
@@ -208,9 +214,6 @@ button.chat-row.selected {
   align-items: center;
   gap: var(--s-1);
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chat-time,
 .chat-pin {
@@ -525,8 +528,8 @@ button.drawer-item:hover,
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 1px;
-  background: var(--line);
+  gap: 2px;
+  background: transparent;
 }
 .avatar-grid .avatar {
   --size: 100%;
@@ -539,7 +542,7 @@ button.drawer-item:hover,
   font-size: calc(var(--avatar-xl) * 0.22);
 }
 .avatar-grid .avatar:nth-child(even) {
-  background: var(--line);
+  background: var(--field);
 }
 .avatar-grid.grid-2,
 .avatar-grid.grid-3 {

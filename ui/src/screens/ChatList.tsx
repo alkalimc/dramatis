@@ -271,7 +271,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
           <span className="chat-top">
             <span className="chat-name">
               {channel.kind === "group" && <Icon name="group" size={16} />}
-              {title}
+              <span className="chat-title">{title}</span>
             </span>
             {pinned && (
               <span className="chat-pin" role="img" aria-label={t("chatlist.pinned")}>

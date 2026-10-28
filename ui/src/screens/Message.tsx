@@ -32,7 +32,7 @@ function Choices({ actions }: { actions: ToolAction[] }) {
   const choices = useMemo(() => choicesOf(actions), [actions]);
   if (choices.length === 0) return null;
   return (
-    <div className="choices">
+    <div className="choices message-offers">
       {choices.map((c) =>
         c.kind === "person" ? (
           <button key={`p:${c.id}`} type="button" className="ghost" onClick={() => acts.openDirect(c.id)}>
@@ -217,10 +217,11 @@ export const MessageView = memo(function MessageView({
   );
 
   return (
+    <>
+    <ActionLines author={message.author} actions={message.actions} />
     <article id={`m-${message.id}`} className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}>
       {!mine && <div className="message-avatar">{last && <SpeakerAvatar author={message.author} name={name} />}</div>}
       <div className="message-stack">
-        <ActionLines author={message.author} actions={message.actions} />
         <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
           {parts.map((b, i) => (
             <BubbleView key={i} b={b} label={i === 0 ? label : null} foot={i === parts.length - 1 ? foot : null} />
@@ -229,13 +230,13 @@ export const MessageView = memo(function MessageView({
           {message.attachment && <img className="attachment" src={api.mediaUrl(message.attachment.path)} alt="" />}
         </div>
 
-        {message.author.kind === "host" && <Choices actions={message.actions} />}
-
         {sourcesOpen && <SourcesPanel cites={message.cites} onClose={() => dispatch({ type: "sources", message: message.id })} />}
         {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
       </div>
       {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}
     </article>
+    {message.author.kind === "host" && <Choices actions={message.actions} />}
+    </>
   );
 });
 

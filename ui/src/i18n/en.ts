@@ -71,6 +71,8 @@ export const en = {
   // ---- waiting panel ----
   "waiting.title": "Who's waiting",
   "waiting.empty": "Nobody is waiting on you.",
+  "waiting.expand": "Show the list",
+  "waiting.collapse": "Hide the list",
   "waiting.more": "Show {count} more",
   "waiting.less": "Show less",
   "activity.messaged": "messaged you",

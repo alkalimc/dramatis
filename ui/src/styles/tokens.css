@@ -71,11 +71,11 @@
   --rail-w: 5.3rem;
   --list-w: clamp(16rem, 22vw, 19.5rem);
   --info-w: 22rem;
-  --row-h: 4.5rem;
-  --head-h: 3.9rem;
+  --row-h: 5.1rem;
+  --head-h: 4.5rem;
   --avatar-s: 1.75rem;
   --avatar-m: 2.4rem;
-  --avatar-l: 3.3rem;
+  --avatar-l: 3.9rem;
   --avatar-xl: 7rem;
   --bubble-r: 12px;
 

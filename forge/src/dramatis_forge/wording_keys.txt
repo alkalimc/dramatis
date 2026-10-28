@@ -536,7 +536,9 @@ typing.tool
 typing.writing
 user.title
 user.you
+waiting.collapse
 waiting.empty
+waiting.expand
 waiting.less
 waiting.more
 waiting.title

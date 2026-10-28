@@ -193,7 +193,7 @@ function Rail() {
           <li>
             <button type="button" className={`rail-item${current === null ? " on" : ""}`} aria-pressed={current === null} onClick={() => dispatch({ type: "drawer", drawer: null })}>
               <span className="rail-icon">
-                <Icon name="chats" size={26} />
+                <Icon name="chats" size={30} />
                 {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
               </span>
               <span className="rail-label">{t("nav.chats")}</span>
@@ -208,7 +208,7 @@ function Rail() {
                 onClick={() => dispatch({ type: "drawer", drawer: current === n.key ? null : n.drawer })}
               >
                 <span className="rail-icon">
-                  <Icon name={n.icon} size={26} />
+                  <Icon name={n.icon} size={30} />
                 </span>
                 <span className="rail-label">{t(`nav.${n.key}`)}</span>
               </button>
