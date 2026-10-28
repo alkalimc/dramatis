@@ -10,6 +10,8 @@ use crate::{Error, Result};
 
 pub const USER_NAME: &str = "user.name";
 pub const USER_BIRTHDAY: &str = "user.birthday";
+/// File name of the user's own picture under the home's uploads directory.
+pub const USER_AVATAR: &str = "user.avatar";
 pub const INTENSITY: &str = "intensity";
 pub const QUIET_HOURS: &str = "quiet_hours";
 pub const NOTIFICATIONS: &str = "notifications";

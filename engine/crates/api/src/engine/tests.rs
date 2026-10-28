@@ -51,7 +51,8 @@ fn fixture() -> TempFolio {
             "revision_url_pattern",
             r#""https://wiki.example/?oldid={revid}&p={page}""#,
         )
-        .manifest("avatar_url_pattern", r#""https://img.example/{page}.png""#);
+        .manifest("avatar_url_pattern", r#""https://img.example/{page}.png""#)
+        .manifest("player_avatar_page", r#""Player""#);
     b.person("amy", Some("03-05"));
     b.person("kal", None);
     b.person("zed", None);
@@ -1044,4 +1045,229 @@ async fn saves_switch_keep_their_own_worlds_and_guard_the_open_one() {
         e.settings().await.unwrap().user_name.as_deref(),
         Some("Bea")
     );
+}
+
+/// Base64 of `bytes` (tests only; the engine just decodes).
+fn b64(bytes: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            if i <= c.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn png_part(tag: u8) -> ImagePart {
+    ImagePart {
+        mime: "image/png".into(),
+        data_base64: b64(&[0x89, b'P', b'N', b'G', 13, 10, 26, 10, tag]),
+    }
+}
+
+#[tokio::test]
+async fn the_user_avatar_defaults_to_the_player_portrait_and_can_be_replaced() {
+    let png = b"\x89PNG\r\n\x1a\nplayer".to_vec();
+    let net = Arc::new(Net(Some(png.clone()), Mutex::new(0)));
+    let r = rig_with(net.clone());
+    let e = &r.engine;
+
+    let default = e.user_avatar().await.unwrap().unwrap();
+    assert_eq!(std::fs::read(&default.path).unwrap(), png);
+    assert!(default.path.contains("media"));
+    e.user_avatar().await.unwrap();
+    assert_eq!(*net.1.lock().unwrap(), 1, "cached like a person's avatar");
+
+    let own = e.set_user_avatar(Some(png_part(1))).await.unwrap().unwrap();
+    assert!(own.path.contains("uploads"));
+    assert_eq!(e.user_avatar().await.unwrap().unwrap(), own);
+    // The same picture again is the same file.
+    assert_eq!(
+        e.set_user_avatar(Some(png_part(1))).await.unwrap().unwrap(),
+        own
+    );
+
+    assert_eq!(
+        e.set_user_avatar(Some(ImagePart {
+            mime: "image/png".into(),
+            data_base64: b64(b"<html>"),
+        }))
+        .await,
+        Err(ApiError::Invalid {
+            field: "image".into()
+        })
+    );
+    assert_eq!(
+        e.user_avatar().await.unwrap().unwrap(),
+        own,
+        "refusal changes nothing"
+    );
+
+    assert_eq!(e.set_user_avatar(None).await.unwrap().unwrap(), default);
+    // No portrait configured and none set: nothing.
+    assert_eq!(rig().engine.user_avatar().await.unwrap().map(|_| ()), None);
+}
+
+#[tokio::test]
+async fn channels_carry_a_name_an_avatar_and_an_archive_flag() {
+    let r = rig();
+    let e = &r.engine;
+    let g = e
+        .create_group(vec![id("amy"), id("kal")], None)
+        .await
+        .unwrap();
+    let wg = convert::world_channel(&g).unwrap();
+    {
+        let w = e.w();
+        world::message::append(&w, wg, &world::Actor::User, "hi", None, None, 1).unwrap();
+    }
+    let row = |e: &Engine| {
+        e.channels_impl()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == g)
+            .unwrap()
+    };
+    let fresh = row(e);
+    assert_eq!(
+        (fresh.name, fresh.avatar, fresh.archived),
+        (None, None, false)
+    );
+
+    e.rename_channel(g.clone(), Some(" Night shift ".into()))
+        .await
+        .unwrap();
+    let file = e
+        .set_channel_avatar(g.clone(), Some(png_part(2)))
+        .await
+        .unwrap()
+        .unwrap();
+    e.archive_channel(g.clone(), true).await.unwrap();
+    let c = row(e);
+    assert_eq!(c.name.as_deref(), Some("Night shift"));
+    assert_eq!(c.avatar, Some(file));
+    assert!(c.archived);
+    assert!(matches!(
+        r.events.take().last(),
+        Some(Event::WorldChanged(_))
+    ));
+
+    // The user writing does not bring it back; a person does.
+    {
+        let w = e.w();
+        world::message::append(&w, wg, &world::Actor::User, "again", None, None, 2).unwrap();
+    }
+    assert!(row(e).archived);
+    {
+        let w = e.w();
+        let amy = world::Actor::Person(world::PersonId("amy".into()));
+        world::message::append(&w, wg, &amy, "here", None, None, 3).unwrap();
+    }
+    assert!(!row(e).archived);
+
+    e.rename_channel(g.clone(), None).await.unwrap();
+    assert_eq!(e.set_channel_avatar(g.clone(), None).await.unwrap(), None);
+    let c = row(e);
+    assert!(c.name.is_none() && c.avatar.is_none());
+
+    let host = e.host_channel().await.unwrap();
+    assert_eq!(
+        e.archive_channel(host, true).await,
+        Err(ApiError::Invalid {
+            field: "channel".into()
+        })
+    );
+    assert_eq!(
+        e.set_channel_avatar(
+            g,
+            Some(ImagePart {
+                mime: "image/png".into(),
+                data_base64: "!!".into(),
+            })
+        )
+        .await,
+        Err(ApiError::Invalid {
+            field: "image".into()
+        })
+    );
+}
+
+#[tokio::test]
+async fn another_process_writing_the_world_is_noticed() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    let wc = convert::world_channel(&ch).unwrap();
+    // The first look only records where things stand.
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert_eq!(e.poll_external().unwrap(), 0);
+    r.events.take();
+
+    // The terminal: its own connection to the same file.
+    let other = world::World::open(e.home.save_path(&e.home.current_save())).unwrap();
+    let said = world::message::append(
+        &other,
+        wc,
+        &world::Actor::User,
+        "from the terminal",
+        None,
+        None,
+        5,
+    )
+    .unwrap();
+    let mine = world::message::append(
+        &other,
+        wc,
+        &world::Actor::User,
+        "from my agent",
+        None,
+        None,
+        6,
+    )
+    .unwrap();
+    // The agent's message was announced by this process already.
+    let announced = e.history_impl(&ch, None, 10).unwrap();
+    let mine_id = announced
+        .iter()
+        .find(|m| m.text == "from my agent")
+        .unwrap()
+        .id
+        .clone();
+    e.ports
+        .seen
+        .record(&Event::MessageAdded(crate::events::MessageAdded {
+            message: announced.iter().find(|m| m.id == mine_id).unwrap().clone(),
+        }));
+
+    // While a reply is being written nothing is announced.
+    r.spy.busy.store(true, Ordering::Relaxed);
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(r.events.take().is_empty());
+    r.spy.busy.store(false, Ordering::Relaxed);
+
+    assert_eq!(e.poll_external().unwrap(), 1);
+    let events = r.events.take();
+    let added: Vec<_> = events
+        .iter()
+        .filter_map(|ev| match ev {
+            Event::MessageAdded(m) => Some(m.message.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(added, ["from the terminal"]);
+    assert!(events.iter().any(|ev| matches!(ev,
+        Event::WorldChanged(w) if w.changes.contains(&WorldChange::Channel { id: ch.clone() }))));
+    let _ = (said, mine);
+
+    // Nothing new, nothing announced.
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(r.events.take().is_empty());
 }

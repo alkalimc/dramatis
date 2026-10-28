@@ -81,6 +81,9 @@ impl Engine {
                     .map(|p| self.person_ref(p.as_str()))
                     .collect(),
                 topic: ch.topic.clone(),
+                name: ch.name.clone(),
+                avatar: self.upload_file(ch.avatar.as_deref()),
+                archived: ch.archived,
                 mode: convert::mode(mode),
                 last_at: last.map(|m| convert::ts(m.at, offset)),
             });

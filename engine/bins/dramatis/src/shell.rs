@@ -111,6 +111,8 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
     tauri::async_runtime::spawn(async move {
         probe.probe_network().await;
     });
+    // The terminal client shares the world database; notice what it writes.
+    tauri::async_runtime::spawn(api::Engine::watch_external(Arc::downgrade(&engine)));
     *app.state::<Current>()
         .0
         .lock()
