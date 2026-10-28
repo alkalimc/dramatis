@@ -300,3 +300,20 @@ def test_say_prefers_pack_text_then_framework_default(pack):
 def test_term_columns_follow_every_record_order():
     from dramatis_forge.report.inspect import _merge_orders
     assert _merge_orders([["b", "d"], ["a", "b", "c", "d"], ["e"]]) == ["a", "b", "c", "d", "e"]
+
+
+def test_wording_command_refreshes_the_folio_in_place(built, pack):
+    from typer.testing import CliRunner
+
+    from dramatis_forge.cli import app
+
+    with Folio(built.folio) as folio:
+        folio.set_meta("wording", {"stale.key": "x"})
+        before = folio.get_meta("build_fingerprint")
+        folio.db.execute("INSERT INTO prompts(subject,slot,body,generator_version) VALUES('p','system','keep',1)")
+    out = CliRunner().invoke(app, ["wording", "--pack", "toy", "--home", str(built.home)])
+    assert out.exit_code == 0, out.output
+    with Folio(built.folio, readonly=True) as folio:
+        assert folio.get_meta("wording") == dict(pack.wording)
+        assert folio.get_meta("build_fingerprint") == before
+        assert folio.db.execute("SELECT body FROM prompts WHERE subject='p'").fetchone()[0] == "keep"

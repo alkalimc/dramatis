@@ -193,7 +193,7 @@ describe("persons without a persona", () => {
     renderWith(<PersonDrawer id={id} />, { patch });
     expect(await screen.findByText("Not available yet")).toBeDefined();
     expect((screen.getByRole("button", { name: "Talk" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Ask something" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Ask them something" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
