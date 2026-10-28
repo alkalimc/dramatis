@@ -83,6 +83,15 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.interject", "{name} may add one line."),
     ("harness.chorus", "{name} answers too, after the others."),
     ("harness.collective", "everyone everybody"),
+    ("harness.next_mark", "\u{2192}"),
+    (
+        "harness.next",
+        "In a group, a member may hand the turn on. Only if the reply really calls for one \
+         particular member to answer next, end it with one final line that starts with {mark} \
+         followed by the names of those members, separated by commas, and nothing else on \
+         that line. If a citation line is also written, this line comes last. Most replies \
+         hand the turn to nobody. The user and the host are never named there.",
+    ),
     (
         "harness.address",
         "Decide who the last message in a group chat speaks to. Members:\n{members}\n\n\
