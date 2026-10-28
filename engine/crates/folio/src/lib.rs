@@ -252,16 +252,6 @@ impl Folio {
             .map_err(Into::into)
     }
 
-    /// People whose birthday is `mm_dd` (`MM-DD`), ordered by id.
-    pub fn persons_born_on(&self, mm_dd: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT person_id FROM persons WHERE birthday = ?1 ORDER BY person_id",
-        )?;
-        let rows = stmt.query_map([mm_dd], |row| row.get::<_, String>(0))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
-    }
-
     /// Everyone who shares scenes with `person`, most shared scenes first.
     ///
     /// Pairs are stored once with `a < b`, so both columns are searched.

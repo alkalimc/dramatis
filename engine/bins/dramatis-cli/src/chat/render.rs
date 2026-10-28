@@ -64,85 +64,13 @@ impl Marker {
     /// The inside of a scene line, or `None` when the line is not one. Only whole lines
     /// count, and a doubled marker (emphasis) is not a scene.
     pub fn inner<'a>(&self, line: &'a str) -> Option<&'a str> {
-        let (open, close) = (self.open.as_str(), self.close.as_str());
-        let line = line.trim();
-        if open.is_empty() || close.is_empty() || line.len() <= open.len() + close.len() {
-            return None;
-        }
-        if !line.starts_with(open) || !line.ends_with(close) {
-            return None;
-        }
-        let inner = &line[open.len()..line.len() - close.len()];
-        if inner.starts_with(open) || inner.ends_with(close) || inner.trim().is_empty() {
-            return None;
-        }
-        Some(inner.trim())
+        api::cites::scene_inner(line, &self.open, &self.close)
     }
 
     /// Whether a line still being written could turn out to be a scene line.
     fn may_open(&self, partial: &str) -> bool {
         let p = partial.trim_start();
         !self.open.is_empty() && (p.starts_with(&self.open) || self.open.starts_with(p))
-    }
-}
-
-/// `text` without its `[#id]` citation marks (one id, or several separated by commas in
-/// one bracket, each optionally prefixed by `#`), with the blanks before a mark and at
-/// line ends removed. The marks tell the engine which passages a reply drew on; a reader
-/// sees those as the sources, not inside the speech.
-pub fn without_cites(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0;
-    while i < text.len() {
-        if text[i..].starts_with("[#")
-            && let Some(end) = cite_end(text, i)
-        {
-            out.truncate(out.trim_end_matches([' ', '\t']).len());
-            i = end;
-            continue;
-        }
-        let c = text[i..].chars().next().unwrap_or_default();
-        out.push(c);
-        i += c.len_utf8().max(1);
-    }
-    out.split('\n')
-        .map(|l| l.trim_end_matches([' ', '\t']))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Where the citation mark starting at `start` (`[#`) ends, if it is one.
-fn cite_end(text: &str, start: usize) -> Option<usize> {
-    let mut rest = &text[start + 2..];
-    let mut at = start + 2;
-    let take = |rest: &mut &str, at: &mut usize| -> Option<()> {
-        let n = rest
-            .find(|c: char| c == ']' || c == ',' || c.is_whitespace())
-            .unwrap_or(rest.len());
-        let chars = rest[..n].chars().count();
-        if chars == 0 || chars > 128 {
-            return None;
-        }
-        *rest = &rest[n..];
-        *at += n;
-        Some(())
-    };
-    take(&mut rest, &mut at)?;
-    loop {
-        let trimmed = rest.trim_start();
-        at += rest.len() - trimmed.len();
-        rest = trimmed;
-        if let Some(r) = rest.strip_prefix(',') {
-            let t = r.trim_start();
-            at += 1 + (r.len() - t.len());
-            rest = t.strip_prefix('#').map_or(t, |s| {
-                at += 1;
-                s
-            });
-            take(&mut rest, &mut at)?;
-        } else {
-            return rest.starts_with(']').then_some(at + 1);
-        }
     }
 }
 
@@ -155,7 +83,7 @@ pub fn message(text: &str, marker: &Marker, style: Style) -> String {
         match marker.inner(line) {
             Some(inner) => lines.push(style.scene(inner)),
             None => {
-                let speech = without_cites(line);
+                let speech = api::cites::strip(line);
                 if speech.trim().is_empty() && !line.trim().is_empty() {
                     continue;
                 }
@@ -236,7 +164,7 @@ impl Streamer {
         {
             return self.write(&format!("{}\n", self.style.scene(inner)));
         }
-        let speech = without_cites(&line);
+        let speech = api::cites::strip(&line);
         let rest = speech.get(printed..).unwrap_or_default();
         if printed == 0 && speech.trim().is_empty() {
             // A blank line waits for what follows; a line of marks alone is dropped.
@@ -267,7 +195,7 @@ impl Streamer {
             end = open;
         }
         let safe = self.line[..end].trim_end_matches([' ', '\t']);
-        let speech = without_cites(safe);
+        let speech = api::cites::strip(safe);
         let out = speech.get(self.printed..).unwrap_or_default().to_owned();
         self.printed = speech.len().max(self.printed);
         if out.is_empty() {
@@ -286,21 +214,6 @@ mod tests {
             open: "(".into(),
             close: ")".into(),
         }
-    }
-
-    #[test]
-    fn cites_are_removed_with_the_blank_before_them() {
-        assert_eq!(without_cites("It works [#u2]."), "It works.");
-        assert_eq!(without_cites("a [#u1, #u2] b [#x,y]"), "a b");
-        assert_eq!(without_cites("two  \t[#a]\nnext [#b]  "), "two\nnext");
-        // Not citations: no hash, empty id, unclosed, too long.
-        assert_eq!(
-            without_cites("see [1] and [#] and [#abc"),
-            "see [1] and [#] and [#abc"
-        );
-        let long = format!("x [#{}]", "a".repeat(129));
-        assert_eq!(without_cites(&long), long);
-        assert_eq!(without_cites("[#a b]"), "[#a b]");
     }
 
     #[test]

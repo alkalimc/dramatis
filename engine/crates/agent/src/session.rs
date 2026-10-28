@@ -462,9 +462,9 @@ impl Agent {
     /// Ids a segment has already shown: every `[#id]` the harness wrote into it.
     pub(crate) fn seen(&self, seg: SegmentId) -> Result<HashSet<String>> {
         let log = self.log(seg)?;
-        let mut out: HashSet<String> = assemble::ids_in(&log.system[2]).into_iter().collect();
+        let mut out: HashSet<String> = api::cites::ids(&log.system[2]).into_iter().collect();
         for t in log.items.iter().flat_map(request::harness_texts) {
-            out.extend(assemble::ids_in(t));
+            out.extend(api::cites::ids(t));
         }
         Ok(out)
     }
@@ -1054,7 +1054,7 @@ impl Agent {
         };
         let mut out: Vec<world::Citation> = Vec::new();
         let ix = self.ix();
-        for id in assemble::ids_in(text) {
+        for id in api::cites::ids(text) {
             let Some(id) = assemble::resolve_id(&id, shown.iter().chain(seen.iter())) else {
                 continue;
             };

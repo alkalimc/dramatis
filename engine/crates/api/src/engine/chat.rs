@@ -3,6 +3,7 @@
 use world::{bond, channel, message, settings};
 
 use super::{Engine, io};
+use crate::cites;
 use crate::convert::{self, world_err, world_person};
 use crate::error::{ApiError, ApiResult};
 use crate::events::WorldChange;
@@ -14,56 +15,14 @@ use crate::views::*;
 /// The most messages one `history` call returns.
 const HISTORY_MAX: u32 = 500;
 
-/// `text` without the scene-description spans: speech is read, stage directions are not.
+/// `text` as it is read aloud: scene lines (whole lines, as the screen sets them apart)
+/// and citation marks are not speech.
 fn spoken(text: &str, open: &str, close: &str) -> String {
-    if open.is_empty() || close.is_empty() {
-        return text.to_owned();
-    }
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(start) = rest.find(open) {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + open.len()..];
-        match after.find(close) {
-            Some(end) => rest = &after[end + close.len()..],
-            // An unclosed marker swallows the rest of the line, as the UI renders it.
-            None => return out,
-        }
-    }
-    out.push_str(rest);
-    without_cites(&out)
-}
-
-/// `text` without its `[#id]` citation marks (one id, or a comma-separated list): they
-/// name sources, they are not speech.
-fn without_cites(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(i) = rest.find("[#") {
-        let tail = &rest[i + 2..];
-        match tail.find(']') {
-            Some(end) if is_cite_list(&tail[..end]) => {
-                out.push_str(rest[..i].trim_end_matches([' ', '\t']));
-                rest = &tail[end + 1..];
-            }
-            _ => {
-                out.push_str(&rest[..i + 2]);
-                rest = tail;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// The inside of a citation bracket after its first `#`: ids, each optionally prefixed
-/// by `#`, separated by commas with optional spaces.
-fn is_cite_list(inside: &str) -> bool {
-    !inside.starts_with(char::is_whitespace)
-        && inside.split(',').all(|item| {
-            let id = item.trim().trim_start_matches('#');
-            !id.is_empty() && id.len() <= 128 && !id.contains(char::is_whitespace)
-        })
+    let speech: Vec<&str> = text
+        .lines()
+        .filter(|l| cites::scene_inner(l, open, close).is_none())
+        .collect();
+    cites::strip(&speech.join("\n"))
 }
 
 impl Engine {
@@ -353,19 +312,14 @@ mod tests {
     use super::spoken;
 
     #[test]
-    fn scene_spans_are_not_read() {
+    fn scene_lines_are_not_read() {
         assert_eq!(
-            spoken("*waves* Hello. *sits* Well.", "*", "*"),
-            " Hello.  Well."
+            spoken("*waves*\nHello. *sits* Well.\n*leaves*", "*", "*"),
+            "Hello. *sits* Well."
         );
-        assert_eq!(spoken("Hi *unclosed", "*", "*"), "Hi ");
-        assert_eq!(spoken("(a) b", "(", ")"), " b");
+        assert_eq!(spoken("(a) b", "(", ")"), "(a) b");
         assert_eq!(spoken("plain", "", ""), "plain");
         assert_eq!(spoken("Yes. [#voice:ab12] Go.", "*", "*"), "Yes. Go.");
         assert_eq!(spoken("[# not an id] ok", "*", "*"), "[# not an id] ok");
-        assert_eq!(
-            spoken("Yes [#a:1,#b:2] and [#c:3, #d:4] go [#e:5, ].", "*", "*"),
-            "Yes and go [#e:5, ]."
-        );
     }
 }
