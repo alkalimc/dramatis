@@ -239,6 +239,10 @@ harness.remembered
 harness.rules
 harness.speaker
 harness.summary
+harness.task
+harness.task.active
+harness.task.failed
+harness.task.interrupted
 harness.tone.close
 harness.tone.deep
 harness.tone.guarded

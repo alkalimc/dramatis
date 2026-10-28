@@ -31,6 +31,28 @@ pub struct Task {
     pub channel: Option<ChannelId>,
     pub reply: Option<MessageId>,
     pub created_at: Option<i64>,
+    /// Set when the request ended without an answer.
+    pub failure: Option<Failure>,
+    /// The host has been shown the failure.
+    pub failure_told: bool,
+}
+
+/// Why a request ended without an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Failure {
+    /// Its run errored or never started.
+    Failed,
+    /// The app stopped while it was open.
+    Interrupted,
+}
+
+impl Failure {
+    fn as_str(self) -> &'static str {
+        match self {
+            Failure::Failed => "failed",
+            Failure::Interrupted => "interrupted",
+        }
+    }
 }
 
 impl Task {
@@ -41,7 +63,7 @@ impl Task {
 }
 
 const COLUMNS: &str = "id, question, assignee, parent, turns_left, granted, status, pinned, cites, \
-                       note_path, channel, reply, created_at";
+                       note_path, channel, reply, created_at, failure, failure_told";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Task> {
     let cites: String = row.get("cites")?;
@@ -59,6 +81,12 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Task> {
         channel: row.get("channel")?,
         reply: row.get("reply")?,
         created_at: row.get("created_at")?,
+        failure: match row.get::<_, Option<String>>("failure")?.as_deref() {
+            Some("failed") => Some(Failure::Failed),
+            Some("interrupted") => Some(Failure::Interrupted),
+            _ => None,
+        },
+        failure_told: row.get("failure_told")?,
     })
 }
 
@@ -458,6 +486,63 @@ pub fn force_close(
     report(conn, &person, id, text, cites, None, office, now)
 }
 
+/// End an open request that has no answer coming: it is done with no reply, its
+/// session closes and `why` is kept for the host and the UI. Does nothing to a request
+/// that is already done. Returns whether it changed.
+pub fn fail(conn: &Connection, id: TaskId, why: Failure, now: i64) -> Result<bool> {
+    let n = conn.execute(
+        "UPDATE task SET status = 'done', turns_left = 0, failure = ?2
+         WHERE id = ?1 AND status = 'active'",
+        (id, why.as_str()),
+    )?;
+    if n > 0 {
+        session::close_for_task(conn, id, now)?;
+    }
+    Ok(n > 0)
+}
+
+/// Requests a person was given that are still open: the user's and the host's, not
+/// pinned questions and not colleagues pulled in (those end with their root).
+pub fn open_requests(conn: &Connection) -> Result<Vec<Task>> {
+    query(
+        conn,
+        "status = 'active' AND pinned = 0 AND assignee IS NOT NULL AND granted IS NOT NULL",
+        [],
+    )
+}
+
+/// Requests that ended without an answer and that the host has not been told about.
+pub fn untold_failures(conn: &Connection) -> Result<Vec<Task>> {
+    query(
+        conn,
+        "failure IS NOT NULL AND failure_told = 0 AND assignee IS NOT NULL",
+        [],
+    )
+}
+
+pub fn mark_told(conn: &Connection, id: TaskId) -> Result<()> {
+    conn.execute("UPDATE task SET failure_told = 1 WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// App start: nothing is running, so every open request is a leftover of a crash or a
+/// quit. They are marked interrupted rather than resumed: a resume would spend model
+/// calls the user did not just ask for. Returns the ones changed.
+pub fn interrupt_open(conn: &Connection, now: i64) -> Result<Vec<TaskId>> {
+    let open: Vec<Task> = query(
+        conn,
+        "status = 'active' AND pinned = 0 AND assignee IS NOT NULL",
+        [],
+    )?;
+    let mut out = Vec::new();
+    for t in open {
+        if fail(conn, t.id, Failure::Interrupted, now)? {
+            out.push(t.id);
+        }
+    }
+    Ok(out)
+}
+
 /// Requests done since `since` whose answer the user has not read: "replied" in the
 /// digest.
 pub fn replied_unread(conn: &Connection) -> Result<Vec<Task>> {
@@ -473,7 +558,7 @@ pub fn replied_unread(conn: &Connection) -> Result<Vec<Task>> {
 /// How many requests a person has finished.
 pub fn done_count(conn: &Connection, person: &PersonId) -> Result<u32> {
     Ok(conn.query_row(
-        "SELECT count(*) FROM task WHERE assignee = ?1 AND status = 'done'",
+        "SELECT count(*) FROM task WHERE assignee = ?1 AND status = 'done' AND failure IS NULL",
         [person],
         |r| r.get(0),
     )?)
@@ -598,6 +683,44 @@ mod tests {
             request_join(&w, c, &p("zz"), &p("b"), None, T0),
             Err(Error::NotParticipant { .. })
         ));
+    }
+
+    #[test]
+    fn failed_and_interrupted_requests_end_without_a_reply() {
+        let w = world();
+        let ask1 = |q: &str| {
+            ask(
+                &w,
+                &p("a"),
+                q,
+                Some(3),
+                None,
+                Tier::Middle,
+                &Ask::default(),
+                T0,
+            )
+            .unwrap()
+        };
+        let (x, y) = (ask1("one"), ask1("two"));
+        let pinned = open_case(&w, "case", T0).unwrap();
+        assert_eq!(open_requests(&w).unwrap().len(), 2);
+        assert!(fail(&w, x.task, Failure::Failed, T0).unwrap());
+        // A second call, or one on a finished request, changes nothing.
+        assert!(!fail(&w, x.task, Failure::Interrupted, T0).unwrap());
+        let t = get(&w, x.task).unwrap();
+        assert_eq!(
+            (t.status, t.failure, t.reply, t.turns_left),
+            (TaskStatus::Done, Some(Failure::Failed), None, 0)
+        );
+        assert_eq!(untold_failures(&w).unwrap().len(), 1);
+        mark_told(&w, x.task).unwrap();
+        assert!(untold_failures(&w).unwrap().is_empty());
+        assert_eq!(done_count(&w, &p("a")).unwrap(), 0);
+        // App start: what is still open is interrupted; a pinned question is left alone.
+        assert_eq!(interrupt_open(&w, T0).unwrap(), vec![y.task]);
+        assert_eq!(get(&w, y.task).unwrap().failure, Some(Failure::Interrupted));
+        assert_eq!(get(&w, pinned).unwrap().status, TaskStatus::Active);
+        assert!(open_requests(&w).unwrap().is_empty());
     }
 
     #[test]

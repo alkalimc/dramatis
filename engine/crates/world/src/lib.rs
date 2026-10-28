@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
+    include_str!("../migrations/0004.sql"),
 ];
 
 /// The schema version a fully migrated database reports.
