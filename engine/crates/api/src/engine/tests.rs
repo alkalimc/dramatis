@@ -131,6 +131,10 @@ impl AgentPort for Spy {
         self.calls.lock().unwrap().push(format!("ask {} {q}", p.0));
         Ok(TaskId("1".into()))
     }
+    async fn wrapup(&self, c: ChannelId) -> ApiResult<()> {
+        self.calls.lock().unwrap().push(format!("wrapup {}", c.0));
+        Ok(())
+    }
     async fn presence(&self, _: bool) -> ApiResult<()> {
         self.calls.lock().unwrap().push("presence".into());
         Ok(())
@@ -565,6 +569,11 @@ async fn people_without_a_persona_are_visible_but_cannot_be_reached() {
         r.spy.calls.lock().unwrap().last().unwrap(),
         &format!("send {} hi", ch.0)
     );
+    e.wrapup(ch.clone()).await.unwrap();
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        &format!("wrapup {}", ch.0)
+    );
 }
 
 #[tokio::test]
@@ -573,9 +582,10 @@ async fn no_chat_role_means_no_model_commands() {
     let e = &r.engine;
     let ch = e.open_direct(id("amy")).await.unwrap();
     assert_eq!(
-        e.send_message(ch, "hi".into(), None).await,
+        e.send_message(ch.clone(), "hi".into(), None).await,
         Err(ApiError::NoEndpoint)
     );
+    assert_eq!(e.wrapup(ch).await, Err(ApiError::NoEndpoint));
     assert_eq!(
         e.ask(id("amy"), "q".into(), None, None).await,
         Err(ApiError::NoEndpoint)

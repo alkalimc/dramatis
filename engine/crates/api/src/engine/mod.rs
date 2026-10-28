@@ -457,6 +457,9 @@ impl Api for Engine {
     ) -> ApiResult<MessageId> {
         self.send_message_impl(channel, text, image).await
     }
+    async fn wrapup(&self, channel: ChannelId) -> ApiResult<()> {
+        self.wrapup_impl(channel).await
+    }
     async fn relay(&self, excerpt: String, from: MessageId, to: PersonId) -> ApiResult<ChannelId> {
         self.relay_impl(excerpt, from, to).await
     }

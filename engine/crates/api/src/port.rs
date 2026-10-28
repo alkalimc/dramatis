@@ -1,9 +1,9 @@
 //! Everything the engine reaches outside its own files, behind traits the app supplies.
 //!
 //! * [`AgentPort`]: whatever needs a model call (a user turn and its replies, a relay, a
-//!   request, the host's line and the openings on presence, event seeds, the rollover
-//!   after a rename). The app implements it over the `agent` crate, which depends on this
-//!   crate for the seam types, so this crate never names it.
+//!   request, a forced wrap-up, the host's line and the openings on presence, event seeds,
+//!   the rollover after a rename). The `runtime` crate implements it over the `agent`
+//!   crate, which depends on this crate for the seam types, so this crate never names it.
 //! * [`LlmPort`]: the endpoint calls that are not a session (`GET /models`, voices,
 //!   `/audio/speech`), implemented over the shared LLM client.
 //! * [`KeyStore`]: the system keychain. [`NetPort`]: plain fetches from the corpus's
@@ -56,6 +56,10 @@ pub trait AgentPort: Send + Sync + 'static {
         turns: Option<u32>,
         parent: Option<TaskId>,
     ) -> ApiResult<TaskId>;
+
+    /// End the channel's conversation now and write what is worth remembering from it.
+    /// Runs in the background; the facts it writes arrive as `WorldChanged`.
+    async fn wrapup(&self, channel: ChannelId) -> ApiResult<()>;
 
     /// The user is present (`opened`: the app was just opened). The digest is already on
     /// screen; this starts what presence asks of the model in the background: wrap-ups of
@@ -183,13 +187,7 @@ impl Clock for FixedClock {
     }
 }
 
-/// No agent and no LLM client behind the port.
-///
-/// TODO(integrator): once `agent` and `llm` are on main, implement [`AgentPort`] in
-/// `bins/dramatis` over `Arc<agent::Agent>` (`post` + spawned `respond` for
-/// `send_message`; `relay` likewise; `ask` + spawned `run_request`; `presence`,
-/// `on_event`, `on_rename` spawned; `set_endpoints` one to one), and [`LlmPort`] over
-/// `llm` (`models`, `voices`, `speech`). Then pass them in `Ports` instead of this.
+/// No agent and no LLM client behind the port: the library form.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Unwired;
 
@@ -219,6 +217,10 @@ impl AgentPort for Unwired {
         _: Option<u32>,
         _: Option<TaskId>,
     ) -> ApiResult<TaskId> {
+        Err(ApiError::NotImplemented)
+    }
+
+    async fn wrapup(&self, _: ChannelId) -> ApiResult<()> {
         Err(ApiError::NotImplemented)
     }
 

@@ -1,0 +1,22 @@
+[package]
+name = "runtime"
+description = "The engine's ports over the agent and the LLM client, shared by the desktop app and the terminal client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+api = { path = "../api" }
+agent = { path = "../agent" }
+llm = { path = "../llm" }
+index = { path = "../index" }
+world = { path = "../world" }
+async-trait.workspace = true
+rusqlite.workspace = true
+toml.workspace = true
+tokio = { version = "=1.53.1", features = ["rt", "sync", "time", "net"] }
+
+[dev-dependencies]
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
