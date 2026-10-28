@@ -481,6 +481,11 @@ async fn a_per_request_model_does_not_roll_for_material_and_records_no_points() 
             .unwrap()
     });
     assert_eq!(calls, 2);
+    let requests: i64 = e.agent.with_world(|w| {
+        w.query_row("SELECT SUM(requests) FROM meter", [], |r| r.get(0))
+            .unwrap()
+    });
+    assert_eq!(requests, 2, "each call is flagged for the hourly window");
 }
 
 #[tokio::test]

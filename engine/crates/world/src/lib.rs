@@ -39,6 +39,7 @@ pub use types::*;
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
+    include_str!("../migrations/0003.sql"),
 ];
 
 /// The schema version a fully migrated database reports.
@@ -285,6 +286,31 @@ mod tests {
         let ch = channel::get(&conn, ChannelId(1)).unwrap();
         assert_eq!(ch.person(), Some(&PersonId::from("p1")));
         assert_eq!(message::history(&conn, ch.id, None, 10).unwrap().len(), 1);
+    }
+
+    /// A schema-2 meter keeps its rows; they read as token-billed (no requests).
+    #[test]
+    fn migrates_schema_2_meter_rows_as_token_billed() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.execute_batch(
+            "INSERT INTO meter(at, shape, model, uncached, cached, output, points)
+                 VALUES (1, 'direct', 'm', 5, 0, 0, 5.0);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        assert_eq!(version(&conn), SCHEMA_VERSION);
+        let (pts, req): (f64, i64) = conn
+            .query_row("SELECT points, requests FROM meter", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((pts, req), (5.0, 0));
+        let st = quota::status(&conn, Tier::Middle, 2, &params::Quota::default()).unwrap();
+        assert_eq!(st.band, quota::Band::Open);
     }
 
     #[test]

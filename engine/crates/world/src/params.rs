@@ -54,12 +54,19 @@ per_tier! {
     Window7d [750_000.0, 2_000_000.0, 5_000_000.0, 12_000_000.0, 30_000_000.0]
 }
 
-/// `quota.*`: rolling windows in quota points (uncached-input-token equivalents).
+per_tier! {
+    /// `quota.window_1h_requests[tier]`: calls on request-billed models per rolling hour.
+    Window1hRequests [40.0, 80.0, 160.0, 320.0, 640.0]
+}
+
+/// `quota.*`: rolling windows in quota points (uncached-input-token equivalents), and for
+/// request-billed models in requests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Quota {
     pub window_5h: Window5h,
     pub window_7d: Window7d,
+    pub window_1h_requests: Window1hRequests,
     /// Use fraction of the tighter window at which unprompted speech stops.
     pub quiet_at: f64,
 }
@@ -69,6 +76,7 @@ impl Default for Quota {
         Self {
             window_5h: Window5h::default(),
             window_7d: Window7d::default(),
+            window_1h_requests: Window1hRequests::default(),
             quiet_at: 0.8,
         }
     }

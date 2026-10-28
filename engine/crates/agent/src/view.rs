@@ -133,6 +133,7 @@ pub fn tier(tier_: Tier) -> t::Tier {
 
 fn span(s: Span) -> WindowSpan {
     match s {
+        Span::OneHour => WindowSpan::OneHour,
         Span::FiveHours => WindowSpan::FiveHours,
         Span::SevenDays => WindowSpan::SevenDays,
     }

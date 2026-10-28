@@ -255,6 +255,7 @@ export const en = {
   "quota.tier.extra_high": "Extra High",
   "quota.tier.max": "Max",
   "quota.tier.ultra": "Ultra",
+  "quota.window.one_hour": "1 hour (requests)",
   "quota.window.five_hours": "5 hours",
   "quota.window.seven_days": "7 days",
   "quota.used": "{percent}%",

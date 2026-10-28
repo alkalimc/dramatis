@@ -1,5 +1,5 @@
-//! Quota: rolling 5-hour and 7-day windows over the usage meter, and the three bands
-//! of the tighter one. The agent records every call's usage; this module only keeps the
+//! Quota: rolling 5-hour and 7-day windows of points and a 1-hour window of requests
+//! (request-billed models) over the usage meter, and the three bands of the tightest. The agent records every call's usage; this module only keeps the
 //! books and decides. The tier without windows has no bands at all.
 
 use rusqlite::Connection;
@@ -9,6 +9,7 @@ use crate::types::{ChannelId, Shape, Tier};
 use crate::{Error, Result};
 
 pub const SPAN_5H_MS: i64 = 5 * 3_600_000;
+pub const SPAN_1H_MS: i64 = 3_600_000;
 pub const SPAN_7D_MS: i64 = 7 * 24 * 3_600_000;
 
 /// Token counts of one call, from the endpoint's `usage`. Reasoning tokens count as
@@ -44,7 +45,8 @@ pub fn points(usage: Usage, prices: Option<Prices>, cost: &Cost) -> f64 {
     usage.uncached as f64 + c * usage.cached as f64 + o * usage.output as f64
 }
 
-/// Record one call. Points are fixed now, with the prices now in force.
+/// Record one call. Points are fixed now, with the prices now in force. This is the
+/// token-billed path; request-billed calls are recorded by the agent with `requests = 1`.
 #[allow(clippy::too_many_arguments)]
 pub fn record_usage(
     conn: &Connection,
@@ -87,6 +89,8 @@ pub enum Band {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Span {
+    /// Counts requests, not points.
+    OneHour,
     FiveHours,
     SevenDays,
 }
@@ -94,6 +98,7 @@ pub enum Span {
 impl Span {
     pub fn ms(self) -> i64 {
         match self {
+            Self::OneHour => SPAN_1H_MS,
             Self::FiveHours => SPAN_5H_MS,
             Self::SevenDays => SPAN_7D_MS,
         }
@@ -104,6 +109,7 @@ impl Span {
 pub struct Window {
     pub span: Span,
     pub limit: f64,
+    /// Points used; on the one-hour window, requests made.
     pub points: f64,
     /// `points / limit`, 0 and up.
     pub used: f64,
@@ -167,11 +173,21 @@ fn band_of(u: f64, quota: &Quota) -> Band {
     }
 }
 
-/// Meter rows in `(now - span, now]`, oldest first.
-fn rows(conn: &Connection, now: i64, span: i64) -> Result<Vec<(i64, f64)>> {
-    let mut stmt =
-        conn.prepare("SELECT at, points FROM meter WHERE at > ?1 AND at <= ?2 ORDER BY at")?;
-    let rows = stmt.query_map((now - span, now), |r| Ok((r.get(0)?, r.get(1)?)))?;
+/// What a window sums over a meter row.
+fn column(span: Span) -> &'static str {
+    match span {
+        Span::OneHour => "requests",
+        _ => "points",
+    }
+}
+
+/// `(at, amount)` of the meter rows in `(now - span, now]`, oldest first.
+fn rows(conn: &Connection, now: i64, span: Span) -> Result<Vec<(i64, f64)>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT at, {col} FROM meter WHERE at > ?1 AND at <= ?2 AND {col} > 0 ORDER BY at",
+        col = column(span)
+    ))?;
+    let rows = stmt.query_map((now - span.ms(), now), |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -192,7 +208,7 @@ fn release(rows: &[(i64, f64)], target: f64, span: i64) -> Option<i64> {
 }
 
 fn window(conn: &Connection, span: Span, limit: f64, now: i64, quota: &Quota) -> Result<Window> {
-    let rows = rows(conn, now, span.ms())?;
+    let rows = rows(conn, now, span)?;
     let pts: f64 = rows.iter().map(|r| r.1).sum();
     let used = if limit > 0.0 {
         pts / limit
@@ -214,7 +230,11 @@ fn window(conn: &Connection, span: Span, limit: f64, now: i64, quota: &Quota) ->
 }
 
 pub fn status(conn: &Connection, tier: Tier, now: i64, quota: &Quota) -> Result<Status> {
-    let (Some(l5), Some(l7)) = (quota.window_5h.get(tier), quota.window_7d.get(tier)) else {
+    let (Some(l5), Some(l7), Some(l1)) = (
+        quota.window_5h.get(tier),
+        quota.window_7d.get(tier),
+        quota.window_1h_requests.get(tier),
+    ) else {
         return Ok(Status {
             tier,
             band: Band::Open,
@@ -227,11 +247,12 @@ pub fn status(conn: &Connection, tier: Tier, now: i64, quota: &Quota) -> Result<
     let windows = vec![
         window(conn, Span::FiveHours, l5, now, quota)?,
         window(conn, Span::SevenDays, l7, now, quota)?,
+        window(conn, Span::OneHour, l1, now, quota)?,
     ];
     let tight = windows
         .iter()
         .max_by(|a, b| a.used.total_cmp(&b.used))
-        .expect("two windows");
+        .expect("three windows");
     let u = tight.used;
     let band = band_of(u, quota);
     // Leaving the band needs every window below its threshold: the latest release wins.
@@ -271,11 +292,13 @@ pub fn decide(status: &Status, kind: CallKind) -> Decision {
     }
 }
 
-/// Points per call shape within `(now - span, now]`, for the spending breakdown.
+/// Points (requests, for the one-hour span) per call shape within `(now - span, now]`,
+/// for the spending breakdown.
 pub fn spent_by_shape(conn: &Connection, now: i64, span: Span) -> Result<Vec<(Shape, f64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT shape, sum(points) FROM meter WHERE at > ?1 AND at <= ?2 GROUP BY shape ORDER BY shape",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT shape, sum({}) FROM meter WHERE at > ?1 AND at <= ?2 GROUP BY shape ORDER BY shape",
+        column(span)
+    ))?;
     let rows = stmt.query_map((now - span.ms(), now), |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -390,6 +413,66 @@ mod tests {
         let st = status(&w, Tier::Middle, T0 + 5 * DAY, &q).unwrap();
         assert_eq!((st.band, st.binding), (Band::Quiet, Some(Span::SevenDays)));
         assert!(st.release_at.unwrap() > T0 + 5 * DAY);
+    }
+
+    /// A request-billed call: no points, one request.
+    fn request(conn: &Connection, at: i64) {
+        conn.execute(
+            "INSERT INTO meter(at, shape, model, uncached, cached, output, points, requests)
+             VALUES (?1, 'direct', 'r', 0, 0, 0, 0.0, 1)",
+            [at],
+        )
+        .unwrap();
+    }
+
+    fn few() -> Quota {
+        let mut q = small();
+        q.window_1h_requests.middle = 10.0;
+        q
+    }
+
+    #[test]
+    fn requests_fill_the_hour_window_and_release_an_hour_later() {
+        let w = world();
+        let q = few();
+        let s = |now| status(&w, Tier::Middle, now, &q).unwrap();
+        for i in 0..7 {
+            request(&w, T0 + i * 1000);
+        }
+        assert_eq!(s(T0 + 10_000).band, Band::Open);
+        request(&w, T0 + 7000);
+        let st = s(T0 + 10_000);
+        assert_eq!((st.band, st.binding), (Band::Quiet, Some(Span::OneHour)));
+        // Quiet ends once enough requests leave: 7 left is below 8.
+        assert_eq!(st.release_at, Some(T0 + HOUR));
+        request(&w, T0 + 8000);
+        request(&w, T0 + 9000);
+        let st = s(T0 + 10_000);
+        assert_eq!(
+            (st.band, st.binding),
+            (Band::Exhausted, Some(Span::OneHour))
+        );
+        assert_eq!(
+            st.release_at,
+            Some(T0 + HOUR),
+            "the first row leaves, 9 < 10"
+        );
+        assert!(!decide(&st, CallKind::UserInitiated).allowed());
+        assert_eq!(s(T0 + HOUR).band, Band::Quiet, "9 left, 9 >= 8");
+        assert_eq!(s(T0 + HOUR + 9000).band, Band::Open);
+        let by = spent_by_shape(&w, T0 + 10_000, Span::OneHour).unwrap();
+        assert_eq!(by, vec![(Shape::Direct, 10.0)]);
+    }
+
+    #[test]
+    fn token_use_alone_never_touches_the_hour_window() {
+        let w = world();
+        let q = few();
+        spend(&w, T0, 50);
+        let st = status(&w, Tier::Middle, T0, &q).unwrap();
+        let hour = st.windows.iter().find(|x| x.span == Span::OneHour).unwrap();
+        assert_eq!((hour.points, hour.used, hour.release_at), (0.0, 0.0, None));
+        assert_eq!(st.band, Band::Open);
     }
 
     #[test]

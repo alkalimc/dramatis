@@ -695,7 +695,9 @@ export type Waiting = {
 	activity: Activity,
 };
 
-export type WindowSpan = "five_hours" | "seven_days";
+export type WindowSpan = 
+/**  Request-billed calls, counted rather than priced. */
+"one_hour" | "five_hours" | "seven_days";
 
 export type WireApi = 
 /**  `POST {base_url}/chat/completions` */
