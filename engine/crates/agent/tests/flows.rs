@@ -1853,6 +1853,63 @@ async fn host_tool_actions_carry_what_a_front_end_needs_to_offer_a_switch() {
     assert!(matches!(old, ToolAction::CreateGroup { channel: None, .. }));
 }
 
+#[tokio::test]
+async fn list_channels_names_the_conversations_and_offers_each() {
+    use agent::Event;
+    use api::views::{ChannelKind, ToolAction};
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    // A direct channel never written to is not a conversation yet.
+    let _unused = direct(&e, "bo");
+    let ann = direct(&e, "ann");
+    e.fake.push([say("Ann: hello.")]);
+    e.agent.send(ann, "hi", None).await.unwrap();
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([say("Ann: here."), say("Bo: here.")]);
+    e.agent.send(g, "everyone?", None).await.unwrap();
+    e.sink.take();
+
+    e.fake.push([
+        call("list_channels", json!({})),
+        say("Two are open; pick one from the choices."),
+    ]);
+    e.agent
+        .send(host, "what can I go back to?", None)
+        .await
+        .unwrap();
+    let listed = e
+        .sink
+        .take()
+        .into_iter()
+        .find_map(|ev| match ev {
+            Event::ToolCalled(t) => match t.action {
+                ToolAction::ListChannels { channels } => Some(channels),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("a list_channels action");
+    // The host's own channel and the empty one are left out. The fake clock does not
+    // advance, so the order between the two is not asserted here.
+    assert_eq!(listed.len(), 2);
+    let group = listed
+        .iter()
+        .find(|c| c.kind == ChannelKind::Group)
+        .unwrap();
+    let direct = listed
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct)
+        .unwrap();
+    assert_eq!(group.id.0, g.to_string());
+    assert_eq!(direct.members.len(), 1);
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("group of") && log.contains("with "), "{log}");
+    // The usage guide is the host's alone.
+    assert!(log.contains("operates this place"));
+    assert!(!log_bytes(&e.agent, ann).contains("operates this place"));
+    assert!(!log_bytes(&e.agent, g).contains("operates this place"));
+}
+
 // ---- hand-offs: a reply may end with a line naming who speaks next ----
 
 fn texts(e: &Env, ch: world::ChannelId) -> Vec<(api::types::Author, String)> {

@@ -208,6 +208,12 @@ pub struct HostRemember {
     pub text: String,
 }
 
+/// List the user's conversations, most recent first. The user is shown a way to open each;
+/// you cannot move the user yourself.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListChannels {}
+
 /// Delete one remembered thing for the user. Only when the user asks. Can be restored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -240,6 +246,7 @@ pub enum HostCall {
     Search(HostSearch),
     Remember(HostRemember),
     Forget(Forget),
+    ListChannels(ListChannels),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -288,6 +295,7 @@ impl HostCall {
             "search" => Self::Search(args(name, raw)?),
             "remember" => Self::Remember(args(name, raw)?),
             "forget" => Self::Forget(args(name, raw)?),
+            "list_channels" => Self::ListChannels(args(name, raw)?),
             _ => return Err(CallError::Unknown(name.to_owned())),
         })
     }
@@ -368,6 +376,7 @@ pub fn host_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<HostSearch>("tool.host", "search", overrides),
         spec::<HostRemember>("tool.host", "remember", overrides),
         spec::<Forget>("tool.host", "forget", overrides),
+        spec::<ListChannels>("tool.host", "list_channels", overrides),
     ]
 }
 

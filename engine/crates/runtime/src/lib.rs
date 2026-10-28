@@ -19,6 +19,7 @@ use api::port::{self, Sink};
 use api::{Engine, Ports};
 use llm::{Retry, Transport};
 
+pub use agent::Frontend;
 pub use bridge::{AgentBridge, BridgeParts, Call};
 
 /// Everything a front end holds: the engine it issues commands to, and, when a corpus is
@@ -38,6 +39,8 @@ pub struct Options {
     pub keys: Option<Arc<dyn agent::endpoint::Keys>>,
     /// See [`BridgeParts::quiet`].
     pub quiet: bool,
+    /// Which front end this is; the host explains only that one's operations.
+    pub frontend: Frontend,
 }
 
 /// Hands the agent's events to the engine's sink, as the seam's own event type.
@@ -94,6 +97,7 @@ impl Runtime {
                 clock: Arc::new(ports::Local),
                 keys: options.keys,
                 quiet: options.quiet,
+                frontend: options.frontend,
             })
         });
         if let Some(b) = &bridge {

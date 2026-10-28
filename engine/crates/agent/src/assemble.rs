@@ -11,6 +11,7 @@ use index::{Hit, Item, Level, SearchResponse};
 use world::fact::Fact;
 use world::trust::Tone;
 
+use crate::agent::Frontend;
 use crate::persona::{HostLayers, Persona};
 use crate::text::{Names, Wording};
 
@@ -45,15 +46,50 @@ pub fn block_a(ctx: &Ctx<'_>, group: bool) -> String {
     parts.join("\n\n")
 }
 
-/// Block A of the host's own session: the same, then both of its layers. Only this
-/// block ever carries the meta layer.
-pub fn block_a_host(ctx: &Ctx<'_>, host_name: &str, layers: &HostLayers) -> String {
+/// What the host's usage guide covers, in the order it is written.
+const GUIDE_TOPICS: [&str; 8] = [
+    "channels",
+    "group",
+    "resend",
+    "sources",
+    "name",
+    "intensity",
+    "saves",
+    "memories",
+];
+
+/// How the host explains the front end the user is on: one line per operation, worded by
+/// the corpus, for that front end only.
+pub fn guide(ctx: &Ctx<'_>, frontend: Frontend) -> String {
+    let which = match frontend {
+        Frontend::App => "app",
+        Frontend::Terminal => "terminal",
+    };
+    let mut lines = vec![ctx.fill(&format!("harness.guide.{which}"), &[])];
+    lines.extend(
+        GUIDE_TOPICS
+            .iter()
+            .map(|t| ctx.fill(&format!("harness.guide.{which}.{t}"), &[])),
+    );
+    lines.push(ctx.fill("harness.guide.limits", &[]));
+    lines.join("\n")
+}
+
+/// Block A of the host's own session: the same, then both of its layers and the usage
+/// guide. Only this block ever carries the meta layer or the guide.
+pub fn block_a_host(
+    ctx: &Ctx<'_>,
+    host_name: &str,
+    layers: &HostLayers,
+    frontend: Frontend,
+) -> String {
     let mut parts = vec![block_a(ctx, false), heading(ctx, host_name)];
     for layer in [&layers.in_world, &layers.meta] {
         if !layer.trim().is_empty() {
             parts.push(ctx.names.sub(layer.trim()).into_owned());
         }
     }
+    parts.push(guide(ctx, frontend));
     parts.join("\n\n")
 }
 
@@ -887,7 +923,7 @@ mod tests {
             in_world: "IN <U>".into(),
             meta: "META".into(),
         };
-        let a = block_a_host(&ctx, "H", &layers);
+        let a = block_a_host(&ctx, "H", &layers, Frontend::Terminal);
         assert!(a.contains("IN Rhea") && a.contains("META"));
         let b = persona_section(
             &ctx,
@@ -898,5 +934,52 @@ mod tests {
         );
         assert!(b.contains("IN Rhea") && !b.contains("META"));
         assert_eq!(entry(&["hi", "", "  ", "ctx"]), "hi\n\nctx");
+    }
+
+    #[test]
+    fn the_guide_is_the_hosts_and_covers_only_its_front_end() {
+        let w = Wording::new(&BTreeMap::new());
+        let n = Names::new("<U>", Some("Rhea"), &w);
+        let ctx = Ctx {
+            wording: &w,
+            names: &n,
+            scene: ("*", "*"),
+        };
+        let layers = HostLayers {
+            in_world: String::new(),
+            meta: String::new(),
+        };
+        let terminal = block_a_host(&ctx, "H", &layers, Frontend::Terminal);
+        let app = block_a_host(&ctx, "H", &layers, Frontend::App);
+        assert!(terminal.contains("/talk") && !terminal.contains("Roster"));
+        assert!(app.contains("Roster") && !app.contains("/talk"));
+        // Both say what the host may claim: only what its tools did.
+        for text in [&terminal, &app] {
+            assert!(
+                text.contains("no queue") && text.contains("chase"),
+                "{text}"
+            );
+        }
+        // No key falls back to its own name: every line is worded.
+        assert!(!terminal.contains("harness.guide") && !app.contains("harness.guide"));
+        // Neither a person's persona section nor block A for persons carries it.
+        let person = Persona {
+            system: "SYS".into(),
+            tone: String::new(),
+            lines: String::new(),
+        };
+        let section = persona_section(
+            &ctx,
+            &Member::Person {
+                name: "P",
+                persona: &person,
+            },
+        );
+        for text in [section, block_a(&ctx, false), block_a(&ctx, true)] {
+            assert!(
+                !text.contains("/talk") && !text.contains("Roster"),
+                "{text}"
+            );
+        }
     }
 }

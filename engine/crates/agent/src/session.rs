@@ -205,7 +205,12 @@ impl Agent {
             None => Vec::new(),
         };
         if c.is_host_channel() {
-            let a = assemble::block_a_host(&ctx, &self.corpus.host_name, &self.corpus.host);
+            let a = assemble::block_a_host(
+                &ctx,
+                &self.corpus.host_name,
+                &self.corpus.host,
+                self.config.frontend,
+            );
             let c_block = assemble::block_c(
                 &ctx,
                 &assemble::Opening {

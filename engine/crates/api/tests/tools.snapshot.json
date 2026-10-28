@@ -215,6 +215,18 @@
           }
         },
         "type": "function"
+      },
+      {
+        "function": {
+          "description": "List the user's conversations, most recent first. The user is shown a way to open each;\nyou cannot move the user yourself.",
+          "name": "list_channels",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "type": "function"
       }
     ],
     "messages": [
@@ -408,6 +420,15 @@
           "type": "object"
         },
         "name": "forget"
+      },
+      {
+        "description": "List the user's conversations, most recent first. The user is shown a way to open each;\nyou cannot move the user yourself.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "name": "list_channels"
       }
     ],
     "responses": [
@@ -606,6 +627,16 @@
           "required": [
             "fact_id"
           ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "List the user's conversations, most recent first. The user is shown a way to open each;\nyou cannot move the user yourself.",
+        "name": "list_channels",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {},
           "type": "object"
         },
         "type": "function"

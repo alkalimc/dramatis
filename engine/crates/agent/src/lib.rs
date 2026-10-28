@@ -24,6 +24,6 @@ pub mod text;
 pub mod view;
 mod wrapup_json;
 
-pub use agent::{Agent, Clock, Config, Event, NoSink, Parts, Sink, SystemClock};
+pub use agent::{Agent, Clock, Config, Event, Frontend, NoSink, Parts, Sink, SystemClock};
 pub use error::{Error, Result};
 pub use flows::{Posted, PresenceOutcome};

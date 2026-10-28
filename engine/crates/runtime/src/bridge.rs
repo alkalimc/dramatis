@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use agent::endpoint::Keys;
-use agent::{Agent, Config, Parts};
+use agent::{Agent, Config, Frontend, Parts};
 use api::endpoints::Endpoints;
 use api::error::{ApiError, ApiResult};
 use api::home::Home;
@@ -51,6 +51,8 @@ pub struct BridgeParts {
     /// Keep background failures for [`AgentBridge::take_failures`] instead of printing
     /// them to stderr.
     pub quiet: bool,
+    /// Which front end the user is on.
+    pub frontend: Frontend,
 }
 
 /// The background work in flight.
@@ -150,6 +152,7 @@ impl AgentBridge {
             world,
             index,
             config: Config {
+                frontend: p.frontend,
                 world: p.params.world.clone(),
                 find_people: p.params.find_people.clone(),
                 agent: self.agent_params.clone(),

@@ -31,7 +31,7 @@ def test_key_list_matches_sources():
         LIST.write_text("\n".join(found) + "\n", encoding="utf-8")
     assert wording_keys() == found, "run with UPDATE_SNAPSHOTS=1 to regenerate wording_keys.txt"
     assert sum(k.startswith("harness.") for k in found) >= 40
-    assert sum(k.startswith("tool.") for k in found) == 14
+    assert sum(k.startswith("tool.") for k in found) == 15
 
 
 def test_missing_figure_counts_unworded_keys():

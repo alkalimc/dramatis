@@ -10,7 +10,7 @@ use api::error::ApiResult;
 use api::events::ActivityState;
 use api::port::{Event, Sink};
 use api::types::{Author, ChannelId, Citation, MessageId, PersonId, PersonRef};
-use api::views::{Message, ToolAction};
+use api::views::{ChannelKind, Message, ToolAction};
 use api::{Api, Engine};
 
 use super::render::{self, Marker, Streamer, Style};
@@ -196,10 +196,13 @@ pub fn action_line(action: &ToolAction) -> String {
         ),
         ToolAction::SetMode { mode, .. } => format!("set mode: {mode:?}").to_lowercase(),
         ToolAction::Forget { fact } => format!("forgot memory {}", fact.0),
+        ToolAction::ListChannels { channels } => {
+            format!("listed {} conversations", channels.len())
+        }
     }
 }
 
-/// What a host tool call lets the user click or pick: a found person, a created group.
+/// What a host tool call lets the user click or pick: a found person, a created or listed group.
 fn offers_of(action: &ToolAction) -> Vec<Offer> {
     match action {
         ToolAction::FindPeople { persons, .. } => persons
@@ -216,6 +219,22 @@ fn offers_of(action: &ToolAction) -> Vec<Offer> {
             channel: channel.clone(),
             members: members.clone(),
         }],
+        // An existing conversation opens by the same two offers a new one does: a direct
+        // channel is the person's, a group is entered by its id.
+        ToolAction::ListChannels { channels } => channels
+            .iter()
+            .filter_map(|c| match (c.kind, c.members.as_slice()) {
+                (ChannelKind::Direct, [p]) => Some(Offer::Person {
+                    id: p.id.0.clone(),
+                    name: p.name.clone(),
+                }),
+                (ChannelKind::Group, members) if !members.is_empty() => Some(Offer::Group {
+                    channel: c.id.clone(),
+                    members: members.to_vec(),
+                }),
+                _ => None,
+            })
+            .collect(),
         _ => Vec::new(),
     }
 }

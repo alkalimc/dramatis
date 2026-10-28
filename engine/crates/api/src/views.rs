@@ -296,6 +296,19 @@ pub enum ToolAction {
     Forget {
         fact: FactId,
     },
+    ListChannels {
+        /// The conversations listed, so a front end can offer to open each.
+        #[serde(default)]
+        channels: Vec<ChannelRef>,
+    },
+}
+
+/// A conversation named in a tool call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ChannelRef {
+    pub id: ChannelId,
+    pub kind: ChannelKind,
+    pub members: Vec<PersonRef>,
 }
 
 // ---- tasks and case files ----

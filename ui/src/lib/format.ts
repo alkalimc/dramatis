@@ -81,10 +81,12 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
       });
     case "forget":
       return t("action.forget");
+    case "list_channels":
+      return t("action.list_channels");
   }
 }
 
-/** Where the user can go from a host message: people it found, a group it made. */
+/** Where the user can go from a host message: people it found, groups it made or listed. */
 export type Choice = { kind: "person"; id: string; name: string } | { kind: "group"; channel: string; names: string[] };
 
 export function choicesOf(actions: ToolAction[]): Choice[] {
@@ -96,7 +98,15 @@ export function choicesOf(actions: ToolAction[]): Choice[] {
         ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name }))
         : a.tool === "create_group" && a.channel
           ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name) }]
-          : [];
+          : a.tool === "list_channels"
+            ? (a.channels ?? []).flatMap((c): Choice[] =>
+                c.kind === "group"
+                  ? [{ kind: "group", channel: c.id, names: c.members.map((m) => m.name) }]
+                  : c.kind === "direct" && c.members[0]
+                    ? [{ kind: "person", id: c.members[0].id, name: c.members[0].name }]
+                    : [],
+              )
+            : [];
     for (const c of found) {
       const key = c.kind === "person" ? `p:${c.id}` : `g:${c.channel}`;
       if (!seen.has(key)) {

@@ -238,6 +238,13 @@ export type ChannelKind = "direct" | "group" |
 /**  The host's own channel. */
 "host";
 
+/**  A conversation named in a tool call. */
+export type ChannelRef = {
+	id: ChannelId,
+	kind: ChannelKind,
+	members: PersonRef[],
+};
+
 export type ChannelSummary = {
 	id: ChannelId,
 	kind: ChannelKind,
@@ -677,7 +684,9 @@ export type ToolAction = { tool: "search"; query: string } | { tool: "get_chunk"
 /**  Who was found, so a front end can offer to open their channels. */
 persons?: PersonRef[] } | { tool: "ask"; person: PersonRef; question: string } | { tool: "create_group"; members: PersonRef[]; 
 /**  The new group, so a front end can offer to open it. Absent on older rows. */
-channel?: ChannelId | null } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId };
+channel?: ChannelId | null } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId } | { tool: "list_channels"; 
+/**  The conversations listed, so a front end can offer to open each. */
+channels?: ChannelRef[] };
 
 /**  A tool call, shown as a visible action line under the message it belongs to. */
 export type ToolCalled = {
