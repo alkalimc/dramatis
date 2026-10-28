@@ -441,6 +441,7 @@ const REFUSALS: &[&str] = &[
     "i can't assist with that",
     "i cannot fulfill this request",
     "i'm sorry, but i can't",
+    "i seem to be encountering an error",
 ];
 
 /// A refusal is a short reply with no CJK text that opens with a stock refusal. A phrase
@@ -761,6 +762,8 @@ mod tests {
     fn refusals_are_short_english_stock_phrases() {
         let canned = "I\u{2019}m having a hard time fulfilling your request. Can I help you with something else instead?";
         assert_eq!(refusal(canned), Refusal::Is);
+        let error = "I seem to be encountering an error. Can I try something else for you?";
+        assert_eq!(refusal(error), Refusal::Is);
         assert_eq!(refusal("I'm having a har"), Refusal::Maybe);
         assert_eq!(refusal(""), Refusal::Maybe);
         assert_eq!(refusal("I can't help laughing."), Refusal::No);
