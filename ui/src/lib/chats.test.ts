@@ -54,7 +54,7 @@ test("reminders (a birthday, a due commitment) never make a chat unread", () => 
   const digest = {
     items: [
       { person, channel: "c1", activity: { kind: "birthday" } as const },
-      { person, channel: "c1", activity: { kind: "commitment_due", fact: 1, text: "rest", due: "2026-01-01T10:00:00Z" } as const },
+      { person, channel: "c1", activity: { kind: "commitment_due", fact: "f1", text: "rest", due: "2026-01-01T10:00:00Z" } as const },
     ],
   };
   expect(unreadOf("c1", {}, digest)).toBe(0);
