@@ -1,6 +1,7 @@
 about.corpus
 about.corpus.by
 about.corpus.licence
+about.corpus.project
 about.issues
 about.license
 about.made_by

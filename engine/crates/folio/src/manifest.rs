@@ -23,7 +23,10 @@ pub const IMPLEMENTED: &[&str] = &["neighbor_expand"];
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct Credits {
     pub by: Option<String>,
+    /// The person's own page.
     pub url: Option<String>,
+    /// The project the corpus belongs to.
+    pub project: Option<String>,
     pub licence: Option<String>,
 }
 

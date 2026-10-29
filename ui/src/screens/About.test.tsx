@@ -18,12 +18,14 @@ test("the drawer footer opens About: name, version, author, links, licence and t
   const page = await openAbout(user);
   expect(within(page).getByRole("heading", { name: "Dramatis" })).toBeDefined();
   expect(within(page).getByText(`Version ${version}`)).toBeDefined();
-  expect(within(page).getByText("Made by alkali")).toBeDefined();
+  // The person links to their profile; the project's links go to the repository.
+  expect(within(page).getByRole("link", { name: "Made by alkali" }).getAttribute("href")).toBe("https://github.com/alkalimc");
   expect(within(page).getByRole("link", { name: "Source code on GitHub" }).getAttribute("href")).toBe("https://github.com/alkalimc/dramatis");
   expect(within(page).getByRole("link", { name: "Report a problem" }).getAttribute("href")).toBe("https://github.com/alkalimc/dramatis/issues");
   expect(within(page).getByText("Licence: Apache-2.0")).toBeDefined();
   const corpus = within(page).getByRole("link", { name: "Corpus built by the demo team · CC BY-NC-SA 4.0" });
-  expect(corpus.getAttribute("href")).toBe("https://example.org/demo-corpus");
+  expect(corpus.getAttribute("href")).toBe("https://example.org/demo-team");
+  expect(within(page).getByRole("link", { name: "Corpus project" }).getAttribute("href")).toBe("https://example.org/demo-corpus");
 });
 
 test("Check now shows the newer release with its page, and the drawer says so", async () => {

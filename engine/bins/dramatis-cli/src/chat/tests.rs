@@ -116,7 +116,8 @@ fn corpus(wording: &str, host: bool) -> TempFolio {
         .manifest("scene_marker", r#"["(", ")"]"#)
         .manifest(
             "credits",
-            r#"{"by":"Someone","url":"https://example.org/corpus","licence":"CC BY-NC-SA 4.0"}"#,
+            r#"{"by":"Someone","url":"https://example.org/me","project":"https://example.org/corpus",
+                "licence":"CC BY-NC-SA 4.0"}"#,
         );
     b.person("ann", None).person("bo", None).person("cy", None);
     b.alias("Annie", "ann", "term_exact");
@@ -1571,7 +1572,9 @@ async fn about_shows_the_build_and_checks_for_an_update_at_most_daily() {
         about.contains("Corpus built by Someone, licence CC BY-NC-SA 4.0"),
         "{about}"
     );
+    assert!(about.contains("https://example.org/me"), "{about}");
     assert!(about.contains("https://example.org/corpus"), "{about}");
+    assert!(about.contains("https://github.com/alkalimc\n"), "{about}");
     assert!(
         about.contains(
             "Update available: 99.0.0, https://github.com/alkalimc/dramatis/releases/tag/v99.0.0"

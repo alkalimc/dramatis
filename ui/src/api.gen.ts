@@ -396,6 +396,8 @@ export type AppForm =
 export type AppInfo = {
 	version: string,
 	author: string,
+	/**  The author's own page. */
+	author_url: string | null,
 	repository: string,
 	license: string,
 	/**  Who built the open corpus, when it says so. */
@@ -550,8 +552,10 @@ export type Confidence = "high" | "medium" | "low";
 /**  A corpus's credit line, from its manifest. */
 export type CorpusCredits = {
 	by: string | null,
-	/**  An https address, or nothing. */
+	/**  The person's own page: an https address, or nothing. */
 	url: string | null,
+	/**  The project's page when it is not this app's: an https address, or nothing. */
+	project: string | null,
 	licence: string | null,
 };
 

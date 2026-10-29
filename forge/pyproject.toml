@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.urls]
+Author = "https://github.com/alkalimc"
 Homepage = "https://github.com/alkalimc/dramatis"
 Repository = "https://github.com/alkalimc/dramatis"
 

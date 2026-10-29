@@ -244,7 +244,7 @@ the English defaults in `forge/src/dramatis_forge/text.py`.
 
 ## Licence
 
-Code: Apache-2.0, copyright 2026 alkali. A corpus built with this tool is not covered by that licence; it carries
+Code: Apache-2.0, copyright 2026 [alkali](https://github.com/alkalimc). A corpus built with this tool is not covered by that licence; it carries
 whatever terms its source has, and the attribution report gives the per-page provenance
 needed to honour them.
 

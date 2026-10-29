@@ -144,9 +144,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   const info: AppInfo = {
     version,
     author: "alkali",
+    author_url: "https://github.com/alkalimc",
     repository,
     license: "Apache-2.0",
-    corpus_credits: { by: "the demo team", url: "https://example.org/demo-corpus", licence: "CC BY-NC-SA 4.0" },
+    corpus_credits: { by: "the demo team", url: "https://example.org/demo-team", project: "https://example.org/demo-corpus", licence: "CC BY-NC-SA 4.0" },
   };
   const found = (auto: boolean): UpdateStatus => ({ current: version, latest: "99.0.0", url: `${repository}/releases/tag/v99.0.0`, newer: true, checked_at: iso(), auto });
   let update: UpdateStatus = params.get("update") === "1" ? found(true) : { current: version, latest: null, url: null, newer: false, checked_at: null, auto: true };

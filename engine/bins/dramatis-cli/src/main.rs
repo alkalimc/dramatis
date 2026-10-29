@@ -44,12 +44,15 @@ fn default_folio() -> Result<PathBuf> {
 #[command(
     name = "dramatis-cli",
     version,
-    author,
     about = "Inspect, query and measure a .folio corpus",
     after_help = concat!(
         "dramatis ",
         env!("CARGO_PKG_VERSION"),
-        ", made by alkali, Apache-2.0\n",
+        ", made by ",
+        env!("CARGO_PKG_AUTHORS"),
+        ", ",
+        env!("CARGO_PKG_LICENSE"),
+        "\n",
         env!("CARGO_PKG_REPOSITORY")
     )
 )]

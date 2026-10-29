@@ -2784,6 +2784,10 @@ async fn app_info_comes_from_the_build() {
     let info = rig().engine.app_info().await.unwrap();
     assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
     assert_eq!(info.author, "alkali");
+    assert_eq!(
+        info.author_url.as_deref(),
+        Some("https://github.com/alkalimc")
+    );
     assert_eq!(info.repository, "https://github.com/alkalimc/dramatis");
     assert_eq!(info.license, "Apache-2.0");
 }
@@ -2803,12 +2807,20 @@ async fn the_corpus_credit_comes_from_its_manifest_and_only_links_https() {
         (e, folio)
     };
     let (e, _f) = open(Some(
-        r#"{"by":"someone","url":"https://example.org/corpus","licence":"CC BY-NC-SA 4.0"}"#,
+        r#"{"by":"someone","url":"https://example.org/me","project":"https://example.org/corpus",
+            "licence":"CC BY-NC-SA 4.0"}"#,
     ));
     let c = e.app_info().await.unwrap().corpus_credits.unwrap();
     assert_eq!(c.by.as_deref(), Some("someone"));
-    assert_eq!(c.url.as_deref(), Some("https://example.org/corpus"));
+    assert_eq!(c.url.as_deref(), Some("https://example.org/me"));
+    assert_eq!(c.project.as_deref(), Some("https://example.org/corpus"));
     assert_eq!(c.licence.as_deref(), Some("CC BY-NC-SA 4.0"));
+    // The app's own repository is not repeated as the corpus's project.
+    let (e, _f) = open(Some(
+        r#"{"by":"someone","project":"https://github.com/alkalimc/dramatis/"}"#,
+    ));
+    let c = e.app_info().await.unwrap().corpus_credits.unwrap();
+    assert_eq!(c.project, None);
     // A link that is not https is dropped, the rest stays.
     let (e, _f) = open(Some(r#"{"by":"someone","url":"http://example.org"}"#));
     let c = e.app_info().await.unwrap().corpus_credits.unwrap();

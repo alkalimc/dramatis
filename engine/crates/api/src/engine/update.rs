@@ -10,15 +10,19 @@ impl Engine {
     pub(crate) fn app_info_impl(&self) -> AppInfo {
         let credits = self.corpus.as_ref().map(|c| &c.manifest.credits);
         let clean = |s: &Option<String>| s.clone().filter(|s| !s.trim().is_empty());
+        // Only a plain https address becomes a link.
+        let link = |s: &Option<String>| {
+            clean(s).filter(|u| {
+                u.starts_with("https://") && !u.chars().any(|c| c.is_whitespace() || c.is_control())
+            })
+        };
         AppInfo {
             corpus_credits: credits
                 .map(|c| CorpusCredits {
                     by: clean(&c.by),
-                    // Only a plain https address becomes a link.
-                    url: clean(&c.url).filter(|u| {
-                        u.starts_with("https://")
-                            && !u.chars().any(|c| c.is_whitespace() || c.is_control())
-                    }),
+                    url: link(&c.url),
+                    project: link(&c.project)
+                        .filter(|p| p.trim_end_matches('/') != update::REPOSITORY),
                     licence: clean(&c.licence),
                 })
                 .filter(|c| c.by.is_some() || c.licence.is_some()),

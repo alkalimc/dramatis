@@ -6,10 +6,20 @@ import { ExternalLink } from "../ui/ExternalLink";
 
 /** "Corpus built by X · licence", from whichever parts the corpus gives; a link when it gives a page. */
 function CorpusLine({ t, credits }: { t: T; credits: CorpusCredits }) {
-  const { by, licence, url } = credits;
+  const { by, licence, url, project } = credits;
   const text = by && licence ? t("about.corpus", { by, licence }) : by ? t("about.corpus.by", { by }) : licence ? t("about.corpus.licence", { licence }) : null;
   if (!text) return null;
-  return <p>{url ? <ExternalLink href={url}>{text}</ExternalLink> : text}</p>;
+  return (
+    <p>
+      {url ? <ExternalLink href={url}>{text}</ExternalLink> : text}
+      {project && (
+        <>
+          {" "}
+          <ExternalLink href={project}>{t("about.corpus.project")}</ExternalLink>
+        </>
+      )}
+    </p>
+  );
 }
 
 /** The about page of the settings card: who made this, which version, and the update check. */
@@ -34,7 +44,7 @@ export function AboutPage() {
       {version && <p>{t("menu.version", { version })}</p>}
       {info && (
         <>
-          <p>{t("about.made_by", { author: info.author })}</p>
+          <p>{info.author_url ? <ExternalLink href={info.author_url}>{t("about.made_by", { author: info.author })}</ExternalLink> : t("about.made_by", { author: info.author })}</p>
           {info.corpus_credits && <CorpusLine t={t} credits={info.corpus_credits} />}
           <ul className="about-links">
             <li>

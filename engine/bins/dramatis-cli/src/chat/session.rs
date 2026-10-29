@@ -2690,6 +2690,9 @@ impl Session {
         };
         said("cli.about.title", &[("version", &info.version)]);
         said("cli.about.author", &[("author", &info.author)]);
+        if let Some(url) = &info.author_url {
+            self.term.line(url);
+        }
         said("cli.about.license", &[("license", &info.license)]);
         self.term.line(&info.repository);
         if let Some(c) = &info.corpus_credits {
@@ -2701,7 +2704,7 @@ impl Session {
                     ("licence", c.licence.as_ref().unwrap_or(&none)),
                 ],
             );
-            if let Some(url) = &c.url {
+            for url in [&c.url, &c.project].into_iter().flatten() {
                 self.term.line(url);
             }
         }

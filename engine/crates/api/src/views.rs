@@ -43,6 +43,8 @@ pub struct AppStatus {
 pub struct AppInfo {
     pub version: String,
     pub author: String,
+    /// The author's own page.
+    pub author_url: Option<String>,
     pub repository: String,
     pub license: String,
     /// Who built the open corpus, when it says so.
@@ -53,16 +55,25 @@ pub struct AppInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct CorpusCredits {
     pub by: Option<String>,
-    /// An https address, or nothing.
+    /// The person's own page: an https address, or nothing.
     pub url: Option<String>,
+    /// The project's page when it is not this app's: an https address, or nothing.
+    pub project: Option<String>,
     pub licence: Option<String>,
 }
 
 impl AppInfo {
     pub fn current() -> Self {
+        // Cargo's `authors` entry reads `name (page)`.
+        let raw = env!("CARGO_PKG_AUTHORS");
+        let (author, author_url) = match raw.split_once(" (") {
+            Some((name, rest)) => (name, rest.strip_suffix(')')),
+            None => (raw, None),
+        };
         Self {
             version: crate::update::VERSION.into(),
-            author: env!("CARGO_PKG_AUTHORS").into(),
+            author: author.into(),
+            author_url: author_url.map(Into::into),
             repository: crate::update::REPOSITORY.into(),
             license: env!("CARGO_PKG_LICENSE").into(),
             corpus_credits: None,

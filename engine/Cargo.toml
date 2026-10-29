@@ -18,7 +18,7 @@ version = "1.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
-authors = ["alkali"]
+authors = ["alkali (https://github.com/alkalimc)"]
 repository = "https://github.com/alkalimc/dramatis"
 homepage = "https://github.com/alkalimc/dramatis"
 
