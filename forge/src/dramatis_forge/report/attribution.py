@@ -145,6 +145,7 @@ def values(attribution: Attribution, pack: Pack) -> dict[str, str]:
         "CREDIT_BY": pack.publication.credit_by or unset,
         "CREDIT_URL": pack.publication.credit_url or unset,
         "PROJECT_URL": pack.publication.project_url or unset,
+        "LICENCE": pack.publication.licence or unset,
         "PAGE_ROWS": _page_rows(attribution, pack),
         "GENERATED_AT": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
     }
