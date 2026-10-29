@@ -71,6 +71,9 @@ pub(crate) struct Turn {
     pub activity: Option<ActivityState>,
     /// Names the reply's closing hand-off line listed (group replies only).
     pub hand_off: Vec<String>,
+    /// This turn's person has no tool list (emulated tools), so a proposal to the host is a
+    /// closing line of the reply.
+    pub proposing: bool,
 }
 
 impl Turn {
@@ -93,6 +96,7 @@ impl Turn {
             wrapped: None,
             activity: None,
             hand_off: Vec::new(),
+            proposing: false,
         }
     }
 
@@ -228,7 +232,10 @@ impl Agent {
             );
             return Ok([a, String::new(), c_block]);
         }
-        let a = assemble::block_a(&ctx, c.kind == ChannelKind::Group);
+        // Where the persons' tools are emulated they get no tool list, so proposals to the
+        // host are a closing line, explained here.
+        let proposing = self.role_for(LogKind::Person)?.0.model.emulated_tools();
+        let a = assemble::block_a(&ctx, c.kind == ChannelKind::Group, proposing);
         let folio_guard = self.ix();
         let folio = folio_guard.folio();
         // Owner first, then everyone else in id order.
@@ -587,13 +594,14 @@ impl Agent {
             shape.tools.clear();
         }
         // The stored shape keeps the full list; only this call's request leaves it out.
-        if role.model.emulated_tools()
+        let proposing = role.model.emulated_tools()
             && kind == LogKind::Person
             && matches!(
                 turn.shape,
                 Shape::Direct | Shape::Group | Shape::Interject | Shape::Opening
-            )
-        {
+            );
+        turn.proposing = proposing;
+        if proposing {
             shape.tools.clear();
         }
         let log = self.log(seg)?;
@@ -642,11 +650,8 @@ impl Agent {
             let mut held = String::new();
             let mut holding = true;
             // A group reply's trailing hand-off line, held back until it is known not to be.
-            let mark = if turn.in_group() {
-                assemble::hand_off_mark(&self.corpus.wording)
-            } else {
-                ""
-            };
+            let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), proposing);
+            let mark_list = marks.list();
             let mut tail = String::new();
             while let Some(event) = events.next().await {
                 match event {
@@ -656,10 +661,10 @@ impl Agent {
                             if assemble::refusal(&held, self.corpus.cjk) == assemble::Refusal::No {
                                 holding = false;
                                 let all = std::mem::take(&mut held);
-                                self.stream_text(turn, &mut streamed, &mut tail, mark, all)?;
+                                self.stream_text(turn, &mut streamed, &mut tail, &mark_list, all)?;
                             }
                         } else {
-                            self.stream_text(turn, &mut streamed, &mut tail, mark, delta)?;
+                            self.stream_text(turn, &mut streamed, &mut tail, &mark_list, delta)?;
                         }
                     }
                     Ok(LlmEvent::Done(r)) => done = Some(r),
@@ -695,15 +700,12 @@ impl Agent {
             let refused = reply.tool_calls().next().is_none()
                 && assemble::refusal(&reply.text(), self.corpus.cjk) == assemble::Refusal::Is;
             if !refused && !held.is_empty() {
-                self.stream_text(turn, &mut streamed, &mut tail, mark, held)?;
+                self.stream_text(turn, &mut streamed, &mut tail, &mark_list, held)?;
             }
             // What is still held at the end is the closing line itself, or a start of
             // speech that only looked like one.
-            if !refused && !tail.is_empty() {
-                let (_, names) = assemble::split_hand_off(&tail, mark);
-                if names.is_empty() && !tail.trim_start().starts_with(mark) {
-                    self.stream_delta(turn, &mut streamed, std::mem::take(&mut tail))?;
-                }
+            if !refused && !tail.is_empty() && assemble::split_closing(&tail, marks).text == tail {
+                self.stream_delta(turn, &mut streamed, std::mem::take(&mut tail))?;
             }
             if refused && !retried {
                 // A fresh request, paid like any other; the refusal is not kept.
@@ -791,21 +793,21 @@ impl Agent {
         self.emit_quota()
     }
 
-    /// Show a piece of a reply as it arrives, keeping back a trailing line that is or may
-    /// become the hand-off line. With no marker it passes straight through.
+    /// Show a piece of a reply as it arrives, keeping back trailing lines that are or may
+    /// become closing lines. With no marker it passes straight through.
     fn stream_text(
         &self,
         turn: &mut Turn,
         streamed: &mut bool,
         tail: &mut String,
-        mark: &str,
+        marks: &[&str],
         delta: String,
     ) -> Result<()> {
-        if mark.is_empty() {
+        if marks.is_empty() {
             return self.stream_delta(turn, streamed, delta);
         }
         tail.push_str(&delta);
-        let n = assemble::shown_len(tail, mark);
+        let n = assemble::shown_len(tail, marks);
         if n > 0 {
             let rest = tail.split_off(n);
             let shown = std::mem::replace(tail, rest);
@@ -1173,11 +1175,14 @@ impl Agent {
             turn.actions.clear();
             return Ok(());
         }
+        let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), turn.proposing);
+        let closing = assemble::split_closing(&turn.text, marks);
+        turn.text = closing.text;
+        turn.hand_off = closing.hand_off;
+        if turn.proposing && (closing.find.is_some() || closing.group.is_some()) {
+            self.propose(turn, closing.find, closing.group)?;
+        }
         if turn.in_group() {
-            let mark = assemble::hand_off_mark(&self.corpus.wording);
-            let (text, names) = assemble::split_hand_off(&turn.text, mark);
-            turn.text = text;
-            turn.hand_off = names;
             // A model that starts by repeating the message before it word for word: the
             // copy is not this person's line.
             let before = message::history(&self.db(), turn.channel, turn.message, 1)?;

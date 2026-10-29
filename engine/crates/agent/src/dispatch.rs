@@ -469,6 +469,53 @@ impl Agent {
         Ok(Ok(self.say(names, "harness.suggested", &[])))
     }
 
+    /// A person's closing proposal line (where tools are emulated) takes the path of the
+    /// `ask_host` call, with its limits; a refused one is dropped, since nothing answers
+    /// the person. Names in a group line are the roster's display names, ids or aliases.
+    pub(crate) fn propose(
+        &self,
+        turn: &mut Turn,
+        find: Option<String>,
+        group: Option<Vec<String>>,
+    ) -> Result<()> {
+        let Some(me) = turn.speaker.person().cloned() else {
+            return Ok(());
+        };
+        let seg = self.current_segment(turn.channel)?;
+        let names = self.segment_names(seg)?;
+        let group = match group {
+            Some(listed) => {
+                let mut roster = Vec::new();
+                for p in self.offerable(&self.db())? {
+                    let display = self.display(&p)?;
+                    roster.push((PersonId::from(p.as_str()), display));
+                }
+                let ix = self.ix();
+                let by_alias = |n: &str| Ok(ix.folio().persons_for_alias(n)?);
+                let mut ids = Vec::new();
+                for n in &listed {
+                    // A name nobody answers to stays as written, which refuses the group.
+                    ids.push(match crate::address::member_named(n, &roster, by_alias)? {
+                        Some(p) => p.as_str().to_owned(),
+                        None => n.clone(),
+                    });
+                }
+                Some(ids)
+            }
+            None => None,
+        };
+        // Two lines are two calls; the second meets the one-per-reply limit.
+        for ask in [
+            tools::AskHost { find, group: None },
+            tools::AskHost { find: None, group },
+        ] {
+            if ask.find.is_some() || ask.group.is_some() {
+                let _ = self.ask_host(turn, &me, ask, &names)?;
+            }
+        }
+        Ok(())
+    }
+
     fn host(
         &self,
         turn: &mut Turn,

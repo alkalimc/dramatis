@@ -2829,6 +2829,183 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
     assert!(tool_actions(&q).is_empty());
 }
 
+// ---- emulated tools: a person proposes through a closing line of the reply ----
+
+const FIND: &str = "\u{21d2} find:";
+const GROUP: &str = "\u{21d2} group:";
+
+/// The events of a turn: streamed text, and the tool actions shown.
+fn turn_events(e: &Env) -> (String, Vec<api::views::ToolAction>) {
+    let mut streamed = String::new();
+    let mut actions = Vec::new();
+    for ev in e.sink.take() {
+        match ev {
+            agent::Event::MessageDelta(d) => streamed.push_str(&d.delta),
+            agent::Event::ToolCalled(t) => actions.push(t.action),
+            _ => {}
+        }
+    }
+    (streamed, actions)
+}
+
+#[tokio::test]
+async fn an_emulated_person_proposes_with_a_closing_line() {
+    use api::views::ToolAction;
+    let (e, ch) = emulated_env();
+    e.fake.push([say(&format!(
+        "Bo knows more than I do.\n{FIND} forge blade steel"
+    ))]);
+    e.agent.send(ch, "find someone for me", None).await.unwrap();
+    let (streamed, actions) = turn_events(&e);
+    // The line is neither streamed nor stored, and the offer waits under the message.
+    assert!(
+        !streamed.contains('\u{21d2}') && streamed.contains("Bo knows"),
+        "{streamed}"
+    );
+    assert!(
+        matches!(actions.as_slice(), [ToolAction::FindPeople { persons, .. }]
+            if persons.iter().any(|x| x.id.0 == "bo")),
+        "{actions:?}"
+    );
+    let stored = e.agent.history(ch, None, 5).unwrap();
+    let last = stored.last().unwrap();
+    assert_eq!(last.text, "Bo knows more than I do.");
+    assert_eq!(last.actions.len(), 1);
+    assert_eq!(group_count(&e), 0);
+    // No tool list is sent; the protocol is explained instead.
+    let body = String::from_utf8(e.fake.bodies()[0].clone()).unwrap();
+    assert!(body.contains(FIND) && body.contains(GROUP), "{body}");
+    assert!(body.contains("nothing happens until"));
+}
+
+#[tokio::test]
+async fn an_emulated_group_proposal_matches_the_tool_path_and_makes_nothing() {
+    use api::views::ToolAction;
+    let (e, ch) = emulated_env();
+    e.fake
+        .push([say(&format!("A group would help.\n{GROUP} Bo, dee"))]);
+    e.agent
+        .send(ch, "can we get everyone?", None)
+        .await
+        .unwrap();
+    let (streamed, text_path) = turn_events(&e);
+    assert!(!streamed.contains('\u{21d2}'), "{streamed}");
+    assert_eq!(group_count(&e), 0);
+    let [
+        ToolAction::CreateGroup {
+            members,
+            channel: None,
+        },
+    ] = text_path.as_slice()
+    else {
+        panic!("{text_path:?}");
+    };
+    assert_eq!(
+        members.iter().map(|m| m.id.0.as_str()).collect::<Vec<_>>(),
+        ["ann", "bo", "dee"]
+    );
+    // The same offer as the tool call makes, so accepting it takes the one-shot path.
+    let n = env(WireApi::Chat);
+    let nch = direct(&n, "ann");
+    n.fake.push([
+        call("ask_host", json!({"group": ["bo", "dee"]})),
+        say("A group would help."),
+    ]);
+    n.agent
+        .send(nch, "can we get everyone?", None)
+        .await
+        .unwrap();
+    let (_, tool_path) = turn_events(&n);
+    assert_eq!(text_path, tool_path);
+    let stored = e.agent.history(ch, None, 5).unwrap();
+    assert_eq!(stored.last().unwrap().actions, text_path);
+}
+
+#[tokio::test]
+async fn an_emulated_proposal_keeps_the_same_limits_as_the_tool() {
+    let (e, ch) = emulated_env();
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("dee"), Mode::Disabled).unwrap());
+    // One per reply: the second line is refused.
+    e.fake
+        .push([say(&format!("Ok.\n{FIND} forge blade steel\n{GROUP} Bo"))]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    let (_, actions) = turn_events(&e);
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    // A stranger, a person without a persona and a disabled person are never offered.
+    for who in ["nobody", "cy", "dee"] {
+        e.fake.push([say(&format!("No.\n{GROUP} {who}"))]);
+        e.agent.send(ch, "again", None).await.unwrap();
+        let (streamed, actions) = turn_events(&e);
+        assert!(actions.is_empty(), "{who}: {actions:?}");
+        assert!(!streamed.contains('\u{21d2}'));
+    }
+    let stored = e.agent.history(ch, None, 9).unwrap();
+    assert!(stored.last().unwrap().text == "No.");
+    // The quiet band closes unprompted offers.
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let q = env_with(ep, |c| c.world.quota.quiet_at = 0.0);
+    let qch = direct(&q, "ann");
+    q.fake.push([say(&format!("Never mind.\n{GROUP} Bo"))]);
+    q.agent.send(qch, "hello", None).await.unwrap();
+    assert!(turn_events(&q).1.is_empty());
+}
+
+#[tokio::test]
+async fn a_malformed_proposal_line_is_speech_and_native_tools_ignore_the_mark() {
+    let (e, ch) = emulated_env();
+    let reply = format!("Mind the {FIND} mark.\n{FIND}");
+    e.fake.push([say(&reply)]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    let (streamed, actions) = turn_events(&e);
+    assert!(actions.is_empty());
+    assert_eq!(streamed, reply);
+    assert_eq!(
+        e.agent.history(ch, None, 5).unwrap().last().unwrap().text,
+        reply
+    );
+    // A line in the middle of the text is speech too.
+    let mid = format!("{FIND} steel\nand more");
+    e.fake.push([say(&mid)]);
+    e.agent.send(ch, "again", None).await.unwrap();
+    let (streamed, actions) = turn_events(&e);
+    assert!(actions.is_empty() && streamed == mid, "{streamed}");
+    // Native tools: the model has the tool, the line means nothing and the prompt is silent.
+    let n = env(WireApi::Chat);
+    let nch = direct(&n, "ann");
+    let line = format!("Hm.\n{FIND} steel");
+    n.fake.push([say(&line)]);
+    n.agent.send(nch, "hello", None).await.unwrap();
+    let (streamed, actions) = turn_events(&n);
+    assert!(actions.is_empty() && streamed == line);
+    let body = String::from_utf8(n.fake.bodies()[0].clone()).unwrap();
+    assert!(!body.contains("nothing happens until"));
+}
+
+#[tokio::test]
+async fn the_host_keeps_its_tools_on_an_emulated_endpoint_and_reads_a_fenced_call() {
+    use api::views::ToolAction;
+    let (e, _) = emulated_env();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let body = json!({"name": "find_people", "arguments": {"topic": "forge blade steel"}});
+    e.fake.push([
+        say(&format!("```tool_call\n{body}\n```")),
+        say("Bo knows it."),
+    ]);
+    e.agent.send(host, "find me a smith", None).await.unwrap();
+    // The request carries the host's tools (the endpoint emulates them or the text block
+    // is read), unlike a person's.
+    assert!(e.fake.json()[0].get("tools").is_some());
+    let (_, actions) = turn_events(&e);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, ToolAction::FindPeople { persons, .. } if !persons.is_empty())),
+        "{actions:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_new_save_opens_with_the_hosts_welcome_once_and_without_a_model_call() {
     for (frontend, marker) in [
