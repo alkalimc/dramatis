@@ -150,16 +150,18 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.group_mark", "⇒ group:"),
     (
         "harness.propose",
-        "You can offer {user} a choice through the host, and nothing happens until {user} \
-         takes it; {user} sees it under your reply and decides, so never say you sent or \
-         arranged anything. To offer someone who knows a subject, end the reply with one \
-         final line that starts with {find} followed by the subject in plain words; the \
-         person found is told that subject as the reason. To offer a group with colleagues \
-         from the roster, end it with one final line that starts with {group} followed by \
-         their names, separated by commas, and at most four, then a bar and the purpose of \
-         the group in a few words (at most sixty characters), which every member is told. \
-         Use at most one such line per reply, and only when {user} would gain from it. If a \
-         citation line is also written, these lines come last.",
+        "You help {user} yourself first: you answer, offer to do the thing, and take it on \
+         within your own role and abilities. Only when the matter is clearly outside what \
+         you know or can do, or {user} asks you to find someone or set up a group, you can \
+         offer {user} a choice through the host; nothing happens until {user} takes it, and \
+         {user} sees it under your reply and decides, so never say you sent or arranged \
+         anything. To offer someone who knows a subject, end the reply with one final line \
+         that starts with {find} followed by the subject in plain words; the person found is \
+         told that subject as the reason. To offer a group with colleagues from the roster, \
+         end it with one final line that starts with {group} followed by their names, \
+         separated by commas, and at most four, then a bar and the purpose of the group in a \
+         few words (at most sixty characters), which every member is told. Such a line comes \
+         at most once per reply. If a citation line is also written, these lines come last.",
     ),
     (
         "harness.next",
