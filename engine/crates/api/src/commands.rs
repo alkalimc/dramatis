@@ -181,8 +181,15 @@ commands! {
 
     // ---- corpus ----
 
-    /// Library-mode search: the whole corpus, no memories.
-    fn search_corpus(query: String, persons: Vec<PersonId>) -> SearchResults;
+    /// Library-mode search: the whole corpus, no memories. Empty `persons` or `templates`
+    /// mean no restriction on that side.
+    fn search_corpus(query: String, persons: Vec<PersonId>, templates: Vec<String>)
+        -> SearchResults;
+    /// One unit in full with up to `around` neighbours on each side, for reading the
+    /// source in place. `NotFound` when the id is not in the corpus.
+    fn read_unit(unit: String, around: u32) -> UnitView;
+    /// The unit templates of the corpus, for the search filter.
+    fn corpus_templates() -> Vec<String> = Ok(Vec::new());
     fn resolve_citation(citation: Citation) -> CitationView;
     fn avatar(person: PersonId) -> Option<MediaFile> = Ok(None);
     /// The user's picture: the one they set, else the corpus's player portrait (fetched

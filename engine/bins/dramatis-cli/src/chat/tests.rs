@@ -207,15 +207,28 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
 
 /// `with_save: false` is a home where the user has not picked a save yet.
 async fn rig_full(wording: &str, host: bool, with_save: bool, recorded: Option<&str>) -> Rig {
+    rig_setup(wording, host, with_save, recorded, true).await
+}
+
+/// `endpoints: false` is a home with no endpoints file: library mode from the start.
+async fn rig_setup(
+    wording: &str,
+    host: bool,
+    with_save: bool,
+    recorded: Option<&str>,
+    endpoints: bool,
+) -> Rig {
     let folio = corpus(wording, host);
     let home = TempHome::new();
-    std::fs::write(
-        home.0.join("endpoints.toml"),
-        "[[profile]]\nname = 'p'\nbase_url = 'http://127.0.0.1:9/v1'\nwire_api = 'chat'\n\
-         [[profile.model]]\nid = 'model-a'\n\
-         [roles]\nchat = { profile = 'p', model = 'model-a' }\n",
-    )
-    .unwrap();
+    if endpoints {
+        std::fs::write(
+            home.0.join("endpoints.toml"),
+            "[[profile]]\nname = 'p'\nbase_url = 'http://127.0.0.1:9/v1'\nwire_api = 'chat'\n\
+             [[profile.model]]\nid = 'model-a'\n\
+             [roles]\nchat = { profile = 'p', model = 'model-a' }\n",
+        )
+        .unwrap();
+    }
     if with_save {
         // A save to open, as a first run leaves the home after the user picks one.
         let h = Home::new(&home.0);
@@ -351,9 +364,18 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
     // The sources unfold on request.
     let unfolded = r.run("/sources").await;
     assert!(
-        unfolded.contains("sources (1):\n  Tea page"),
+        unfolded.contains("sources (1):\n  1. Tea page"),
         "{unfolded:?}"
     );
+    assert!(!unfolded.contains("jasmine tea needs"), "{unfolded:?}");
+    // Then an entry shows its text.
+    let entry = r.run("/sources 1 1").await;
+    assert!(
+        entry.contains("Ann said the jasmine tea needs cooler water"),
+        "{entry:?}"
+    );
+    assert!(r.run("/source 1").await.contains("jasmine tea needs"));
+    assert!(r.run("/sources 1 2").await.contains("no entry 2"));
     assert!(r.run("/sources 2").await.contains("no reply with sources"));
 
     let history = r.run("/history 2").await;
@@ -1394,4 +1416,73 @@ async fn people_have_a_profile_a_mode_and_requests_are_listed() {
     assert!(r.run("/birthday clear").await.contains("cleared"));
     let clock = r.run("/clock").await;
     assert!(clock.trim().len() >= 16, "{clock:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_an_endpoint_the_session_is_a_library_and_never_calls_a_model() {
+    let mut r = rig_setup(WORDING, false, true, None, false).await;
+    r.session.set_no_model(true);
+    // The notice is one line; the prompt names the mode.
+    let notice = r.session.library_notice(false).unwrap();
+    assert!(
+        notice.contains("library mode") && !notice.contains('\n'),
+        "{notice}"
+    );
+    assert!(r.session.prompt().starts_with("[library] Doc"));
+
+    // The roster lists everyone, with no word about the host speaking.
+    let listed = r.run("/list").await;
+    assert!(listed.contains("ann") && listed.contains("bo "), "{listed}");
+    assert!(r.run("/who ann").await.contains("ann"));
+
+    // Search needs no conversation; results are numbered and open with /read.
+    let found = r.run("/search jasmine tea").await;
+    assert!(
+        found.contains("1. Tea page") && found.contains("/read <n>"),
+        "{found}"
+    );
+    let read = r.run("/read 1").await;
+    assert!(read.contains("Tea page (u1)"), "{read}");
+    assert!(
+        read.contains("Ann said the jasmine tea needs cooler water"),
+        "{read}"
+    );
+    assert!(r.run("/read u2").await.contains("Bo hammered the blade"));
+    assert!(r.run("/read nope").await.contains("no unit \"nope\""));
+    assert!(r.run("/read 9").await.contains("no such result"));
+    assert!(r.run("/memories").await.contains("no memories"));
+    assert!(r.run("/save").await.contains("default"));
+
+    // Talking, asking and the like say what they need; the script would panic on a call.
+    for line in ["hello", "/ask ann tea?", "/wrapup"] {
+        let out = r.run(line).await;
+        assert!(out.contains("needs a language model"), "{line}: {out}");
+    }
+    // Nothing to go back to without an endpoint.
+    assert!(r.run("/library off").await.contains("stays on"));
+    assert!(r.run("/stats").await.contains("no model calls yet"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn library_mode_can_be_chosen_and_left_when_a_model_is_set_up() {
+    let mut r = rig().await;
+    assert!(r.session.library_notice(false).is_none());
+    assert!(r.run("/talk ann").await.contains("talking to ann"));
+    assert!(r.run("/library").await.contains("nothing here calls"));
+    assert!(r.session.prompt().contains("[ann]"));
+    let out = r.run("hello").await;
+    assert!(out.contains("library mode is on"), "{out}");
+    // Opening a unit works in a conversation too; the script is still untouched.
+    assert!(r.run("/read u1").await.contains("jasmine"));
+    assert!(
+        r.run("/library off")
+            .await
+            .contains("back to conversations")
+    );
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("Hello again."));
+    assert!(r.run("hello").await.contains("Hello again."));
 }

@@ -5,7 +5,7 @@ use super::Engine;
 use crate::convert;
 use crate::corpus::{self, Corpus};
 use crate::display::Namer;
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::types::*;
 use crate::views::*;
 
@@ -38,6 +38,7 @@ impl Engine {
         &self,
         query: &str,
         persons: &[PersonId],
+        templates: &[String],
     ) -> ApiResult<SearchResults> {
         let c = self.corpus()?;
         if query.trim().is_empty() {
@@ -50,6 +51,7 @@ impl Engine {
         let namer = self.namer()?;
         let mut request = index::SearchRequest::new(query);
         request.filters.persons = persons.iter().map(|p| p.0.clone()).collect();
+        request.filters.templates = templates.to_vec();
         let found = c.with_index(|ix| ix.search(&request))?;
         Ok(SearchResults {
             hits: found
@@ -61,6 +63,45 @@ impl Engine {
             confidence: convert::confidence(found.confidence.level),
             understood_as: found.resolved.map(|r| namer.show(&r.target)),
         })
+    }
+
+    pub(crate) fn read_unit_impl(&self, id: &str, around: u32) -> ApiResult<UnitView> {
+        let c = self.corpus()?;
+        let namer = self.namer()?;
+        let found = c.with_index(|ix| ix.get(id, i64::from(around)))?;
+        let Some((unit, near)) = found else {
+            return Err(ApiError::NotFound);
+        };
+        // Neighbours come in source order; the ones that start before the unit precede it.
+        let at = unit.span_from.unwrap_or(0);
+        let (mut before, mut after) = (Vec::new(), Vec::new());
+        for n in &near {
+            let p = self.passage(c, &namer, n);
+            if n.span_from.unwrap_or(0) < at {
+                before.push(p);
+            } else {
+                after.push(p);
+            }
+        }
+        Ok(UnitView {
+            unit: self.passage(c, &namer, &unit),
+            before,
+            after,
+        })
+    }
+
+    pub(crate) fn templates_impl(&self) -> ApiResult<Vec<String>> {
+        let c = self.corpus()?;
+        let mut all: Vec<String> = c.with_folio(|f| {
+            let mut stmt = f
+                .conn()
+                .prepare_cached("SELECT DISTINCT template FROM chunks")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(Into::into)
+        })?;
+        all.sort();
+        Ok(all)
     }
 
     /// Three levels: the chunk id still exists; else the unit of the same page whose span

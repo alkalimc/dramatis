@@ -418,20 +418,6 @@ impl Show {
         (n > 0).then(|| format!("sources: {n}  (/sources to show)"))
     }
 
-    /// The sources of a message in full, one per line; `None` when it cites nothing.
-    pub fn sources_in_full(&self, m: &Message) -> Option<String> {
-        let b = self.bound.get()?;
-        let list = Self::source_list(&b.names, m);
-        if list.is_empty() {
-            return None;
-        }
-        let mut out = format!("sources ({}):\n", list.len());
-        for s in list {
-            out.push_str(&format!("  {s}\n"));
-        }
-        Some(out)
-    }
-
     /// A stored message in full: name, text, tool lines, sources.
     pub fn whole(&self, m: &Message) -> String {
         let Some(b) = self.bound.get() else {

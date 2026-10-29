@@ -29,6 +29,10 @@ pub enum Command {
     Leave,
     /// Mark the current channel (or every one) read.
     Read(bool),
+    /// Show a unit of the corpus with its neighbours: an id, or a number from `/search`.
+    ReadUnit(String),
+    /// Library mode on (the corpus without a language model), or back off.
+    Library(bool),
     /// Ask a person to look into a question.
     Ask(String, String),
     /// The requests and their state.
@@ -64,8 +68,9 @@ pub enum Command {
     /// Take back the n-th last message of the user in this channel (1 = the last) and
     /// put its text in the input line.
     Resend(usize),
-    /// Show in full the sources of the n-th last reply that has any (1 = the last).
-    Sources(usize),
+    /// The sources of the n-th last reply that has any (1 = the last), as a list; with a
+    /// second number, the text of that entry.
+    Sources(usize, Option<usize>),
     Search(String),
     Stats,
     /// Disk use by kind, or empty some caches.
@@ -231,7 +236,12 @@ pub fn parse(line: &str) -> Command {
         "read" => match args {
             "" => Command::Read(false),
             "all" => Command::Read(true),
-            _ => Command::Invalid("usage: /read [all]".into()),
+            unit => Command::ReadUnit(unit.to_owned()),
+        },
+        "library" | "lib" => match args {
+            "" | "on" => Command::Library(true),
+            "off" => Command::Library(false),
+            _ => Command::Invalid("usage: /library [off]".into()),
         },
         "ask" => {
             let w = words(args);
@@ -300,12 +310,21 @@ pub fn parse(line: &str) -> Command {
                 _ => Command::Invalid("usage: /resend [n]".into()),
             },
         },
-        "sources" | "src" => match args {
-            "" => Command::Sources(1),
-            n => match n.parse::<usize>() {
-                Ok(n) if n > 0 => Command::Sources(n),
-                _ => Command::Invalid("usage: /sources [n]".into()),
-            },
+        "sources" | "src" => {
+            let w: Vec<Option<usize>> = args
+                .split_whitespace()
+                .map(|n| n.parse::<usize>().ok().filter(|n| *n > 0))
+                .collect();
+            match w.as_slice() {
+                [] => Command::Sources(1, None),
+                [Some(n)] => Command::Sources(*n, None),
+                [Some(n), Some(k)] => Command::Sources(*n, Some(*k)),
+                _ => Command::Invalid("usage: /sources [n] [entry]".into()),
+            }
+        }
+        "source" => match args.parse::<usize>() {
+            Ok(k) if k > 0 => Command::Sources(1, Some(k)),
+            _ => Command::Invalid("usage: /source <entry>, a number from /sources".into()),
         },
         "search" | "s" if args.is_empty() => Command::Invalid("usage: /search <query>".into()),
         "search" | "s" => Command::Search(args.to_owned()),
@@ -349,8 +368,14 @@ mod tests {
         assert_eq!(parse("/memories x"), Command::Memories(Some("x".into())));
         assert_eq!(parse("/resend"), Command::Resend(1));
         assert_eq!(parse("/resend 3"), Command::Resend(3));
-        assert_eq!(parse("/sources"), Command::Sources(1));
-        assert_eq!(parse("/sources 2"), Command::Sources(2));
+        assert_eq!(parse("/sources"), Command::Sources(1, None));
+        assert_eq!(parse("/sources 2"), Command::Sources(2, None));
+        assert_eq!(parse("/sources 2 3"), Command::Sources(2, Some(3)));
+        assert_eq!(parse("/source 3"), Command::Sources(1, Some(3)));
+        assert_eq!(parse("/library"), Command::Library(true));
+        assert_eq!(parse("/library off"), Command::Library(false));
+        assert_eq!(parse("/read 2"), Command::ReadUnit("2".into()));
+        assert_eq!(parse("/read u1"), Command::ReadUnit("u1".into()));
         assert_eq!(parse("/quit"), Command::Quit);
         assert_eq!(parse("/host"), Command::Host);
         assert_eq!(parse("/go 2"), Command::Go(2));
@@ -501,7 +526,10 @@ mod tests {
             "/who",
             "/mode Ann",
             "/mode Ann loud",
-            "/read some",
+            "/library maybe",
+            "/source",
+            "/sources 1 0",
+            "/sources x",
             "/ask Ann",
             "/find",
             "/nope",
