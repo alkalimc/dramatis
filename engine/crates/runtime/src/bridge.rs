@@ -376,6 +376,30 @@ impl AgentPort for Port {
         Ok(())
     }
 
+    async fn group_opened(
+        &self,
+        channel: ChannelId,
+        by: Option<PersonId>,
+        purpose: String,
+    ) -> ApiResult<()> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        let by = by.map(|p| world::PersonId(p.0));
+        Ok(agent.group_opening(ch, by.as_ref(), &purpose)?)
+    }
+
+    async fn found_opened(
+        &self,
+        channel: ChannelId,
+        by: Option<PersonId>,
+        topic: String,
+    ) -> ApiResult<()> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        let by = by.map(|p| world::PersonId(p.0));
+        Ok(agent.found_opening(ch, by.as_ref(), &topic).await?)
+    }
+
     fn set_endpoints(&self, endpoints: &Endpoints) {
         *self.0.endpoints.lock().unwrap_or_else(|e| e.into_inner()) = endpoints.clone();
         if let Some(a) = self.0.built() {

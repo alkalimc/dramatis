@@ -595,7 +595,15 @@ impl Api for Engine {
         self.create_group_impl(members, topic)
     }
     async fn open_offer(&self, message: MessageId, action: u32) -> ApiResult<ChannelId> {
-        self.open_offer_impl(&message, action)
+        self.open_offer_impl(&message, action).await
+    }
+    async fn open_found(
+        &self,
+        message: MessageId,
+        action: u32,
+        person: PersonId,
+    ) -> ApiResult<ChannelId> {
+        self.open_found_impl(&message, action, &person).await
     }
     async fn delete_group(&self, channel: ChannelId) -> ApiResult<()> {
         self.delete_group_impl(&channel)

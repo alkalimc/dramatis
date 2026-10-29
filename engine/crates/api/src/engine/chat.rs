@@ -49,6 +49,7 @@ impl Engine {
             cites: meta.cites.iter().map(convert::citation).collect(),
             confidence: meta.confidence.map(convert::confidence),
             relayed: meta.relayed,
+            service: meta.service,
             task: meta.task.map(convert::task_id),
             note: meta.note.map(|n| MediaFile {
                 path: self.home.office().join(n).to_string_lossy().into_owned(),
@@ -227,7 +228,65 @@ impl Engine {
         Ok(id)
     }
 
-    pub(crate) fn open_offer_impl(&self, msg: &MessageId, action: u32) -> ApiResult<ChannelId> {
+    /// Who wrote a suggestion: a person, or the host (`None`).
+    fn proposer(author: &world::Actor) -> Option<PersonId> {
+        author.person().map(|p| PersonId(p.0.clone()))
+    }
+
+    pub(crate) async fn open_found_impl(
+        &self,
+        msg: &MessageId,
+        action: u32,
+        person: &PersonId,
+    ) -> ApiResult<ChannelId> {
+        let invalid = || ApiError::Invalid {
+            field: "action".into(),
+        };
+        let stored = message::get(&self.w(), convert::world_message(msg)?).map_err(world_err)?;
+        let actions: Vec<ToolAction> = stored
+            .tool_calls
+            .as_ref()
+            .and_then(|a| serde_json::from_value(a.clone()).ok())
+            .unwrap_or_default();
+        let Some(ToolAction::FindPeople { topic, persons }) = actions.get(action as usize) else {
+            return Err(invalid());
+        };
+        if !persons.iter().any(|p| p.id == *person) {
+            return Err(invalid());
+        }
+        let topic = topic.clone();
+        let ch = self.open_direct_impl(person)?;
+        self.ports
+            .agent
+            .found_opened(ch.clone(), Self::proposer(&stored.author), topic)
+            .await?;
+        Ok(ch)
+    }
+
+    pub(crate) async fn open_offer_impl(
+        &self,
+        msg: &MessageId,
+        action: u32,
+    ) -> ApiResult<ChannelId> {
+        let (group, opening) = self.group_from_offer(msg, action)?;
+        if let Some((by, purpose)) = opening {
+            self.ports
+                .agent
+                .group_opened(group.clone(), by, purpose)
+                .await?;
+        }
+        self.changed(vec![WorldChange::Channel { id: group.clone() }]);
+        Ok(group)
+    }
+
+    /// The group an offer stands for, made if it was not yet. A group made now with a
+    /// purpose also returns who suggested it and the purpose, for its first line.
+    #[allow(clippy::type_complexity)]
+    fn group_from_offer(
+        &self,
+        msg: &MessageId,
+        action: u32,
+    ) -> ApiResult<(ChannelId, Option<(Option<PersonId>, String)>)> {
         let invalid = || ApiError::Invalid {
             field: "action".into(),
         };
@@ -238,8 +297,11 @@ impl Engine {
             .as_ref()
             .and_then(|a| serde_json::from_value(a.clone()).ok())
             .unwrap_or_default();
-        let ToolAction::CreateGroup { members, channel } =
-            actions.get(action as usize).ok_or_else(invalid)?
+        let ToolAction::CreateGroup {
+            members,
+            channel,
+            purpose,
+        } = actions.get(action as usize).ok_or_else(invalid)?
         else {
             return Err(invalid());
         };
@@ -248,29 +310,28 @@ impl Engine {
             self.require_available(p)?;
         }
         let members = members.clone();
+        let purpose = purpose.clone();
         let existing = channel.clone();
         // One lock from the check to the record, so two clicks cannot both create.
         let w = self.w();
         if let Some(c) = existing
             && channel::get(&w, convert::world_channel(&c)?).is_ok_and(|ch| ch.deleted_at.is_none())
         {
-            return Ok(c);
+            return Ok((c, None));
         }
         let ids: Vec<world::PersonId> = people.iter().map(world_person).collect();
-        let created =
-            channel::create_group(&w, &ids, None, world::Origin::User).map_err(world_err)?;
+        let created = channel::create_group(&w, &ids, purpose.as_deref(), world::Origin::User)
+            .map_err(world_err)?;
         let created = convert::channel_id(created);
         actions[action as usize] = ToolAction::CreateGroup {
             members,
             channel: Some(created.clone()),
+            purpose: purpose.clone(),
         };
         let value = serde_json::to_value(&actions).map_err(|_| invalid())?;
         message::set_tool_calls(&w, mid, &value).map_err(world_err)?;
-        drop(w);
-        self.changed(vec![WorldChange::Channel {
-            id: created.clone(),
-        }]);
-        Ok(created)
+        let opening = purpose.map(|p| (Self::proposer(&stored.author), p));
+        Ok((created, opening))
     }
 
     pub(crate) fn delete_group_impl(&self, ch: &ChannelId) -> ApiResult<()> {

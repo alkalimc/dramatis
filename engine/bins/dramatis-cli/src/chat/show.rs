@@ -256,7 +256,9 @@ impl Names {
                 &[("name", &person.name), ("question", question)],
             ),
             // No channel yet: a person's suggestion, which waits for the user.
-            ToolAction::CreateGroup { members, channel } => {
+            ToolAction::CreateGroup {
+                members, channel, ..
+            } => {
                 let (key, default) = if channel.is_some() {
                     ("action.create_group", "created a group: {names}")
                 } else {
@@ -366,11 +368,13 @@ fn offers_of(action: &ToolAction, line: Line) -> Vec<Offer> {
             .map(|p| Offer::Person {
                 id: p.id.0.clone(),
                 name: p.name.clone(),
+                line: Some(line.clone()),
             })
             .collect(),
         ToolAction::CreateGroup {
             members,
             channel: Some(channel),
+            ..
         } => vec![Offer::Group {
             channel: channel.clone(),
             members: members.clone(),
@@ -378,6 +382,7 @@ fn offers_of(action: &ToolAction, line: Line) -> Vec<Offer> {
         ToolAction::CreateGroup {
             members,
             channel: None,
+            ..
         } if members.len() >= 2 => vec![Offer::NewGroup {
             members: members.clone(),
             line,
@@ -390,6 +395,7 @@ fn offers_of(action: &ToolAction, line: Line) -> Vec<Offer> {
                 (ChannelKind::Direct, [p]) => Some(Offer::Person {
                     id: p.id.0.clone(),
                     name: p.name.clone(),
+                    line: None,
                 }),
                 (ChannelKind::Group, members) if !members.is_empty() => Some(Offer::Group {
                     channel: c.id.clone(),
@@ -414,16 +420,16 @@ pub enum Offer {
     Person {
         id: String,
         name: String,
+        /// The find suggestion this person came from, so the reason they were found is
+        /// written when they are taken; none for an existing conversation.
+        line: Option<Line>,
     },
     Group {
         channel: ChannelId,
         members: Vec<PersonRef>,
     },
     /// Nothing exists yet; taking it creates the group, once, and records it on `line`.
-    NewGroup {
-        members: Vec<PersonRef>,
-        line: Line,
-    },
+    NewGroup { members: Vec<PersonRef>, line: Line },
 }
 
 /// Which action line of which message an offer came from.

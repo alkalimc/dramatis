@@ -2012,7 +2012,7 @@ async fn host_tool_actions_carry_what_a_front_end_needs_to_offer_a_switch() {
     });
     assert!(
         actions.iter().any(|a| matches!(a,
-            ToolAction::CreateGroup { members, channel: Some(c) }
+            ToolAction::CreateGroup { members, channel: Some(c), .. }
                 if members.len() == 2 && c.0 == groups.to_string())),
         "{actions:?}"
     );
@@ -2756,6 +2756,7 @@ async fn a_persons_suggestion_is_an_offer_and_changes_nothing() {
         ToolAction::CreateGroup {
             members,
             channel: None,
+            ..
         } => Some(members.iter().map(|m| m.id.0.clone()).collect::<Vec<_>>()),
         _ => None,
     });
@@ -2831,6 +2832,157 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
 
 // ---- emulated tools: a person proposes through a closing line of the reply ----
 
+fn group_topic(e: &Env, g: ChannelId) -> Option<String> {
+    e.agent.with_world(|w| channel::get(w, g).unwrap().topic)
+}
+
+#[tokio::test]
+async fn a_proposal_carries_a_short_purpose_on_both_paths() {
+    use api::views::ToolAction;
+    let purpose_of = |actions: &[ToolAction]| {
+        actions.iter().find_map(|a| match a {
+            ToolAction::CreateGroup { purpose, .. } => Some(purpose.clone()),
+            _ => None,
+        })
+    };
+    // Native tools: cut to one short line.
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    let long = format!("plan a party\nsecond line {}", "x".repeat(80));
+    e.fake.push([
+        call("ask_host", json!({"group": ["bo", "dee"], "purpose": long})),
+        say("A group would help."),
+    ]);
+    e.agent.send(ch, "everyone?", None).await.unwrap();
+    let (_, actions) = turn_events(&e);
+    assert_eq!(purpose_of(&actions), Some(Some("plan a party".to_owned())));
+    // Without one, the offer has none.
+    e.fake.push([
+        call("ask_host", json!({"group": ["bo", "dee"]})),
+        say("A group would help."),
+    ]);
+    e.agent.send(ch, "everyone?", None).await.unwrap();
+    let (_, actions) = turn_events(&e);
+    assert_eq!(purpose_of(&actions), Some(None));
+
+    // Emulated tools: after a bar, ASCII or full-width.
+    let (e, ch) = emulated_env();
+    for bar in ["|", "\u{ff5c}"] {
+        e.fake.push([say(&format!(
+            "A group would help.\n{GROUP} Bo, dee {bar} plan a party"
+        ))]);
+        e.agent.send(ch, "everyone?", None).await.unwrap();
+        let (streamed, actions) = turn_events(&e);
+        assert!(!streamed.contains('\u{21d2}') && !streamed.contains("plan a party"));
+        assert_eq!(purpose_of(&actions), Some(Some("plan a party".to_owned())));
+    }
+    // A line without a purpose still works.
+    e.fake
+        .push([say(&format!("A group would help.\n{GROUP} Bo, dee"))]);
+    e.agent.send(ch, "everyone?", None).await.unwrap();
+    assert_eq!(purpose_of(&turn_events(&e).1), Some(None));
+    // The model is told how to write it.
+    let body = String::from_utf8(e.fake.bodies()[0].clone()).unwrap();
+    assert!(body.contains("the purpose of"), "{body}");
+}
+
+#[tokio::test]
+async fn a_group_made_for_a_purpose_says_why_and_tells_every_member() {
+    let e = env(WireApi::Chat);
+    // As the user accepts a person's proposal: the topic is the purpose, and the host's
+    // first line names it and who suggested it. No model call is made.
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("plan a party"))
+        .unwrap();
+    e.agent
+        .group_opening(g, Some(&p("ann")), "plan a party")
+        .unwrap();
+    assert_eq!(group_topic(&e, g).as_deref(), Some("plan a party"));
+    assert!(e.fake.bodies().is_empty());
+    let first = e.agent.history(g, None, 5).unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].author, api::types::Author::Host);
+    assert!(
+        first[0].text.contains("suggested this group: plan a party")
+            && first[0].text.contains("ann"),
+        "{}",
+        first[0].text
+    );
+    // Every member's prompt carries the purpose as the topic.
+    e.fake.push([say("Bo: gladly.")]);
+    e.agent.send(g, "bo, shall we start?", None).await.unwrap();
+    let body = String::from_utf8(e.fake.bodies()[0].clone()).unwrap();
+    assert!(body.contains("Topic: plan a party"), "{body}");
+
+    // The host's own create_group takes the same argument (and the old name).
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        call(
+            "create_group",
+            json!({"members": ["ann", "dee"], "purpose": "plan a party"}),
+        ),
+        say("Done."),
+    ]);
+    e.agent.send(host, "make a group", None).await.unwrap();
+    let made = e.agent.with_world(|w| {
+        channel::list(w)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.kind == world::ChannelKind::Group && c.id != g)
+            .unwrap()
+    });
+    assert_eq!(made.topic.as_deref(), Some("plan a party"));
+    let line = e.agent.history(made.id, None, 5).unwrap();
+    assert!(
+        line[0].author == api::types::Author::Host
+            && line[0].text.contains("suggested this group: plan a party"),
+        "{line:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_found_person_is_told_why_when_the_user_takes_them() {
+    let e = env(WireApi::Chat);
+    let bo = direct(&e, "bo");
+    e.agent
+        .found_opening(bo, Some(&p("ann")), "forge blade steel")
+        .await
+        .unwrap();
+    // No model call; the line is in the person's log and shown as a service line.
+    assert!(e.fake.bodies().is_empty());
+    let shown = e.agent.history(bo, None, 5).unwrap();
+    assert_eq!(shown.len(), 1);
+    assert!(shown[0].service, "{shown:?}");
+    assert!(
+        shown[0].text.contains("suggested you could help")
+            && shown[0].text.contains("forge blade steel")
+            && shown[0].text.contains("ann"),
+        "{}",
+        shown[0].text
+    );
+    assert!(log_bytes(&e.agent, bo).contains("forge blade steel"));
+    // Taking the same person again does not repeat it.
+    e.agent
+        .found_opening(bo, Some(&p("ann")), "forge blade steel")
+        .await
+        .unwrap();
+    assert_eq!(e.agent.history(bo, None, 5).unwrap().len(), 1);
+    // The host's own find offers say it was the host.
+    let cy = direct(&e, "dee");
+    e.agent.found_opening(cy, None, "tea").await.unwrap();
+    assert!(
+        e.agent.history(cy, None, 5).unwrap()[0]
+            .text
+            .contains("Host")
+    );
+    // The person answers when the user writes, and the reason is in what the model sees.
+    e.fake.push([say("Steel, then.")]);
+    e.agent.send(bo, "tell me about steel", None).await.unwrap();
+    let body = String::from_utf8(e.fake.bodies()[0].clone()).unwrap();
+    assert!(body.contains("suggested you could help"), "{body}");
+}
+
 const FIND: &str = "\u{21d2} find:";
 const GROUP: &str = "\u{21d2} group:";
 
@@ -2895,6 +3047,7 @@ async fn an_emulated_group_proposal_matches_the_tool_path_and_makes_nothing() {
         ToolAction::CreateGroup {
             members,
             channel: None,
+            ..
         },
     ] = text_path.as_slice()
     else {

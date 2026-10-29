@@ -68,13 +68,18 @@ pub struct RequestJoin {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AskHost {
-    /// A subject, in plain words, for the host to find colleagues who know it.
+    /// A subject, in plain words, for the host to find colleagues who know it. The one
+    /// found is told it as the reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub find: Option<String>,
     /// Roster ids of colleagues for the host to propose a group with; you are included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub group: Option<Vec<String>>,
+    /// With `group`: why the group is worth making, in one short line (about sixty
+    /// characters), for example "plan a birthday party". The members are told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
 }
 
 /// Remember one thing from this conversation.
@@ -156,7 +161,7 @@ pub struct Digest {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindPeople {
-    /// The subject, in plain words.
+    /// The subject, in plain words. The one the user picks is told it as the reason.
     pub topic: String,
 }
 
@@ -182,9 +187,10 @@ pub struct CreateGroup {
     /// Roster ids.
     #[schemars(length(min = 1))]
     pub members: Vec<String>,
-    /// What the group is about. Leave out for casual talk.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub topic: Option<String>,
+    /// Why the group exists, in one short line (about sixty characters), for example
+    /// "plan a birthday party". Every member is told. Leave out for casual talk.
+    #[serde(default, alias = "topic", skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
 }
 
 /// Change whether a person or a group may speak unprompted. Only when the user asks.

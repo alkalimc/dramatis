@@ -446,6 +446,21 @@ pub struct Closing {
     pub find: Option<String>,
     /// The members named by a group proposal.
     pub group: Option<Vec<String>>,
+    /// Why the group is proposed, when the line gives a reason after the names.
+    pub purpose: Option<String>,
+}
+
+/// Separators between a group line's names and its purpose: ASCII or full-width bar.
+const PURPOSE_BARS: [char; 2] = ['|', '\u{ff5c}'];
+
+/// A group line's text after its mark, split into the names and the purpose. A line with
+/// no bar, or nothing after it, has no purpose.
+fn split_purpose(rest: &str) -> (Vec<String>, Option<String>) {
+    let (names, purpose) = match rest.split_once(PURPOSE_BARS) {
+        Some((n, p)) => (n, Some(p.trim().to_owned()).filter(|p| !p.is_empty())),
+        None => (rest, None),
+    };
+    (split_names(names), purpose)
 }
 
 /// Split off the closing lines `marks` name. A proposal line with nothing after its mark
@@ -468,9 +483,13 @@ pub fn split_closing(text: &str, marks: Marks<'_>) -> Closing {
         out.find = Some(topic);
     }
     let (kept, rest) = split_line(&out.text, marks.group, &others(marks.group));
-    if let Some(names) = rest.map(|r| split_names(&r)).filter(|n| !n.is_empty()) {
+    if let Some((names, purpose)) = rest
+        .map(|r| split_purpose(&r))
+        .filter(|(n, _)| !n.is_empty())
+    {
         out.text = kept;
         out.group = Some(names);
+        out.purpose = purpose;
     }
     out
 }
@@ -786,6 +805,24 @@ mod tests {
         assert_eq!(c.find.as_deref(), Some("forge steel"));
         let c = split_closing(&format!("Hi.\n{group} Ann, Bo"), marks);
         assert_eq!(c.group, Some(vec!["Ann".to_owned(), "Bo".to_owned()]));
+        assert_eq!(c.purpose, None);
+        // A reason after a bar, ASCII or full-width; a bar with nothing after it is none.
+        for (line, purpose) in [
+            ("Ann, Bo | plan a party", Some("plan a party")),
+            (
+                "Ann, Bo \u{ff5c}plan a party, soon ",
+                Some("plan a party, soon"),
+            ),
+            ("Ann, Bo |", None),
+        ] {
+            let c = split_closing(&format!("Hi.\n{group} {line}"), marks);
+            assert_eq!(c.text, "Hi.");
+            assert_eq!(c.group, Some(vec!["Ann".to_owned(), "Bo".to_owned()]));
+            assert_eq!(c.purpose.as_deref(), purpose);
+        }
+        // A bar before any name is no group line.
+        let c = split_closing(&format!("Hi.\n{group} | party"), marks);
+        assert_eq!(c.group, None);
         // Both closing lines, either order, and a citation line: all leave, the marks stay.
         for body in [
             format!("Hi.\n{hand} Ann\n{find} x\n[#u1]"),

@@ -160,6 +160,22 @@ impl AgentPort for Spy {
         self.calls.lock().unwrap().push("presence".into());
         Ok(())
     }
+    async fn group_opened(&self, c: ChannelId, by: Option<PersonId>, p: String) -> ApiResult<()> {
+        let by = by.map_or("host".to_string(), |b| b.0);
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("group {} {by} {p}", c.0));
+        Ok(())
+    }
+    async fn found_opened(&self, c: ChannelId, by: Option<PersonId>, t: String) -> ApiResult<()> {
+        let by = by.map_or("host".to_string(), |b| b.0);
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("found {} {by} {t}", c.0));
+        Ok(())
+    }
     async fn on_event(&self) -> ApiResult<()> {
         self.calls.lock().unwrap().push("event".into());
         Ok(())
@@ -1166,6 +1182,7 @@ async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
     let offer = ToolAction::CreateGroup {
         members: vec![person("amy"), person("kal")],
         channel: None,
+        purpose: Some("plan a party".into()),
     };
     let (mid, other) = {
         let w = e.w();
@@ -1199,6 +1216,16 @@ async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
             .count()
     };
     assert_eq!(groups(e), 1);
+    // The purpose is the group's topic, and the group's first line is asked for once,
+    // naming the person who suggested it.
+    let topic = world::channel::get(&e.w(), convert::world_channel(&first).unwrap())
+        .unwrap()
+        .topic;
+    assert_eq!(topic.as_deref(), Some("plan a party"));
+    assert_eq!(
+        r.spy.calls.lock().unwrap().as_slice(),
+        [format!("group {} amy plan a party", first.0)]
+    );
     // The stored line now names the group, so every front end shows it as opened.
     let stored = world::message::get(&e.w(), other).unwrap();
     let lines: Vec<ToolAction> = serde_json::from_value(stored.tool_calls.unwrap()).unwrap();
@@ -1208,6 +1235,50 @@ async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
     let again = e.open_offer(mid.clone(), 1).await.unwrap();
     assert_ne!(again, first);
     assert_eq!(groups(e), 1);
+}
+
+#[tokio::test]
+async fn a_found_person_is_opened_with_the_reason_they_were_found() {
+    let r = rig();
+    let e = &r.engine;
+    let host = e.host_channel().await.unwrap();
+    let person = |p: &str| PersonRef {
+        id: id(p),
+        name: p.into(),
+        pronoun: None,
+    };
+    let calls = serde_json::to_value([ToolAction::FindPeople {
+        topic: "forging".into(),
+        persons: vec![person("amy")],
+    }])
+    .unwrap();
+    let mid = {
+        let w = e.w();
+        let ch = convert::world_channel(&host).unwrap();
+        let m = world::message::append(
+            &w,
+            ch,
+            &world::Actor::Host,
+            "Here is someone.",
+            Some(&calls),
+            None,
+            e.now().ms,
+        )
+        .unwrap();
+        convert::message_id(m)
+    };
+    let invalid = Err(ApiError::Invalid {
+        field: "action".into(),
+    });
+    assert_eq!(e.open_found(mid.clone(), 3, id("amy")).await, invalid);
+    // Only people the line offered.
+    assert_eq!(e.open_found(mid.clone(), 0, id("kal")).await, invalid);
+    let ch = e.open_found(mid, 0, id("amy")).await.unwrap();
+    assert_eq!(ch, e.open_direct(id("amy")).await.unwrap());
+    assert_eq!(
+        r.spy.calls.lock().unwrap().as_slice(),
+        [format!("found {} host forging", ch.0)]
+    );
 }
 
 /// Base64 of `bytes` (tests only; the engine just decodes).

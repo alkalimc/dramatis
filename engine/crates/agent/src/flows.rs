@@ -231,6 +231,11 @@ impl Agent {
     /// returning its text. Refused while a turn holds the channel.
     pub fn rewind(&self, ch: ChannelId, message: MessageId) -> Result<String> {
         let _turn = self.try_lock_channel(ch).ok_or(Error::Busy)?;
+        // A context line is the harness's, not something the user wrote.
+        let stored = message::get(&self.db(), message)?;
+        if api::meta::MessageMeta::of(stored.attachment.as_ref()).service {
+            return Err(Error::Invalid("not the user's own message".into()));
+        }
         let out = world::rewind::rewind(&self.db(), ch, message)?;
         self.emit(Event::Rewound(api::events::Rewound {
             channel: crate::view::channel_id(ch),
@@ -877,6 +882,83 @@ impl Agent {
             id: view::channel_id(id),
         }]);
         Ok(id)
+    }
+
+    /// The first line of a group made for a purpose: the host says why it exists and who
+    /// suggested it (`by`, or the host itself). Fixed wording, no model call.
+    pub fn group_opening(&self, ch: ChannelId, by: Option<&PersonId>, purpose: &str) -> Result<()> {
+        let name = self.proposer(by)?;
+        let names = self.names()?;
+        let text = self.corpus.wording.fill(
+            "harness.group_purpose",
+            &names,
+            &[("name", &name), ("purpose", purpose)],
+        );
+        let now = self.now();
+        let conn = self.db();
+        channel::add_participant(&conn, ch, &Actor::Host)?;
+        let id = message::append(&conn, ch, &Actor::Host, &text, None, None, now.ms)?;
+        let stored = message::get(&conn, id)?;
+        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        drop(conn);
+        self.emit(Event::MessageAdded(MessageAdded { message: shown }));
+        Ok(())
+    }
+
+    /// The user took a person found for `topic`: the person's log gets the reason, so they
+    /// know why they were found, and the user sees the same line as a service line. Nothing
+    /// is asked of the model; the person answers when the user writes.
+    pub async fn found_opening(
+        &self,
+        ch: ChannelId,
+        by: Option<&PersonId>,
+        topic: &str,
+    ) -> Result<()> {
+        let name = self.proposer(by)?;
+        let seg = self.ensure_segment(ch, None).await?;
+        let names = self.segment_names(seg)?;
+        let text = self.corpus.wording.fill(
+            "harness.found_for",
+            &names,
+            &[("name", &name), ("topic", topic)],
+        );
+        let said = message::history(&self.db(), ch, None, 50)?
+            .iter()
+            .any(|m| m.author == Actor::User && m.text == text);
+        if said {
+            return Ok(());
+        }
+        let meta = api::meta::MessageMeta {
+            service: true,
+            ..api::meta::MessageMeta::default()
+        };
+        let now = self.now();
+        self.append_user(seg, &text, None)?;
+        let conn = self.db();
+        let attachment =
+            serde_json::to_value(&meta).map_err(|e| world::Error::Invalid(e.to_string()))?;
+        let id = message::append(
+            &conn,
+            ch,
+            &Actor::User,
+            &text,
+            None,
+            Some(&attachment),
+            now.ms,
+        )?;
+        let stored = message::get(&conn, id)?;
+        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        drop(conn);
+        self.emit(Event::MessageAdded(MessageAdded { message: shown }));
+        Ok(())
+    }
+
+    /// Who suggested something, by name: a person, or the host when `by` is none.
+    fn proposer(&self, by: Option<&PersonId>) -> Result<String> {
+        match by {
+            Some(p) => self.display(p.as_str()),
+            None => Ok(self.corpus.host_name.clone()),
+        }
     }
 
     /// Change a person's or a group's mode, as the user. Enabling someone without a
