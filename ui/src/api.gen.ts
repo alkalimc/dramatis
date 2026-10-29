@@ -407,7 +407,10 @@ export type AppInfo = {
 export type AppStatus = {
 	form: AppForm,
 	corpus: CorpusState,
-	/**  No user name yet: show the first-run form. */
+	/**
+	 *  The first-run questions (name, birthday, bio, all optional) have not been seen on
+	 *  this save: show them.
+	 */
 	needs_setup: boolean,
 	/**
 	 *  The open save is encrypted and not unlocked: only `unlock` (or switching to another
