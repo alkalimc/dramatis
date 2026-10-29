@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -25,7 +26,21 @@ def collect(repo: Path) -> list[str]:
     tools = (repo / "engine/crates/api/src/tools.rs").read_text(encoding="utf-8")
     keys |= {f"{ns}.{name}"
              for ns, name in re.findall(r'spec::<\w+>\("(tool(?:\.host)?)", "(\w+)"', tools)}
+    snap = json.loads((repo / "engine/crates/api/tests/tools.snapshot.json").read_text(encoding="utf-8"))
+    for side, ns in (("shared", "tool"), ("host", "tool.host")):
+        for tool in snap[side]["chat"]:
+            fn = tool["function"]
+            keys |= params(f"{ns}.{fn['name']}", fn["parameters"])
     return sorted(keys)
+
+
+def params(prefix: str, schema: dict) -> set[str]:
+    """`<tool key>.<param>` for every property, and `.<inner>` inside objects and lists of objects."""
+    out: set[str] = set()
+    for name, prop in schema.get("properties", {}).items():
+        out.add(f"{prefix}.{name}")
+        out |= params(f"{prefix}.{name}", prop.get("items", prop))
+    return out
 
 
 def test_key_list_matches_sources():
@@ -34,7 +49,7 @@ def test_key_list_matches_sources():
         LIST.write_text("\n".join(found) + "\n", encoding="utf-8")
     assert wording_keys() == found, "run with UPDATE_SNAPSHOTS=1 to regenerate wording_keys.txt"
     assert sum(k.startswith("harness.") for k in found) >= 40
-    assert sum(k.startswith("tool.") for k in found) == 16
+    assert sum(k.startswith("tool.") for k in found) >= 17
 
 
 def test_missing_figure_counts_unworded_keys():
