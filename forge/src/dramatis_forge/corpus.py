@@ -280,6 +280,8 @@ def _run(
         folio.set_meta("scene_marker", list(pack.scene_marker))
         folio.set_meta("clock.year_offset", pack.year_offset)
         folio.set_meta("user_placeholder", pack.user_placeholder)
+        if credits := pack.publication.credits():
+            folio.set_meta("credits", credits)
         # chunk id -> the other form pages its text also appears on, in form order.
         # What the checks above counted, for the figure report: a defect that is fixed stays
         # visible as a number that must stay at its floor.
@@ -791,7 +793,7 @@ def _check_attribution(
 
 
 #: Manifest keys that describe when and where a build ran rather than what it contains.
-_UNHASHED = frozenset({"build_fingerprint", "built_at", "build"})
+_UNHASHED = frozenset({"build_fingerprint", "built_at", "build", "credits"})
 
 
 def _fingerprint(folio: Folio) -> str:
