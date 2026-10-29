@@ -94,19 +94,19 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
 export type Choice =
   | { kind: "person"; id: string; name: string }
   | { kind: "group"; channel: string; names: string[] }
-  | { kind: "new_group"; members: string[]; names: string[] };
+  | { kind: "new_group"; members: string[]; names: string[]; action: number };
 
 export function choicesOf(actions: ToolAction[]): Choice[] {
   const out: Choice[] = [];
   const seen = new Set<string>();
-  for (const a of actions) {
+  actions.forEach((a, index) => {
     const found: Choice[] =
       a.tool === "find_people"
         ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name }))
         : a.tool === "create_group" && a.channel
           ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name) }]
           : a.tool === "create_group" && a.members.length >= 2
-            ? [{ kind: "new_group", members: a.members.map((m) => m.id), names: a.members.map((m) => m.name) }]
+            ? [{ kind: "new_group", members: a.members.map((m) => m.id), names: a.members.map((m) => m.name), action: index }]
             : a.tool === "list_channels"
               ? (a.channels ?? []).flatMap((c): Choice[] =>
                   c.kind === "group"
@@ -123,7 +123,7 @@ export function choicesOf(actions: ToolAction[]): Choice[] {
         out.push(c);
       }
     }
-  }
+  });
   return out;
 }
 

@@ -1095,6 +1095,63 @@ async fn saves_switch_keep_their_own_worlds_and_guard_the_open_one() {
     );
 }
 
+#[tokio::test]
+async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
+    let r = rig();
+    let e = &r.engine;
+    let direct = e.open_direct(id("amy")).await.unwrap();
+    let person = |p: &str| PersonRef {
+        id: id(p),
+        name: p.into(),
+        pronoun: None,
+    };
+    let offer = ToolAction::CreateGroup {
+        members: vec![person("amy"), person("kal")],
+        channel: None,
+    };
+    let (mid, other) = {
+        let w = e.w();
+        let ch = convert::world_channel(&direct).unwrap();
+        let calls = serde_json::to_value([ToolAction::Report, offer]).unwrap();
+        let m = world::message::append(
+            &w,
+            ch,
+            &world::Actor::Person(world::PersonId("amy".into())),
+            "let us talk",
+            Some(&calls),
+            None,
+            e.now().ms,
+        )
+        .unwrap();
+        (convert::message_id(m), m)
+    };
+    let invalid = Err(ApiError::Invalid {
+        field: "action".into(),
+    });
+    assert_eq!(e.open_offer(mid.clone(), 0).await, invalid);
+    assert_eq!(e.open_offer(mid.clone(), 7).await, invalid);
+    let first = e.open_offer(mid.clone(), 1).await.unwrap();
+    assert_eq!(e.open_offer(mid.clone(), 1).await.unwrap(), first);
+    let groups = |e: &Engine| {
+        let w = e.w();
+        world::channel::list(&w)
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.kind == world::ChannelKind::Group)
+            .count()
+    };
+    assert_eq!(groups(e), 1);
+    // The stored line now names the group, so every front end shows it as opened.
+    let stored = world::message::get(&e.w(), other).unwrap();
+    let lines: Vec<ToolAction> = serde_json::from_value(stored.tool_calls.unwrap()).unwrap();
+    assert!(matches!(&lines[1], ToolAction::CreateGroup { channel: Some(c), .. } if *c == first));
+    // A group deleted since is made again, not returned dead.
+    e.delete_group(first.clone()).await.unwrap();
+    let again = e.open_offer(mid.clone(), 1).await.unwrap();
+    assert_ne!(again, first);
+    assert_eq!(groups(e), 1);
+}
+
 /// Base64 of `bytes` (tests only; the engine just decodes).
 fn b64(bytes: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

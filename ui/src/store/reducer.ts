@@ -130,6 +130,16 @@ export function reduce(s: State, a: Action): State {
         unread: m.author.kind === "user" || m.channel === (s.channel ?? s.hostChannel) ? s.unread : { ...s.unread, [m.channel]: (s.unread[m.channel] ?? 0) + 1 },
       };
     }
+    case "offerTaken": {
+      const list = s.messages[a.channel];
+      if (!list) return s;
+      const next = list.map((m) =>
+        m.id !== a.message
+          ? m
+          : { ...m, actions: m.actions.map((x, i) => (i === a.action && x.tool === "create_group" ? { ...x, channel: a.group } : x)) },
+      );
+      return { ...s, messages: { ...s.messages, [a.channel]: next } };
+    }
     case "toolCalled": {
       const e = a.event;
       const list = s.messages[e.channel];

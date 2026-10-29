@@ -68,6 +68,13 @@ export const commands = {
 	/**  Everything before this message has been seen. */
 	markRead: (channel: ChannelId, upTo: MessageId) => typedError<null, ApiError>(__TAURI_INVOKE("mark_read", { channel, upTo })),
 	createGroup: (members: PersonId[], topic: string | null) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("create_group", { members, topic })),
+	/**
+	 *  Take a group a person suggested: the `action`-th action line of `message`, a group
+	 *  with no channel yet. Creates it the first time and records its channel on the line;
+	 *  every later call returns that same group (`Invalid` for any other action). A group
+	 *  deleted since is made again.
+	 */
+	openOffer: (message: MessageId, action: number) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_offer", { message, action })),
 	deleteGroup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_group", { channel })),
 	/**  Title a channel. `None` or blank returns to the derived title. */
 	renameChannel: (channel: ChannelId, name: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("rename_channel", { channel, name })),

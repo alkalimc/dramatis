@@ -217,7 +217,7 @@ pub fn action_line(action: &ToolAction) -> String {
 
 /// What a tool call lets the user click or pick: a found person, a created or listed group,
 /// or a group someone suggested and the user has not made yet.
-fn offers_of(action: &ToolAction) -> Vec<Offer> {
+fn offers_of(action: &ToolAction, line: Line) -> Vec<Offer> {
     match action {
         ToolAction::FindPeople { persons, .. } => persons
             .iter()
@@ -238,6 +238,7 @@ fn offers_of(action: &ToolAction) -> Vec<Offer> {
             channel: None,
         } if members.len() >= 2 => vec![Offer::NewGroup {
             members: members.clone(),
+            line,
         }],
         // An existing conversation opens by the same two offers a new one does: a direct
         // channel is the person's, a group is entered by its id.
@@ -276,10 +277,18 @@ pub enum Offer {
         channel: ChannelId,
         members: Vec<PersonRef>,
     },
-    /// Nothing exists yet; taking it creates the group.
+    /// Nothing exists yet; taking it creates the group, once, and records it on `line`.
     NewGroup {
         members: Vec<PersonRef>,
+        line: Line,
     },
+}
+
+/// Which action line of which message an offer came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line {
+    pub message: MessageId,
+    pub index: u32,
 }
 
 impl Offer {
@@ -290,7 +299,7 @@ impl Offer {
                 "open group: {}",
                 names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
             ),
-            Offer::NewGroup { members } => format!(
+            Offer::NewGroup { members, .. } => format!(
                 "start a group: {}",
                 names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
             ),
@@ -300,7 +309,7 @@ impl Offer {
     pub fn members(&self) -> Vec<PersonId> {
         match self {
             Offer::Person { id, .. } => vec![PersonId(id.clone())],
-            Offer::Group { members, .. } | Offer::NewGroup { members } => {
+            Offer::Group { members, .. } | Offer::NewGroup { members, .. } => {
                 members.iter().map(|m| m.id.clone()).collect()
             }
         }
@@ -311,6 +320,8 @@ impl Offer {
 struct State {
     /// Choices from the host's tool calls since the session last took them.
     offers: Vec<Offer>,
+    /// How many action lines each message has shown so far: the next one's index.
+    lines: BTreeMap<MessageId, u32>,
     live: Option<Live>,
     /// The message whose name has been written, so a stream resumed after a tool line
     /// does not repeat it.
@@ -506,7 +517,13 @@ impl Sink for Show {
             Event::ToolCalled(t) => {
                 self.close(&mut st);
                 // The host's finds and lists, and a person's suggestion: the same pick list.
-                for offer in offers_of(&t.action) {
+                let index = st.lines.entry(t.message.clone()).or_default();
+                let line = Line {
+                    message: t.message.clone(),
+                    index: *index,
+                };
+                *index += 1;
+                for offer in offers_of(&t.action, line) {
                     if !st.offers.contains(&offer) {
                         st.offers.push(offer);
                     }

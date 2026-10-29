@@ -143,13 +143,21 @@ async fn two_turns_and_a_wrapup_hit_the_cache() {
             .expect("the corpus has no persona")
             .to_owned()
     });
-    let ch = agent.open_direct(&world::PersonId(person.clone())).unwrap();
+    // `host` talks to the host's own channel, which has no wrap-up.
+    let is_host = person == "host";
+    let ch = if is_host {
+        agent.with_world(|w| world::channel::host(w).unwrap())
+    } else {
+        agent.open_direct(&world::PersonId(person.clone())).unwrap()
+    };
     let say = std::env::var("DRAMATIS_SMOKE_SAY")
         .unwrap_or_else(|_| "Hello. How are you today?\nWhat did you do this morning?".into());
     for text in say.lines().filter(|l| !l.trim().is_empty()) {
         agent.send(ch, text, None).await.unwrap();
     }
-    agent.wrapup(ch).await.unwrap();
+    if !is_host {
+        agent.wrapup(ch).await.unwrap();
+    }
     for m in agent.history(ch, None, 50).unwrap() {
         println!("{:?}: {}", m.author, m.text);
     }
@@ -181,6 +189,9 @@ async fn two_turns_and_a_wrapup_hit_the_cache() {
     println!("shape uncached cached output");
     for r in &rows {
         println!("{} {} {} {}", r.0, r.1, r.2, r.3);
+    }
+    if is_host {
+        return;
     }
     assert!(rows.len() >= 2, "{rows:?}");
     // A request-billed chat role reports no cache, so there is nothing to assert.

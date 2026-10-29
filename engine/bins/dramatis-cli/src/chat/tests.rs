@@ -490,20 +490,38 @@ async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_grou
         name: id.into(),
         pronoun: None,
     };
+    // The suggestion is a stored line of ann's message, as it is in a real turn.
+    let offer = ToolAction::CreateGroup {
+        members: vec![person("ann"), person("cy")],
+        channel: None,
+    };
+    let direct = r.engine.open_direct(PersonId("ann".into())).await.unwrap();
+    let message = {
+        let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
+        let calls = serde_json::to_value([&offer]).unwrap();
+        let id = world::message::append(
+            &w,
+            world::ChannelId(direct.0.parse().unwrap()),
+            &world::Actor::Person(world::PersonId("ann".into())),
+            "shall we?",
+            Some(&calls),
+            None,
+            1,
+        )
+        .unwrap();
+        api::types::MessageId(id.to_string())
+    };
     let called = |action| {
         api::port::Event::ToolCalled(api::events::ToolCalled {
-            channel: api::types::ChannelId("2".into()),
-            message: api::types::MessageId("2".into()),
+            channel: direct.clone(),
+            message: message.clone(),
             author: api::types::Author::Person {
                 id: PersonId("ann".into()),
             },
             action,
         })
     };
-    r.show.emit(called(ToolAction::CreateGroup {
-        members: vec![person("ann"), person("cy")],
-        channel: None,
-    }));
+    r.show.emit(called(offer.clone()));
     r.session.offers_for_test();
     let listed = r.out.take();
     assert!(listed.contains("1 start a group: ann, cy"), "{listed}");
@@ -511,6 +529,16 @@ async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_grou
     assert!(!r.session.prompt().starts_with("[ann, cy]"));
     assert!(r.run("/go 1").await.contains("group with ann, cy"));
     assert!(r.session.prompt().starts_with("[ann, cy]"));
+    // Taking it again opens the same group instead of making another.
+    r.run("/talk ann").await;
+    assert!(r.run("/go 1").await.contains("group with ann, cy"));
+    let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
+    let made = world::channel::list(&w)
+        .unwrap()
+        .iter()
+        .filter(|c| c.kind == world::ChannelKind::Group)
+        .count();
+    assert_eq!(made, 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

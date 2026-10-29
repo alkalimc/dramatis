@@ -248,6 +248,8 @@ export type Action =
   | { type: "messageDelta"; event: MessageDelta }
   | { type: "messageAdded"; event: MessageAdded }
   | { type: "toolCalled"; event: ToolCalled }
+  /** A suggested group was made: its action line now names the group, so it reads as opened. */
+  | { type: "offerTaken"; channel: ChannelId; message: MessageId; action: number; group: ChannelId }
   | { type: "turnActivity"; event: TurnActivity }
   | { type: "modeChanged"; event: ModeChanged }
   | { type: "worldChanged"; event: WorldChanged }
