@@ -402,6 +402,20 @@ impl AgentPort for Port {
         Ok(agent.found_opening(ch, by.as_ref(), &topic).await?)
     }
 
+    async fn members_changed(
+        &self,
+        channel: ChannelId,
+        joined: Vec<PersonId>,
+        left: Vec<PersonId>,
+    ) -> ApiResult<()> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        let ids = |v: Vec<PersonId>| -> Vec<world::PersonId> {
+            v.into_iter().map(|p| world::PersonId(p.0)).collect()
+        };
+        Ok(agent.members_changed(ch, &ids(joined), &ids(left)).await?)
+    }
+
     fn set_endpoints(&self, endpoints: &Endpoints) {
         *self.0.endpoints.lock().unwrap_or_else(|e| e.into_inner()) = endpoints.clone();
         if let Some(a) = self.0.built() {

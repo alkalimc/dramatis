@@ -320,6 +320,18 @@ impl Engine {
             return Ok((c, None));
         }
         let ids: Vec<world::PersonId> = people.iter().map(world_person).collect();
+        // The same people already have a group: that one, recorded on the line like a new one.
+        if let Some(same) = channel::find_group_with(&w, &ids).map_err(world_err)? {
+            let same = convert::channel_id(same.id);
+            actions[action as usize] = ToolAction::CreateGroup {
+                members,
+                channel: Some(same.clone()),
+                purpose,
+            };
+            let value = serde_json::to_value(&actions).map_err(|_| invalid())?;
+            message::set_tool_calls(&w, mid, &value).map_err(world_err)?;
+            return Ok((same, None));
+        }
         let created = channel::create_group(&w, &ids, purpose.as_deref(), world::Origin::User)
             .map_err(world_err)?;
         let created = convert::channel_id(created);
@@ -332,6 +344,75 @@ impl Engine {
         message::set_tool_calls(&w, mid, &value).map_err(world_err)?;
         let opening = purpose.map(|p| (Self::proposer(&stored.author), p));
         Ok((created, opening))
+    }
+
+    /// Take one of the people an invitation named: the same path as adding by hand.
+    pub(crate) async fn open_invite_impl(
+        &self,
+        msg: &MessageId,
+        action: u32,
+        person: &PersonId,
+    ) -> ApiResult<ChannelId> {
+        let invalid = || ApiError::Invalid {
+            field: "action".into(),
+        };
+        let stored = message::get(&self.w(), convert::world_message(msg)?).map_err(world_err)?;
+        let actions: Vec<ToolAction> = stored
+            .tool_calls
+            .as_ref()
+            .and_then(|a| serde_json::from_value(a.clone()).ok())
+            .unwrap_or_default();
+        let Some(ToolAction::InviteToGroup { channel, persons }) = actions.get(action as usize)
+        else {
+            return Err(invalid());
+        };
+        if !persons.iter().any(|p| p.id == *person) {
+            return Err(invalid());
+        }
+        let channel = channel.clone();
+        self.add_members_impl(&channel, vec![person.clone()])
+            .await?;
+        Ok(channel)
+    }
+
+    pub(crate) async fn add_members_impl(
+        &self,
+        ch: &ChannelId,
+        persons: Vec<PersonId>,
+    ) -> ApiResult<()> {
+        let id = convert::world_channel(ch)?;
+        for p in &persons {
+            self.require_available(p)?;
+        }
+        let ids: Vec<world::PersonId> = persons.iter().map(world_person).collect();
+        let added = channel::add_members(&self.w(), id, &ids).map_err(world_err)?;
+        if added.is_empty() {
+            return Ok(());
+        }
+        self.changed(vec![WorldChange::Channel { id: ch.clone() }]);
+        let joined = added.iter().map(|p| PersonId(p.0.clone())).collect();
+        self.ports
+            .agent
+            .members_changed(ch.clone(), joined, Vec::new())
+            .await
+    }
+
+    pub(crate) async fn remove_member_impl(
+        &self,
+        ch: &ChannelId,
+        person: &PersonId,
+    ) -> ApiResult<()> {
+        let id = convert::world_channel(ch)?;
+        let left =
+            channel::remove_member(&self.w(), id, &world_person(person)).map_err(world_err)?;
+        if !left {
+            return Ok(());
+        }
+        self.changed(vec![WorldChange::Channel { id: ch.clone() }]);
+        self.ports
+            .agent
+            .members_changed(ch.clone(), Vec::new(), vec![person.clone()])
+            .await
     }
 
     pub(crate) fn delete_group_impl(&self, ch: &ChannelId) -> ApiResult<()> {

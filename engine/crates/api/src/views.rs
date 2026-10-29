@@ -338,6 +338,12 @@ pub enum ToolAction {
         #[serde(default)]
         purpose: Option<String>,
     },
+    /// A person's suggestion, made inside a group, to bring colleagues into that group.
+    /// Nothing changes until the user takes one of them.
+    InviteToGroup {
+        channel: ChannelId,
+        persons: Vec<PersonRef>,
+    },
     SetMode {
         target: Target,
         mode: Mode,

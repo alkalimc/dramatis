@@ -145,6 +145,9 @@ fn cache_key(segment: SegmentId) -> String {
 /// Weekday keys of the corpus wording, Monday first.
 const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
+/// Most groups a direct chat's opening lists for its person.
+const GROUPS_LISTED_MAX: usize = 5;
+
 impl Agent {
     pub(crate) fn log_kind(&self, conn: &rusqlite::Connection, ch: ChannelId) -> Result<LogKind> {
         Ok(if channel::get(conn, ch)?.is_host_channel() {
@@ -228,6 +231,7 @@ impl Agent {
                     memory_owner: None,
                     summary: summary.map(|s| s.text.as_str()),
                     recent: &recent,
+                    groups: None,
                 },
             );
             return Ok([a, String::new(), c_block]);
@@ -290,6 +294,38 @@ impl Agent {
             memories.drain(..memories.len() - keep);
         }
         let owner = (people.len() == 1).then(|| names_of[0].as_str());
+        // A direct chat tells its person which groups he is in, fixed for the segment. A
+        // group's log is shared by all its members, so it lists none: its members are the
+        // roster above.
+        let mut briefs = Vec::new();
+        if let (ChannelKind::Direct, Some(me)) = (c.kind, c.person()) {
+            for g in channel::groups_of(conn, me)?
+                .into_iter()
+                .take(GROUPS_LISTED_MAX)
+            {
+                let mut others = Vec::new();
+                for p in g.persons().iter().filter(|p| *p != me) {
+                    others.push(
+                        folio
+                            .person(p.as_str())?
+                            .map(|x| x.display)
+                            .unwrap_or_else(|| p.0.clone()),
+                    );
+                }
+                briefs.push(assemble::GroupBrief {
+                    title: g.name.clone(),
+                    others: others.join(self.corpus.wording.get("list.separator")),
+                    purpose: g.topic.clone(),
+                });
+            }
+        }
+        let groups = match (briefs.is_empty(), names_of.first()) {
+            (false, Some(person)) => Some(assemble::Groups {
+                person,
+                list: &briefs,
+            }),
+            _ => None,
+        };
         let c_block = assemble::block_c(
             &ctx,
             &assemble::Opening {
@@ -303,6 +339,7 @@ impl Agent {
                 memory_owner: owner,
                 summary: summary.map(|s| s.text.as_str()),
                 recent: &recent,
+                groups,
             },
         );
         Ok([a, b, c_block])

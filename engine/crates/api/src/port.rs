@@ -101,6 +101,17 @@ pub trait AgentPort: Send + Sync + 'static {
         Ok(())
     }
 
+    /// People joined a group or left it (the roster already changed): say so in the group,
+    /// for the user and for the members' log. Fixed wording, no model call.
+    async fn members_changed(
+        &self,
+        _channel: ChannelId,
+        _joined: Vec<PersonId>,
+        _left: Vec<PersonId>,
+    ) -> ApiResult<()> {
+        Ok(())
+    }
+
     /// The endpoints changed; the next call uses these.
     fn set_endpoints(&self, endpoints: &Endpoints);
 

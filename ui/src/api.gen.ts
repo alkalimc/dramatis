@@ -79,7 +79,8 @@ export const commands = {
 	 *  Take a group a person suggested: the `action`-th action line of `message`, a group
 	 *  with no channel yet. Creates it the first time and records its channel on the line;
 	 *  every later call returns that same group (`Invalid` for any other action). A group
-	 *  deleted since is made again.
+	 *  deleted since is made again. A live group, not archived, that already has exactly
+	 *  these people is that group: nothing new is made.
 	 */
 	openOffer: (message: MessageId, action: number) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_offer", { message, action })),
 	/**
@@ -88,7 +89,25 @@ export const commands = {
 	 *  line the first time. `Invalid` when the person is not on that line.
 	 */
 	openFound: (message: MessageId, action: number, person: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_found", { message, action, person })),
+	/**
+	 *  Take one of the people an invitation (the `action`-th action line of `message`, made
+	 *  inside a group) offered: they join that group, as with `add_members`. Returns the
+	 *  group. `Invalid` when the person is not on that line.
+	 */
+	openInvite: (message: MessageId, action: number, person: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_invite", { message, action, person })),
 	deleteGroup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_group", { channel })),
+	/**
+	 *  Bring people into a live group. Each must be available (`NoPersona`, `Disabled`);
+	 *  anyone already in it is left as is, so repeating is harmless. Each person who joins
+	 *  leaves a service line in the group (no model call), and `WorldChanged` follows.
+	 */
+	addMembers: (channel: ChannelId, persons: PersonId[]) => typedError<null, ApiError>(__TAURI_INVOKE("add_members", { channel, persons })),
+	/**
+	 *  Take a person out of a live group; their messages stay in its history and a service
+	 *  line says so. Not in it: nothing happens. A group keeps at least one person
+	 *  (`Invalid` for the last). `WorldChanged` follows.
+	 */
+	removeMember: (channel: ChannelId, person: PersonId) => typedError<null, ApiError>(__TAURI_INVOKE("remove_member", { channel, person })),
 	/**  Title a channel. `None` or blank returns to the derived title. */
 	renameChannel: (channel: ChannelId, name: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("rename_channel", { channel, name })),
 	/**  Set (or, with `None`, clear) a channel's picture. Returns the stored file. */
@@ -1024,7 +1043,12 @@ persons?: PersonRef[] } | { tool: "ask"; person: PersonRef; question: string } |
 /**  The new group, so a front end can offer to open it. Absent on older rows. */
 channel?: ChannelId | null; 
 /**  Why the group exists, in a few words. It becomes the group's topic. */
-purpose?: string | null } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId } | { tool: "list_channels"; 
+purpose?: string | null } | 
+/**
+ *  A person's suggestion, made inside a group, to bring colleagues into that group.
+ *  Nothing changes until the user takes one of them.
+ */
+{ tool: "invite_to_group"; channel: ChannelId; persons: PersonRef[] } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId } | { tool: "list_channels"; 
 /**  The conversations listed, so a front end can offer to open each. */
 channels?: ChannelRef[] };
 

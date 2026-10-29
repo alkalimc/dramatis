@@ -627,8 +627,22 @@ impl Api for Engine {
     ) -> ApiResult<ChannelId> {
         self.open_found_impl(&message, action, &person).await
     }
+    async fn open_invite(
+        &self,
+        message: MessageId,
+        action: u32,
+        person: PersonId,
+    ) -> ApiResult<ChannelId> {
+        self.open_invite_impl(&message, action, &person).await
+    }
     async fn delete_group(&self, channel: ChannelId) -> ApiResult<()> {
         self.delete_group_impl(&channel)
+    }
+    async fn add_members(&self, channel: ChannelId, persons: Vec<PersonId>) -> ApiResult<()> {
+        self.add_members_impl(&channel, persons).await
+    }
+    async fn remove_member(&self, channel: ChannelId, person: PersonId) -> ApiResult<()> {
+        self.remove_member_impl(&channel, &person).await
     }
     async fn rename_channel(&self, channel: ChannelId, name: Option<String>) -> ApiResult<()> {
         self.rename_channel_impl(&channel, name)

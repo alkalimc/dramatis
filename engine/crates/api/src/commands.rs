@@ -155,13 +155,26 @@ commands! {
     /// Take a group a person suggested: the `action`-th action line of `message`, a group
     /// with no channel yet. Creates it the first time and records its channel on the line;
     /// every later call returns that same group (`Invalid` for any other action). A group
-    /// deleted since is made again.
+    /// deleted since is made again. A live group, not archived, that already has exactly
+    /// these people is that group: nothing new is made.
     fn open_offer(message: MessageId, action: u32) -> ChannelId;
     /// Take one of the people a find suggestion (the `action`-th action line of `message`)
     /// offered: their direct channel, with the reason they were found written as its first
     /// line the first time. `Invalid` when the person is not on that line.
     fn open_found(message: MessageId, action: u32, person: PersonId) -> ChannelId;
+    /// Take one of the people an invitation (the `action`-th action line of `message`, made
+    /// inside a group) offered: they join that group, as with `add_members`. Returns the
+    /// group. `Invalid` when the person is not on that line.
+    fn open_invite(message: MessageId, action: u32, person: PersonId) -> ChannelId;
     fn delete_group(channel: ChannelId) -> ();
+    /// Bring people into a live group. Each must be available (`NoPersona`, `Disabled`);
+    /// anyone already in it is left as is, so repeating is harmless. Each person who joins
+    /// leaves a service line in the group (no model call), and `WorldChanged` follows.
+    fn add_members(channel: ChannelId, persons: Vec<PersonId>) -> ();
+    /// Take a person out of a live group; their messages stay in its history and a service
+    /// line says so. Not in it: nothing happens. A group keeps at least one person
+    /// (`Invalid` for the last). `WorldChanged` follows.
+    fn remove_member(channel: ChannelId, person: PersonId) -> ();
     /// Title a channel. `None` or blank returns to the derived title.
     fn rename_channel(channel: ChannelId, name: Option<String>) -> ();
     /// Set (or, with `None`, clear) a channel's picture. Returns the stored file.

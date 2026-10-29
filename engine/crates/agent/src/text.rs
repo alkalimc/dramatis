@@ -169,7 +169,8 @@ const DEFAULTS: &[(&str, &str)] = &[
          colleague merely mentioned needs no line. To offer a group with colleagues from the roster, \
          end it with one final line that starts with {group} followed by their names, \
          separated by commas, and at most four, then a bar and the purpose of the group in a \
-         few words (at most sixty characters), which every member is told. Such a line comes \
+         few words (at most sixty characters), which every member is told. A group that \
+         already has exactly those people is opened instead of a new one. Such a line comes \
          at most once per reply. If a citation line is also written, these lines come last.",
     ),
     (
@@ -187,6 +188,15 @@ const DEFAULTS: &[(&str, &str)] = &[
          only, no code fence, using exactly these keys: {shape}",
     ),
     ("harness.joined", "{name} joins the conversation."),
+    ("harness.left", "{name} leaves the conversation."),
+    ("list.separator", ", "),
+    (
+        "harness.groups",
+        "{name} is also in these groups with {user}, each by its other members:\n{list}",
+    ),
+    ("harness.groups.line", "- {others}"),
+    ("harness.groups.line_named", "- {title}: {others}"),
+    ("harness.groups.about", " ({purpose})"),
     (
         "harness.ask",
         "{user} asks {name} to look into this: {question}",
@@ -379,6 +389,10 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.asked", "{name} is looking into it."),
     ("harness.group_created", "Group {id} created."),
+    (
+        "harness.group_reused",
+        "Group {id} already has exactly these people, so that one is offered instead of a new group.",
+    ),
     (
         "harness.group_purpose",
         "{name} suggested this group: {purpose}",

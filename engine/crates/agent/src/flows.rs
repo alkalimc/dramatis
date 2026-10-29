@@ -588,6 +588,130 @@ impl Agent {
             || log.items.iter().flat_map(request::harness_texts).any(has))
     }
 
+    /// The segment of a group a member is about to speak in. A group's log is shared, so
+    /// someone added after it opened already reads everything said so far; what he lacks
+    /// is his own persona, which enters as an entry. If the log shows a memory he may not
+    /// recall, it rolls over first, as when a colleague is pulled into a talk.
+    async fn admit(
+        &self,
+        ch: ChannelId,
+        seg: world::SegmentId,
+        person: &PersonId,
+        before: Option<MessageId>,
+    ) -> Result<world::SegmentId> {
+        let name = self.display(person.as_str())?;
+        let names = self.segment_names(seg)?;
+        if self.log_has_persona(seg, &names, &name)? {
+            return Ok(seg);
+        }
+        let mut seg = seg;
+        if self.hides_from(seg, person)? {
+            self.run_wrapup(ch, false).await?;
+            seg = self.open_segment(ch, None, Some(crate::session::Tail { before }))?;
+            // The new prefix was built with him among the members.
+            let names = self.segment_names(seg)?;
+            if self.log_has_persona(seg, &names, &name)? {
+                return Ok(seg);
+            }
+        }
+        self.introduce(seg, person)?;
+        Ok(seg)
+    }
+
+    /// Append a member's persona to a segment as an entry.
+    fn introduce(&self, seg: world::SegmentId, person: &PersonId) -> Result<()> {
+        let names = self.segment_names(seg)?;
+        let name = self.display(person.as_str())?;
+        let persona = persona::person(self.ix().folio(), person.as_str())?
+            .ok_or_else(|| Error::NoPersona(person.clone()))?;
+        let section = assemble::persona_section(
+            &self.ctx(&names),
+            &Member::Person {
+                name: &name,
+                persona: &persona,
+            },
+        );
+        self.append_user(seg, &assemble::entry(&[section.as_str()]), None)
+    }
+
+    /// People were added to a group or taken out of it (the roster already changed): each
+    /// change is a service line in the group, and the group's log says so too, so the
+    /// members know who is there. A newcomer's persona enters the log here when nothing
+    /// forbids it, else when he first speaks. Fixed wording, no model call.
+    pub async fn members_changed(
+        &self,
+        ch: ChannelId,
+        joined: &[PersonId],
+        left: &[PersonId],
+    ) -> Result<()> {
+        let _turn = self.lock_channel(ch).await;
+        let seg = world::log::current(&self.db(), ch)?.map(|s| s.id);
+        let names = match seg {
+            Some(s) => self.segment_names(s)?,
+            None => self.names_now(&self.db())?,
+        };
+        let mut said = Vec::new();
+        for (who, key) in joined
+            .iter()
+            .map(|p| (p, "harness.joined"))
+            .chain(left.iter().map(|p| (p, "harness.left")))
+        {
+            let name = self.display(who.as_str())?;
+            said.push((
+                who,
+                key == "harness.joined",
+                self.corpus.wording.fill(key, &names, &[("name", &name)]),
+            ));
+        }
+        if let Some(seg) = seg {
+            let mut lines = Vec::new();
+            for (who, joining, text) in &said {
+                if *joining {
+                    let name = self.display(who.as_str())?;
+                    let known = self.log_has_persona(seg, &names, &name)?;
+                    if !known && !self.hides_from(seg, who)? {
+                        self.introduce(seg, who)?;
+                    }
+                }
+                lines.push(text.as_str());
+            }
+            self.append_user(seg, &assemble::entry(&lines), None)?;
+        }
+        for (_, _, text) in &said {
+            self.service_line(ch, text)?;
+        }
+        self.changed(vec![WorldChange::Channel {
+            id: view::channel_id(ch),
+        }]);
+        Ok(())
+    }
+
+    /// A line only the user sees, in the user's voice, marked as a service line.
+    fn service_line(&self, ch: ChannelId, text: &str) -> Result<()> {
+        let meta = api::meta::MessageMeta {
+            service: true,
+            ..api::meta::MessageMeta::default()
+        };
+        let attachment =
+            serde_json::to_value(&meta).map_err(|e| world::Error::Invalid(e.to_string()))?;
+        let now = self.now();
+        let conn = self.db();
+        let id = message::append(
+            &conn,
+            ch,
+            &Actor::User,
+            text,
+            None,
+            Some(&attachment),
+            now.ms,
+        )?;
+        let stored = message::get(&conn, id)?;
+        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        drop(conn);
+        self.emit(Event::MessageAdded(MessageAdded { message: shown }));
+        Ok(())
+    }
+
     async fn group_turn(&self, posted: &Posted) -> Result<()> {
         let now = self.now();
         let (members, named) = {
@@ -634,6 +758,9 @@ impl Agent {
         )?;
         let seg = self
             .ensure_segment(posted.channel, Some(posted.message))
+            .await?;
+        let seg = self
+            .admit(posted.channel, seg, &addressed, Some(posted.message))
             .await?;
         let names = self.segment_names(seg)?;
         let speaker = Actor::Person(addressed.clone());
@@ -839,6 +966,7 @@ impl Agent {
 
     async fn interject(&self, ch: ChannelId, person: &PersonId, key: &str) -> Result<Vec<String>> {
         let seg = self.current_segment(ch)?;
+        let seg = self.admit(ch, seg, person, None).await?;
         let names = self.segment_names(seg)?;
         let name = self.display(person.as_str())?;
         let mut turn = Turn::new(ch, Actor::Person(person.clone()), Shape::Interject);

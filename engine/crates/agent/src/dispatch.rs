@@ -410,7 +410,9 @@ impl Agent {
         let spoken = turn.actions.iter().any(|x| {
             matches!(
                 x,
-                ToolAction::FindPeople { .. } | ToolAction::CreateGroup { .. }
+                ToolAction::FindPeople { .. }
+                    | ToolAction::InviteToGroup { .. }
+                    | ToolAction::CreateGroup { .. }
             )
         });
         if spoken {
@@ -421,9 +423,22 @@ impl Agent {
             return Ok(Err(unavailable()));
         }
         let offer = self.offerable(&self.db())?;
+        // In a group, the people already there are never offered again: a find becomes an
+        // invitation into this group, and a group of nobody new is not offered at all.
+        let here = {
+            let ch = channel::get(&self.db(), turn.channel)?;
+            (ch.kind == world::ChannelKind::Group).then(|| ch.persons())
+        };
         match (a.find, a.group) {
             (Some(listed), None) => {
-                let scope: Vec<String> = offer.into_iter().filter(|p| p != me.as_str()).collect();
+                let scope: Vec<String> = offer
+                    .into_iter()
+                    .filter(|p| p != me.as_str())
+                    .filter(|p| {
+                        here.as_ref()
+                            .is_none_or(|h| !h.iter().any(|m| m.as_str() == p))
+                    })
+                    .collect();
                 // A name nobody on the roster answers to is left out; the rest stay offered.
                 let mut found: Vec<PersonId> = Vec::new();
                 for n in &listed {
@@ -441,13 +456,18 @@ impl Agent {
                     .iter()
                     .map(|p| view::person_ref(self.ix().folio(), p.as_str()))
                     .collect::<Result<Vec<_>>>()?;
-                self.show_action(
-                    turn,
+                let action = if here.is_some() {
+                    ToolAction::InviteToGroup {
+                        channel: view::channel_id(turn.channel),
+                        persons,
+                    }
+                } else {
                     ToolAction::FindPeople {
                         topic: clean_purpose(a.purpose.as_deref()).unwrap_or_default(),
                         persons,
-                    },
-                )?;
+                    }
+                };
+                self.show_action(turn, action)?;
             }
             (None, Some(group)) => {
                 let mut members = vec![me.clone()];
@@ -457,7 +477,11 @@ impl Agent {
                         members.push(id);
                     }
                 }
+                let nothing_new = here
+                    .as_ref()
+                    .is_some_and(|h| members.iter().all(|m| h.contains(m)));
                 let ok = members.len() >= 2
+                    && !nothing_new
                     && members.len() <= SUGGESTED_GROUP_MAX + 1
                     && members
                         .iter()
@@ -699,6 +723,23 @@ impl Agent {
                     .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
                     .collect::<Result<Vec<_>>>()?;
                 let purpose = clean_purpose(g.purpose.as_deref());
+                // A live group with exactly these people is the group: no second one.
+                let existing = channel::find_group_with(&self.db(), &members)?;
+                if let Some(found) = existing {
+                    self.show_action(
+                        turn,
+                        ToolAction::CreateGroup {
+                            members: refs,
+                            channel: Some(view::channel_id(found.id)),
+                            purpose,
+                        },
+                    )?;
+                    return Ok(Ok(self.say(
+                        names,
+                        "harness.group_reused",
+                        &[("id", &found.id.to_string())],
+                    )));
+                }
                 let created =
                     channel::create_group(&self.db(), &members, purpose.as_deref(), Origin::User);
                 match created {

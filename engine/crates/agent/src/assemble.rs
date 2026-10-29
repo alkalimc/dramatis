@@ -175,6 +175,21 @@ pub struct Opening<'a> {
     pub summary: Option<&'a str>,
     /// `(author, text)` of the last messages, oldest first.
     pub recent: &'a [(String, String)],
+    /// The groups the person of a direct chat is in, when there are any.
+    pub groups: Option<Groups<'a>>,
+}
+
+/// A person's groups, as block C lists them.
+pub struct Groups<'a> {
+    pub person: &'a str,
+    pub list: &'a [GroupBrief],
+}
+
+/// One group a person is in: the title the user gave it, its other members and its purpose.
+pub struct GroupBrief {
+    pub title: Option<String>,
+    pub others: String,
+    pub purpose: Option<String>,
 }
 
 pub fn memory_id(fact: &Fact) -> String {
@@ -192,6 +207,33 @@ pub fn block_c(ctx: &Ctx<'_>, o: &Opening<'_>) -> String {
     }
     if let Some(t) = o.topic.filter(|t| !t.trim().is_empty()) {
         parts.push(ctx.fill("harness.topic", &[("topic", t.trim())]));
+    }
+    if let Some(g) = o.groups.as_ref().filter(|g| !g.list.is_empty()) {
+        let lines: Vec<String> = g
+            .list
+            .iter()
+            .map(|b| {
+                let others = ctx.names.sub(&b.others);
+                let mut line = match &b.title {
+                    Some(title) => ctx.fill(
+                        "harness.groups.line_named",
+                        &[("title", &ctx.names.sub(title)), ("others", &others)],
+                    ),
+                    None => ctx.fill("harness.groups.line", &[("others", &others)]),
+                };
+                if let Some(purpose) = &b.purpose {
+                    line.push_str(&ctx.fill(
+                        "harness.groups.about",
+                        &[("purpose", &ctx.names.sub(purpose))],
+                    ));
+                }
+                line
+            })
+            .collect();
+        parts.push(ctx.fill(
+            "harness.groups",
+            &[("name", g.person), ("list", &lines.join("\n"))],
+        ));
     }
     if !o.memories.is_empty() {
         let head = match o.memory_owner {

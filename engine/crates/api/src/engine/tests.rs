@@ -168,6 +168,21 @@ impl AgentPort for Spy {
             .push(format!("group {} {by} {p}", c.0));
         Ok(())
     }
+    async fn members_changed(
+        &self,
+        c: ChannelId,
+        joined: Vec<PersonId>,
+        left: Vec<PersonId>,
+    ) -> ApiResult<()> {
+        let names = |v: Vec<PersonId>| v.into_iter().map(|p| p.0).collect::<Vec<_>>().join(",");
+        self.calls.lock().unwrap().push(format!(
+            "members {} +{} -{}",
+            c.0,
+            names(joined),
+            names(left)
+        ));
+        Ok(())
+    }
     async fn found_opened(&self, c: ChannelId, by: Option<PersonId>, t: String) -> ApiResult<()> {
         let by = by.map_or("host".to_string(), |b| b.0);
         self.calls
@@ -1235,6 +1250,163 @@ async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
     let again = e.open_offer(mid.clone(), 1).await.unwrap();
     assert_ne!(again, first);
     assert_eq!(groups(e), 1);
+}
+
+/// A person's message with `lines` under it, in `ch`.
+fn offer_message(e: &Engine, ch: &ChannelId, lines: &[ToolAction]) -> MessageId {
+    let w = e.w();
+    let calls = serde_json::to_value(lines).unwrap();
+    let m = world::message::append(
+        &w,
+        convert::world_channel(ch).unwrap(),
+        &world::Actor::Person(world::PersonId("amy".into())),
+        "a thought",
+        Some(&calls),
+        None,
+        e.now().ms,
+    )
+    .unwrap();
+    convert::message_id(m)
+}
+
+fn person_ref(p: &str) -> PersonRef {
+    PersonRef {
+        id: id(p),
+        name: p.into(),
+        pronoun: None,
+    }
+}
+
+#[tokio::test]
+async fn members_join_and_leave_a_group_and_the_group_says_so() {
+    let r = rig();
+    let e = &r.engine;
+    let calls = || r.spy.calls.lock().unwrap().clone();
+    let group = e.create_group(vec![id("amy")], None).await.unwrap();
+    let members = |e: &Engine| {
+        world::channel::get(&e.w(), convert::world_channel(&group).unwrap())
+            .unwrap()
+            .persons()
+    };
+    // Only people who can answer; nothing changes on a refusal.
+    assert_eq!(
+        e.add_members(group.clone(), vec![id("kal"), id("zed")])
+            .await,
+        Err(ApiError::NoPersona { person: id("zed") })
+    );
+    assert_eq!(members(e).len(), 1);
+    assert!(calls().is_empty());
+
+    e.add_members(group.clone(), vec![id("kal"), id("amy")])
+        .await
+        .unwrap();
+    assert_eq!(members(e).len(), 2);
+    assert_eq!(calls(), [format!("members {} +kal -", group.0)]);
+    // Again: nobody new, nothing said.
+    e.add_members(group.clone(), vec![id("kal")]).await.unwrap();
+    assert_eq!(calls().len(), 1);
+
+    e.remove_member(group.clone(), id("kal")).await.unwrap();
+    assert_eq!(members(e).len(), 1);
+    assert_eq!(calls()[1], format!("members {} + -kal", group.0));
+    // Not in it: nothing happens. The last person stays.
+    e.remove_member(group.clone(), id("kal")).await.unwrap();
+    assert_eq!(calls().len(), 2);
+    assert_eq!(
+        e.remove_member(group.clone(), id("amy")).await,
+        Err(ApiError::Invalid {
+            field: "request".into()
+        })
+    );
+    assert_eq!(members(e).len(), 1);
+
+    // A direct chat has no roster to edit, and a disabled person cannot be added.
+    let direct = e.open_direct(id("amy")).await.unwrap();
+    assert!(e.add_members(direct, vec![id("kal")]).await.is_err());
+    e.set_mode(Target::Person { id: id("kal") }, Mode::Disabled)
+        .await
+        .unwrap();
+    assert!(e.add_members(group, vec![id("kal")]).await.is_err());
+}
+
+#[tokio::test]
+async fn an_invitation_adds_the_person_it_names_and_only_them() {
+    let r = rig();
+    let e = &r.engine;
+    let group = e.create_group(vec![id("amy")], None).await.unwrap();
+    let mid = offer_message(
+        e,
+        &group,
+        &[ToolAction::InviteToGroup {
+            channel: group.clone(),
+            persons: vec![person_ref("kal")],
+        }],
+    );
+    let invalid = Err(ApiError::Invalid {
+        field: "action".into(),
+    });
+    assert_eq!(e.open_invite(mid.clone(), 1, id("kal")).await, invalid);
+    assert_eq!(e.open_invite(mid.clone(), 0, id("amy")).await, invalid);
+    assert_eq!(
+        e.open_invite(mid.clone(), 0, id("kal")).await,
+        Ok(group.clone())
+    );
+    // Taking it again changes nothing.
+    assert_eq!(e.open_invite(mid, 0, id("kal")).await, Ok(group.clone()));
+    let now = world::channel::get(&e.w(), convert::world_channel(&group).unwrap()).unwrap();
+    assert_eq!(now.persons().len(), 2);
+    assert_eq!(
+        r.spy.calls.lock().unwrap().as_slice(),
+        [format!("members {} +kal -", group.0)]
+    );
+}
+
+#[tokio::test]
+async fn a_suggested_group_reuses_a_live_one_with_the_same_people() {
+    let r = rig();
+    let e = &r.engine;
+    let existing = e
+        .create_group(vec![id("kal"), id("amy")], None)
+        .await
+        .unwrap();
+    let direct = e.open_direct(id("amy")).await.unwrap();
+    let offer = ToolAction::CreateGroup {
+        members: vec![person_ref("amy"), person_ref("kal")],
+        channel: None,
+        purpose: Some("plan a party".into()),
+    };
+    let mid = offer_message(e, &direct, &[offer]);
+    let groups = |e: &Engine| {
+        world::channel::list(&e.w())
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.kind == world::ChannelKind::Group)
+            .count()
+    };
+    assert_eq!(e.open_offer(mid.clone(), 0).await.unwrap(), existing);
+    assert_eq!(groups(e), 1);
+    // The group already exists, so it gets no opening line.
+    assert!(r.spy.calls.lock().unwrap().is_empty());
+
+    // An archived group is not reused: the offer makes a new one.
+    let mid = offer_message(
+        e,
+        &direct,
+        &[ToolAction::CreateGroup {
+            members: vec![person_ref("amy"), person_ref("kal")],
+            channel: None,
+            purpose: None,
+        }],
+    );
+    e.archive_channel(existing.clone(), true).await.unwrap();
+    let fresh = e.open_offer(mid, 0).await.unwrap();
+    assert_ne!(fresh, existing);
+    assert_eq!(groups(e), 2);
+    assert!(
+        world::channel::get(&e.w(), convert::world_channel(&existing).unwrap())
+            .unwrap()
+            .archived
+    );
 }
 
 #[tokio::test]
