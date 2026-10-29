@@ -1773,3 +1773,92 @@ async fn a_message_posted_whole_offers_what_it_carries() {
         "{listed}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn people_come_into_a_group_and_leave_it_by_command() {
+    let mut r = rig().await;
+    r.run("/group ann cy").await;
+    assert!(r.run("/invite ann").await.contains("already in this group"));
+    r.run("/remove cy").await;
+    assert!(r.session.prompt().starts_with("[ann]"));
+    assert!(
+        r.run("/remove cy")
+            .await
+            .contains("cy is not in this group")
+    );
+    assert!(
+        r.run("/remove ann")
+            .await
+            .contains("keeps at least one person")
+    );
+    // Commas separate names; someone without a persona cannot be brought in.
+    assert!(r.run("/invite bo, cy").await.contains("no persona"));
+    assert!(r.run("/members").await.contains("ann"));
+    r.run("/invite cy").await;
+    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.run("/invite").await.contains("usage: /invite"));
+    assert!(r.run("/remove").await.contains("usage: /remove"));
+    r.run("/talk ann").await;
+    assert!(r.run("/invite cy").await.contains("not a group"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_invitation_is_a_numbered_choice_that_adds_the_person() {
+    use api::port::Sink;
+    use api::types::PersonId;
+    use api::views::ToolAction;
+    let mut r = rig().await;
+    r.run("/group ann cy").await;
+    r.run("/remove cy").await;
+    let group = {
+        let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
+        let g = world::channel::list(&w)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.kind == world::ChannelKind::Group)
+            .unwrap();
+        api::types::ChannelId(g.id.to_string())
+    };
+    let cy = api::types::PersonRef {
+        id: PersonId("cy".into()),
+        name: "cy".into(),
+        pronoun: None,
+    };
+    let offer = ToolAction::InviteToGroup {
+        channel: group.clone(),
+        persons: vec![cy],
+    };
+    let message = {
+        let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
+        let calls = serde_json::to_value([&offer]).unwrap();
+        let id = world::message::append(
+            &w,
+            world::ChannelId(group.0.parse().unwrap()),
+            &world::Actor::Person(world::PersonId("ann".into())),
+            "cy could help",
+            Some(&calls),
+            None,
+            1,
+        )
+        .unwrap();
+        api::types::MessageId(id.to_string())
+    };
+    r.show
+        .emit(api::port::Event::ToolCalled(api::events::ToolCalled {
+            channel: group.clone(),
+            message,
+            author: api::types::Author::Person {
+                id: PersonId("ann".into()),
+            },
+            action: offer,
+        }));
+    r.session.offers_for_test();
+    let listed = r.out.take();
+    assert!(listed.contains("1 invite cy to join"), "{listed}");
+    assert!(r.session.prompt().starts_with("[ann]"));
+    r.run("/go 1").await;
+    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    // Taking it again changes nothing.
+    r.run("/go 1").await;
+    assert!(r.session.prompt().starts_with("[ann, cy]"));
+}

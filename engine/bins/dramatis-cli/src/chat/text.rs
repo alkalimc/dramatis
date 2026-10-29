@@ -54,6 +54,8 @@ anything else       send it to the current channel
 /chats [archived]   your conversations, newest first, with what is unread; /chat <n> opens one
 /rename [title]     title this conversation; no title returns to the members' names
 /members            who is in this group
+/invite <p1>, <p2>  bring persons into this group
+/remove <person>    take a person out of this group; what they said stays
 /archive, /unarchive  take this conversation out of the list, or put it back
 /leave              delete this group and what was said in it (asks first)",
     ),
@@ -133,6 +135,13 @@ line is one message.",
     ("cli.offer.person", "talk to {name}"),
     ("cli.offer.group", "open group: {names}"),
     ("cli.offer.new_group", "start a group: {names}"),
+    ("cli.offer.invite", "invite {name} to join"),
+    ("cli.invite.already", "they are already in this group"),
+    ("cli.remove.not_member", "{name} is not in this group"),
+    (
+        "cli.remove.last",
+        "a group keeps at least one person; /leave deletes it",
+    ),
     ("cli.sources.count", "sources: {n}  (/sources to show)"),
     ("cli.picture", "[picture]"),
     ("cli.picture.lost", "[picture unavailable]"),
@@ -459,6 +468,8 @@ line is one message.",
     ("cli.usage.birthday", "usage: /birthday [MM-DD | clear]"),
     ("cli.usage.talk", "usage: /talk <person>"),
     ("cli.usage.group", "usage: /group <p1> <p2> [...]"),
+    ("cli.usage.invite", "usage: /invite <p1>, <p2> [...]"),
+    ("cli.usage.remove", "usage: /remove <person>"),
     ("cli.usage.chats", "usage: /chats [archived]"),
     ("cli.usage.chat", "usage: /chat <n>, a number from /chats"),
     ("cli.usage.who", "usage: /who <person>"),

@@ -17,6 +17,8 @@ const COMMANDS: &[&str] = &[
     "chat",
     "rename",
     "members",
+    "invite",
+    "remove",
     "archive",
     "unarchive",
     "leave",
@@ -153,6 +155,12 @@ pub fn complete(line: &str, pos: usize, data: &Snapshot) -> (usize, Vec<Pair>) {
             let at = args.rfind(char::is_whitespace).map_or(0, |i| i + 1);
             (args_at + at, persons(&args[at..], data, false))
         }
+        "invite" => {
+            // Names are separated by commas or spaces; the word after the last one completes.
+            let at = args.rfind([',', ' ']).map_or(0, |i| i + 1);
+            (args_at + at, persons(args[at..].trim_start(), data, false))
+        }
+        "remove" => (args_at, persons(args, data, true)),
         "save" => save(args, args_at, data),
         _ => none,
     }
@@ -302,6 +310,15 @@ mod tests {
         assert_eq!(found.0, 10);
         assert_eq!(shown(&found), ["Anchor", "Annie"]);
         assert_eq!(shown(&at("/group ")), ["Anchor", "Annie", "Bo"]);
+    }
+
+    #[test]
+    fn invite_completes_after_a_comma_and_remove_any_name() {
+        let found = at("/invite Bo, An");
+        assert_eq!(found.0, 12);
+        assert_eq!(shown(&found), ["Anchor", "Annie"]);
+        assert_eq!(shown(&at("/remove BO")), ["Bo"]);
+        assert_eq!(shown(&at("/remove Ann L")), ["Ann Lee"]);
     }
 
     #[test]

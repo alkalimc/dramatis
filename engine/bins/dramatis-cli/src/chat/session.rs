@@ -368,6 +368,8 @@ impl Session {
             Command::Archive(on) => self.archive(on).await,
             Command::Rename(name) => self.rename(&name).await,
             Command::Members => self.members(),
+            Command::Invite(who) => self.invite(&who).await,
+            Command::Remove(who) => self.remove(&who).await,
             Command::Leave => self.leave(),
             Command::Read(all) => self.read(all).await,
             Command::ReadUnit(unit) => self.read_unit(&unit).await,
@@ -686,6 +688,26 @@ impl Session {
         });
     }
 
+    /// A group changed its roster behind the session's back (an invitation was taken):
+    /// read its members again, and go into it unless it is already the open one.
+    async fn joined_group(&mut self, channel: ChannelId) {
+        let members = match self.engine.channels().await {
+            Ok(list) => list
+                .into_iter()
+                .find(|c| c.id == channel)
+                .map(|c| c.participants.into_iter().map(|p| p.id).collect::<Vec<_>>()),
+            Err(e) => return self.fail(&e),
+        };
+        let Some(members) = members else {
+            return;
+        };
+        if self.current.as_ref().is_some_and(|c| c.channel == channel) {
+            self.set_members(members);
+        } else {
+            self.enter_group(channel, members).await;
+        }
+    }
+
     /// Switch to choice `n` of the host's latest offer.
     async fn go(&mut self, n: usize) {
         let Some(offer) = self.offers.get(n - 1).cloned() else {
@@ -710,6 +732,18 @@ impl Session {
                 self.enter_person(person, opened).await;
             }
             Offer::Person { id, .. } => self.open_person(PersonId(id)).await,
+            // Taking an invitation adds the person as `/invite` does; the group stays open.
+            Offer::Invite { id, line, .. } => {
+                let person = PersonId(id);
+                match self
+                    .engine
+                    .open_invite(line.message, line.index, person.clone())
+                    .await
+                {
+                    Ok(channel) => self.joined_group(channel).await,
+                    Err(e) => self.fail(&e),
+                }
+            }
             group @ Offer::Group { .. } => {
                 let Offer::Group { channel, .. } = &group else {
                     return;
@@ -731,6 +765,86 @@ impl Session {
                     Err(e) => self.fail(&e),
                 }
             }
+        }
+    }
+
+    /// The current group and its members, or the reason there is none, said to the user.
+    fn current_group(&self) -> Option<(ChannelId, Vec<PersonId>)> {
+        match self.current.as_ref() {
+            Some(Current {
+                channel,
+                kind: Kind::Group(members),
+                ..
+            }) => Some((channel.clone(), members.clone())),
+            Some(_) => {
+                self.term.line(&self.msg("cli.members.not_group"));
+                None
+            }
+            None => {
+                self.term.line(&self.msg("cli.no_channel"));
+                None
+            }
+        }
+    }
+
+    /// The current group has these members now.
+    fn set_members(&mut self, members: Vec<PersonId>) {
+        let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
+        let label = self.names.group_label(&names);
+        if let Some(c) = self.current.as_mut() {
+            c.kind = Kind::Group(members);
+            c.label = label;
+        }
+    }
+
+    /// Bring people into the current group; the group says who joined.
+    async fn invite(&mut self, who: &[String]) {
+        let Some((channel, members)) = self.current_group() else {
+            return;
+        };
+        let mut added: Vec<PersonId> = Vec::new();
+        for w in who {
+            match self.resolve(w).await {
+                Ok(p) if !members.contains(&p) && !added.contains(&p) => added.push(p),
+                Ok(_) => {}
+                Err(e) => return self.term.line(&e),
+            }
+        }
+        if added.is_empty() {
+            return self.term.line(&self.msg("cli.invite.already"));
+        }
+        match self.engine.add_members(channel, added.clone()).await {
+            Ok(()) => {
+                let mut members = members;
+                members.extend(added);
+                self.set_members(members);
+            }
+            Err(e) => self.fail(&e),
+        }
+    }
+
+    /// Take a person out of the current group; what they said stays.
+    async fn remove(&mut self, who: &str) {
+        let Some((channel, mut members)) = self.current_group() else {
+            return;
+        };
+        let person = match self.resolve_as(who, false).await {
+            Ok(p) => p,
+            Err(e) => return self.term.line(&e),
+        };
+        if !members.contains(&person) {
+            let name = self.names.person(&person.0);
+            return self
+                .term
+                .line(&self.names.say("cli.remove.not_member", &[("name", &name)]));
+        }
+        match self.engine.remove_member(channel, person.clone()).await {
+            Ok(()) => {
+                members.retain(|p| p != &person);
+                self.set_members(members);
+            }
+            Err(ApiError::Invalid { .. }) => self.term.line(&self.msg("cli.remove.last")),
+            Err(e) => self.fail(&e),
         }
     }
 

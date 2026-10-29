@@ -261,6 +261,11 @@ impl Names {
                 "asked {name}: {question}",
                 &[("name", &person.name), ("question", question)],
             ),
+            ToolAction::InviteToGroup { persons, .. } => with(
+                "action.invite",
+                "offered to bring in: {names}",
+                &[("names", &list(persons))],
+            ),
             // No channel yet: a person's suggestion, which waits for the user.
             ToolAction::CreateGroup {
                 members, channel, ..
@@ -381,6 +386,14 @@ fn offers_of(action: &ToolAction, line: Line) -> Vec<Offer> {
                 line: Some(line.clone()),
             })
             .collect(),
+        ToolAction::InviteToGroup { persons, .. } => persons
+            .iter()
+            .map(|p| Offer::Invite {
+                id: p.id.0.clone(),
+                name: p.name.clone(),
+                line: line.clone(),
+            })
+            .collect(),
         ToolAction::CreateGroup {
             members,
             channel: Some(channel),
@@ -440,6 +453,12 @@ pub enum Offer {
     },
     /// Nothing exists yet; taking it creates the group, once, and records it on `line`.
     NewGroup { members: Vec<PersonRef>, line: Line },
+    /// A person to bring into the group the suggestion was made in.
+    Invite {
+        id: String,
+        name: String,
+        line: Line,
+    },
 }
 
 /// Which action line of which message an offer came from.
@@ -465,12 +484,13 @@ impl Offer {
                 "cli.offer.new_group",
                 &[("names", &names.group_label(&member_names(members)))],
             ),
+            Offer::Invite { name, .. } => names.say("cli.offer.invite", &[("name", name)]),
         }
     }
 
     pub fn members(&self) -> Vec<PersonId> {
         match self {
-            Offer::Person { id, .. } => vec![PersonId(id.clone())],
+            Offer::Person { id, .. } | Offer::Invite { id, .. } => vec![PersonId(id.clone())],
             Offer::Group { members, .. } | Offer::NewGroup { members, .. } => {
                 members.iter().map(|m| m.id.clone()).collect()
             }

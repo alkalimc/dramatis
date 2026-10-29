@@ -25,6 +25,10 @@ pub enum Command {
     /// Title the current channel; empty text returns to the derived title.
     Rename(String),
     Members,
+    /// Bring people into the current group.
+    Invite(Vec<String>),
+    /// Take a person out of the current group.
+    Remove(String),
     /// Delete the current group, after asking.
     Leave,
     /// Mark the current channel (or every one) read.
@@ -237,6 +241,28 @@ pub fn parse(line: &str) -> Command {
         "unarchive" => Command::Archive(false),
         "rename" => Command::Rename(args.to_owned()),
         "members" => Command::Members,
+        "invite" => {
+            // Commas separate names (a name may hold spaces); without one, spaces do.
+            let split = |sep: &dyn Fn(char) -> bool| -> Vec<String> {
+                args.split(sep)
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            };
+            let who = if args.contains(',') {
+                split(&|c| c == ',')
+            } else {
+                split(&char::is_whitespace)
+            };
+            if who.is_empty() {
+                Command::Invalid("cli.usage.invite")
+            } else {
+                Command::Invite(who)
+            }
+        }
+        "remove" if args.is_empty() => Command::Invalid("cli.usage.remove"),
+        "remove" => Command::Remove(args.to_owned()),
         "leave" => Command::Leave,
         "read" => match args {
             "" => Command::Read(false),
@@ -439,6 +465,17 @@ mod tests {
         );
         assert_eq!(parse("/rename"), Command::Rename(String::new()));
         assert_eq!(parse("/members"), Command::Members);
+        assert_eq!(
+            parse("/invite Amy Rose, kal"),
+            Command::Invite(vec!["Amy Rose".into(), "kal".into()])
+        );
+        assert_eq!(
+            parse("/invite amy kal"),
+            Command::Invite(vec!["amy".into(), "kal".into()])
+        );
+        assert_eq!(parse("/invite"), Command::Invalid("cli.usage.invite"));
+        assert_eq!(parse("/remove amy"), Command::Remove("amy".into()));
+        assert_eq!(parse("/remove"), Command::Invalid("cli.usage.remove"));
         assert_eq!(parse("/leave"), Command::Leave);
         assert_eq!(parse("/read"), Command::Read(false));
         assert_eq!(parse("/read all"), Command::Read(true));
