@@ -25,7 +25,6 @@ export const en = {
 
   // ---- app ----
   "app.loading": "Loading",
-  "app.corpus.missing": "No corpus is open. Open a .folio file to begin.",
   "app.corpus.unsupported": "This corpus uses format {version}, which this app cannot read. Please update the app.",
   "app.corpus.requirement": "This corpus needs a feature this app lacks ({requirement}). Please update the app.",
   "app.mock": "Demo data",
@@ -42,7 +41,6 @@ export const en = {
   "nav.cases": "Requests",
   "nav.world": "World",
   "nav.library": "Library",
-  "nav.system": "System",
   "drawer.close": "Close",
   "clock.in_world": "{year}-{month}-{day} {time}",
   "clock.label": "In-world date and local time",
@@ -105,11 +103,9 @@ export const en = {
   "chatlist.mark_read": "Mark as read",
   "chatlist.preview.you": "You: {text}",
   "chatlist.preview.author": "{name}: {text}",
-  "channel.host": "{host}",
   "channel.group.untitled": "Group",
   "channel.group_info": "Group info",
   "channel.find": "Search in this chat",
-  "channel.find.count": "{count} found",
   "channel.latest": "Jump to the latest message",
   "search.scope": "Search messages in",
   "search.hint": "Search messages",
@@ -172,7 +168,6 @@ export const en = {
   "choice.new_group": "Start a group with {names}",
   "choice.invite": "Invite {name} to join",
   "confidence.low": "Thin archive",
-  "citation.label": "From the archive",
   "citation.stale": "This passage changed since it was cited; showing the current version.",
   "citation.gone": "This passage is no longer in the corpus.",
   "citation.page": "Page",
@@ -342,8 +337,6 @@ export const en = {
   "world.deleted": "deleted",
 
   // ---- system drawer ----
-  "system.title": "System",
-  "system.tab.quota": "Quota and quiet",
   "settings.page.quota": "Quota and intensity",
   "settings.page.quiet": "Quiet hours and notifications",
   "settings.page.endpoints": "Endpoints",
@@ -351,7 +344,6 @@ export const en = {
   "settings.page.privacy": "Privacy and security",
   "settings.page.storage": "Advanced: data and storage",
   "settings.page.language": "Language",
-  "system.tab.endpoints": "Endpoints",
   "system.tab.saves": "Saves",
   "unlock.title": "Enter your password",
   "unlock.save": "Save: {name}",
@@ -486,13 +478,11 @@ export const en = {
   "events.count.1": "One a day",
   "events.count.2": "Two a day",
   "events.hint": "Now and then the host mentions something small that happened. It never needs an answer.",
-  "you.title": "You",
   "you.name": "What should they call you?",
   "you.birthday": "Birthday (optional)",
   "you.month": "Month",
   "you.day": "Day",
   "you.save": "Save",
-  "you.saved": "Saved",
   "you.preview": "They will call you {title}.",
 
   // ---- endpoints ----

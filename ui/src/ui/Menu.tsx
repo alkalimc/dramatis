@@ -12,7 +12,7 @@ export interface MenuItem {
 
 /**
  * A small menu opened at a point (right click) or under a button. Escape, a click outside
- * or a scroll closes it; arrows move between items.
+ * or a scroll closes it; arrows, Home and End move between items.
  */
 export function Menu({ at, items, label, onClose }: { at: { x: number; y: number }; items: MenuItem[]; label: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -64,11 +64,12 @@ export function Menu({ at, items, label, onClose }: { at: { x: number; y: number
       onClose();
       return;
     }
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const all = [...(ref.current?.querySelectorAll<HTMLElement>("button") ?? [])];
     const at = all.indexOf(document.activeElement as HTMLElement);
-    all[(at + (e.key === "ArrowDown" ? 1 : all.length - 1)) % all.length]?.focus();
+    const next = e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : (at + (e.key === "ArrowDown" ? 1 : all.length - 1)) % all.length;
+    all[next]?.focus();
   };
 
   return (

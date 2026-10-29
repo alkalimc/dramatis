@@ -22,7 +22,6 @@ activity.came_by
 activity.commitment_due
 activity.messaged
 activity.replied
-app.corpus.missing
 app.corpus.requirement
 app.corpus.unsupported
 app.crash
@@ -79,11 +78,9 @@ channel.delete.confirm
 channel.earlier
 channel.empty
 channel.find
-channel.find.count
 channel.find.none
 channel.group.untitled
 channel.group_info
-channel.host
 channel.latest
 channel.more
 channel.person_page
@@ -111,7 +108,6 @@ choice.invite
 choice.new_group
 choice.person
 citation.gone
-citation.label
 citation.loading
 citation.open
 citation.open_revision
@@ -772,7 +768,6 @@ nav.chats
 nav.label
 nav.library
 nav.roster
-nav.system
 nav.world
 org.name
 person.ask
@@ -983,10 +978,7 @@ storage.nothing
 storage.pictures
 storage.saves
 storage.title
-system.tab.endpoints
-system.tab.quota
 system.tab.saves
-system.title
 tool.ask_host
 tool.ask_host.find
 tool.ask_host.group
@@ -1100,5 +1092,3 @@ you.month
 you.name
 you.preview
 you.save
-you.saved
-you.title

@@ -1,11 +1,11 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChannelId, ChannelSummary, ImagePart, Message } from "../api";
 import { useT } from "../i18n";
 import { channelTitle } from "../lib/chats";
 import { authorName, sameAuthor, typingText } from "../lib/format";
 import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
-import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
+import { useActions, useApi, useDispatch, useStore } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
 import { Badge } from "../ui/Badge";
 import { Menu } from "../ui/Menu";
@@ -16,9 +16,15 @@ import { useChatMenu } from "./chatMenu";
 
 const NO_MESSAGES: Message[] = [];
 
-function useStreams(channel: ChannelId): [string, Stream][] {
-  const streams = useStore((s) => s.streams);
-  return useMemo(() => Object.entries(streams).filter(([, st]) => st.channel === channel), [streams, channel]);
+/** Ids of this channel's streams. Selecting the joined string keeps the body from re-rendering on every token. */
+function useStreamIds(channel: ChannelId): string[] {
+  const key = useStore((s) =>
+    Object.entries(s.streams)
+      .filter(([, st]) => st.channel === channel)
+      .map(([id]) => id)
+      .join("\n"),
+  );
+  return useMemo(() => (key ? key.split("\n") : []), [key]);
 }
 
 /** Messages by one speaker this close together read as one run of bubbles. */
@@ -36,7 +42,7 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
   const messages = useStore((s) => s.messages[channel] ?? NO_MESSAGES);
   const done = useStore((s) => s.historyDone[channel] ?? false);
   const tts = useStore((s) => Boolean(s.endpoints?.roles?.tts));
-  const streams = useStreams(channel);
+  const streams = useStreamIds(channel);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const historyError = useStore((s) => s.loadErrors[`history:${channel}`]);
@@ -58,6 +64,10 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
     const el = log.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, streams, waiting]);
+  const follow = useCallback(() => {
+    const el = log.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, []);
 
   // How far from the newest message the reader is, and how many arrived while away.
   const [away, setAway] = useState(0);
@@ -105,8 +115,8 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
             {after?.(m, i)}
           </div>
         ))}
-        {streams.map(([id, st]) => (
-          <PendingActions key={id} id={id} stream={st} channel={channel} first={!(lastMessage && sameAuthor(lastMessage.author, st.author))} />
+        {streams.map((id) => (
+          <PendingActions key={id} id={id} channel={channel} last={lastMessage} onGrow={follow} />
         ))}
         {waiting && streams.length === 0 && !typing && (
           <p className="muted awaiting" role="status">
@@ -143,8 +153,13 @@ function TurnFailed({ channel }: { channel: ChannelId }) {
   );
 }
 
-function PendingActions({ id, stream, channel, first }: { id: string; stream: Stream; channel: ChannelId; first: boolean }) {
+function PendingActions({ id, channel, last, onGrow }: { id: string; channel: ChannelId; last?: Message; onGrow: () => void }) {
+  const stream = useStore((s) => s.streams[id]);
   const pending = useStore((s) => s.pendingActions[id]);
+  const text = stream?.text;
+  useLayoutEffect(onGrow, [text, pending, onGrow]);
+  if (!stream) return null;
+  const first = !(last && sameAuthor(last.author, stream.author));
   return (
     <>
       {pending && <ActionLines author={stream.author} actions={pending} />}

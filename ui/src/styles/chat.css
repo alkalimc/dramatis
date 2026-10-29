@@ -40,15 +40,6 @@
 .subtitle.typing {
   color: var(--accent);
 }
-.find-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-}
 
 /* ---- who is waiting: pinned under the header ---- */
 .waiting {
@@ -444,11 +435,6 @@ button.source-line:hover:not(:disabled) {
   gap: var(--s-4);
   font-size: var(--fs-sm);
 }
-.citation-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
 .citation-detail {
   font-size: var(--fs-sm);
 }
@@ -534,15 +520,6 @@ button.source-line:hover:not(:disabled) {
 }
 .composer textarea:focus-visible {
   box-shadow: none;
-}
-.composer-meta {
-  display: flex;
-  gap: var(--s-3);
-  align-items: center;
-  font-size: var(--fs-sm);
-}
-.composer-hint {
-  margin: 0;
 }
 .chip-attached {
   position: relative;

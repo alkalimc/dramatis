@@ -29,7 +29,6 @@
   color: var(--accent);
   text-transform: none;
 }
-.info-actions,
 .info-buttons {
   display: flex;
   gap: var(--s-2);
@@ -65,13 +64,6 @@ button.member:hover {
 .picture-buttons {
   margin-top: var(--s-2);
   justify-content: center;
-}
-.profile-pic {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--s-2);
-  padding-bottom: var(--s-3);
 }
 .voice {
   display: flex;
@@ -293,48 +285,10 @@ button.member:hover {
   font-size: var(--fs-sm);
 }
 
-/* ---- system: tabs, intensity, quiet hours, you ---- */
-.tabs {
-  display: flex;
-  gap: var(--s-1);
-  border-bottom: 1px solid var(--line);
-}
-.tabs [role="tab"] {
-  background: none;
-  color: var(--muted);
-  border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  min-height: var(--ctl);
-  font-weight: var(--fw);
-}
-.tabs [role="tab"]:hover:not(:disabled) {
-  background: var(--hover);
-  color: var(--ink);
-}
-.tabs [aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--ink);
-  font-weight: var(--fw-strong);
-}
-[role="tabpanel"] {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-4);
-  padding-top: var(--s-3);
-}
-[role="tabpanel"] > section + section {
-  padding-top: var(--s-4);
-  border-top: 1px solid var(--line);
-}
-[role="tabpanel"] section > h3,
+/* ---- system: intensity, quiet hours, you ---- */
 .drawer-body > section > h3 {
   font-size: var(--fs-sm);
   color: var(--accent);
-}
-[role="tabpanel"] section > h4 {
-  margin-top: var(--s-3);
-  color: var(--muted);
 }
 .windows {
   margin: var(--s-2) 0;
@@ -424,13 +378,6 @@ label.switch span {
 input[type="time"]::-webkit-calendar-picker-indicator,
 input[type="date"]::-webkit-calendar-picker-indicator {
   opacity: 0.7;
-}
-.form-actions {
-  margin-top: var(--s-2);
-}
-.form-actions button[type="submit"] {
-  padding: 0 var(--s-5);
-  border-radius: var(--r-pill);
 }
 .you form,
 .first-open form {

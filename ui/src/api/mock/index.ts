@@ -2,7 +2,7 @@
 // commands. Used outside the Tauri webview (browser preview, tests). Replies are canned
 // and streamed through the same events the engine sends.
 //
-// Demo switches (query string): `form=library` (no endpoint yet), `first=1` (first open),
+// Demo switches (query string): `form=library` (no endpoint yet), `first=1` (first open), `long=1` (a long host history),
 // `tts=0` (no read-aloud role), `tier=ultra`, `band=quiet|exhausted`, `marker=paren`
 // (scene lines in `(...)` instead of `*...*`). Sending a message that contains the word
 // `fail` ends the turn in a rate-limit failure instead of a reply. First-run switches:
@@ -260,6 +260,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   const reactions: MessageRef[] = [];
 
   if (!introPending) {
+    // `?long=1`: 120 older lines in the host channel, so history needs more than one page.
+    if (params.get("long") === "1") {
+      for (let i = 1; i <= 120; i++) msg("host", i % 2 ? USER : HOST, `Older line ${i}`, 60 * 48 + (121 - i));
+    }
     msg("host", USER, "Who knows about the harbor flood? Ask someone for me.", 60 * 26);
     msg(
       "host",
