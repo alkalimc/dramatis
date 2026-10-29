@@ -3,6 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "license": "Apache-2.0",
+  "author": "alkali (https://github.com/alkalimc)",
+  "homepage": "https://github.com/alkalimc/dramatis",
   "type": "module",
   "packageManager": "pnpm@12.3.4",
   "engines": {
