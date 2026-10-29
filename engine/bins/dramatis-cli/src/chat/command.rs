@@ -65,6 +65,8 @@ pub enum Command {
     Lang(Option<String>),
     /// Show quiet hours, switch them `on`/`off`, or set `HH:MM-HH:MM`.
     Quiet(Option<String>),
+    /// List the ship events, or switch them `on`/`off` or set how many a day.
+    Events(Option<String>),
     Save(Save),
     History(usize),
     /// Take back the n-th last message of the user in this channel (1 = the last) and
@@ -299,6 +301,7 @@ pub fn parse(line: &str) -> Command {
         "tier" => Command::Tier(optional(args)),
         "lang" => Command::Lang(optional(args)),
         "quiet" => Command::Quiet(optional(args)),
+        "events" => Command::Events(optional(args)),
         "save" => parse_save(args),
         "logout" if args.is_empty() => Command::Save(Save::Logout),
         "logout" => Command::Invalid("cli.usage.logout"),
@@ -414,6 +417,8 @@ mod tests {
         );
         assert_eq!(parse("/tier"), Command::Tier(None));
         assert_eq!(parse("/quiet off"), Command::Quiet(Some("off".into())));
+        assert_eq!(parse("/events"), Command::Events(None));
+        assert_eq!(parse("/events 2"), Command::Events(Some("2".into())));
         assert_eq!(parse("/chats"), Command::Chats(false));
         assert_eq!(parse("/chats archived"), Command::Chats(true));
         assert_eq!(parse("/chat 2"), Command::Chat(2));

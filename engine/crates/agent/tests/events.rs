@@ -90,8 +90,10 @@ async fn an_event_is_made_once_a_day_and_posted_with_offers() {
         ));
         // The post is also the host's unread line, and a metered host call.
         let metered: i64 = e.agent.with_world(|w| {
-            w.query_row("SELECT count(*) FROM meter WHERE shape = 'host'", [], |r| r.get(0))
-                .unwrap()
+            w.query_row("SELECT count(*) FROM meter WHERE shape = 'host'", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
         });
         assert_eq!(metered, 1);
         assert_eq!(e.agent.ship_events().unwrap().len(), 1);
@@ -183,7 +185,8 @@ async fn the_setting_chooses_how_many_and_zero_turns_them_off() {
     assert_eq!(requests(&e), 0);
     e.agent
         .with_world(|w| settings::set(w, settings::EVENTS_PER_DAY, &2).unwrap());
-    e.fake.push([say(&reply()), say(&reply().replace(TEA, "Later"))]);
+    e.fake
+        .push([say(&reply()), say(&reply().replace(TEA, "Later"))]);
     e.agent.tick(true).await.unwrap();
     e.agent.tick(true).await.unwrap();
     assert_eq!(requests(&e), 1, "a failed or finished try waits");
@@ -257,7 +260,10 @@ async fn the_people_it_involves_know_of_it_that_day_and_not_the_next() {
     e.agent.tick(true).await.unwrap();
     // Involved: the open segment is told on its next turn, once.
     e.fake.push([say("Yes."), say("Still.")]);
-    e.agent.send(bo, "what happened today?", None).await.unwrap();
+    e.agent
+        .send(bo, "what happened today?", None)
+        .await
+        .unwrap();
     let told = body_text(e.fake.bodies().last().unwrap());
     assert!(told.contains("Bo came to see about the water"), "{told}");
     e.agent.send(bo, "and then?", None).await.unwrap();
@@ -299,7 +305,10 @@ async fn one_of_them_may_bring_it_up_as_an_opening_within_the_usual_limits() {
     e.agent.tick(true).await.unwrap();
     // A user who is not mid-conversation, back after a while.
     e.clock.advance(2 * HOUR_MS);
-    e.fake.push([say("It is ann's birthday today."), say("About that tea, Doc.")]);
+    e.fake.push([
+        say("It is ann's birthday today."),
+        say("About that tea, Doc."),
+    ]);
     let out = e.agent.presence(true).await.unwrap();
     let (who, ch) = out.opened.expect("an opening");
     assert!(["ann", "bo"].contains(&who.as_str()));
@@ -328,5 +337,8 @@ async fn the_host_post_reaches_the_ui_as_one_message_with_its_offers() {
     assert_eq!(added.len(), 1);
     assert_eq!(added[0].actions.len(), 2);
     let stored = e.agent.with_world(|w| event::recent(w, 5).unwrap());
-    assert_eq!(stored[0].message.map(|m| m.0.to_string()), Some(added[0].id.0.clone()));
+    assert_eq!(
+        stored[0].message.map(|m| m.0.to_string()),
+        Some(added[0].id.0.clone())
+    );
 }

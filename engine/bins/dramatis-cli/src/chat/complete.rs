@@ -38,6 +38,7 @@ const COMMANDS: &[&str] = &[
     "edit",
     "tier",
     "quiet",
+    "events",
     "lang",
     "password",
     "save",

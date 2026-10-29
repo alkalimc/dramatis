@@ -164,6 +164,8 @@ export const commands = {
 	quota: () => typedError<QuotaStatus, ApiError>(__TAURI_INVOKE("quota")),
 	setTier: (tier: Tier) => typedError<null, ApiError>(__TAURI_INVOKE("set_tier", { tier })),
 	settings: () => typedError<Settings, ApiError>(__TAURI_INVOKE("settings")),
+	/**  The ship events the host told of, today's and the last few, newest first. */
+	shipEvents: () => typedError<ShipEvent[], ApiError>(__TAURI_INVOKE("ship_events")),
 	updateSettings: (settings: Settings) => typedError<null, ApiError>(__TAURI_INVOKE("update_settings", { settings })),
 	/**
 	 *  Show the system's file dialog for a corpus. The path chosen, or `None` when the
@@ -907,12 +909,32 @@ export type Settings = {
 	/**  `None`: no quiet hours. The engine fills the register default on first run. */
 	quiet_hours: QuietHours | null,
 	notifications: boolean,
+	/**
+	 *  Ship events the host may post per day: 0 turns them off. The engine fills the
+	 *  register default on first run and cuts a larger number to the register's most.
+	 */
+	events_per_day: number,
 };
 
 export type ShapeSpend = {
 	shape: CallShape,
 	/**  Calls in the window. */
 	calls: number | null,
+};
+
+/**
+ *  A happening on the ship the host told of: the host's channel history holds the post
+ *  itself; this is the log of them.
+ */
+export type ShipEvent = {
+	/**  The local date it belongs to, `YYYY-MM-DD`. */
+	day: string,
+	at: Timestamp,
+	title: string,
+	text: string,
+	persons: PersonRef[],
+	/**  The host's post, where its offers are. */
+	message: MessageId | null,
 };
 
 export type StorageCategory = {

@@ -29,6 +29,7 @@ export function WorldDrawer() {
           </button>
         ))}
       </div>
+      <ShipLog />
       {error && <InlineError error={error} onRetry={reload} />}
       {loading && !list && (
         <p className="muted" role="status">
@@ -42,6 +43,34 @@ export function WorldDrawer() {
         ))}
       </ul>
     </div>
+  );
+}
+
+/** The happenings the host told of, newest first; absent while there are none. */
+function ShipLog() {
+  const t = useT();
+  const api = useApi();
+  const version = useStore((s) => s.worldVersion);
+  const { data } = useQuery(() => api.commands.shipEvents(), [api, version]);
+  if (!data || data.length === 0) return null;
+  return (
+    <section className="ship-log" aria-label={t("world.events.title")}>
+      <h3>{t("world.events.title")}</h3>
+      <ul className="facts">
+        {data.map((e) => (
+          <li key={`${e.day}-${e.at}`} className="fact">
+            <p className="fact-text">
+              <strong>{e.title}</strong> {e.text}
+            </p>
+            <p className="fact-meta">
+              <span>{e.day}</span>
+              {" · "}
+              <span>{t("world.events.people", { names: e.persons.map((p) => p.name).join(", ") })}</span>
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

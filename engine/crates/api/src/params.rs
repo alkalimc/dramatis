@@ -65,7 +65,7 @@ pub struct Params {
     pub find_people: index::params::FindPeople,
     pub media: Media,
     pub coldstart: Coldstart,
-    /// `quota`, `cost`, `ask`, `seed`, `session`, `wrapup`, `trust`, at the top level.
+    /// `quota`, `cost`, `ask`, `seed`, `session`, `wrapup`, `events`, `trust`, at the top level.
     #[serde(flatten)]
     pub world: world::params::Params,
 }

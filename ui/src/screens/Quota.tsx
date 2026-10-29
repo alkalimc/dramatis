@@ -149,6 +149,21 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
       <p id={`${id}-n`} className="muted small">
         {t("quiet.notifications.hint")}
       </p>
+      <label className="field">
+        <span>{t("events.per_day")}</span>
+        <select
+          value={settings.events_per_day}
+          aria-describedby={`${id}-e`}
+          onChange={(e) => save({ ...settings, events_per_day: Number(e.target.value) })}
+        >
+          <option value={0}>{t("events.count.0")}</option>
+          <option value={1}>{t("events.count.1")}</option>
+          <option value={2}>{t("events.count.2")}</option>
+        </select>
+      </label>
+      <p id={`${id}-e`} className="muted small">
+        {t("events.hint")}
+      </p>
     </section>
   );
 }

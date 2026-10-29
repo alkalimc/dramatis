@@ -602,6 +602,9 @@ pub struct Settings {
     /// `None`: no quiet hours. The engine fills the register default on first run.
     pub quiet_hours: Option<QuietHours>,
     pub notifications: bool,
+    /// Ship events the host may post per day: 0 turns them off. The engine fills the
+    /// register default on first run and cuts a larger number to the register's most.
+    pub events_per_day: u32,
 }
 
 impl Default for Settings {
@@ -613,8 +616,23 @@ impl Default for Settings {
             bio: None,
             quiet_hours: None,
             notifications: true,
+            events_per_day: 1,
         }
     }
+}
+
+/// A happening on the ship the host told of: the host's channel history holds the post
+/// itself; this is the log of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ShipEvent {
+    /// The local date it belongs to, `YYYY-MM-DD`.
+    pub day: String,
+    pub at: Timestamp,
+    pub title: String,
+    pub text: String,
+    pub persons: Vec<PersonRef>,
+    /// The host's post, where its offers are.
+    pub message: Option<MessageId>,
 }
 
 // ---- saves ----

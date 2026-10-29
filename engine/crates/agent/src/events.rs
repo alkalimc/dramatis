@@ -274,7 +274,10 @@ impl Agent {
             output_schema: Some(schema),
             ..Request::default()
         };
-        Ok(Some((units.iter().map(|u| u.id.clone()).collect(), request)))
+        Ok(Some((
+            units.iter().map(|u| u.id.clone()).collect(),
+            request,
+        )))
     }
 
     /// The model's draft, metered, or `None` when the call failed or the reply is not an
@@ -337,11 +340,7 @@ impl Agent {
         let text = cut(&draft.text, TEXT_MAX);
         let names = self.names()?;
         let w = &self.corpus.wording;
-        let told = w.fill(
-            "events.fact",
-            &names,
-            &[("title", &title), ("text", &text)],
-        );
+        let told = w.fill("events.fact", &names, &[("title", &title), ("text", &text)]);
         let (id, host) = {
             let conn = self.db();
             let fact = fact::write(
@@ -396,7 +395,8 @@ impl Agent {
             .replace("{user}", names.user())
             .replace("{title}", &title)
             .replace("{text}", &text);
-        let calls = serde_json::to_value(&actions).map_err(|e| world::Error::Invalid(e.to_string()))?;
+        let calls =
+            serde_json::to_value(&actions).map_err(|e| world::Error::Invalid(e.to_string()))?;
         let conn = self.db();
         let msg = message::append(
             &conn,

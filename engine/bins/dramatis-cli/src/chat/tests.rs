@@ -229,6 +229,8 @@ async fn rig_setup(
         )
         .unwrap();
     }
+    // The scripted endpoint streams only: no ship event, which is a whole reply.
+    std::fs::write(home.0.join("params.toml"), "[events]\nper_day = 0\n").unwrap();
     if with_save {
         // A save to open, as a first run leaves the home after the user picks one.
         let h = Home::new(&home.0);
@@ -1621,4 +1623,21 @@ async fn library_mode_can_be_chosen_and_left_when_a_model_is_set_up() {
         .unwrap()
         .push_back(Reply::Say("Hello again."));
     assert!(r.run("hello").await.contains("Hello again."));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn events_are_listed_and_switched() {
+    let mut r = rig().await;
+    let out = r.run("/events").await;
+    // The rig's register has them off until the user asks.
+    assert!(
+        out.contains("ship events off") && out.contains("nothing has happened"),
+        "{out}"
+    );
+    assert!(r.run("/events 2").await.contains("2 a day"));
+    assert!(r.run("/events off").await.contains("ship events off"));
+    assert!(r.run("/events").await.contains("ship events off"));
+    assert!(r.run("/events on").await.contains("1 a day"));
+    assert!(r.run("/events 3").await.contains("usage"));
+    assert!(r.run("/events many").await.contains("usage"));
 }

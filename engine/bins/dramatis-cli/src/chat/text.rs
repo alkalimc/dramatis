@@ -104,6 +104,8 @@ anything else       send it to the current channel
 /tier [level]       how much the people may do on their own: low, middle, high,
                     extra_high, max, ultra
 /quiet [on|off|HH:MM-HH:MM]  hours when nobody comes to you unprompted
+/events [on|off|n]  the small happenings on board the host tells of: list them, switch
+                    them, or set how many a day (0 to 2)
 /lang [corpus|en]   the words of the interface: the corpus's language or English; the
                     people keep speaking the corpus's language",
     ),
@@ -350,6 +352,10 @@ line is one message.",
     ),
     ("cli.quiet.on", "quiet hours on, {from} to {to}"),
     ("cli.quiet.off", "quiet hours off"),
+    ("cli.usage.events", "usage: /events [on|off|0|1|2]"),
+    ("cli.events.on", "ship events on, {n} a day"),
+    ("cli.events.off", "ship events off"),
+    ("cli.events.none", "nothing has happened on board yet"),
     (
         "cli.save.busy",
         "a reply is still being written; try again when it ends",
