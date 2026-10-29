@@ -12,7 +12,8 @@
 // dialog exists).
 //
 // `ui/wording.local.json` (git-ignored; exported by the forge) supplies a corpus's wording
-// when present, so the preview shows that corpus's language.
+// when present, so the dev-server preview shows that corpus's language. Only the dev
+// server reads it: a production build never carries a local pack's wording.
 import type {
   ApiError,
   AppStatus,
@@ -59,12 +60,12 @@ type Result<T> = Promise<{ status: "ok"; data: T } | { status: "error"; error: A
 
 // Tests expect the English defaults, so they never read the local file.
 const localWording: Record<string, Record<string, string>> =
-  import.meta.env.MODE === "test"
-    ? {}
-    : import.meta.glob<Record<string, string>>("/wording.local.json", {
+  import.meta.env.DEV && import.meta.env.MODE !== "test"
+    ? import.meta.glob<Record<string, string>>("/wording.local.json", {
         eager: true,
         import: "default",
-      });
+      })
+    : {};
 
 const ok = <T>(data: T): Result<T> => Promise.resolve({ status: "ok", data });
 const fail = <T>(error: ApiError): Result<T> => Promise.resolve({ status: "error", error });
