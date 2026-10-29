@@ -2,7 +2,8 @@
 //!
 //! Event seeds (a commitment falling due, a conclusion or pinned question that hit a
 //! person's own units) come before daily ones (the user's birthday, a memory about the
-//! user worth asking after, the user's recent words hitting his units); within a class
+//! user worth asking after, the user's recent words hitting his units, a ship event of
+//! the day he is part of); within a class
 //! whoever has gone longest without talking with the user goes first. At most one person
 //! opens per occasion, and four experience limits hold on every tier. A seed held back
 //! stays undelivered for the next chance.
@@ -13,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::channel::{self, Channel};
 use crate::clock::{self, Now};
+use crate::event;
 use crate::fact::{self, About, Audience};
 use crate::params::{Seed as SeedParams, Session as SessionParams};
 use crate::quota::{self, Band};
@@ -35,6 +37,8 @@ pub enum SeedKind {
     Memory(FactId),
     /// The user's recent words (this message) hit his units.
     Words(MessageId),
+    /// A ship event of today that involves him (the fact that tells of it).
+    Happening(FactId),
 }
 
 impl SeedKind {
@@ -53,6 +57,7 @@ impl SeedKind {
             Self::Birthday(y) => ("birthday", y.to_string()),
             Self::Memory(f) => ("memory", f.0.to_string()),
             Self::Words(m) => ("words", m.0.to_string()),
+            Self::Happening(f) => ("event", f.0.to_string()),
         }
     }
 
@@ -65,6 +70,7 @@ impl SeedKind {
             "birthday" => Self::Birthday(i32::try_from(n).ok()?),
             "memory" => Self::Memory(FactId(n)),
             "words" => Self::Words(MessageId(n)),
+            "event" => Self::Happening(FactId(n)),
             _ => return None,
         })
     }
@@ -306,6 +312,14 @@ fn daily_candidates(conn: &Connection, now: Now, words: &[WordsHit]) -> Result<V
         if let Some(k) = memory {
             push(k, Vec::new())?;
         }
+        // Today's happening he is part of: the newest he has not brought up yet.
+        for f in event::facts_for(conn, p, now)?.into_iter().rev() {
+            let k = SeedKind::Happening(f.id);
+            if !used(conn, Some(p), &k)? {
+                push(k, Vec::new())?;
+                break;
+            }
+        }
     }
     for w in words {
         if !enabled.contains(&w.person) {
@@ -441,7 +455,10 @@ pub fn plan(
             continue;
         };
         let fact = match c.kind {
-            SeedKind::Commitment(f) | SeedKind::Conclusion(f) | SeedKind::Memory(f) => Some(f),
+            SeedKind::Commitment(f)
+            | SeedKind::Conclusion(f)
+            | SeedKind::Memory(f)
+            | SeedKind::Happening(f) => Some(f),
             _ => None,
         };
         return Ok(Planned::Open(Opening {

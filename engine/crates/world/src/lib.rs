@@ -13,6 +13,7 @@ pub mod bond;
 pub mod channel;
 pub mod cipher;
 pub mod clock;
+pub mod event;
 pub mod fact;
 pub mod leakcheck;
 pub mod log;
@@ -48,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0006.sql"),
     include_str!("../migrations/0007.sql"),
     include_str!("../migrations/0008.sql"),
+    include_str!("../migrations/0009.sql"),
 ];
 
 /// The schema version a fully migrated database reports.

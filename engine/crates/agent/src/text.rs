@@ -31,6 +31,12 @@ const DEFAULTS: &[(&str, &str)] = &[
          and I can explain any of them.",
     ),
     (
+        "host.event.frame",
+        "Something small happened on the ship today, if you would like to hear it.\n\n{title}\n{text}\
+         |A little news from the ship, whenever you have a moment.\n\n{title}\n{text}\
+         |Just so you know, there was a small happening on board today.\n\n{title}\n{text}",
+    ),
+    (
         "host.intro.app",
         "Welcome. You can talk to anyone on the Roster, start a group, and ask me for anything: \
          finding someone who knows a subject, or a summary of what changed. Requests, memories, \
@@ -216,6 +222,36 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Something {name} remembers about {user}: {text}",
     ),
     ("harness.opening.words", "{user} said recently: {text}"),
+    (
+        "harness.opening.event",
+        "Something happened on the ship today that you are part of: {text}",
+    ),
+    (
+        "harness.event",
+        "Something happened on the ship today, and you may mention it if it comes up \
+         naturally: {text}",
+    ),
+    (
+        "harness.event.ask",
+        "Make up one small happening on the ship for today, {date}, for {user} to hear about. \
+         Keep it everyday and small, something people mention over a meal, told in two to \
+         four sentences, set in the world as it is. It involves one to three of the people \
+         listed below, and may suggest that a few of them gather for a reason, or that {user} \
+         talk to someone about it.\n\nA theme for today: {topic}\n\nMaterial from the \
+         world, so that it fits the place:\n{material}\n\nPeople it may involve (id: \
+         name):\n{people}\n{extra}\n\nReply with a title, the text, the ids of the people \
+         involved, a gathering (its members' ids and its purpose) or null, and the ids of \
+         people {user} might talk to.",
+    ),
+    (
+        "harness.event.recent",
+        "Topics of the groups {user} started lately:\n{recent}",
+    ),
+    ("events.fact", "{title}: {text}"),
+    (
+        "events.topics",
+        "training|the canteen|supplies|the medical bay|the weather|a festival|someone's hobby",
+    ),
     ("harness.digest", "Since {user} last looked:"),
     (
         "harness.digest.none",

@@ -2351,7 +2351,7 @@ impl Session {
                     engine.presence().await?;
                     bridge.idle().await;
                 }
-                bridge.tick().await;
+                bridge.tick(true).await;
                 bridge.idle().await;
                 Ok::<(), api::ApiError>(())
             })

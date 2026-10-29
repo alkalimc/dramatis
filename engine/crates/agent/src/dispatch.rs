@@ -30,7 +30,7 @@ const SUGGESTED_GROUP_MAX: usize = 4;
 const PURPOSE_MAX: usize = 60;
 
 /// A purpose as one short line: the first line, trimmed, cut to [`PURPOSE_MAX`].
-fn clean_purpose(purpose: Option<&str>) -> Option<String> {
+pub(crate) fn clean_purpose(purpose: Option<&str>) -> Option<String> {
     let line = purpose?.lines().map(str::trim).find(|l| !l.is_empty())?;
     Some(
         line.chars()
@@ -129,6 +129,7 @@ impl Agent {
         persons: Vec<String>,
         seen: &std::collections::HashSet<String>,
     ) -> Result<index::SearchResponse> {
+        self.sweep();
         let (as_person, memories) = {
             let conn = self.db();
             let as_person = channel::as_person(&conn, channel, speaker)?;

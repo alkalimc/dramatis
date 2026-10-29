@@ -11,6 +11,7 @@ mod address;
 pub mod agent;
 pub mod assemble;
 mod dispatch;
+mod events;
 pub mod endpoint;
 pub mod error;
 mod flows;
