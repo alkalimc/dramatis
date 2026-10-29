@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Author, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
@@ -7,6 +8,8 @@ import { bubbles, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { SourcesPanel } from "./Citation";
 import { Avatar, UserAvatar } from "../ui/Avatar";
+import { Dialog } from "../ui/Dialog";
+import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { SelectionMenu } from "./SelectionMenu";
 
@@ -81,10 +84,43 @@ function SceneLines({ lines }: { lines: string[] }) {
   );
 }
 
-function BubbleView({ b, label, foot }: { b: ReturnType<typeof bubbles>[number]; label: ReactNode; foot: ReactNode }) {
+/** The picture the user sent, or a placeholder when it is gone; a click opens it larger. */
+function Picture({ message }: { message: Message }) {
+  const t = useT();
+  const api = useApi();
+  const [open, setOpen] = useState(false);
+  if (message.picture_lost) {
+    return (
+      <p className="attachment-lost">
+        <Icon name="image" size={18} /> {t("message.picture.lost")}
+      </p>
+    );
+  }
+  if (!message.attachment) return null;
+  const src = api.mediaUrl(message.attachment.path);
+  return (
+    <>
+      <button type="button" className="attachment-open" aria-label={t("message.picture.open")} onClick={() => setOpen(true)}>
+        <img className="attachment" src={src} alt={t("message.picture")} />
+      </button>
+      {open &&
+        createPortal(
+          <Dialog title={t("message.picture")} onClose={() => setOpen(false)} className="lightbox" hideTitle>
+            <button type="button" className="lightbox-close" aria-label={t("drawer.close")} onClick={() => setOpen(false)}>
+              <img src={src} alt={t("message.picture")} />
+            </button>
+          </Dialog>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+function BubbleView({ b, label, foot, top }: { b: ReturnType<typeof bubbles>[number]; label: ReactNode; foot: ReactNode; top?: ReactNode }) {
   return (
     <div className="bubble">
       {label}
+      {top}
       <SceneLines lines={b.before} />
       {b.text !== null && <Speech text={b.text} />}
       <SceneLines lines={b.after} />
@@ -193,6 +229,8 @@ export const MessageView = memo(function MessageView({
       )
     );
 
+  const picture = message.attachment || message.picture_lost ? <Picture message={message} /> : null;
+
   const foot = (
     <div className="message-foot">
       {message.cites.length > 0 && (
@@ -255,10 +293,9 @@ export const MessageView = memo(function MessageView({
       <div className="message-stack">
         <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
           {parts.map((b, i) => (
-            <BubbleView key={i} b={b} label={i === 0 ? label : null} foot={i === parts.length - 1 ? foot : null} />
+            <BubbleView key={i} b={b} label={i === 0 ? label : null} top={i === 0 ? picture : null} foot={i === parts.length - 1 ? foot : null} />
           ))}
-          {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} foot={foot} />}
-          {message.attachment && <img className="attachment" src={api.mediaUrl(message.attachment.path)} alt="" />}
+          {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} top={picture} foot={foot} />}
         </div>
 
         {sourcesOpen && <SourcesPanel cites={message.cites} onClose={() => dispatch({ type: "sources", message: message.id })} />}

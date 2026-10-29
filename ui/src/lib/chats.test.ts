@@ -14,6 +14,7 @@ function message(id: string, channel: string, at: string, text = "hi"): Message 
     text,
     actions: [],
     attachment: null,
+    picture_lost: false,
     cites: [],
     confidence: null,
     relayed: false,

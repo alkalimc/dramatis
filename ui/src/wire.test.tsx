@@ -43,7 +43,7 @@ describe("user title", () => {
 
   test("corpus text arrives substituted: placeholders in it are shown as received", () => {
     const m: Message = {
-      id: "m1", channel: "c1", author: { kind: "host" }, text: "Hello <user>, welcome to <org>.", actions: [], attachment: null,
+      id: "m1", channel: "c1", author: { kind: "host" }, text: "Hello <user>, welcome to <org>.", actions: [], attachment: null, picture_lost: false,
       cites: [], confidence: null, relayed: false, task: null, note: null, at: "2030-01-01T00:00:00Z",
     };
     const store = createStore();
@@ -205,7 +205,7 @@ function fireOpen() {
 describe("another process wrote", () => {
   test("a channel change reloads the list and the open conversation", async () => {
     const extra: Message = {
-      id: "from-terminal", channel: "host", author: { kind: "host" }, text: "Written from the terminal.", actions: [], attachment: null,
+      id: "from-terminal", channel: "host", author: { kind: "host" }, text: "Written from the terminal.", actions: [], attachment: null, picture_lost: false,
       cites: [], confidence: null, relayed: false, task: null, note: null, at: new Date(Date.now() + 120_000).toISOString(),
     };
     let late = false;

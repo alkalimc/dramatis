@@ -272,7 +272,48 @@
   }
 }
 .attachment {
-  max-width: 16rem;
+  display: block;
+  max-width: min(16rem, 100%);
+  max-height: 18rem;
+  border-radius: var(--r-sm);
+}
+.attachment-open {
+  display: block;
+  padding: 0;
+  margin: var(--s-1) 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.attachment-lost {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-1) 0;
+  padding: var(--s-2) var(--s-3);
+  border: 1px dashed var(--stamp);
+  border-radius: var(--r-sm);
+  color: var(--stamp);
+  font-size: var(--fs-sm);
+}
+.dialog.lightbox {
+  width: auto;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+.lightbox-close {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-out;
+}
+.lightbox-close img {
+  display: block;
+  max-width: 92vw;
+  max-height: 88vh;
   border-radius: var(--r-sm);
 }
 .choices {

@@ -35,6 +35,9 @@ import type {
   Roster,
   RosterBand,
   SaveInfo,
+  StorageCategory,
+  StorageKind,
+  StorageUsage,
   RosterRow,
   Settings,
   TaskSummary,
@@ -124,6 +127,27 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let openSave = "default";
   // `?locked=1` starts on an encrypted save; its password is "hunter2".
   let locked = params.get("locked") === "1";
+  /** The two caches the user may clear; the other kinds are fixed sizes. */
+  const cache = { avatars: { kb: 2300, files: 24 }, audio: { kb: 5200, files: 9 } };
+  const storageUsage = (): StorageUsage => {
+    const pictures = { count: 3, kb: 180 };
+    const rows: [StorageKind, number, number, boolean][] = [
+      ["saves", saves.reduce((n, s) => n + s.size_kb, 0) + pictures.kb, saves.length, false],
+      ["avatars", cache.avatars.kb, cache.avatars.files, true],
+      ["audio", cache.audio.kb, cache.audio.files, true],
+      ["uploads", 120, 2, false],
+      ["corpus", 48000, 1, false],
+    ];
+    const categories: StorageCategory[] = rows.map(([kind, kb, files, clearable]) => ({ kind, kb, files, clearable }));
+    return {
+      total_kb: categories.reduce((n, c) => n + c.kb, 0),
+      categories,
+      saves: saves.map((s) => ({ name: s.name, kb: s.size_kb, current: s.name === openSave })),
+      pictures: pictures.count,
+      picture_kb: pictures.kb,
+      cache_limit_kb: 3_000_000,
+    };
+  };
   let saves: SaveInfo[] = [
     { name: "default", size_kb: 412, played_at: iso(5), current: true, encrypted: locked },
     { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false, encrypted: false },
@@ -166,6 +190,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       text,
       actions: [],
       attachment: null,
+      picture_lost: false,
       cites: [],
       confidence: null,
       relayed: false,
@@ -862,6 +887,12 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
       settings = { ...next, bio: next.bio?.trim() || null };
       return ok(null);
+    },
+    storageUsage: () => ok(storageUsage()),
+    clearStorage: (categories) => {
+      if (categories.some((k) => k !== "avatars" && k !== "audio")) return fail({ code: "invalid", field: "categories" });
+      for (const k of categories) cache[k as "avatars" | "audio"] = { kb: 0, files: 0 };
+      return ok(storageUsage());
     },
     saves: () => ok(saves.map((s) => ({ ...s, current: s.name === openSave }))),
     newSave: (name) => {
