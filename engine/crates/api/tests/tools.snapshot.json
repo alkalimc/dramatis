@@ -706,7 +706,7 @@
       },
       {
         "function": {
-          "description": "Ask a colleague to join this conversation. Give a person, or a topic to find one by.",
+          "description": "Ask a colleague to join this conversation, when the matter is clearly outside what you\nknow or can do; anything you can answer yourself, you answer. Give a person, or a topic\nto find one by.",
           "name": "request_join",
           "parameters": {
             "additionalProperties": false,
@@ -880,7 +880,7 @@
       },
       {
         "function": {
-          "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. The user is only shown the suggestion and decides; nothing happens\nbefore. Give exactly one of `find` and `group`, at most once per reply.",
+          "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. You help the user yourself first; this is for matters clearly\noutside what you know or can do, or when the user asks for someone or a group. The user\nis only shown the suggestion and decides; nothing happens before. Give exactly one of\n`find` and `group`, at most once per reply.",
           "name": "ask_host",
           "parameters": {
             "additionalProperties": false,
@@ -972,7 +972,7 @@
         "name": "get_chunk"
       },
       {
-        "description": "Ask a colleague to join this conversation. Give a person, or a topic to find one by.",
+        "description": "Ask a colleague to join this conversation, when the matter is clearly outside what you\nknow or can do; anything you can answer yourself, you answer. Give a person, or a topic\nto find one by.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -1134,7 +1134,7 @@
         "name": "wrapup"
       },
       {
-        "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. The user is only shown the suggestion and decides; nothing happens\nbefore. Give exactly one of `find` and `group`, at most once per reply.",
+        "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. You help the user yourself first; this is for matters clearly\noutside what you know or can do, or when the user asks for someone or a group. The user\nis only shown the suggestion and decides; nothing happens before. Give exactly one of\n`find` and `group`, at most once per reply.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -1226,7 +1226,7 @@
         "type": "function"
       },
       {
-        "description": "Ask a colleague to join this conversation. Give a person, or a topic to find one by.",
+        "description": "Ask a colleague to join this conversation, when the matter is clearly outside what you\nknow or can do; anything you can answer yourself, you answer. Give a person, or a topic\nto find one by.",
         "name": "request_join",
         "parameters": {
           "additionalProperties": false,
@@ -1392,7 +1392,7 @@
         "type": "function"
       },
       {
-        "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. The user is only shown the suggestion and decides; nothing happens\nbefore. Give exactly one of `find` and `group`, at most once per reply.",
+        "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. You help the user yourself first; this is for matters clearly\noutside what you know or can do, or when the user asks for someone or a group. The user\nis only shown the suggestion and decides; nothing happens before. Give exactly one of\n`find` and `group`, at most once per reply.",
         "name": "ask_host",
         "parameters": {
           "additionalProperties": false,

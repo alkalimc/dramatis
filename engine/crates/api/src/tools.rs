@@ -46,7 +46,9 @@ pub struct GetChunk {
     pub neighbours: Option<u8>,
 }
 
-/// Ask a colleague to join this conversation. Give a person, or a topic to find one by.
+/// Ask a colleague to join this conversation, when the matter is clearly outside what you
+/// know or can do; anything you can answer yourself, you answer. Give a person, or a topic
+/// to find one by.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestJoin {
@@ -63,8 +65,10 @@ pub struct RequestJoin {
 }
 
 /// Ask the host to arrange something for the user: someone who knows a subject, or a group
-/// with some colleagues. The user is only shown the suggestion and decides; nothing happens
-/// before. Give exactly one of `find` and `group`, at most once per reply.
+/// with some colleagues. You help the user yourself first; this is for matters clearly
+/// outside what you know or can do, or when the user asks for someone or a group. The user
+/// is only shown the suggestion and decides; nothing happens before. Give exactly one of
+/// `find` and `group`, at most once per reply.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AskHost {
