@@ -12,6 +12,8 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
   applied = true;
   const d = store.dispatch;
   await wait(600);
+  const theme = new URLSearchParams(location.search).get("theme");
+  if (theme === "light" || theme === "dark") actions.setTheme(theme);
   const s = store.getState();
   const group = s.channels.find((c) => c.kind === "group");
   const direct = s.channels.find((c) => c.kind === "direct");

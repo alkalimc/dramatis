@@ -73,7 +73,7 @@ function InfoRow({ icon, value, label, onClick, open }: { icon: IconName; value:
     <>
       <Icon name={icon} size={24} />
       <span className="info-label">{label}</span>
-      <span className="info-value">{value}</span>
+      <span className="info-value" title={value}>{value}</span>
     </>
   );
   return onClick ? (

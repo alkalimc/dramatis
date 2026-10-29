@@ -51,11 +51,11 @@ button.member {
   border: none;
   border-radius: var(--r-sm);
   color: var(--ink);
-  padding: var(--s-2);
+  min-height: var(--row-s);
+  padding: var(--s-1) var(--s-2);
 }
 button.member:hover {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 .picture-buttons {
   margin-top: var(--s-2);
@@ -107,9 +107,10 @@ button.member:hover {
   align-items: center;
   gap: var(--s-1);
   cursor: pointer;
+  min-height: var(--ctl-sm);
   padding: 0 var(--s-3);
   font-size: var(--fs-sm);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-pill);
   background: var(--field);
 }
@@ -146,7 +147,7 @@ button.member:hover {
   border-radius: 0;
   background: none;
   font-size: var(--fs-md);
-  font-weight: 400;
+  font-weight: var(--fw);
 }
 .mode-all .mode-choice::after {
   content: "";
@@ -190,7 +191,7 @@ button.member:hover {
   margin: var(--s-1) 0;
 }
 .mode-legend dt {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   display: inline;
 }
 .mode-legend dd {
@@ -299,11 +300,17 @@ button.member:hover {
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
+  min-height: var(--ctl);
+  font-weight: var(--fw);
+}
+.tabs [role="tab"]:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
 }
 .tabs [aria-selected="true"] {
   border-bottom-color: var(--accent);
   color: var(--ink);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 [role="tabpanel"] {
   display: flex;
@@ -367,6 +374,15 @@ button.member:hover {
 .birthday input {
   width: 5.5rem;
 }
+/* A section of settings: its rows sit a step apart. */
+.settings-page > section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.settings-page > section > h3 {
+  margin: 0;
+}
 /* A label over its control, for the small inputs of the system forms. */
 .field {
   display: flex;
@@ -394,7 +410,7 @@ label.switch {
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  padding: var(--s-1) 0;
+  min-height: var(--ctl);
   cursor: pointer;
 }
 label.switch span {
@@ -408,9 +424,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   margin-top: var(--s-2);
 }
 .form-actions button[type="submit"] {
-  padding: var(--s-2) var(--s-5);
+  padding: 0 var(--s-5);
   border-radius: var(--r-pill);
-  font-weight: 600;
 }
 .you form,
 .first-open form {
@@ -547,24 +562,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .pc-title {
   flex: 1;
   font-size: var(--fs-lg);
-  font-weight: 600;
-}
-.pc-bar button.icon {
-  width: 2.2rem;
-  height: 2.2rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: none;
-  border: none;
-  color: var(--muted);
-}
-.pc-bar button.icon:hover {
-  background: var(--raised);
-  color: var(--ink);
-  filter: none;
+  font-weight: var(--fw-strong);
 }
 .pc-head {
   display: flex;
@@ -583,7 +581,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .pc-name {
   margin: var(--s-2) 0 0;
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .pc-status {
   margin: 0;
@@ -597,19 +595,16 @@ button.camera-btn {
   position: absolute;
   right: -0.2rem;
   bottom: -0.2rem;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: var(--ctl-lg);
+  height: var(--ctl-lg);
   padding: 0;
   border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #2f7fd6;
-  color: #fff;
+  background: var(--camera);
+  color: var(--accent-ink);
   border: 3px solid var(--panel);
 }
 button.camera-btn:hover:not(:disabled) {
-  filter: brightness(1.12);
+  filter: brightness(1.1);
 }
 .pc-failed {
   margin: 0;
@@ -625,16 +620,17 @@ button.camera-btn:hover:not(:disabled) {
   justify-content: flex-start;
   gap: var(--s-4);
   width: 100%;
-  padding: var(--s-3) var(--s-4);
+  min-height: var(--row-s);
+  padding: var(--s-2) var(--s-4);
   background: none;
   border: none;
   border-radius: 0;
   color: var(--ink);
+  font-weight: var(--fw);
   text-align: left;
 }
 button.info-row:hover {
-  background: var(--field);
-  filter: none;
+  background: var(--hover);
 }
 .info-row .icon-svg {
   flex: none;
@@ -720,7 +716,7 @@ button.info-row:hover {
 button.wide {
   width: 100%;
   padding: var(--s-3) var(--s-4);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .privacy-form,
 .password-dialog {
@@ -740,7 +736,7 @@ button.wide {
 .section-title {
   color: var(--accent);
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   padding: var(--s-3) var(--s-4) var(--s-1);
   margin: 0;
 }
@@ -773,7 +769,7 @@ button.wide {
   display: grid;
   place-items: center;
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .storage-arc.storage-k-saves { stroke: var(--k-saves); }
 .storage-arc.storage-k-avatars { stroke: var(--k-avatars); }
@@ -799,7 +795,7 @@ button.wide {
 }
 .storage-pct {
   color: var(--muted);
-  font-weight: 400;
+  font-weight: var(--fw);
   margin-left: var(--s-1);
 }
 .storage-size {
@@ -849,17 +845,18 @@ button.wide {
   display: block;
   width: calc(100% - 2 * var(--s-4));
   margin: var(--s-3) var(--s-4);
-  padding: var(--s-3);
+  min-height: var(--ctl);
   border: 0;
   border-radius: var(--r-pill);
   background: var(--accent-fill);
   color: var(--accent-ink);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   cursor: pointer;
 }
 .storage-clear:disabled {
   background: var(--raised);
   color: var(--muted);
+  opacity: 1;
   cursor: default;
 }
 .storage > p {

@@ -12,7 +12,7 @@ h2,
 h3,
 h4,
 h5 {
-  line-height: 1.25;
+  line-height: var(--lh-tight);
   margin: 0 0 var(--s-2);
 }
 h1 {
@@ -50,7 +50,8 @@ a {
 [tabindex="-1"]:focus {
   outline: none;
 }
-button.icon:focus-visible {
+button.icon:focus-visible,
+button.round:focus-visible {
   border-radius: 50%;
 }
 
@@ -97,54 +98,88 @@ button {
   align-items: center;
   justify-content: center;
   gap: var(--s-2);
+  min-height: var(--ctl);
   border: 1px solid var(--accent-fill);
   background: var(--accent-fill);
   color: var(--accent-ink);
   border-radius: var(--r-sm);
-  padding: var(--s-1) var(--s-4);
+  padding: 0 var(--s-4);
+  font-weight: var(--fw);
   white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-button:hover:not(:disabled) {
-  filter: brightness(1.1);
+/* `:where` keeps these defaults weaker than any classed button, which sets its own hover */
+button:where(:hover:not(:disabled)) {
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
+}
+button:where(:active:not(:disabled)) {
+  background: var(--accent-fill-press);
+  border-color: var(--accent-fill-press);
+}
+button:where(:not([class])),
+button.ghost,
+button.wide {
+  font-weight: var(--fw-strong);
 }
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 button.ghost {
   background: transparent;
   color: var(--accent);
-  border-color: var(--line);
+  border-color: var(--edge);
 }
 button.ghost:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--edge);
+  color: var(--accent-hover);
+}
+button.ghost:active:not(:disabled) {
   background: var(--raised);
-  filter: none;
+  color: var(--accent-press);
 }
 button.link {
   background: none;
   border: none;
+  min-height: 0;
   padding: 0;
+  font-weight: var(--fw);
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   display: inline;
   text-align: left;
 }
+button.link:hover:not(:disabled) {
+  background: none;
+  color: var(--accent-hover);
+}
+button.link:active:not(:disabled) {
+  background: none;
+  color: var(--accent-press);
+}
 button.link.name {
   text-decoration: none;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   color: var(--ink);
 }
 button.icon {
   background: none;
-  border: 1px solid transparent;
+  border: none;
   color: var(--muted);
-  padding: 0 var(--s-2);
+  min-width: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  padding: 0;
+  border-radius: 50%;
 }
 button.icon:hover:not(:disabled) {
-  border-color: var(--line);
-  filter: none;
+  background: var(--hover);
+  color: var(--ink);
+}
+button.icon:active:not(:disabled) {
+  background: var(--raised);
 }
 button.danger,
 .danger {
@@ -152,9 +187,19 @@ button.danger,
   border-color: var(--danger);
   background: transparent;
 }
+button.danger:hover:not(:disabled) {
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
+  color: var(--accent-ink);
+}
+button.danger:active:not(:disabled) {
+  background: var(--danger-fill);
+  filter: brightness(0.9);
+}
 button.round {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: var(--ctl);
+  height: var(--ctl);
+  min-height: 0;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -163,16 +208,21 @@ button.round {
 }
 button.round:hover:not(:disabled),
 button.round[aria-pressed="true"] {
-  background: var(--raised);
+  background: var(--hover);
   color: var(--ink);
-  filter: none;
+}
+button.round:active:not(:disabled) {
+  background: var(--raised);
 }
 button.round.small {
-  width: 1.8rem;
-  height: 1.8rem;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
 }
 button.round.send {
   color: var(--accent);
+}
+button.round.send:hover:not(:disabled) {
+  color: var(--accent-hover);
 }
 
 /* ---- fields ---- */
@@ -180,10 +230,21 @@ input,
 select,
 textarea {
   background: var(--field);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-sm);
+  min-height: var(--ctl);
   padding: var(--s-1) var(--s-3);
   max-width: 100%;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
 }
 input:focus-visible,
 select:focus-visible,
@@ -206,17 +267,19 @@ input[type="checkbox"],
 input[type="radio"],
 input[type="range"] {
   accent-color: var(--accent-fill);
+  min-height: 0;
 }
 /* One switch for every on/off setting. */
 input[role="switch"] {
   appearance: none;
   flex: none;
-  width: 2.2rem;
-  height: 1.3rem;
+  width: var(--switch-w);
+  height: var(--switch-h);
   min-width: 0;
+  min-height: 0;
   padding: 0;
   border-radius: var(--r-pill);
-  background: var(--line);
+  background: var(--switch-off);
   border: none;
   position: relative;
   cursor: pointer;
@@ -227,18 +290,23 @@ input[role="switch"]::after {
   position: absolute;
   top: 0.15rem;
   left: 0.15rem;
-  width: 1rem;
-  height: 1rem;
+  width: calc(var(--switch-h) - 0.3rem);
+  height: calc(var(--switch-h) - 0.3rem);
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--switch-thumb);
   transition: transform 0.15s;
 }
 input[role="switch"]:checked {
   background: var(--accent-fill);
 }
 input[role="switch"]:checked::after {
-  transform: translateX(0.9rem);
+  transform: translateX(calc(var(--switch-w) - var(--switch-h)));
   background: var(--accent-ink);
+}
+input[role="switch"]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 label {
   display: inline-block;
@@ -250,14 +318,16 @@ fieldset {
 }
 legend {
   padding: 0;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   margin-bottom: var(--s-1);
 }
 
 /* ---- chips, tags, cards ---- */
 .chip {
   display: inline-flex;
-  border: 1px solid var(--line);
+  align-items: center;
+  min-height: var(--ctl-sm);
+  border: 1px solid var(--edge);
   background: var(--field);
   color: var(--ink);
   border-radius: var(--r-pill);
@@ -278,10 +348,10 @@ legend {
   display: inline-block;
   font-size: var(--fs-xs);
   color: var(--muted);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-pill);
   padding: 0 var(--s-2);
-  font-weight: normal;
+  font-weight: var(--fw);
 }
 .tag.relayed {
   background: var(--line);
@@ -315,15 +385,32 @@ legend {
 }
 .badge {
   flex: none;
-  min-width: 1.35rem;
-  height: 1.35rem;
+  min-width: var(--badge);
+  height: var(--badge);
   padding: 0 var(--s-2);
   border-radius: var(--r-pill);
   border: none;
   background: var(--accent-fill);
   color: var(--accent-ink);
   font-size: var(--fs-xs);
-  font-weight: 700;
-  line-height: 1.35rem;
+  font-weight: var(--fw-strong);
+  line-height: var(--badge);
   text-align: center;
+}
+
+/* ---- scrollbars: thin, quiet, the same everywhere ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  border-radius: var(--r-pill);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

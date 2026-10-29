@@ -4,48 +4,59 @@
  * sets `data-theme` on the root. Text colours meet WCAG AA on the surfaces they sit on.
  */
 :root {
-  /* surfaces, back to front: the night palette of the desktop client this UI follows */
-  --rail: #17191d;
-  --bg: #17191d;
-  --panel: #282e32;
-  --raised: #33393e;
-  --field: #3d444b;
-  --line: #222528;
-  --scrim: rgb(0 0 0 / 0.5);
+  /* surfaces, back to front: rail, chat ground, list panel, raised (menus, other bubble), field */
+  --rail: #121518;
+  --bg: #181b1f;
+  --panel: #23292d;
+  --raised: #2d3439;
+  --field: #363e44;
+  --line: #14171a;
+  --hover: rgb(255 255 255 / 0.06);
+  --edge: rgb(255 255 255 / 0.2);
+  --scroll: rgb(255 255 255 / 0.22);
+  --switch-off: #6c7883;
+  --switch-thumb: #f2f4f5;
+  --scrim: rgb(0 0 0 / 0.55);
 
-  /* text */
-  --ink: #f5f6f7;
-  --muted: #8e9399;
-  /* small print on bubbles: stricter than muted, which sits on plain panels */
-  --stamp: #a3a9ae;
+  /* text: primary, secondary (stamp), muted; each is AA on every surface above */
+  --ink: #f2f4f5;
+  --stamp: #c4cacf;
+  --muted: #a9b0b6;
+  /* small print on the own bubble */
+  --stamp-own: #cfe7e3;
 
   /* accent: `--accent` is for text and icons, `--accent-fill` carries white text */
   --accent: #3ee2cc;
-  --accent-fill: #009687;
+  --accent-hover: #6cf0de;
+  --accent-press: #2cc4b0;
+  --accent-fill: #00796b;
+  --accent-fill-hover: #006b5e;
+  --accent-fill-press: #005c51;
   --accent-ink: #ffffff;
-  --select: #009687;
-  --select-ink: #ffffff;
-  --camera: #4994db;
+  --select: var(--accent-fill);
+  --select-ink: var(--accent-ink);
+  --camera: #3a82d0;
   --pill: #4a5159;
 
   /* bubbles */
-  --own: #1b6e68;
-  --other: #33393e;
+  --own: #17524c;
+  --other: var(--raised);
 
   /* state */
   --warn: #f0b36a;
-  --danger: #ff8a7d;
+  --danger: #ff8f82;
+  --danger-fill: #b3261e;
   --focus: #3ee2cc;
 
-  /* speaker name colours */
-  --hue-0: #5ec8bd;
-  --hue-1: #f2a36b;
-  --hue-2: #8fb8ff;
-  --hue-3: #e58bb4;
-  --hue-4: #b6d36b;
-  --hue-5: #c3a2f5;
-  --hue-6: #f0cf6a;
-  --hue-7: #6fd0e8;
+  /* speaker name colours: an Okabe-Ito based set, safe under colour-vision differences */
+  --hue-0: #56b4e9;
+  --hue-1: #f0a030;
+  --hue-2: #2fc9a0;
+  --hue-3: #e8d84a;
+  --hue-4: #7aa7ff;
+  --hue-5: #ff8a4c;
+  --hue-6: #e08fc0;
+  --hue-7: #b9c2e0;
 
   /* storage kinds: an eight-colour set made for colour-vision differences, lighter on the night panel */
   --k-saves: #4aa3df;
@@ -59,71 +70,103 @@
   --r-sm: 10px;
   --r-md: 14px;
   --r-pill: 999px;
-  --shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+  --bubble-r: 12px;
+  --shadow: 0 8px 28px rgb(0 0 0 / 0.4);
+  --shadow-menu: 0 4px 16px rgb(0 0 0 / 0.4);
 
-  /* space */
+  /* space: 4px steps on a 15px root */
   --s-1: 0.25rem;
   --s-2: 0.5rem;
   --s-3: 0.75rem;
   --s-4: 1rem;
   --s-5: 1.5rem;
+  --s-6: 2rem;
 
-  /* type */
+  /* type: four sizes, two weights */
   --fs-xs: 0.75rem;
   --fs-sm: 0.85rem;
   --fs-md: 0.95rem;
   --fs-lg: 1.1rem;
+  --fw: 400;
+  --fw-strong: 600;
+  --lh: 1.5;
+  --lh-tight: 1.25;
+
+  /* control heights: every button, field, switch and list row uses one of these (rem is 15px) */
+  --ctl-sm: 2.2rem;
+  --ctl: 2.4rem;
+  --ctl-lg: 2.9rem;
+  --row-h: 5.1rem;
+  --row-s: 3rem;
+  --head-h: 4.5rem;
+
+  /* icons: size and pen */
+  --ic-sm: 18px;
+  --ic: 22px;
+  --ic-lg: 26px;
+  --ic-stroke: 1.7;
 
   /* sizes of the fixed parts */
   --rail-w: 5.3rem;
   --list-w: clamp(16rem, 22vw, 19.5rem);
   --info-w: 22rem;
-  --row-h: 5.1rem;
-  --head-h: 4.5rem;
   --avatar-s: 1.75rem;
   --avatar-m: 2.4rem;
   --avatar-l: 3.9rem;
   --avatar-xl: 7rem;
-  --bubble-r: 12px;
+  --badge: 1.35rem;
+  --switch-w: 2.4rem;
+  --switch-h: 1.4rem;
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: var(--lh);
   color: var(--ink);
   background: var(--bg);
 }
 
 :root[data-theme="light"] {
   --rail: #f1f4f6;
-  --pill: #c9d2d9;
-  --camera: #3a82d0;
-  --bg: #e4eaee;
+  --bg: #e5ebef;
   --panel: #ffffff;
   --raised: #eef2f5;
-  --field: #f4f7f9;
-  --line: #d5dde3;
-  --scrim: rgb(20 30 40 / 0.35);
+  --field: #f2f5f7;
+  --line: #d3dce2;
+  --hover: rgb(20 30 40 / 0.06);
+  --edge: rgb(20 30 40 / 0.3);
+  --scroll: rgb(20 30 40 / 0.28);
+  --switch-off: #7f8d98;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(20 30 40 / 0.4);
   --ink: #1a2229;
-  --muted: #566570;
   --stamp: #3d4a54;
+  --muted: #566570;
+  --stamp-own: #2f4a43;
   --accent: #0b6f66;
+  --accent-hover: #095a53;
+  --accent-press: #074a44;
   --accent-fill: #0b7a6f;
-  --select: #0b7a6f;
+  --accent-fill-hover: #096a60;
+  --accent-fill-press: #07574f;
+  --camera: #3a82d0;
+  --pill: #c9d2d9;
   --own: #d4f0e5;
   --other: #ffffff;
   --warn: #8a4b00;
   --danger: #a3261b;
+  --danger-fill: #b3261e;
   --focus: #0b6f66;
-  --hue-0: #0b7a70;
-  --hue-1: #a8500f;
-  --hue-2: #2a5fb8;
-  --hue-3: #b02c6a;
-  --hue-4: #4e7a0a;
-  --hue-5: #6b3fb0;
-  --hue-6: #7a5f00;
-  --hue-7: #0b6f87;
+  --hue-0: #00709e;
+  --hue-1: #9a5600;
+  --hue-2: #00755a;
+  --hue-3: #75650a;
+  --hue-4: #2a5fb8;
+  --hue-5: #b24400;
+  --hue-6: #a8467f;
+  --hue-7: #50607a;
   --shadow: 0 8px 28px rgb(20 30 40 / 0.18);
+  --shadow-menu: 0 4px 16px rgb(20 30 40 / 0.16);
   --k-saves: #0072b2;
   --k-avatars: #c98400;
   --k-audio: #00875f;

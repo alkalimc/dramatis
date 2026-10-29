@@ -24,7 +24,7 @@
 .channel-header h2 {
   margin: 0;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -80,11 +80,10 @@
   border-radius: var(--r-xs);
 }
 .waiting-row:hover {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 .waiting-row .name {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   min-width: 7rem;
 }
 .waiting-row .what {
@@ -124,7 +123,7 @@
   display: flex;
   align-items: flex-end;
   gap: var(--s-2);
-  margin-top: 2px;
+  margin-top: var(--s-1);
   /* a person's bubble stays in the left two thirds, the user's in the right two thirds */
   max-width: min(66%, 56rem);
 }
@@ -186,7 +185,7 @@
 .bubble .author {
   margin: 0;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   color: var(--muted);
 }
 .author .tag {
@@ -225,12 +224,12 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: var(--s-1);
   margin: var(--s-3) 0 var(--s-1);
   max-width: 100%;
 }
 .action-lines li {
-  padding: 1px var(--s-3);
+  padding: 0 var(--s-3);
   border-radius: var(--r-pill);
   background: var(--panel);
   color: var(--stamp);
@@ -244,6 +243,19 @@
   font-size: var(--fs-xs);
   color: var(--stamp);
   min-height: 1.2rem;
+}
+.from-user .message-foot,
+.from-user .bubble .scene,
+.from-user .bubble .author {
+  color: var(--stamp-own);
+}
+.from-user .bubble a,
+.from-user .bubble button.link {
+  color: var(--ink);
+}
+/* the hit area stays 32px high without making the bubble taller */
+.message-foot button.icon {
+  margin: -0.5rem 0;
 }
 .message-foot time {
   margin-left: auto;
@@ -333,9 +345,12 @@
   border-color: transparent;
   color: var(--accent);
 }
-.choices button:hover {
-  background: var(--raised);
-  filter: none;
+.choices button {
+  min-height: var(--ctl);
+}
+.choices button:hover:not(:disabled) {
+  background: var(--field);
+  color: var(--accent-hover);
 }
 
 /* ---- sources: a panel under the message with the cited original text ---- */
@@ -378,17 +393,33 @@
   padding-top: var(--s-3);
   border-top: 1px solid var(--line);
 }
-.source-line {
+button.source-line {
   display: flex;
   align-items: baseline;
+  justify-content: flex-start;
   gap: var(--s-3);
   width: 100%;
-  padding: 0;
+  min-height: var(--ctl-sm);
+  padding: var(--s-1) var(--s-2);
+  background: none;
+  border-color: transparent;
+  color: var(--ink);
   text-align: left;
   font-size: var(--fs-md);
+  font-weight: var(--fw);
+  white-space: normal;
+}
+button.source-line:hover:not(:disabled) {
+  background: var(--hover);
+}
+.source-title {
+  color: var(--accent);
+}
+.source-line .muted {
+  font-size: var(--fs-sm);
 }
 .source-line[aria-expanded="true"] .source-title {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .passage {
   margin: var(--s-2) 0;
@@ -425,7 +456,7 @@
   margin: 0;
 }
 .passage-header {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   font-size: var(--fs-sm);
 }
 .selection-menu {
@@ -456,7 +487,7 @@
   border-bottom: none;
 }
 .candidates .name {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .candidates .reason {
   color: var(--muted);
@@ -484,11 +515,11 @@
   flex: 1;
   resize: none;
   max-height: 10rem;
-  min-height: 2.9rem;
+  min-height: var(--ctl-lg);
   border: none;
   background: transparent;
   padding: 0.75rem var(--s-2);
-  line-height: 1.4;
+  line-height: var(--lh);
 }
 .composer textarea:focus-visible {
   box-shadow: none;
@@ -556,15 +587,15 @@ button.to-bottom {
   position: absolute;
   right: var(--s-4);
   bottom: var(--s-4);
-  width: 2.9rem;
-  height: 2.9rem;
-  background: var(--pill);
+  width: var(--ctl-lg);
+  height: var(--ctl-lg);
+  background: var(--raised);
+  border: 1px solid var(--edge);
   color: var(--ink);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-menu);
 }
 button.to-bottom:hover:not(:disabled) {
-  background: var(--pill);
-  filter: brightness(1.15);
+  background: var(--field);
 }
 .to-bottom-count {
   position: absolute;
@@ -581,7 +612,7 @@ button.to-bottom:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  min-height: 2.4rem;
+  min-height: var(--ctl);
   cursor: pointer;
 }
 button.pinned-first {
