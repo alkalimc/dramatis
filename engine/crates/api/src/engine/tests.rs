@@ -324,7 +324,7 @@ fn english_keeps_names_and_model_facing_wording() {
     let all: BTreeMap<String, String> = [
         ("host.name", "H"),
         ("org.name", "O"),
-        ("user.title", "Dr.{name}"),
+        ("user.title", "Mx {name}"),
         ("lang.corpus", "L"),
         ("gender.facet", "g"),
         ("harness.x", "m"),

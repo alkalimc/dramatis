@@ -8,7 +8,7 @@ import { renderApp } from "../test/render";
 function worded(api: Api): Api {
   const wording = async () => {
     const lang = await api.commands.interfaceLanguage();
-    const entries =
+    const entries: Record<string, string> =
       lang.status === "ok" && lang.data === "english"
         ? { "lang.corpus": "Espanol" }
         : { "settings.page.language": "Idioma", "menu.settings": "Ajustes", "lang.corpus": "Espanol", "first.title": "Bienvenida", "first.language": "Idioma", "first.bio": "Sobre ti", locale: "es-ES-u-hc-h23" };
