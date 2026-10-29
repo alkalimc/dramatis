@@ -183,6 +183,8 @@ parameters and is deleted at exit), and `--user <name>` to set the user's name. 
 the line is edited with arrow keys, Home/End and Up/Down history, and wide (CJK) characters count by their display width;
 `--plain`, or piped input, reads plain lines with no prompt.
 
+A turn that ends without a reply leaves one line in `$DRAMATIS_HOME/logs/dramatis.log` (time, channel, speaker, model and the first 300 characters of what came back; never keys or the prompt). The file moves to `dramatis.log.1` at about 1 MB, replacing the older one.
+
 | Command | What it does |
 | --- | --- |
 | `/list [filter]` | persons with a persona, and whether the host is available |

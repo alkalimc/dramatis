@@ -924,7 +924,22 @@ async fn facts_edit_delete_and_restore() {
 async fn digest_and_presence_are_data_plus_one_background_call() {
     let r = rig();
     let e = &r.engine;
-    // 2026-03-05 is amy's birthday: she is waiting, with a channel to click through to.
+    // 2026-03-05 is amy's birthday: she is waiting, with a channel to click through to,
+    // because the user has talked to her.
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    {
+        let w = e.w();
+        world::message::append(
+            &w,
+            convert::world_channel(&ch).unwrap(),
+            &world::Actor::User,
+            "hello",
+            None,
+            None,
+            e.now().ms,
+        )
+        .unwrap();
+    }
     let d = e.digest().await.unwrap();
     assert_eq!(d.items.len(), 1);
     assert_eq!(d.items[0].activity, Activity::Birthday);

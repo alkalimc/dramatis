@@ -2985,7 +2985,7 @@ async fn a_proposal_carries_a_short_purpose_on_both_paths() {
     assert_eq!(purpose_of(&turn_events(&e).1), Some(None));
     // The model is told how to write it.
     let body = String::from_utf8(e.fake.bodies()[0].clone()).unwrap();
-    assert!(body.contains("the purpose of"), "{body}");
+    assert!(body.contains("then a bar and the purpose in"), "{body}");
 }
 
 #[tokio::test]

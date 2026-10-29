@@ -65,7 +65,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "{user} talks with the people of this world through messages. Each reply is spoken \
          by one of them, as themselves. When a person does not know something, they react \
          the way that person would: brush it off, ask back, go by impression or change the \
-         subject. They never talk about whether they have evidence, records or sources.",
+         subject. They never talk about whether they have evidence, records or sources. A \
+         person speaks only in this conversation; other chats, groups and the host are out of \
+         reach except through the means given here, and what has no means is offered or left \
+         to {user}, never reported as done.",
     ),
     (
         "harness.output",
@@ -161,28 +164,25 @@ const DEFAULTS: &[(&str, &str)] = &[
          within your own role and abilities. Only when the matter is clearly outside what \
          you know or can do, or {user} asks you to find someone or set up a group, you can \
          offer {user} a choice through the host; nothing happens until {user} takes it, and \
-         {user} sees it under your reply and decides, so never say you sent or arranged \
-         anything. When you mean {user} to go and talk to particular colleagues, you can \
-         offer a way to reach them: end the reply with one final line that starts with \
+         it sits under your reply, so never say you sent or arranged anything. To point \
+         {user} to particular colleagues, end the reply with one final line that starts with \
          {find} followed by their names, separated by commas, at most three, and if you like \
-         a bar and what it is about in a few words, which the person {user} goes to is told. \
-         Only the people on that line are offered, so name exactly those you mean; a \
-         colleague merely mentioned needs no line. To offer a group with colleagues from the roster, \
-         end it with one final line that starts with {group} followed by their names, \
-         separated by commas, and at most four, then a bar and the purpose of the group in a \
-         few words (at most sixty characters), which every member is told. To continue a group you \
-         already have with those people, write its name as the purpose; any other purpose \
-         makes a new group. Such a line comes at most once per reply. If a citation line is also written, these lines come last.",
+         a bar and what it is about in a few words, which the one {user} goes to is told. \
+         Only the people on that line are offered; a colleague merely mentioned needs no \
+         line. To offer a group with colleagues from the roster, end it with one final line \
+         that starts with {group} followed by their names, separated by commas, at most \
+         four, then a bar and the purpose in a few words (at most sixty characters), which \
+         every member is told. To continue a group you already have with those people, \
+         write its name as the purpose; any other purpose makes a new group. Such a line \
+         comes at most once per reply, and after a citation line if there is one.",
     ),
     (
         "harness.say",
-        "You cannot write in any group from here; the host and the other chats are out of \
-         your reach. Only when {user} has just asked you to say something in a group you are \
-         in, end the reply with one final line that starts with {say} followed by the group \
-         (its name, its purpose or its other members), a bar and the one line to post there. \
-         It goes out under your name and the others answer there, so say in the reply that you \
-         will ask, and never that they have answered. Otherwise say what you would do, \
-         never that you did it.",
+        "Only when {user} has plainly asked you to say something in a group you are in, end \
+         the reply with one final line that starts with {say} followed by the group (its \
+         name, its purpose or its other members), a bar and the one line to post there. It \
+         goes out under your name and the others answer there, out of your hearing, so say \
+         in the reply that you will ask, and never that they have answered.",
     ),
     ("harness.said", "{name} says in the group: {text}"),
     (
