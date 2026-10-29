@@ -87,6 +87,10 @@ commands! {
         corpus: CorpusState::Missing,
         needs_setup: true,
         locked: false,
+        save: None,
+        missing_save: None,
+        home_dir: String::new(),
+        saves_dir: String::new(),
     });
     /// The corpus's runtime phrasing.
     fn wording() -> Wording = Ok(Wording::default());
@@ -202,6 +206,18 @@ commands! {
     fn settings() -> Settings = Ok(Settings::default());
     fn update_settings(settings: Settings) -> ();
 
+    // ---- first run ----
+
+    /// Show the system's file dialog for a corpus. The path chosen, or `None` when the
+    /// dialog was cancelled. `NotImplemented` where there is no dialog: the user types the
+    /// path instead.
+    fn choose_corpus() -> Option<String>;
+    /// Use the `.folio` at `path` as the corpus from now on: checked, remembered in the
+    /// home directory, and the app reopens on it. `NotFound` when there is no such file,
+    /// `Invalid` with field `corpus` (unreadable), `corpus_version` (written for another format)
+    /// or `corpus_requirement` (needs a reader feature this build lacks).
+    fn set_corpus(path: String) -> ();
+
     // ---- saves ----
 
     /// Every save, the most recently played first. Endpoints, keys, the corpus and the
@@ -213,6 +229,10 @@ commands! {
     /// being written. The caller reloads what it shows. Another process (the terminal
     /// next to the app) keeps the save it has open until it is restarted.
     fn switch_save(name: String) -> ();
+    /// Close the current save and leave none open: the name for the next start is cleared,
+    /// an encrypted save's password is forgotten, and the caller shows the save picker.
+    /// `Busy` while a reply or request is being written. Works on a locked save too.
+    fn log_out() -> ();
     /// A consistent copy under a new name; works on the current save too.
     fn copy_save(from: String, to: String) -> ();
     /// Renaming the current save needs the engine idle, like a switch.
@@ -245,6 +265,11 @@ commands! {
         presets: crate::endpoints::presets(),
         ..EndpointsView::default()
     });
+    /// The first-run form in one step: the profile (replaced if it exists, its other models
+    /// kept), the chat role, the host role when `host_model` is given, and the key. Nothing
+    /// is written when any part is invalid; `Invalid` names the field (`name`, `base_url`,
+    /// `model`, `host_model`, `key`).
+    fn setup_endpoint(setup: EndpointSetup) -> ();
     fn add_profile(profile: Profile) -> ();
     /// Replace the profile called `name` (which may rename it).
     fn update_profile(name: String, profile: Profile) -> ();

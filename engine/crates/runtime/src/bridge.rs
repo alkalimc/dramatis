@@ -118,7 +118,8 @@ impl AgentBridge {
     pub fn new(parts: BridgeParts) -> ApiResult<Arc<Self>> {
         Ok(Arc::new(Self {
             agent_params: agent_params(&parts.home)?,
-            world: Mutex::new(parts.home.world()),
+            // No save to open yet: an empty path is not a file, so the agent is not built.
+            world: Mutex::new(parts.home.world().unwrap_or_default()),
             password: Mutex::new(parts.password.clone()),
             endpoints: Mutex::new(parts.endpoints.clone()),
             parts,

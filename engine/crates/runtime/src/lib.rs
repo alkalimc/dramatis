@@ -44,6 +44,11 @@ pub struct Options {
     /// The password of the current save, when it is encrypted and the front end has it
     /// (the terminal asks before it starts; the app unlocks later through `unlock`).
     pub password: Option<String>,
+    /// What to do when the engine asks to be opened again (a corpus was chosen); `None`:
+    /// nothing, the front end asks the user to restart.
+    pub restart: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The system's file dialog for a corpus, where the front end has one.
+    pub choose_file: Option<api::engine::ChooseFile>,
 }
 
 /// Hands the agent's events to the engine's sink, as the seam's own event type.
@@ -95,6 +100,8 @@ impl Runtime {
             net: Arc::new(ports::Net(http)),
             sink: sink.clone(),
             seen,
+            restart: options.restart.unwrap_or_else(|| Arc::new(|| {})),
+            choose_file: options.choose_file,
             ..Ports::default()
         };
         let bridge = folio

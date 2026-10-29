@@ -30,7 +30,7 @@ use crate::display::{self, Namer};
 use crate::endpoints::{Endpoints, Profile, Role};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{QuotaChanged, WorldChange, WorldChanged};
-use crate::home::Home;
+use crate::home::{Home, Start};
 use crate::media::MediaCache;
 use crate::params::Params;
 use crate::port::{
@@ -52,7 +52,16 @@ pub struct Ports {
     /// What `sink` has announced; see [`Seen`]. Wire the same one into a [`Tracking`]
     /// sink that every event source shares.
     pub seen: Arc<Seen>,
+    /// Asked for when the engine itself cannot take effect (a corpus was chosen): the
+    /// front end opens the home again. Library form: nothing happens.
+    pub restart: Arc<dyn Fn() + Send + Sync>,
+    /// Shows the system's file dialog for a corpus and answers the path chosen (`None`:
+    /// cancelled). Absent where there is no dialog; the user types the path instead.
+    pub choose_file: Option<ChooseFile>,
 }
+
+/// See [`Ports::choose_file`].
+pub type ChooseFile = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 impl Default for Ports {
     /// Nothing wired: library form, no network, keys in memory.
@@ -65,6 +74,8 @@ impl Default for Ports {
             sink: Arc::new(NoSink),
             clock: Arc::new(LocalClock),
             seen: Arc::default(),
+            restart: Arc::new(|| {}),
+            choose_file: None,
         }
     }
 }
@@ -77,8 +88,11 @@ pub struct Engine {
     params: Params,
     ports: Ports,
     world: Mutex<World>,
-    /// The name of the save `world` is.
+    /// The name of the save `world` is; empty while none is open (`world` is then an empty
+    /// stand-in, as for a locked save).
     save: Mutex<String>,
+    /// The recorded last save that was not there at start, for the picker to mention.
+    missing_save: Mutex<Option<String>>,
     /// The open save is encrypted and was not unlocked: `world` is an empty stand-in.
     locked: AtomicBool,
     /// Passwords entered in this process, by save name. Memory only, never written.
@@ -121,15 +135,26 @@ impl Engine {
     ) -> ApiResult<Self> {
         home.create().map_err(io)?;
         let params = Params::load(&home.params()).map_err(io)?;
-        let save = home.current_save();
         let mut passwords = HashMap::new();
-        let (world, locked) = match World::open_with(home.save_path(&save), password.as_deref()) {
-            Ok(w) => {
-                passwords.extend(password.map(|p| (save.clone(), p)));
-                (w, false)
+        let (save, missing, world, locked) = match home.start_save() {
+            Start::Open(save) => {
+                match World::open_with(home.save_path(&save), password.as_deref()) {
+                    Ok(w) => {
+                        passwords.extend(password.map(|p| (save.clone(), p)));
+                        (save, None, w, false)
+                    }
+                    Err(world::Error::Locked) => {
+                        (save, None, World::in_memory().map_err(world_err)?, true)
+                    }
+                    Err(e) => return Err(world_err(e)),
+                }
             }
-            Err(world::Error::Locked) => (World::in_memory().map_err(world_err)?, true),
-            Err(e) => return Err(world_err(e)),
+            Start::Pick { missing } => (
+                String::new(),
+                missing,
+                World::in_memory().map_err(world_err)?,
+                false,
+            ),
         };
         let endpoints = match std::fs::read_to_string(home.endpoints()) {
             Ok(text) => Endpoints::from_toml(&text).map_err(io)?,
@@ -155,6 +180,7 @@ impl Engine {
             ports,
             world: Mutex::new(world),
             save: Mutex::new(save),
+            missing_save: Mutex::new(missing),
             locked: AtomicBool::new(locked),
             passwords: Mutex::new(passwords),
             corpus,
@@ -320,6 +346,14 @@ impl Engine {
                 .flatten()
                 .is_none(),
             locked: self.locked.load(Ordering::Relaxed),
+            save: Some(self.open_save()).filter(|s| !s.is_empty()),
+            missing_save: self
+                .missing_save
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+            home_dir: self.home.root().display().to_string(),
+            saves_dir: self.home.saves().display().to_string(),
         }
     }
 
@@ -634,6 +668,21 @@ impl Api for Engine {
     async fn new_save(&self, name: String) -> ApiResult<()> {
         crate::saves::create(&self.home, &name)
     }
+    async fn log_out(&self) -> ApiResult<()> {
+        self.log_out_impl()
+    }
+    async fn choose_corpus(&self) -> ApiResult<Option<String>> {
+        let ask = self
+            .ports
+            .choose_file
+            .clone()
+            .ok_or(ApiError::NotImplemented)?;
+        // The dialog blocks until the user answers.
+        tokio::task::spawn_blocking(move || ask()).await.map_err(io)
+    }
+    async fn set_corpus(&self, path: String) -> ApiResult<()> {
+        self.set_corpus_impl(&path)
+    }
     async fn switch_save(&self, name: String) -> ApiResult<()> {
         self.switch_save_impl(&name)
     }
@@ -665,6 +714,9 @@ impl Api for Engine {
     }
     async fn endpoints(&self) -> ApiResult<EndpointsView> {
         Ok(self.endpoints_view())
+    }
+    async fn setup_endpoint(&self, setup: EndpointSetup) -> ApiResult<()> {
+        self.setup_endpoint_impl(setup)
     }
     async fn add_profile(&self, profile: Profile) -> ApiResult<()> {
         self.add_profile_impl(profile)

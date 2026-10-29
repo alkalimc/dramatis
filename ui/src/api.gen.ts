@@ -136,6 +136,19 @@ export const commands = {
 	settings: () => typedError<Settings, ApiError>(__TAURI_INVOKE("settings")),
 	updateSettings: (settings: Settings) => typedError<null, ApiError>(__TAURI_INVOKE("update_settings", { settings })),
 	/**
+	 *  Show the system's file dialog for a corpus. The path chosen, or `None` when the
+	 *  dialog was cancelled. `NotImplemented` where there is no dialog: the user types the
+	 *  path instead.
+	 */
+	chooseCorpus: () => typedError<string | null, ApiError>(__TAURI_INVOKE("choose_corpus")),
+	/**
+	 *  Use the `.folio` at `path` as the corpus from now on: checked, remembered in the
+	 *  home directory, and the app reopens on it. `NotFound` when there is no such file,
+	 *  `Invalid` with field `corpus` (unreadable), `corpus_version` (written for another format)
+	 *  or `corpus_requirement` (needs a reader feature this build lacks).
+	 */
+	setCorpus: (path: string) => typedError<null, ApiError>(__TAURI_INVOKE("set_corpus", { path })),
+	/**
 	 *  Every save, the most recently played first. Endpoints, keys, the corpus and the
 	 *  media cache are shared by all of them.
 	 */
@@ -148,6 +161,12 @@ export const commands = {
 	 *  next to the app) keeps the save it has open until it is restarted.
 	 */
 	switchSave: (name: string) => typedError<null, ApiError>(__TAURI_INVOKE("switch_save", { name })),
+	/**
+	 *  Close the current save and leave none open: the name for the next start is cleared,
+	 *  an encrypted save's password is forgotten, and the caller shows the save picker.
+	 *  `Busy` while a reply or request is being written. Works on a locked save too.
+	 */
+	logOut: () => typedError<null, ApiError>(__TAURI_INVOKE("log_out")),
 	/**  A consistent copy under a new name; works on the current save too. */
 	copySave: (from: string, to: string) => typedError<null, ApiError>(__TAURI_INVOKE("copy_save", { from, to })),
 	/**  Renaming the current save needs the engine idle, like a switch. */
@@ -179,6 +198,13 @@ export const commands = {
 	 */
 	setPassword: (current: string | null, next: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("set_password", { current, next })),
 	endpoints: () => typedError<EndpointsView, ApiError>(__TAURI_INVOKE("endpoints")),
+	/**
+	 *  The first-run form in one step: the profile (replaced if it exists, its other models
+	 *  kept), the chat role, the host role when `host_model` is given, and the key. Nothing
+	 *  is written when any part is invalid; `Invalid` names the field (`name`, `base_url`,
+	 *  `model`, `host_model`, `key`).
+	 */
+	setupEndpoint: (setup: EndpointSetup) => typedError<null, ApiError>(__TAURI_INVOKE("setup_endpoint", { setup })),
 	addProfile: (profile: Profile) => typedError<null, ApiError>(__TAURI_INVOKE("add_profile", { profile })),
 	/**  Replace the profile called `name` (which may rename it). */
 	updateProfile: (name: string, profile: Profile) => typedError<null, ApiError>(__TAURI_INVOKE("update_profile", { name, profile })),
@@ -289,6 +315,20 @@ export type AppStatus = {
 	 *  save) works until then.
 	 */
 	locked: boolean,
+	/**
+	 *  The save this process has open. `None`: none (first run, the last one is gone, or
+	 *  the user logged out), so the save picker shows.
+	 */
+	save: string | null,
+	/**
+	 *  The save recorded as the last one used when it no longer exists (renamed or deleted
+	 *  elsewhere), so the picker can say so.
+	 */
+	missing_save: string | null,
+	/**  The home directory, where endpoints, parameters and the corpus link live. */
+	home_dir: string,
+	/**  The folder the saves are files in. */
+	saves_dir: string,
 };
 
 /**  Who can recall a fact. Shown on every row: the only place visibility surfaces. */
@@ -408,6 +448,23 @@ export type CorpusState = { state: "missing" } | { state: "loaded"; name: string
 /**  The waiting panel: pure data, no model call. */
 export type Digest = {
 	items: Waiting[],
+};
+
+/**
+ *  The first-run form: one endpoint, the model the people talk with, optionally another for
+ *  the host, and the key. Written together or not at all.
+ */
+export type EndpointSetup = {
+	/**  The profile's name; one that exists is updated. */
+	name: string,
+	base_url: string,
+	wire_api: WireApi,
+	/**  The model of the chat role. */
+	model: string,
+	/**  A different model for the host; `None`: the host uses the chat role. */
+	host_model: string | null,
+	/**  Goes to the keychain and nowhere else. `None`: leave the profile's key as it is. */
+	key: string | null,
 };
 
 export type EndpointsView = {

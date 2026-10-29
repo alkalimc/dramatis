@@ -62,13 +62,15 @@ pub enum Save {
     Delete(String),
     Export(String, String),
     Import(String, Option<String>),
+    /// Close the open save and go to the save list.
+    Logout,
 }
 
 const SAVE_USAGE: &str = "usage: /save [new <name> | switch <name> | copy <from> <to> | \
-rename <from> <to> | delete <name> | export <name> <path> | import <path> [name]]";
+rename <from> <to> | delete <name> | export <name> <path> | import <path> [name] | logout]";
 
 /// Split on spaces, keeping "double quoted" text together.
-fn words(args: &str) -> Vec<String> {
+pub(super) fn words(args: &str) -> Vec<String> {
     let mut out = Vec::new();
     let (mut word, mut quoted, mut any) = (String::new(), false, false);
     for c in args.chars() {
@@ -106,6 +108,7 @@ fn parse_save(args: &str) -> Command {
         ["rename", a, b] => Save::Rename((*a).into(), (*b).into()),
         ["delete", n] => Save::Delete((*n).into()),
         ["export", n, p] => Save::Export((*n).into(), (*p).into()),
+        ["logout"] => Save::Logout,
         ["import", p] => Save::Import((*p).into(), None),
         ["import", p, n] => Save::Import((*p).into(), Some((*n).into())),
         _ => return Command::Invalid(SAVE_USAGE.into()),
@@ -181,6 +184,8 @@ pub fn parse(line: &str) -> Command {
         "tier" => Command::Tier(optional(args)),
         "quiet" => Command::Quiet(optional(args)),
         "save" => parse_save(args),
+        "logout" if args.is_empty() => Command::Save(Save::Logout),
+        "logout" => Command::Invalid("usage: /logout".into()),
         "history" | "h" => match args {
             "" => Command::History(HISTORY_DEFAULT),
             n => match n.parse::<usize>() {
@@ -295,6 +300,8 @@ mod tests {
             Rename("a".into(), "b c".into())
         );
         assert_eq!(save("/save delete a"), Delete("a".into()));
+        assert_eq!(save("/save logout"), Logout);
+        assert_eq!(save("/logout"), Logout);
         assert_eq!(
             save("/save export a \"/tmp/my dir/a.sqlite\""),
             Export("a".into(), "/tmp/my dir/a.sqlite".into())

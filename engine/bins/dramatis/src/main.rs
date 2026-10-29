@@ -1,9 +1,9 @@
 //! The desktop app: the window, the tray and the engine behind the `api` seam, in one
 //! process that opens no port. Closing the window hides it; the app quits from the tray.
 //!
-//! Startup opens the corpus from `$DRAMATIS_FOLIO`, else the newest `.folio` in
-//! `$DRAMATIS_HOME` (default `~/.dramatis`), else asks for a file and links it into the
-//! home directory. Debug builds load the UI from the Vite dev server (`devUrl`); builds
+//! Startup opens the corpus from `$DRAMATIS_FOLIO`, else the one chosen in the
+//! window, else the newest `.folio` in `$DRAMATIS_HOME` (default `~/.dramatis`), else the window asks for a file and the home
+//! remembers the choice. Debug builds load the UI from the Vite dev server (`devUrl`); builds
 //! with the `custom-protocol` feature (what `tauri build` enables) embed `ui/dist`, which
 //! must be built first. See the README's "Desktop app" section.
 

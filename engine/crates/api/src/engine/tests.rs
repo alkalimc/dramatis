@@ -165,7 +165,7 @@ impl AgentPort for Spy {
         !self.busy.load(Ordering::Relaxed)
     }
     fn switch_world(&self, path: &std::path::Path, key: Option<&str>) {
-        let name = path.file_stem().unwrap().to_string_lossy();
+        let name = path.file_stem().unwrap_or_default().to_string_lossy();
         let locked = if key.is_some() { " locked" } else { "" };
         self.calls
             .lock()
@@ -205,6 +205,8 @@ fn rig_full(net: Arc<dyn NetPort>, params: &str) -> Rig {
     let folio = fixture();
     let home = temp_home();
     home.create().unwrap();
+    // A home with a save to open, as a first run leaves it after the user picks one.
+    drop(world::World::open(home.save_path("default")).unwrap());
     std::fs::write(home.params(), params).unwrap();
     let spy = Arc::new(Spy::default());
     let events = Arc::new(Recorder::default());
@@ -987,7 +989,7 @@ async fn saves_switch_keep_their_own_worlds_and_guard_the_open_one() {
     r.spy.busy.store(false, Ordering::Relaxed);
 
     e.switch_save("second".into()).await.unwrap();
-    assert_eq!(e.home.current_save(), "second");
+    assert_eq!(e.home.current_save().as_deref(), Some("second"));
     assert_eq!(
         e.settings().await.unwrap().user_name,
         None,
@@ -1023,7 +1025,7 @@ async fn saves_switch_keep_their_own_worlds_and_guard_the_open_one() {
     e.rename_save("default".into(), "main".into())
         .await
         .unwrap();
-    assert_eq!(e.home.current_save(), "main");
+    assert_eq!(e.home.current_save().as_deref(), Some("main"));
     assert_eq!(r.spy.calls.lock().unwrap().last().unwrap(), "world main");
     assert_eq!(
         e.settings().await.unwrap().user_name.as_deref(),
@@ -1221,7 +1223,7 @@ async fn another_process_writing_the_world_is_noticed() {
     r.events.take();
 
     // The terminal: its own connection to the same file.
-    let other = world::World::open(e.home.save_path(&e.home.current_save())).unwrap();
+    let other = world::World::open(e.home.save_path(&e.home.current_save().unwrap())).unwrap();
     let said = world::message::append(
         &other,
         wc,
@@ -1283,7 +1285,7 @@ async fn another_process_writing_the_world_is_noticed() {
 
 /// Appends as the terminal would: a second connection to the open save's file.
 fn terminal_says(e: &Engine, ch: &ChannelId, text: &str) {
-    let other = world::World::open(e.home.save_path(&e.home.current_save())).unwrap();
+    let other = world::World::open(e.home.save_path(&e.home.current_save().unwrap())).unwrap();
     let wc = convert::world_channel(ch).unwrap();
     world::message::append(&other, wc, &world::Actor::User, text, None, None, 5).unwrap();
 }
@@ -1369,7 +1371,7 @@ async fn export_while_another_connection_writes_is_a_consistent_copy() {
     let e = &r.engine;
     let ch = e.open_direct(id("amy")).await.unwrap();
     let wc = convert::world_channel(&ch).unwrap();
-    let path = e.home.save_path(&e.home.current_save());
+    let path = e.home.save_path(&e.home.current_save().unwrap());
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let writer = std::thread::spawn({
         let stop = stop.clone();
@@ -1706,7 +1708,7 @@ async fn a_rename_that_cannot_finish_leaves_the_open_save_open_under_its_old_nam
     );
     assert!(e.home.save_path("default").exists());
     assert!(!e.home.save_path("main").exists());
-    assert_eq!(e.home.current_save(), "default");
+    assert_eq!(e.home.current_save().as_deref(), Some("default"));
     assert!(e.locked.load(Ordering::Relaxed));
 }
 
@@ -1741,4 +1743,251 @@ async fn a_rewind_frees_ids_that_a_terminal_write_then_reuses() {
     // The terminal's next message gets the freed id.
     terminal_says(e, &ch, "from the terminal");
     assert_eq!(e.poll_external().unwrap(), 1);
+}
+
+// ---- first run: the save picker, log out, the corpus ----
+
+#[tokio::test]
+async fn a_home_with_no_save_shows_the_picker_and_a_switch_opens_and_records_one() {
+    let home = temp_home();
+    let e = Engine::open(home.clone(), None, Ports::default()).unwrap();
+    let s = e.app_status().await.unwrap();
+    assert_eq!((s.save, s.missing_save), (None, None));
+    assert_eq!(s.saves_dir, home.saves().display().to_string());
+    assert_eq!(s.home_dir, home.root().display().to_string());
+    assert!(home.current_save().is_none());
+
+    e.new_save("first".into()).await.unwrap();
+    e.switch_save("first".into()).await.unwrap();
+    assert_eq!(e.app_status().await.unwrap().save.as_deref(), Some("first"));
+    assert_eq!(home.current_save().as_deref(), Some("first"));
+    assert!(e.saves().await.unwrap()[0].current);
+}
+
+#[tokio::test]
+async fn a_recorded_save_that_is_gone_shows_the_picker_and_says_which() {
+    let home = temp_home();
+    home.create().unwrap();
+    home.set_current_save("renamed-elsewhere").unwrap();
+    let e = Engine::open(home.clone(), None, Ports::default()).unwrap();
+    let s = e.app_status().await.unwrap();
+    assert_eq!(s.save, None);
+    assert_eq!(s.missing_save.as_deref(), Some("renamed-elsewhere"));
+    // Opening another one clears the note.
+    e.new_save("b".into()).await.unwrap();
+    e.switch_save("b".into()).await.unwrap();
+    assert_eq!(e.app_status().await.unwrap().missing_save, None);
+}
+
+#[tokio::test]
+async fn log_out_closes_the_save_clears_the_record_and_the_next_start_picks() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+    e.log_out().await.unwrap();
+    assert_eq!(e.app_status().await.unwrap().save, None);
+    assert!(e.saves().await.unwrap().iter().all(|s| !s.current));
+    assert_eq!(
+        e.home.start_save(),
+        crate::home::Start::Pick { missing: None }
+    );
+    // The terminal or a restarted app comes up at the picker too.
+    assert_eq!(reopen(&r, None).app_status().await.unwrap().save, None);
+    // Logging out twice is harmless; the save is untouched and opens again.
+    e.log_out().await.unwrap();
+    e.switch_save("default".into()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
+    assert_eq!(
+        reopen(&r, None).app_status().await.unwrap().save.as_deref(),
+        Some("default")
+    );
+}
+
+#[tokio::test]
+async fn log_out_forgets_the_password_and_waits_for_an_idle_engine() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+    e.set_password(None, Some("pw".into())).await.unwrap();
+    e.log_out().await.unwrap();
+    assert_eq!(e.switch_save("default".into()).await, Err(ApiError::Locked));
+    e.unlock("default".into(), "pw".into()).await.unwrap();
+    e.switch_save("default".into()).await.unwrap();
+
+    r.spy.busy.store(true, Ordering::Relaxed);
+    assert_eq!(e.log_out().await, Err(ApiError::Busy));
+    assert_eq!(
+        e.app_status().await.unwrap().save.as_deref(),
+        Some("default")
+    );
+}
+
+#[tokio::test]
+async fn two_clients_on_one_home_start_on_the_same_last_save() {
+    let r = rig();
+    let e = &r.engine;
+    e.new_save("second".into()).await.unwrap();
+    e.switch_save("second".into()).await.unwrap();
+    // The other client keeps what it had open until it restarts (it was on `default`).
+    let started_before = e.app_status().await.unwrap().save;
+    assert_eq!(started_before.as_deref(), Some("second"));
+    let terminal = reopen(&r, None);
+    assert_eq!(
+        terminal.app_status().await.unwrap().save.as_deref(),
+        Some("second")
+    );
+    // And it writes the record on its own switch, which the app reads at its next start.
+    terminal.switch_save("default".into()).await.unwrap();
+    assert_eq!(
+        reopen(&r, None).app_status().await.unwrap().save.as_deref(),
+        Some("default")
+    );
+}
+
+#[tokio::test]
+async fn choosing_a_corpus_checks_it_remembers_it_and_asks_for_a_reopen() {
+    let reopened = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = reopened.clone();
+    let home = temp_home();
+    let ports = Ports {
+        restart: Arc::new(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+        }),
+        ..Ports::default()
+    };
+    let e = Engine::open(home.clone(), None, ports).unwrap();
+    assert_eq!(e.app_status().await.unwrap().corpus, CorpusState::Missing);
+
+    assert_eq!(
+        e.set_corpus("/no/such/file.folio".into()).await,
+        Err(ApiError::NotFound)
+    );
+    let junk = home.root().join("junk.folio");
+    std::fs::write(&junk, b"not a database").unwrap();
+    assert_eq!(
+        e.set_corpus(junk.display().to_string()).await,
+        Err(ApiError::Invalid {
+            field: "corpus".into()
+        })
+    );
+    let bad = Builder::new().manifest("format_version", "99").finish();
+    assert_eq!(
+        e.set_corpus(bad.path().display().to_string()).await,
+        Err(ApiError::Invalid {
+            field: "corpus_version".into()
+        })
+    );
+    assert_eq!(reopened.load(Ordering::Relaxed), 0);
+    assert_eq!(home.chosen_corpus(), None);
+
+    let good = fixture();
+    // Quotes and spaces from a pasted path do not matter.
+    e.set_corpus(format!(" \"{}\" ", good.path().display()))
+        .await
+        .unwrap();
+    assert_eq!(reopened.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        home.chosen_corpus(),
+        Some(good.path().canonicalize().unwrap())
+    );
+    // Without a file dialog the window falls back to a typed path.
+    assert_eq!(e.choose_corpus().await, Err(ApiError::NotImplemented));
+}
+
+fn setup(model: &str) -> EndpointSetup {
+    EndpointSetup {
+        name: "mine".into(),
+        base_url: "https://api.example.invalid/v1".into(),
+        wire_api: WireApi::Chat,
+        model: model.into(),
+        host_model: None,
+        key: Some(" sk-test ".into()),
+    }
+}
+
+#[tokio::test]
+async fn the_first_run_form_writes_a_valid_endpoints_file_and_the_key_to_the_keychain() {
+    let r = rig();
+    let e = &r.engine;
+    assert!(!e.home.endpoints().exists());
+    assert!(!e.chat_configured());
+
+    // Every field is checked and a refusal changes nothing.
+    for (bad, field) in [
+        (
+            EndpointSetup {
+                name: " ".into(),
+                ..setup("m")
+            },
+            "name",
+        ),
+        (
+            EndpointSetup {
+                base_url: "api.example.invalid".into(),
+                ..setup("m")
+            },
+            "base_url",
+        ),
+        (setup(""), "model"),
+        (setup("two words"), "model"),
+        (
+            EndpointSetup {
+                host_model: Some("a b".into()),
+                ..setup("m")
+            },
+            "host_model",
+        ),
+    ] {
+        assert_eq!(
+            e.setup_endpoint(bad).await,
+            Err(ApiError::Invalid {
+                field: field.into()
+            })
+        );
+    }
+    assert!(!e.home.endpoints().exists());
+
+    e.setup_endpoint(EndpointSetup {
+        host_model: Some("model-h".into()),
+        ..setup("model-c")
+    })
+    .await
+    .unwrap();
+    let text = std::fs::read_to_string(e.home.endpoints()).unwrap();
+    assert!(!text.contains("sk-test"), "the key never reaches the file");
+    let parsed = Endpoints::from_toml(&text).unwrap();
+    parsed.validate().unwrap();
+    let roles = parsed.roles.unwrap();
+    assert_eq!(roles.chat.model, "model-c");
+    assert_eq!(roles.host.unwrap().model, "model-h");
+    let view = e.endpoints().await.unwrap();
+    assert!(view.profiles[0].has_key);
+    assert!(e.chat_configured());
+    // A fresh process reads the same file back.
+    assert_eq!(
+        reopen(&r, None)
+            .endpoints()
+            .await
+            .unwrap()
+            .roles
+            .unwrap()
+            .chat
+            .model,
+        "model-c"
+    );
+
+    // Running it again updates the profile and keeps its key when none is given.
+    e.setup_endpoint(EndpointSetup {
+        key: None,
+        ..setup("model-d")
+    })
+    .await
+    .unwrap();
+    let view = e.endpoints().await.unwrap();
+    assert_eq!(view.profiles.len(), 1);
+    assert!(view.profiles[0].has_key);
+    assert_eq!(view.roles.unwrap().host, None);
 }

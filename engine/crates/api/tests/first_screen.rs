@@ -23,6 +23,8 @@ fn home(tag: &str) -> Home {
 
 async fn first_screen(folio: &Path, tag: &str) -> std::time::Duration {
     let home = home(tag);
+    home.create().unwrap();
+    drop(world::World::open(home.save_path("default")).unwrap());
     let start = Instant::now();
     let engine = Engine::open(home.clone(), Some(folio.to_path_buf()), Ports::default()).unwrap();
     let status = engine.app_status().await.unwrap();
