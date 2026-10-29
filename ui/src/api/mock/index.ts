@@ -129,6 +129,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     bio: null,
     quiet_hours: { from: "23:00", to: "07:00" },
     notifications: true,
+    events_per_day: 1,
   };
   let introPending = settings.user_name === null;
   let openSave: string | null = params.get("nosave") === "1" ? null : "default";
@@ -990,9 +991,25 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(null);
     },
     settings: () => ok({ ...settings }),
+    shipEvents: () =>
+      ok(
+        settings.events_per_day === 0
+          ? []
+          : [
+              {
+                day: iso().slice(0, 10),
+                at: iso(),
+                title: "Tea on the deck",
+                text: "Mira brewed a pot for whoever passed by, and Oren stayed to argue about the water.",
+                persons: [ref("mira"), ref("oren")],
+                message: null,
+              },
+            ],
+      ),
     updateSettings: (next) => {
       if (next.user_name !== null && !next.user_name.trim()) return fail({ code: "invalid", field: "user_name" });
       if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
+      if (next.events_per_day > 2) return fail({ code: "invalid", field: "events_per_day" });
       settings = { ...next, bio: next.bio?.trim() || null };
       return ok(null);
     },

@@ -394,6 +394,7 @@ impl Session {
             Command::Lang(arg) => self.lang(arg.as_deref()).await,
             Command::Tier(level) => self.tier(level.as_deref()).await,
             Command::Quiet(arg) => self.quiet(arg.as_deref()).await,
+            Command::Events(arg) => self.events(arg.as_deref()).await,
             Command::Save(cmd) => {
                 self.save(cmd).await;
                 self.refresh_completions().await;
@@ -2017,6 +2018,53 @@ impl Session {
         });
     }
 
+    /// The ship events: how many a day, and the last few. A number or `on`/`off` sets it.
+    async fn events(&self, arg: Option<&str>) {
+        let settings = match self.engine.settings().await {
+            Ok(s) => s,
+            Err(e) => return self.fail(&e),
+        };
+        let params = &self.engine.params().world.events;
+        let n = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
+            None => settings.events_per_day,
+            Some("off") => 0,
+            Some("on") if settings.events_per_day > 0 => settings.events_per_day,
+            Some("on") => params.per_day.max(1),
+            Some(n) => match n.parse::<u32>() {
+                Ok(n) if n <= params.max_per_day => n,
+                _ => return self.term.line(&self.msg("cli.usage.events")),
+            },
+        };
+        if arg.is_some() && n != settings.events_per_day {
+            let next = Settings {
+                events_per_day: n,
+                ..settings
+            };
+            if let Err(e) = self.engine.update_settings(next).await {
+                return self.fail(&e);
+            }
+        }
+        self.term.note(&match n {
+            0 => self.msg("cli.events.off"),
+            n => self.names.say("cli.events.on", &[("n", &n.to_string())]),
+        });
+        if arg.is_some() {
+            return;
+        }
+        match self.engine.ship_events().await {
+            Ok(events) if events.is_empty() => self.term.note(&self.msg("cli.events.none")),
+            Ok(events) => {
+                for e in events {
+                    let who: Vec<_> = e.persons.iter().map(|p| p.name.as_str()).collect();
+                    self.term
+                        .line(&format!("{}  {} ({})", e.day, e.title, who.join(", ")));
+                    self.term.line(&format!("    {}", e.text));
+                }
+            }
+            Err(e) => self.fail(&e),
+        }
+    }
+
     // ---- saves ----
 
     /// What a save command's failure means in a terminal.
@@ -2430,7 +2478,7 @@ impl Session {
                     engine.presence().await?;
                     bridge.idle().await;
                 }
-                bridge.tick().await;
+                bridge.tick(true).await;
                 bridge.idle().await;
                 Ok::<(), api::ApiError>(())
             })

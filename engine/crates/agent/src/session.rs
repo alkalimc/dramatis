@@ -357,6 +357,7 @@ impl Agent {
         summary: Option<&Summary>,
         tail: Option<Tail>,
     ) -> Result<SegmentId> {
+        self.sweep();
         let conn = self.db();
         let kind = self.log_kind(&conn, ch)?;
         let (role, _) = self.role_for(kind)?;

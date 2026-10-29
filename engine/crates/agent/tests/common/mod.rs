@@ -684,6 +684,8 @@ pub fn env_in(
     };
     // Scripts do not expect the extra audience request unless a test asks for it.
     config.agent.group.classify = false;
+    // Nor the day's ship event, which a test of its own asks for.
+    config.world.events.per_day = 0;
     tune(&mut config);
     let fake = Arc::new(Fake::default());
     let sink = Arc::new(Recorder::default());

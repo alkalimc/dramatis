@@ -21,6 +21,11 @@ test("settings is a card with a list of sections; each opens its page and back r
   expect(within(page).getByRole("switch", { name: "Do not disturb" })).toBeDefined();
   expect(within(page).getByLabelText("From")).toBeDefined();
   expect(within(page).getByLabelText("To")).toBeDefined();
+  // Happenings on board: one a day until the user chooses another number.
+  const events = within(page).getByLabelText("Happenings on board") as HTMLSelectElement;
+  expect(events.value).toBe("1");
+  await user.selectOptions(events, "0");
+  expect((within(page).getByLabelText("Happenings on board") as HTMLSelectElement).value).toBe("0");
   await user.click(within(card).getByRole("button", { name: "Back" }));
   expect(within(card).getByRole("button", { name: /^Saves/ })).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Close" }));

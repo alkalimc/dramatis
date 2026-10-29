@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::params::{QuietHours, Seed};
+use crate::params::{Events, QuietHours, Seed};
 use crate::types::{MonthDay, PersonId, Tier};
 use crate::{Error, Result};
 
@@ -19,6 +19,10 @@ pub const BIO_MAX: usize = 200;
 pub const INTENSITY: &str = "intensity";
 pub const QUIET_HOURS: &str = "quiet_hours";
 pub const NOTIFICATIONS: &str = "notifications";
+/// Ship events per local day the user chose (0 = none).
+pub const EVENTS_PER_DAY: &str = "events.per_day";
+/// When the last ship event was tried (unix ms), made or not.
+pub const EVENTS_TRIED: &str = "events.tried";
 
 pub fn voice_key(person: &PersonId) -> String {
     format!("voice.{person}")
@@ -130,6 +134,13 @@ pub fn quiet_hours(conn: &Connection, seed: &Seed) -> Result<Option<QuietHours>>
 
 pub fn notifications(conn: &Connection) -> Result<bool> {
     Ok(get(conn, NOTIFICATIONS)?.unwrap_or(true))
+}
+
+/// Missing key: the register default. Never above what the register allows.
+pub fn events_per_day(conn: &Connection, events: &Events) -> Result<u32> {
+    Ok(get::<u32>(conn, EVENTS_PER_DAY)?
+        .unwrap_or(events.per_day)
+        .min(events.max_per_day))
 }
 
 pub fn voice(conn: &Connection, person: &PersonId) -> Result<Option<String>> {

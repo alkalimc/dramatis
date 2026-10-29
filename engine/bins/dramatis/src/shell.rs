@@ -365,7 +365,10 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             if let Some((engine, bridge)) = current {
                 engine.probe_network().await;
                 if engine.chat_configured() {
-                    bridge.tick().await;
+                    let shown = handle
+                        .get_webview_window("main")
+                        .is_some_and(|w| w.is_visible().unwrap_or(false));
+                    bridge.tick(shown).await;
                 }
             }
         }

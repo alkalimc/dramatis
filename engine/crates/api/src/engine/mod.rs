@@ -441,6 +441,8 @@ impl Engine {
                     to: q.to,
                 }),
             notifications: world::settings::notifications(&w).map_err(world_err)?,
+            events_per_day: world::settings::events_per_day(&w, &self.params.world.events)
+                .map_err(world_err)?,
         })
     }
 
@@ -466,6 +468,7 @@ impl Engine {
         {
             return Err(invalid("bio"));
         }
+        let events = s.events_per_day.min(self.params.world.events.max_per_day);
         let renamed = {
             let w = self.w();
             // Both sit in the cached prefix, so a change of either starts new segments.
@@ -483,6 +486,8 @@ impl Engine {
             });
             world::settings::set(&w, world::settings::QUIET_HOURS, &quiet).map_err(world_err)?;
             world::settings::set(&w, world::settings::NOTIFICATIONS, &s.notifications)
+                .map_err(world_err)?;
+            world::settings::set(&w, world::settings::EVENTS_PER_DAY, &events)
                 .map_err(world_err)?;
             renamed || rebio
         };
@@ -717,6 +722,9 @@ impl Api for Engine {
     }
     async fn set_tier(&self, tier: Tier) -> ApiResult<()> {
         self.set_tier_impl(tier)
+    }
+    async fn ship_events(&self) -> ApiResult<Vec<ShipEvent>> {
+        self.ship_events_impl()
     }
     async fn settings(&self) -> ApiResult<Settings> {
         self.settings_impl()

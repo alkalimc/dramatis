@@ -163,7 +163,7 @@ async fn a_tick_does_not_end_the_conversation_of_a_turn_in_flight() {
     .await;
     // The model is slow: far longer than the idle timeout passes.
     e.clock.advance(31 * 60_000);
-    within(e.agent.tick()).await.unwrap();
+    within(e.agent.tick(false)).await.unwrap();
     let open = e
         .agent
         .with_world(|w| session::open_sessions(w).unwrap())
@@ -222,7 +222,7 @@ async fn a_tick_leaves_a_running_request_open_however_long_the_call_takes() {
     })
     .await;
     e.clock.advance(2 * world::task::LEASE_MS);
-    within(e.agent.tick()).await.unwrap();
+    within(e.agent.tick(false)).await.unwrap();
     let t = e
         .agent
         .with_world(|w| world::task::get(w, asked.task).unwrap());

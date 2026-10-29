@@ -13,6 +13,7 @@ pub mod assemble;
 mod dispatch;
 pub mod endpoint;
 pub mod error;
+mod events;
 mod flows;
 pub mod meter;
 pub mod params;

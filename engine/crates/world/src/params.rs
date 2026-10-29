@@ -198,6 +198,37 @@ impl Default for Wrapup {
     }
 }
 
+/// `events.*`: the happenings the host posts about the ship.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Events {
+    /// Happenings per local day until the user chooses another number.
+    pub per_day: u32,
+    /// The most per day the user can choose.
+    pub max_per_day: u32,
+    /// Past happenings a listing shows, and how far back the units used are avoided.
+    pub list: u32,
+    /// People offered to the model as those a happening may involve.
+    pub pool: u32,
+    /// Most people one happening involves.
+    pub max_persons: u32,
+    /// Minutes before another try when one made nothing.
+    pub retry_min: u32,
+}
+
+impl Default for Events {
+    fn default() -> Self {
+        Self {
+            per_day: 1,
+            max_per_day: 2,
+            list: 5,
+            pool: 8,
+            max_persons: 3,
+            retry_min: 60,
+        }
+    }
+}
+
 /// `trust.*`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -233,6 +264,7 @@ pub struct Params {
     pub seed: Seed,
     pub session: Session,
     pub wrapup: Wrapup,
+    pub events: Events,
     pub trust: Trust,
 }
 

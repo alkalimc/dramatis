@@ -34,6 +34,28 @@ fn activity(a: world::presence::Activity, offset: i32) -> Activity {
 }
 
 impl Engine {
+    /// The ship events, newest first. A person the corpus no longer has is left out.
+    pub(crate) fn ship_events_impl(&self) -> ApiResult<Vec<ShipEvent>> {
+        let offset = self.now().offset_min;
+        let events =
+            world::event::recent(&self.w(), self.params.world.events.list).map_err(world_err)?;
+        Ok(events
+            .into_iter()
+            .map(|e| ShipEvent {
+                day: e.day,
+                at: convert::ts(e.at, offset),
+                title: e.title,
+                text: e.text,
+                persons: e
+                    .persons
+                    .iter()
+                    .map(|p| self.person_ref(p.as_str()))
+                    .collect(),
+                message: e.message.map(convert::message_id),
+            })
+            .collect())
+    }
+
     /// The waiting panel: disabled people and people without a persona are left out.
     pub(crate) fn digest_impl(&self) -> ApiResult<Digest> {
         let Some(c) = &self.corpus else {

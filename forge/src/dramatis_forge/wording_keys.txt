@@ -154,6 +154,9 @@ cli.delete.ask
 cli.delete.done
 cli.delete.in_use
 cli.error
+cli.events.none
+cli.events.off
+cli.events.on
 cli.export.replace
 cli.export.wrote
 cli.find.none
@@ -345,6 +348,7 @@ cli.usage.birthday
 cli.usage.chat
 cli.usage.chats
 cli.usage.edit
+cli.usage.events
 cli.usage.find
 cli.usage.forget
 cli.usage.go
@@ -492,6 +496,13 @@ error.turn.quota_exhausted
 error.turn.rate_limited
 error.unknown
 error.wrong_password
+events.count.0
+events.count.1
+events.count.2
+events.fact
+events.hint
+events.per_day
+events.topics
 first.bio
 first.birthday
 first.language
@@ -548,6 +559,9 @@ harness.error.once
 harness.error.refused
 harness.error.unavailable
 harness.error.wrapup_only
+harness.event
+harness.event.ask
+harness.event.recent
 harness.find_mark
 harness.found_for
 harness.group_created
@@ -589,6 +603,7 @@ harness.opening
 harness.opening.birthday
 harness.opening.commitment
 harness.opening.conclusion
+harness.opening.event
 harness.opening.memory
 harness.opening.pinned
 harness.opening.words
@@ -614,6 +629,7 @@ harness.topic
 harness.wrapup
 harness.wrapup.shape
 harness.wrapup.summary
+host.event.frame
 host.intro.app
 host.intro.terminal
 host.name
@@ -969,6 +985,8 @@ world.edit.cancel
 world.edit.label
 world.edit.save
 world.empty
+world.events.people
+world.events.title
 world.filter
 world.hurt.effect
 world.kind.commitment

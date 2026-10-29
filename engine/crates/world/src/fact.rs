@@ -88,6 +88,8 @@ pub struct Fact {
     pub kind: FactKind,
     pub about: Option<About>,
     pub due: Option<i64>,
+    /// The instant the fact ends ([`sweep_expired`] removes it); `None`: it stays.
+    pub expires: Option<i64>,
     pub delivered: bool,
     pub text: String,
     pub retracted: bool,
@@ -102,6 +104,7 @@ pub struct NewFact {
     pub kind: FactKind,
     pub about: Option<About>,
     pub due: Option<i64>,
+    pub expires: Option<i64>,
     pub text: String,
 }
 
@@ -113,6 +116,7 @@ impl NewFact {
             kind,
             about: None,
             due: None,
+            expires: None,
             text: text.into(),
         }
     }
@@ -124,6 +128,11 @@ impl NewFact {
 
     pub fn due(mut self, due: i64) -> Self {
         self.due = Some(due);
+        self
+    }
+
+    pub fn expires(mut self, at: i64) -> Self {
+        self.expires = Some(at);
         self
     }
 }
@@ -149,7 +158,7 @@ impl Written {
 }
 
 const COLUMNS: &str = "id, author, audience_kind, audience_ref, kind, about_kind, about_ref, \
-                       due, delivered, text, retracted, created_at";
+                       due, expires, delivered, text, retracted, created_at";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Fact> {
     Ok(Fact {
@@ -162,6 +171,7 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Fact> {
         kind: row.get("kind")?,
         about: About::decode(row.get("about_kind")?, row.get("about_ref")?),
         due: row.get("due")?,
+        expires: row.get("expires")?,
         delivered: row.get("delivered")?,
         text: row.get("text")?,
         retracted: row.get("retracted")?,
@@ -222,8 +232,8 @@ pub fn write(conn: &Connection, new: &NewFact, now: i64) -> Result<Written> {
     };
     conn.execute(
         "INSERT INTO fact(author, audience_kind, audience_ref, kind, about_kind, about_ref,
-                          due, text, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                          due, expires, text, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             new.author,
             audience_kind,
@@ -232,6 +242,7 @@ pub fn write(conn: &Connection, new: &NewFact, now: i64) -> Result<Written> {
             about_kind,
             about_ref,
             new.due,
+            new.expires,
             new.text.trim(),
             now
         ],
@@ -292,6 +303,7 @@ pub fn edit(conn: &Connection, id: FactId, text: &str, now: i64) -> Result<FactI
             kind: old.kind,
             about: old.about.clone(),
             due: old.due,
+            expires: old.expires,
             text: text.to_owned(),
         };
         if normalize(text).is_empty() {
@@ -412,6 +424,16 @@ pub fn due_commitments(conn: &Connection, now: i64) -> Result<Vec<Fact>> {
         "kind = 'commitment' AND retracted = 0 AND delivered = 0 AND due IS NOT NULL AND due <= ?1",
         [now],
     )
+}
+
+/// Remove the facts that ended by `now`. A fact written with an end is kept only as long
+/// as it is true (a happening of one day), so it is deleted outright and not retracted:
+/// it would otherwise sit in the drawer as something the user deleted.
+pub fn sweep_expired(conn: &Connection, now: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM fact WHERE expires IS NOT NULL AND expires <= ?1",
+        [now],
+    )?)
 }
 
 pub fn mark_delivered(conn: &Connection, id: FactId) -> Result<()> {

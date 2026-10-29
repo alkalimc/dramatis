@@ -429,6 +429,7 @@ impl Agent {
             );
         }
         lines.extend(self.attachment(seg, &mut turn, &posted.text, Vec::new())?);
+        lines.extend(self.event_lines(seg, &mut turn, std::slice::from_ref(person))?);
         self.user_entry(seg, posted, &lines, None)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
@@ -645,6 +646,7 @@ impl Agent {
                     .fill("harness.speaker", &names, &[("name", &name)]),
             ];
         lines.extend(self.attachment(seg, &mut turn, &posted.text, Vec::new())?);
+        lines.extend(self.event_lines(seg, &mut turn, &members)?);
         self.user_entry(seg, posted, &lines, None)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
@@ -1324,6 +1326,10 @@ impl Agent {
                 }
             }
         }
+        // The user is here: today's happening on the ship, if one is due.
+        if self.ship_event().await? {
+            out.host_spoke = true;
+        }
         Ok(out)
     }
 
@@ -1375,8 +1381,10 @@ impl Agent {
 
     /// The periodic step while the app runs: conversations idle past
     /// `session.idle_timeout` are wrapped up, then due event seeds (a commitment) may
-    /// open. Call it every minute or so; it makes no call when nothing is due.
-    pub async fn tick(&self) -> Result<Option<(PersonId, ChannelId)>> {
+    /// open. With the user `present` (the window shown, the terminal in use) the day's
+    /// ship event may be made. Call it every minute or so; it makes no call when nothing
+    /// is due.
+    pub async fn tick(&self, present: bool) -> Result<Option<(PersonId, ChannelId)>> {
         let ended = {
             let now = self.now().ms;
             let conn = self.db();
@@ -1404,6 +1412,10 @@ impl Agent {
             }
         }
         let opened = self.on_event().await?;
+        if present && self.chat().is_ok() {
+            let _plan = self.planner.lock().await;
+            self.ship_event().await?;
+        }
         if !ended.is_empty() {
             self.changed(vec![WorldChange::Digest]);
         }
@@ -1425,7 +1437,7 @@ impl Agent {
         Ok(())
     }
 
-    fn birthdays(&self) -> Result<Vec<(PersonId, MonthDay)>> {
+    pub(crate) fn birthdays(&self) -> Result<Vec<(PersonId, MonthDay)>> {
         Ok(self
             .ix()
             .folio()
@@ -1551,6 +1563,7 @@ impl Agent {
             SeedKind::Pinned(_) => detail("harness.opening.pinned", task_text.as_ref()),
             SeedKind::Words(_) => detail("harness.opening.words", task_text.as_ref()),
             SeedKind::Birthday(_) => Some(w.fill("harness.opening.birthday", &names, &[])),
+            SeedKind::Happening(_) => detail("harness.opening.event", fact_text.as_ref()),
         };
         lines.extend(line);
         let units: Vec<folio::Unit> = {
