@@ -581,6 +581,18 @@ line is one message.",
         "About you, up to {max} characters (optional): ",
     ),
     (
+        "cli.first.avatar",
+        "A picture of you: the path to an image file (optional): ",
+    ),
+    (
+        "cli.first.avatar.unreadable",
+        "That file could not be read; the default picture stays.",
+    ),
+    (
+        "cli.first.avatar.invalid",
+        "That is not a picture that can be used; the default picture stays.",
+    ),
+    (
         "cli.header",
         "folio {folio} | world {world} | chat {chat} | host {host_model}",
     ),

@@ -13,6 +13,7 @@ action.request_join.topic
 action.search
 action.set_mode
 action.suggest_group
+action.talk_offer
 action.target.group
 activity.birthday
 activity.came_by
@@ -160,6 +161,9 @@ cli.events.on
 cli.export.replace
 cli.export.wrote
 cli.find.none
+cli.first.avatar
+cli.first.avatar.invalid
+cli.first.avatar.unreadable
 cli.first.bio
 cli.first.birthday
 cli.first.language
@@ -503,6 +507,10 @@ events.fact
 events.hint
 events.per_day
 events.topics
+first.avatar.hint
+first.avatar.next
+first.avatar.skip
+first.avatar.title
 first.bio
 first.birthday
 first.language
@@ -617,6 +625,7 @@ harness.rules
 harness.speaker
 harness.suggested
 harness.summary
+harness.talk_offered
 harness.task
 harness.task.active
 harness.task.failed

@@ -202,16 +202,28 @@ export function createActions(api: Api, store: Store) {
     savePrefs({ pinned: store.getState().pinned, theme });
   }
 
+  /** A conversation nobody has spoken in is not in the list: its stand-in row follows the change. */
+  function patchTemp(channel: ChannelId, patch: Partial<ChannelSummary>) {
+    const row = store.getState().temp;
+    if (row && row.id === channel) d({ type: "temp", row: { ...row, ...patch } });
+  }
+
   async function archive(channel: ChannelId, archived: boolean) {
     if ((await attempt(c.archiveChannel(channel, archived))) === undefined) return;
+    patchTemp(channel, { archived });
     await refreshChannels();
     if (archived && (store.getState().channel ?? store.getState().hostChannel) === channel) await open(null);
   }
   async function rename(channel: ChannelId, name: string | null) {
-    if ((await attempt(c.renameChannel(channel, name))) !== undefined) await refreshChannels();
+    if ((await attempt(c.renameChannel(channel, name))) === undefined) return;
+    patchTemp(channel, { name });
+    await refreshChannels();
   }
   async function setChannelAvatar(channel: ChannelId, image: ImagePart | null) {
-    if ((await attempt(c.setChannelAvatar(channel, image))) !== undefined) await refreshChannels();
+    const avatar = await attempt(c.setChannelAvatar(channel, image));
+    if (avatar === undefined) return;
+    patchTemp(channel, { avatar });
+    await refreshChannels();
   }
   async function setUserAvatar(image: ImagePart | null) {
     if ((await attempt(c.setUserAvatar(image))) !== undefined) await refreshUserAvatar();
@@ -261,6 +273,7 @@ export function createActions(api: Api, store: Store) {
     refreshChannels,
     refreshQuota,
     refreshEndpoints,
+    refreshUserAvatar,
     refreshClock,
     loadHistory,
     reloadHistory,

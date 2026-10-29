@@ -13,6 +13,7 @@ import { AskCard } from "./screens/Ask";
 import { CaseDrawer, CasesDrawer } from "./screens/Cases";
 import { FirstOpen } from "./screens/FirstOpen";
 import { GroupDialog } from "./screens/Group";
+import { Badge } from "./ui/Badge";
 import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
 import { PersonDrawer } from "./screens/Person";
@@ -22,7 +23,7 @@ import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
 import { ChangedScreen } from "./screens/Changed";
 import { UnlockScreen } from "./screens/Unlock";
-import { CorpusSetup, ModelStep, SavePicker } from "./screens/Welcome";
+import { AvatarStep, CorpusSetup, ModelStep, SavePicker } from "./screens/Welcome";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -79,6 +80,7 @@ function Shell() {
   // Whether this window began on the first-run name form, so the model step can follow it.
   const firstRun = useRef(false);
   if (status?.needs_setup) firstRun.current = true;
+  const [avatarDone, setAvatarDone] = useState(false);
   const [modelDone, setModelDone] = useState(false);
   const chat = endpoints?.roles?.chat;
   const modelMissing = endpoints !== null && (!chat || endpoints.profiles.some((p) => p.profile.name === chat.profile && !p.has_key));
@@ -108,6 +110,7 @@ function Shell() {
   // The model step follows the name on a first run, and only then: afterwards the
   // endpoints page in settings is where this lives.
   if (status.needs_setup) return <FirstOpen />;
+  if (firstRun.current && !avatarDone) return <AvatarStep onDone={() => setAvatarDone(true)} />;
   if (firstRun.current && !modelDone && modelMissing) {
     return (
       <ModelStep
@@ -223,7 +226,7 @@ function Rail() {
             >
               <span className="rail-icon">
                 <Icon name="chats" size={30} />
-                {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
+                {unreadChats > 0 && <Badge count={unreadChats} decorative />}
               </span>
               <span className="rail-label">{t("nav.chats")}</span>
             </button>

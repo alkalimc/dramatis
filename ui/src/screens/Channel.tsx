@@ -7,6 +7,7 @@ import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
 import { useActions, useApi, useDispatch, useStore, type Stream } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
+import { Badge } from "../ui/Badge";
 import { Menu } from "../ui/Menu";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
@@ -118,7 +119,7 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
       </div>
       {away > 0 && (
         <button type="button" className="to-bottom round" aria-label={t("channel.latest")} title={t("channel.latest")} onClick={toBottom}>
-          {unseen > 0 && <span className="badge to-bottom-count">{unseen}</span>}
+          {unseen > 0 && <Badge count={unseen} className="to-bottom-count" decorative />}
           <Icon name="down" size={24} />
         </button>
       )}

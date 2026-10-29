@@ -5,6 +5,7 @@ import { activityText, authorName, typingText, when } from "../lib/format";
 import { byActivity, channelTitle, lastActivity, previewOf, unreadOf } from "../lib/chats";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { ChannelAvatar } from "../ui/Avatar";
+import { Badge } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
 import { useChatMenu } from "./chatMenu";
 
@@ -287,9 +288,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
       </button>
       {unread > 0 && (
         // A sibling of the row, not inside it: a button cannot hold a button.
-        <button type="button" className="badge" aria-label={t("chatlist.unread", { count: unread })} title={t("chatlist.mark_read")} onClick={() => void actions.clearUnread(channel.id)}>
-          {unread}
-        </button>
+        <Badge count={unread} quiet={channel.archived || channel.mode === "disabled"} label={t("chatlist.unread", { count: unread })} title={t("chatlist.mark_read")} onClick={() => void actions.clearUnread(channel.id)} />
       )}
     </div>
   );

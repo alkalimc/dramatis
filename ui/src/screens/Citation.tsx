@@ -3,6 +3,7 @@ import type { Api, Citation, CitationView } from "../api";
 import { useT } from "../i18n";
 import { useApi } from "../store";
 import { Icon } from "../ui/Icon";
+import { ExternalLink } from "../ui/ExternalLink";
 
 // Resolving a citation is a local lookup, never a model call; one request per citation.
 const cache = new Map<string, Promise<CitationView | null>>();
@@ -68,14 +69,14 @@ export function CitationDetail({ citation, view }: { citation: Citation; view: C
       )}
       <p className="citation-links">
         {view.source_url && (
-          <a href={view.source_url} target="_blank" rel="noopener noreferrer">
+          <ExternalLink href={view.source_url}>
             {t("citation.open")}
-          </a>
+          </ExternalLink>
         )}
         {view.revision_url && (
-          <a href={view.revision_url} target="_blank" rel="noopener noreferrer">
+          <ExternalLink href={view.revision_url}>
             {t("citation.open_revision")}
-          </a>
+          </ExternalLink>
         )}
       </p>
     </div>
@@ -115,14 +116,14 @@ export function SourceEntries({ cites }: { cites: Citation[] }) {
                     {v.passage && <blockquote className="passage">{v.passage.text}</blockquote>}
                     <p className="citation-links">
                       {v.source_url && (
-                        <a href={v.source_url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink href={v.source_url}>
                           {t("citation.open")}
-                        </a>
+                        </ExternalLink>
                       )}
                       {v.revision_url && (
-                        <a href={v.revision_url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink href={v.revision_url}>
                           {t("citation.open_revision")}
-                        </a>
+                        </ExternalLink>
                       )}
                     </p>
                   </>

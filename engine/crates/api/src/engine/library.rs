@@ -23,6 +23,26 @@ impl Engine {
         Ok(())
     }
 
+    /// Hand a web address to the system browser. Only plain http(s) addresses go out: a
+    /// webview opens nothing on its own, and the opener must never be given a path, an
+    /// option or another scheme.
+    pub(crate) fn open_external_impl(&self, url: &str) -> ApiResult<()> {
+        let url = url.trim();
+        let web = url.starts_with("https://") || url.starts_with("http://");
+        if !web || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(ApiError::Invalid {
+                field: "url".into(),
+            });
+        }
+        let open = self
+            .ports
+            .open_url
+            .clone()
+            .ok_or(ApiError::NotImplemented)?;
+        open(url);
+        Ok(())
+    }
+
     fn passage(&self, c: &Corpus, namer: &Namer, u: &folio::Unit) -> Passage {
         Passage {
             citation: convert::unit_citation(u),

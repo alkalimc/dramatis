@@ -5,6 +5,7 @@ import { useQuery } from "../lib/useQuery";
 import { useApi, useDispatch, useStore } from "../store";
 import { InlineError } from "../ui/ErrorBar";
 import { RosterList } from "./Roster";
+import { ExternalLink } from "../ui/ExternalLink";
 
 /**
  * The library: the roster and full-text search of the corpus, with a unit opened in place.
@@ -144,9 +145,9 @@ function CorpusSearch() {
                         {h.source_url && (
                           <>
                             {" · "}
-                            <a href={h.source_url} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink href={h.source_url}>
                               {t("citation.open")}
-                            </a>
+                            </ExternalLink>
                           </>
                         )}
                       </p>
@@ -200,9 +201,9 @@ function UnitReader({ id, onOpen, onBack, back }: { id: string; onOpen: (id: str
               {data.unit.source_url && (
                 <>
                   {" · "}
-                  <a href={data.unit.source_url} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink href={data.unit.source_url}>
                     {t("citation.open")}
-                  </a>
+                  </ExternalLink>
                 </>
               )}
             </p>

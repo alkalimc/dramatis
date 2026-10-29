@@ -322,7 +322,11 @@ pub async fn first_run(engine: &Engine, names: &Names, ask: &mut dyn Ask) {
             settings.bio = Some(bio);
         }
     }
-    match engine.update_settings(settings).await {
+    let saved = engine.update_settings(settings).await;
+    if saved.is_ok() {
+        avatar_step(engine, names, ask).await;
+    }
+    match saved {
         Ok(()) => {
             if let Err(e) = names.refresh_user(engine).await {
                 ask.say(&names.api_error(&e));
@@ -330,6 +334,33 @@ pub async fn first_run(engine: &Engine, names: &Names, ask: &mut dyn Ask) {
         }
         // A birthday the engine refuses (month 13) is the one thing it can refuse here.
         Err(ApiError::Invalid { .. }) => ask.say(&names.text("cli.birthday.invalid")),
+        Err(e) => ask.say(&names.api_error(&e)),
+    }
+}
+
+/// Optional: the path to an image file for the user's picture, through the same command the
+/// app uses. Empty keeps the default portrait; a path that fails says so and keeps it too.
+pub(super) async fn avatar_step(engine: &Engine, names: &Names, ask: &mut dyn Ask) {
+    let Some(typed) = ask
+        .line(&names.text("cli.first.avatar"))
+        .map(|p| p.trim().trim_matches(['"', '\'']).to_owned())
+        .filter(|p| !p.is_empty())
+    else {
+        return;
+    };
+    let Ok(bytes) = std::fs::read(&typed) else {
+        return ask.say(&names.text("cli.first.avatar.unreadable"));
+    };
+    let Some(ext) = api::media::image_ext(&bytes) else {
+        return ask.say(&names.text("cli.first.avatar.invalid"));
+    };
+    let image = api::views::ImagePart {
+        mime: api::media::image_mime(ext).to_owned(),
+        data_base64: api::media::base64_encode(&bytes),
+    };
+    match engine.set_user_avatar(Some(image)).await {
+        Ok(_) => {}
+        Err(ApiError::Invalid { .. }) => ask.say(&names.text("cli.first.avatar.invalid")),
         Err(e) => ask.say(&names.api_error(&e)),
     }
 }

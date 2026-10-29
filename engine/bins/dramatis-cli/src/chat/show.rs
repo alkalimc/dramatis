@@ -245,6 +245,12 @@ impl Names {
             ToolAction::Report => self.word("action.report", "reported back"),
             ToolAction::Wrapup => self.text("cli.action.wrapup"),
             ToolAction::Digest => self.word("action.digest", "looked at the digest"),
+            // A named person, not a subject: no reason to pass on.
+            ToolAction::FindPeople { topic, persons } if topic.is_empty() => with(
+                "action.talk_offer",
+                "offered a chat with {names}",
+                &[("names", &list(persons))],
+            ),
             ToolAction::FindPeople { topic, .. } => with(
                 "action.find_people",
                 "looked for people on: {topic}",

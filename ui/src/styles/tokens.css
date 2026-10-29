@@ -114,7 +114,9 @@
   --avatar-m: 2.4rem;
   --avatar-l: 3.9rem;
   --avatar-xl: 7rem;
-  --badge: 1.35rem;
+  --badge: 1.25rem;
+  /* both lines of a chat row share one height, so the badge can sit on the second */
+  --chat-line: 1.4rem;
   --switch-w: 2.4rem;
   --switch-h: 1.4rem;
 

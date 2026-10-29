@@ -15,7 +15,7 @@
       },
       {
         "function": {
-          "description": "Find people who know about something. The user is shown a way to talk to them; you\ncannot move the user yourself.",
+          "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them; you cannot move the user yourself.",
           "name": "find_people",
           "parameters": {
             "additionalProperties": false,
@@ -68,13 +68,13 @@
       },
       {
         "function": {
-          "description": "Start a group conversation. The result gives the group id, and the user is shown a way\nto open it; you cannot move the user yourself.",
+          "description": "Start a group conversation among two or more people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.",
           "name": "create_group",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "members": {
-                "description": "Roster ids.",
+                "description": "Roster ids, two or more.",
                 "items": {
                   "type": "string"
                 },
@@ -240,7 +240,7 @@
         "name": "digest"
       },
       {
-        "description": "Find people who know about something. The user is shown a way to talk to them; you\ncannot move the user yourself.",
+        "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them; you cannot move the user yourself.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -287,12 +287,12 @@
         "name": "ask"
       },
       {
-        "description": "Start a group conversation. The result gives the group id, and the user is shown a way\nto open it; you cannot move the user yourself.",
+        "description": "Start a group conversation among two or more people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
             "members": {
-              "description": "Roster ids.",
+              "description": "Roster ids, two or more.",
               "items": {
                 "type": "string"
               },
@@ -443,7 +443,7 @@
         "type": "function"
       },
       {
-        "description": "Find people who know about something. The user is shown a way to talk to them; you\ncannot move the user yourself.",
+        "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them; you cannot move the user yourself.",
         "name": "find_people",
         "parameters": {
           "additionalProperties": false,
@@ -492,13 +492,13 @@
         "type": "function"
       },
       {
-        "description": "Start a group conversation. The result gives the group id, and the user is shown a way\nto open it; you cannot move the user yourself.",
+        "description": "Start a group conversation among two or more people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.",
         "name": "create_group",
         "parameters": {
           "additionalProperties": false,
           "properties": {
             "members": {
-              "description": "Roster ids.",
+              "description": "Roster ids, two or more.",
               "items": {
                 "type": "string"
               },

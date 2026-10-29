@@ -484,9 +484,9 @@ pub fn corpus() -> TempFolio {
 /// The same, with the pack's own wording in CJK text when `cjk` is set.
 pub fn corpus_in(cjk: bool) -> TempFolio {
     let wording = if cjk {
-        r#"{"user.you": "Doc", "host.name": "Hostess", "tool.search": "Search the archive.", "daypart.night": "\u591c\u91cc"}"#
+        r#"{"user.you": "Doc", "host.name": "Hostess", "host.intro.terminal": "Welcome, <U>. I am {host}. Try /talk or the Roster.", "host.intro.app": "Welcome, <U>. I am {host}. Try /talk or the Roster.", "tool.search": "Search the archive.", "daypart.night": "\u591c\u91cc"}"#
     } else {
-        r#"{"user.you": "Doc", "host.name": "Hostess", "tool.search": "Search the archive."}"#
+        r#"{"user.you": "Doc", "host.name": "Hostess", "host.intro.terminal": "Welcome, <U>. I am {host}. Try /talk or the Roster.", "host.intro.app": "Welcome, <U>. I am {host}. Try /talk or the Roster.", "tool.search": "Search the archive."}"#
     };
     let mut b = Builder::new()
         .manifest("user_placeholder", r#""<U>""#)

@@ -181,6 +181,12 @@ export const commands = {
 	 */
 	setCorpus: (path: string) => typedError<null, ApiError>(__TAURI_INVOKE("set_corpus", { path })),
 	/**
+	 *  Open a web address (the page a passage came from) in the system browser. `Invalid`
+	 *  with field `url` unless it is a plain http or https address; `NotImplemented` where
+	 *  there is no browser to hand it to.
+	 */
+	openExternal: (url: string) => typedError<null, ApiError>(__TAURI_INVOKE("open_external", { url })),
+	/**
 	 *  Every save, the most recently played first. Endpoints, keys, the corpus and the
 	 *  media cache are shared by all of them.
 	 */

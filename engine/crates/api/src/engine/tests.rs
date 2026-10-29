@@ -2523,3 +2523,45 @@ async fn a_renamed_or_deleted_save_is_noticed_too() {
     std::fs::remove_file(e.home.save_path("spare")).unwrap();
     assert!(e.check_open_file());
 }
+
+#[tokio::test]
+async fn only_plain_web_addresses_go_to_the_browser() {
+    let opened = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = opened.clone();
+    let folio = fixture();
+    let home = temp_home();
+    home.create().unwrap();
+    drop(world::World::open(home.save_path("default")).unwrap());
+    let ports = Ports {
+        open_url: Some(Arc::new(move |u: &str| seen.lock().unwrap().push(u.into()))),
+        ..Ports::default()
+    };
+    let e = Engine::open(home, Some(folio.path().to_path_buf()), ports).unwrap();
+    e.open_external("https://wiki.example/Story_1".into())
+        .await
+        .unwrap();
+    for bad in [
+        "file:///etc/passwd",
+        "-a Calculator",
+        "javascript:alert(1)",
+        "https://x.example/a b",
+        "",
+    ] {
+        assert!(
+            matches!(
+                e.open_external(bad.into()).await,
+                Err(ApiError::Invalid { .. })
+            ),
+            "{bad}"
+        );
+    }
+    assert_eq!(*opened.lock().unwrap(), ["https://wiki.example/Story_1"]);
+    // No browser wired (the terminal, tests): nothing to open with.
+    let r = rig();
+    assert_eq!(
+        r.engine
+            .open_external("https://wiki.example/x".into())
+            .await,
+        Err(ApiError::NotImplemented)
+    );
+}

@@ -542,6 +542,39 @@ impl Agent {
         Ok(())
     }
 
+    /// The offerable person a name, id or alias stands for, if exactly one.
+    fn person_named(&self, name: &str, offer: &[String]) -> Result<Option<PersonId>> {
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let mut roster = Vec::new();
+        for p in offer {
+            roster.push((PersonId::from(p.as_str()), self.display(p)?));
+        }
+        let ix = self.ix();
+        let by_alias = |n: &str| Ok(ix.folio().persons_for_alias(n)?);
+        crate::address::member_named(name, &roster, by_alias)
+    }
+
+    /// Show the user a way to open a chat with one person. Nothing is made until it is
+    /// taken, and the result says so, so the host does not claim more.
+    fn talk_offer(&self, turn: &mut Turn, person: &str, names: &Names) -> Result<Outcome> {
+        let who = view::person_ref(self.ix().folio(), person)?;
+        let name = who.name.clone();
+        self.show_action(
+            turn,
+            ToolAction::FindPeople {
+                topic: String::new(),
+                persons: vec![who],
+            },
+        )?;
+        Ok(Ok(self.say(
+            names,
+            "harness.talk_offered",
+            &[("name", &name), ("id", person)],
+        )))
+    }
+
     fn host(
         &self,
         turn: &mut Turn,
@@ -558,6 +591,10 @@ impl Agent {
             }
             HostCall::FindPeople(f) => {
                 let offer = self.offerable(&self.db())?;
+                // A name or alias that is exactly one person is that person, not a topic.
+                if let Some(p) = self.person_named(f.topic.trim(), &offer)? {
+                    return self.talk_offer(turn, p.as_str(), names);
+                }
                 let people = self.ix().find_people(
                     &f.topic,
                     Some(&offer),
@@ -634,11 +671,20 @@ impl Agent {
                 }
             }
             HostCall::CreateGroup(g) => {
-                let members: Vec<PersonId> = g
-                    .members
-                    .iter()
-                    .map(|m| PersonId::from(m.as_str()))
-                    .collect();
+                let mut members: Vec<PersonId> = Vec::new();
+                for m in &g.members {
+                    let m = PersonId::from(m.as_str());
+                    if !members.contains(&m) {
+                        members.push(m);
+                    }
+                }
+                // One person is a conversation, not a group: offer to talk instead.
+                if let [only] = &members[..] {
+                    if self.available(&self.db(), only).is_err() {
+                        return Ok(Err(self.refuse(names, "harness.error.unavailable", "")));
+                    }
+                    return self.talk_offer(turn, only.as_str(), names);
+                }
                 for m in &members {
                     if self.available(&self.db(), m).is_err() {
                         return Ok(Err(self.refuse(names, "harness.error.unavailable", "")));

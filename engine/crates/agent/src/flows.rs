@@ -916,6 +916,10 @@ impl Agent {
         by: Option<&PersonId>,
         topic: &str,
     ) -> Result<()> {
+        // No subject (a named person was offered): there is no reason to pass on.
+        if topic.trim().is_empty() {
+            return Ok(());
+        }
         let name = self.proposer(by)?;
         let seg = self.ensure_segment(ch, None).await?;
         let names = self.segment_names(seg)?;

@@ -261,6 +261,7 @@ async fn rig_setup(
             password: None,
             restart: None,
             choose_file: None,
+            open_url: None,
         },
     )
     .unwrap();
@@ -776,8 +777,14 @@ async fn the_first_run_questions_are_optional_and_asked_once_per_home() {
     let names = Names::load(&engine).await.unwrap();
     assert!(super::setup::needs_first_run(&engine, &h).await);
 
-    let mut ask = Script::new(&["2", "Rowan", "03-14", "Likes tea"], &[]);
+    // The picture step takes a path to an image file and stores it with the app's command.
+    let picture = home.0.join("me.png");
+    std::fs::write(&picture, [0x89, b'P', b'N', b'G', 13, 10, 26, 10, 0]).unwrap();
+    assert!(engine.user_avatar().await.unwrap().is_none());
+    let path = picture.display().to_string();
+    let mut ask = Script::new(&["2", "Rowan", "03-14", "Likes tea", &path], &[]);
     super::setup::first_run(&engine, &names, &mut ask).await;
+    assert!(engine.user_avatar().await.unwrap().is_some());
     let s = engine.settings().await.unwrap();
     assert_eq!(s.user_name.as_deref(), Some("Rowan"));
     assert_eq!(s.birthday.map(|d| (d.month, d.day)), Some((3, 14)));
@@ -795,7 +802,16 @@ async fn the_first_run_questions_are_optional_and_asked_once_per_home() {
     e2.new_save("main".into()).await.unwrap();
     e2.switch_save("main".into()).await.unwrap();
     let n2 = Names::load(&e2).await.unwrap();
-    super::setup::first_run(&e2, &n2, &mut Script::new(&["", "", "", ""], &[])).await;
+    super::setup::first_run(&e2, &n2, &mut Script::new(&["", "", "", "", ""], &[])).await;
+    // Skipped: no picture was set.
+    assert_eq!(e2.user_avatar().await.unwrap(), None);
+    // A path that is not a picture is said so and changes nothing.
+    let junk = other.0.join("notes.txt");
+    std::fs::write(&junk, "plain text").unwrap();
+    let mut bad = Script::new(&[&junk.display().to_string()], &[]);
+    super::setup::avatar_step(&e2, &n2, &mut bad).await;
+    assert_eq!(e2.user_avatar().await.unwrap(), None);
+    assert_eq!(bad.said.last(), Some(&n2.text("cli.first.avatar.invalid")));
     assert_eq!(e2.settings().await.unwrap().user_name, None);
     assert_eq!(
         oh.interface_language(),

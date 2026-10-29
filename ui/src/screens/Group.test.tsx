@@ -151,3 +151,38 @@ test("group menu: deleting asks first and removes the group", async () => {
   await waitFor(() => expect(screen.queryByRole("heading", { name: TITLE })).toBeNull());
   expect(confirm).toHaveBeenCalledTimes(2);
 });
+
+test("a group made from the dialog has an info panel before anyone has spoken in it", async () => {
+  const user = userEvent.setup();
+  // As in the engine, a group nobody has spoken in is not in the list yet.
+  const created = new Set<string>();
+  renderApp("", (api) => ({
+    ...api,
+    commands: {
+      ...api.commands,
+      createGroup: async (m, topic) => {
+        const r = await api.commands.createGroup(m, topic);
+        if (r.status === "ok") created.add(r.data);
+        return r;
+      },
+      channels: async () => {
+        const r = await api.commands.channels();
+        return r.status === "ok" ? { ...r, data: r.data.filter((c) => !created.has(c.id)) } : r;
+      },
+    },
+  }));
+  await screen.findByRole("heading", { name: "Who's waiting" });
+  await user.click(screen.getByRole("button", { name: "Attach" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Bring people in" }));
+  await user.click(await screen.findByRole("button", { name: "Next" }));
+  const dialog = await screen.findByRole("dialog", { name: "Bring people in" });
+  await user.type(within(dialog).getByRole("searchbox"), "Mira");
+  await user.click(await within(dialog).findByRole("button", { name: /^Add Mira/ }));
+  await user.click(within(dialog).getByRole("button", { name: "Start" }));
+  const panel = await openInfo(user);
+  // Not stuck on "Loading": the members and the mode are there.
+  expect(within(panel).queryByText("Loading")).toBeNull();
+  expect(within(panel).getByRole("heading", { name: "Members" })).toBeDefined();
+  await user.click(within(panel).getByRole("radio", { name: "Enabled" }));
+  await waitFor(() => expect((within(panel).getByRole("radio", { name: "Enabled" }) as HTMLInputElement).checked).toBe(true));
+});

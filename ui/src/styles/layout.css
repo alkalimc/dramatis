@@ -91,10 +91,6 @@ button.rail-item.on:hover {
   position: absolute;
   top: -0.5rem;
   left: 58%;
-  min-width: 1.2rem;
-  height: 1.2rem;
-  line-height: 1.2rem;
-  padding: 0 var(--s-1);
   box-shadow: 0 0 0 2px var(--rail);
 }
 .rail-item.on .rail-icon .badge {
@@ -206,6 +202,7 @@ button.chat-row.selected:hover {
   display: flex;
   align-items: center;
   gap: var(--s-2);
+  height: var(--chat-line);
 }
 .chat-title {
   min-width: 0;
@@ -239,8 +236,10 @@ button.chat-row.selected:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* room for the unread badge that sits over the row's right edge */
-  padding-right: var(--s-6);
+}
+/* room for the unread badge, which sits at the right end of this line */
+.chat-row.unread .chat-preview {
+  padding-right: calc(var(--badge) + var(--s-3));
 }
 .chat-row.unread .chat-preview {
   color: var(--ink);
@@ -254,12 +253,12 @@ button.chat-row.selected:hover {
 .chat-row.selected .chat-preview.typing {
   color: var(--select-ink);
 }
+/* A sibling of the row, centred on the row's second line (the time stays on the first). */
 .chat-item > .badge {
   position: absolute;
   right: var(--s-3);
-  bottom: var(--s-3);
-  background: var(--pill);
-  color: var(--ink);
+  top: calc(50% + var(--chat-line) / 2);
+  transform: translateY(-50%);
 }
 .chat-row.selected + .badge {
   background: var(--select-ink);

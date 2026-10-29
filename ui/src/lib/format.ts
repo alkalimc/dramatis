@@ -70,7 +70,8 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
     case "digest":
       return t("action.digest");
     case "find_people":
-      return t("action.find_people", { topic: a.topic });
+      // A named person rather than a subject: only the offer to talk.
+      return a.topic ? t("action.find_people", { topic: a.topic }) : t("action.talk_offer", { names: list(a.persons ?? []) });
     case "ask":
       return t("action.ask", { name: a.person.name, question: a.question });
     case "create_group":
