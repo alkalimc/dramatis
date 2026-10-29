@@ -232,6 +232,95 @@ pub fn add_participant(conn: &Connection, channel: ChannelId, who: &Actor) -> Re
     Ok(())
 }
 
+/// Bring people into a live group, as the user's own change of its roster. Each must be
+/// available. Returns who was not in it already, so a repeat adds nobody.
+pub fn add_members(
+    conn: &Connection,
+    channel: ChannelId,
+    persons: &[PersonId],
+) -> Result<Vec<PersonId>> {
+    crate::atomic(conn, |conn| {
+        let ch = live_group(conn, channel)?;
+        let mut added = Vec::new();
+        for p in persons {
+            bond::ensure_available(conn, p)?;
+            if !ch.participants.contains(&Actor::Person(p.clone())) && !added.contains(p) {
+                added.push(p.clone());
+            }
+        }
+        for p in &added {
+            conn.execute(
+                "INSERT INTO channel_participant(channel, participant) VALUES (?1, ?2)
+                 ON CONFLICT DO NOTHING",
+                (channel, p),
+            )?;
+        }
+        Ok(added)
+    })
+}
+
+/// Take a person out of a live group. What they said stays in its history. A group keeps
+/// at least one person. Returns whether the person was in it.
+pub fn remove_member(conn: &Connection, channel: ChannelId, person: &PersonId) -> Result<bool> {
+    crate::atomic(conn, |conn| {
+        let ch = live_group(conn, channel)?;
+        if !ch.participants.contains(&Actor::Person(person.clone())) {
+            return Ok(false);
+        }
+        if ch.persons().len() <= 1 {
+            return Err(Error::Invalid("a group keeps at least one person".into()));
+        }
+        conn.execute(
+            "DELETE FROM channel_participant WHERE channel = ?1 AND participant = ?2",
+            (channel, person),
+        )?;
+        Ok(true)
+    })
+}
+
+fn live_group(conn: &Connection, channel: ChannelId) -> Result<Channel> {
+    let ch = get(conn, channel)?;
+    if ch.kind != ChannelKind::Group || ch.deleted_at.is_some() {
+        return Err(Error::Invalid(format!(
+            "channel {channel} is not a live group"
+        )));
+    }
+    Ok(ch)
+}
+
+/// The live, unarchived group whose people are exactly `persons` (the host aside), if
+/// any; the one with the newest message when several.
+pub fn find_group_with(conn: &Connection, persons: &[PersonId]) -> Result<Option<Channel>> {
+    let mut want = persons.to_vec();
+    want.sort();
+    want.dedup();
+    for ch in list(conn)? {
+        if ch.kind != ChannelKind::Group || ch.archived {
+            continue;
+        }
+        let mut have = ch.persons();
+        have.sort();
+        if have == want {
+            return Ok(Some(ch));
+        }
+    }
+    Ok(None)
+}
+
+/// Live, unarchived groups a person is in, newest first.
+pub fn groups_of(conn: &Connection, person: &PersonId) -> Result<Vec<Channel>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id FROM channel c JOIN channel_participant p ON p.channel = c.id
+         WHERE p.participant = ?1 AND c.kind = 'group' AND c.deleted_at IS NULL
+           AND c.archived = 0
+         ORDER BY c.id DESC",
+    )?;
+    let ids: Vec<ChannelId> = stmt
+        .query_map([person], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    ids.into_iter().map(|id| get(conn, id)).collect()
+}
+
 /// A group's mode. Direct channels have none of their own: their person's mode governs.
 pub fn set_mode(conn: &Connection, channel: ChannelId, mode: Mode) -> Result<()> {
     let ch = get(conn, channel)?;
@@ -480,6 +569,46 @@ mod tests {
         let h = host(&w).unwrap();
         assert!(get(&w, h).unwrap().is_host_channel());
         assert_eq!(host(&w).unwrap(), h);
+    }
+
+    #[test]
+    fn members_join_and_leave_a_live_group() {
+        let w = world();
+        let g = create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        assert_eq!(add_members(&w, g, &[p("c"), p("a")]).unwrap(), vec![p("c")]);
+        assert!(add_members(&w, g, &[p("c")]).unwrap().is_empty());
+        assert_eq!(get(&w, g).unwrap().persons(), vec![p("a"), p("b"), p("c")]);
+        assert!(remove_member(&w, g, &p("b")).unwrap());
+        assert!(!remove_member(&w, g, &p("b")).unwrap());
+        assert!(remove_member(&w, g, &p("c")).unwrap());
+        assert!(remove_member(&w, g, &p("a")).is_err());
+        assert_eq!(get(&w, g).unwrap().persons(), vec![p("a")]);
+        let d = direct(&w, &p("a")).unwrap();
+        assert!(add_members(&w, d, &[p("b")]).is_err());
+        assert!(remove_member(&w, d, &p("a")).is_err());
+    }
+
+    #[test]
+    fn a_group_is_found_by_exactly_its_people_while_live_and_unarchived() {
+        let w = world();
+        let g = create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        add_participant(&w, g, &Actor::Host).unwrap();
+        let found = |who: &[&str]| {
+            let who: Vec<PersonId> = who.iter().map(|x| p(x)).collect();
+            find_group_with(&w, &who).unwrap().map(|c| c.id)
+        };
+        assert_eq!(found(&["b", "a"]), Some(g));
+        assert_eq!(found(&["a"]), None);
+        assert_eq!(found(&["a", "b", "c"]), None);
+        let g2 = create_group(&w, &[p("a"), p("c")], None, Origin::User).unwrap();
+        assert_eq!(groups_of(&w, &p("a")).unwrap()[0].id, g2);
+        assert_eq!(groups_of(&w, &p("a")).unwrap().len(), 2);
+        set_archived(&w, g, true).unwrap();
+        assert_eq!(found(&["a", "b"]), None);
+        assert_eq!(groups_of(&w, &p("a")).unwrap().len(), 1);
+        delete_group(&w, g2, 1).unwrap();
+        assert_eq!(found(&["a", "c"]), None);
+        assert!(groups_of(&w, &p("a")).unwrap().is_empty());
     }
 
     #[test]
