@@ -235,6 +235,7 @@ export function reduce(s: State, a: Action): State {
       return {
         ...s,
         channel: a.channel,
+        library: false,
         drawer: null,
         menuOpen: false,
         find: null,
@@ -270,6 +271,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, ask: a.draft };
     case "groupDialog":
       return { ...s, groupDialog: a.open };
+    case "library":
+      return { ...s, library: a.on, ...(a.on ? { menuOpen: false } : {}) };
     case "dismissLibraryNotice":
       return { ...s, libraryNoticeDismissed: true };
     case "error":

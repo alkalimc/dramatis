@@ -4,6 +4,7 @@ import { useT } from "./i18n";
 import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Store } from "./store";
 import { ErrorBar, InlineError } from "./ui/ErrorBar";
 import { unreadOf } from "./lib/chats";
+import { inLibrary } from "./lib/library";
 import { isDark } from "./lib/prefs";
 import { Icon, type IconName } from "./ui/Icon";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
@@ -189,9 +190,11 @@ function Rail() {
     for (const c of s.channels) if (unreadOf(c, s.unread) > 0) n += 1;
     return n;
   });
+  const library = useStore((s) => s.library);
+  const libOn = useStore(inLibrary);
   const key = drawerKey(drawer);
   // Settings is a card over the app, not a section: the rail keeps showing the chats.
-  const current = key === "system" ? null : key;
+  const current = libOn ? null : key === "system" ? null : key;
 
   return (
     <header className="rail">
@@ -202,12 +205,28 @@ function Rail() {
       <nav aria-label={t("nav.label")}>
         <ul>
           <li>
-            <button type="button" className={`rail-item${current === null ? " on" : ""}`} aria-pressed={current === null} onClick={() => dispatch({ type: "drawer", drawer: null })}>
+            <button
+              type="button"
+              className={`rail-item${current === null && !libOn ? " on" : ""}`}
+              aria-pressed={current === null && !libOn}
+              onClick={() => {
+                dispatch({ type: "library", on: false });
+                dispatch({ type: "drawer", drawer: null });
+              }}
+            >
               <span className="rail-icon">
                 <Icon name="chats" size={30} />
                 {unreadChats > 0 && <span className="badge" aria-hidden="true">{unreadChats}</span>}
               </span>
               <span className="rail-label">{t("nav.chats")}</span>
+            </button>
+          </li>
+          <li>
+            <button type="button" className={`rail-item${libOn ? " on" : ""}`} aria-pressed={libOn} onClick={() => dispatch({ type: "library", on: !library })}>
+              <span className="rail-icon">
+                <Icon name="library" size={30} />
+              </span>
+              <span className="rail-label">{t("nav.library")}</span>
             </button>
           </li>
           {NAV.map((n) => (

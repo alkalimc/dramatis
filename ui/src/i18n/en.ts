@@ -37,6 +37,7 @@ export const en = {
   "nav.roster": "Roster",
   "nav.cases": "Requests",
   "nav.world": "World",
+  "nav.library": "Library",
   "nav.system": "System",
   "drawer.close": "Close",
   "clock.in_world": "{year}-{month}-{day} {time}",
@@ -546,6 +547,13 @@ export const en = {
   "library.understood": "Searched for: {name}",
   "library.results.empty": "Nothing found.",
   "library.searching": "Searching",
+  "library.filter.person": "Only this person",
+  "library.filter.person.any": "Anyone",
+  "library.filter.template": "Only this kind of text",
+  "library.filter.template.any": "Any kind",
+  "library.read": "Read in full",
+  "library.back": "Back to results",
+  "library.reader": "Passage",
 
   // ---- first run: corpus, save, model ----
   "setup.corpus.title": "Open your corpus",

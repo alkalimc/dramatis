@@ -288,3 +288,12 @@ test("marking read clears the saved count in the list with the local one", () =>
   s = reduce(s, { type: "unread", channel: "c1", count: 0 });
   expect(s.channels.map((c) => c.unread)).toEqual([0, 3]);
 });
+
+test("the library is a choice that opening a conversation ends", () => {
+  let s = reduce(initialState(), { type: "library", on: true });
+  expect(s.library).toBe(true);
+  s = reduce(s, { type: "open", channel: "c1" });
+  expect(s.library).toBe(false);
+  s = reduce(reduce(s, { type: "library", on: true }), { type: "library", on: false });
+  expect(s.library).toBe(false);
+});

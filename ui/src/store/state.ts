@@ -162,6 +162,8 @@ export interface State {
   ask: AskDraft | null;
   groupDialog: boolean;
   libraryNoticeDismissed: boolean;
+  /** The library is the main pane on purpose (the user chose it); without a model it is always. */
+  library: boolean;
   /** Last failed action (not a load), announced in a live region. */
   error: Failure | null;
 }
@@ -210,6 +212,7 @@ export function initialState(): State {
     ask: null,
     groupDialog: false,
     libraryNoticeDismissed: false,
+    library: false,
     error: null,
   };
 }
@@ -260,4 +263,5 @@ export type Action =
   | { type: "ask"; draft: AskDraft | null }
   | { type: "groupDialog"; open: boolean }
   | { type: "dismissLibraryNotice" }
+  | { type: "library"; on: boolean }
   | { type: "error"; error: Failure | null };

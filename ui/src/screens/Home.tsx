@@ -95,7 +95,10 @@ export function Main() {
   const form = useStore((s) => s.status?.form);
   const host = useStore((s) => s.hostChannel);
   const channel = useStore((s) => s.channel);
+  const library = useStore((s) => s.library);
   const hostDone = useStore((s) => (host ? (s.historyDone[host] ?? false) : false));
+
+  if (library) return <Library />;
 
   if (channel && channel !== host) {
     return (

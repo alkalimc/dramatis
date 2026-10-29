@@ -118,6 +118,12 @@ cli.help.other
 cli.help.people
 cli.help.saves
 cli.help.settings
+cli.library.needs_model
+cli.library.needs_model_off
+cli.library.off
+cli.library.on
+cli.library.start
+cli.library.stays
 cli.start
 cli.typing
 cli.typing.more
@@ -358,9 +364,16 @@ host.name
 host.quota_exhausted
 host.rate_limited
 host.role
+library.back
 library.configure
+library.filter.person
+library.filter.person.any
+library.filter.template
+library.filter.template.any
 library.later
 library.not_connected
+library.read
+library.reader
 library.results.empty
 library.search
 library.search.placeholder
@@ -428,6 +441,7 @@ model.wire
 nav.cases
 nav.chats
 nav.label
+nav.library
 nav.roster
 nav.system
 nav.world

@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import type { PersonId } from "../api";
 import { pronounOf, useT } from "../i18n";
 import { when } from "../lib/format";
+import { inLibrary } from "../lib/library";
 import { hasPersona } from "../lib/persona";
 import { useQuery } from "../lib/useQuery";
 import { useActions, useApi, useDispatch, useStore } from "../store";
@@ -16,6 +17,7 @@ export function PersonDrawer({ id }: { id: PersonId }) {
   const actions = useActions();
   const dispatch = useDispatch();
   const version = useStore((s) => s.peopleVersion);
+  const library = useStore(inLibrary);
   const tts = useStore((s) => Boolean(s.endpoints?.roles?.tts));
   const { data: page, error, reload } = useQuery(() => api.commands.personPage(id), [api, id, version]);
 
@@ -67,7 +69,7 @@ export function PersonDrawer({ id }: { id: PersonId }) {
           <strong>{t("person.unavailable")}</strong> {t("person.unavailable.hint", pronounOf(t, page.person))}
         </p>
       )}
-      {!off && (
+      {!off && !library && (
         <p className="row info-buttons">
           <button type="button" disabled={!ready} aria-describedby={ready ? undefined : "unavailable-note"} onClick={() => actions.openDirect(id)}>
             {t("person.talk")}
