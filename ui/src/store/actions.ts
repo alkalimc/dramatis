@@ -162,6 +162,7 @@ export function createActions(api: Api, store: Store) {
     // Talking leaves the library view: the conversation is where the user goes.
     if (store.getState().library) d({ type: "library", on: false });
     d({ type: "drawer", drawer: null });
+    d({ type: "personCard", person: null });
     await open(channel, personRef(person));
   }
 

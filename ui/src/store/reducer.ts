@@ -293,7 +293,9 @@ export function reduce(s: State, a: Action): State {
     case "drawer":
       return { ...s, drawer: a.drawer };
     case "ask":
-      return { ...s, ask: a.draft };
+      return { ...s, ask: a.draft, ...(a.draft ? { personCard: null } : {}) };
+    case "personCard":
+      return { ...s, personCard: a.person };
     case "groupDialog":
       return { ...s, groupDialog: a.open };
     case "library":

@@ -630,3 +630,22 @@ button.pinned-first {
 .waiting ul {
   margin-top: var(--s-1);
 }
+
+/* A person's avatar and name in a chat open their page. */
+.avatar-button,
+.author-name {
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.avatar-button {
+  display: block;
+  border-radius: 50%;
+}
+.author-name:hover {
+  text-decoration: underline;
+}

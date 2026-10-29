@@ -7,11 +7,29 @@ import { hasPersona } from "../lib/persona";
 import { useQuery } from "../lib/useQuery";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
+import { Dialog } from "../ui/Dialog";
 import { InlineError } from "../ui/ErrorBar";
+import { Icon } from "../ui/Icon";
 import { ModeSwitch } from "../ui/ModeSwitch";
 
+/** A person's page over the conversation, opened from a name or avatar in a chat. */
+export function PersonCard({ id }: { id: PersonId }) {
+  const t = useT();
+  const dispatch = useDispatch();
+  const name = useStore((s) => s.names[id] ?? t("person.unknown"));
+  const close = () => dispatch({ type: "personCard", person: null });
+  return (
+    <Dialog title={name} onClose={close} className="person-card" hideTitle>
+      <button type="button" className="icon close" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={close}>
+        <Icon name="close" size={20} />
+      </button>
+      <PersonDrawer id={id} card />
+    </Dialog>
+  );
+}
+
 /** One person: a single trust number, companions, mode, and a voice when read-aloud exists. */
-export function PersonDrawer({ id }: { id: PersonId }) {
+export function PersonDrawer({ id, card = false }: { id: PersonId; card?: boolean }) {
   const t = useT();
   const api = useApi();
   const actions = useActions();
@@ -36,16 +54,35 @@ export function PersonDrawer({ id }: { id: PersonId }) {
   const ready = hasPersona(page);
 
   return (
-    <div className="drawer-body info-panel person-page">
-      <button type="button" className="link back" onClick={() => dispatch({ type: "drawer", drawer: { kind: "roster" } })}>
-        ← {t("person.back")}
-      </button>
+    <div className={`drawer-body info-panel person-page${card ? " in-card" : ""}`}>
+      {!card && (
+        <button type="button" className="link back" onClick={() => dispatch({ type: "drawer", drawer: { kind: "roster" } })}>
+          ← {t("person.back")}
+        </button>
+      )}
       <header className="info-head">
         <Avatar person={page.person} size="xl" />
-        <h2 className="info-name">{page.person.name}</h2>
+        {/* In a card the dialog's title is the heading; the name here is what it shows. */}
+        {card ? <p className="info-name">{page.person.name}</p> : <h2 className="info-name">{page.person.name}</h2>}
         {page.summary && <p className="muted">{page.summary}</p>}
         <p className="tag trust">{t("person.trust", { trust: page.trust })}</p>
       </header>
+      {!off && talkable && (
+        <p className="row info-buttons">
+          <button type="button" disabled={!ready} aria-describedby={ready ? undefined : "unavailable-note"} onClick={() => actions.openDirect(id)}>
+            {t("person.talk")}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            disabled={!ready}
+            aria-describedby={ready ? undefined : "unavailable-note"}
+            onClick={() => dispatch({ type: "ask", draft: { person: id } })}
+          >
+            {t("person.ask", pronounOf(t, page.person))}
+          </button>
+        </p>
+      )}
       <section className="info-section">
         <h3>{t("person.mode")}</h3>
         <ModeSwitch
@@ -67,22 +104,6 @@ export function PersonDrawer({ id }: { id: PersonId }) {
       {!ready && (
         <p className="muted unavailable" id="unavailable-note">
           <strong>{t("person.unavailable")}</strong> {t("person.unavailable.hint", pronounOf(t, page.person))}
-        </p>
-      )}
-      {!off && talkable && (
-        <p className="row info-buttons">
-          <button type="button" disabled={!ready} aria-describedby={ready ? undefined : "unavailable-note"} onClick={() => actions.openDirect(id)}>
-            {t("person.talk")}
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            disabled={!ready}
-            aria-describedby={ready ? undefined : "unavailable-note"}
-            onClick={() => dispatch({ type: "ask", draft: { person: id } })}
-          >
-            {t("person.ask", pronounOf(t, page.person))}
-          </button>
         </p>
       )}
       {tts && <VoicePicker person={id} voice={page.voice} />}

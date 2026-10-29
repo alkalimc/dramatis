@@ -879,3 +879,17 @@ button.camera-big img {
   font-size: var(--fs-lg);
   font-weight: var(--fw-strong);
 }
+.dialog.person-card {
+  position: relative;
+  width: min(30rem, 100%);
+  padding: 0;
+}
+.dialog.person-card > .close {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  z-index: 1;
+}
+.person-page.in-card {
+  padding: var(--s-4) var(--s-5) var(--s-5);
+}

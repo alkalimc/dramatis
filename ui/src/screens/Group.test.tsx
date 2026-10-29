@@ -244,3 +244,23 @@ test("a group made from the dialog has an info panel before anyone has spoken in
   await user.click(within(panel).getByRole("radio", { name: "Enabled" }));
   await waitFor(() => expect((within(panel).getByRole("radio", { name: "Enabled" }) as HTMLInputElement).checked).toBe(true));
 });
+
+test("a name or avatar in a chat opens the person's page as a card; Talk opens the chat and closes it", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const log = await screen.findByRole("log");
+  await within(log).findByText("It did. I'm on nights this week.");
+  // The name above a bubble.
+  await user.click(within(log).getAllByRole("button", { name: /^Tess Arden/ })[0]);
+  const card = await screen.findByRole("dialog", { name: "Tess Arden" });
+  expect(await within(card).findByText(/^Trust \d+$/)).toBeDefined();
+  expect(within(card).queryByRole("button", { name: /Back to roster/ })).toBeNull();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Tess Arden" })).toBeNull());
+  // The avatar beside a bubble, then Talk.
+  await user.click(within(log).getAllByRole("button", { name: /Open .*'s page/ })[0]);
+  const again = await screen.findByRole("dialog");
+  await user.click(await within(again).findByRole("button", { name: "Talk" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(await screen.findByRole("textbox", { name: "Message" })).toBeDefined();
+});

@@ -724,6 +724,7 @@ message.author
 message.awaiting
 message.copy
 message.note
+message.person.open
 message.picture
 message.picture.lost
 message.picture.open

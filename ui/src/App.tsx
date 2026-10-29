@@ -16,7 +16,7 @@ import { GroupDialog } from "./screens/Group";
 import { Badge } from "./ui/Badge";
 import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
-import { PersonDrawer } from "./screens/Person";
+import { PersonCard, PersonDrawer } from "./screens/Person";
 import { LeftDrawer, ProfileCard } from "./screens/Profile";
 import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
@@ -68,6 +68,7 @@ function Shell() {
   const t = useT();
   const status = useStore((s) => s.status);
   const ask = useStore((s) => s.ask);
+  const personCard = useStore((s) => s.personCard);
   const group = useStore((s) => s.groupDialog);
   const drawer = useStore((s) => s.drawer);
   const statusError = useStore((s) => s.loadErrors.status);
@@ -138,6 +139,7 @@ function Shell() {
       {drawer?.kind === "contacts" && <ContactsCard />}
       {drawer?.kind === "system" && <SettingsCard page={drawer.tab} />}
       {profile && <ProfileCard mode={profile} />}
+      {personCard && <PersonCard id={personCard} />}
       {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
     </div>

@@ -168,6 +168,8 @@ export interface State {
   drawer: Drawer | null;
   ask: AskDraft | null;
   groupDialog: boolean;
+  /** A person's page shown as a card over the conversation (from a name or avatar in a chat). */
+  personCard: PersonId | null;
   libraryNoticeDismissed: boolean;
   /** The library is the main pane on purpose (the user chose it); without a model it is always. */
   library: boolean;
@@ -221,6 +223,7 @@ export function initialState(): State {
     drawer: null,
     ask: null,
     groupDialog: false,
+    personCard: null,
     libraryNoticeDismissed: false,
     library: false,
     error: null,
@@ -275,6 +278,7 @@ export type Action =
   | { type: "open"; channel: ChannelId | null }
   | { type: "drawer"; drawer: Drawer | null }
   | { type: "ask"; draft: AskDraft | null }
+  | { type: "personCard"; person: PersonId | null }
   | { type: "groupDialog"; open: boolean }
   | { type: "dismissLibraryNotice" }
   | { type: "library"; on: boolean }

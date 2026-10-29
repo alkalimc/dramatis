@@ -104,10 +104,30 @@ function hueOf(a: Author): number {
   return h % HUES;
 }
 
-/** The speaker's round avatar, shown beside the last bubble of a run. */
+/** The speaker's round avatar, shown beside the last bubble of a run; a person's opens their page. */
 function SpeakerAvatar({ author, name }: { author: Author; name: string }) {
+  const t = useT();
+  const dispatch = useDispatch();
   if (author.kind === "user") return null;
-  return <Avatar person={{ id: author.kind === "person" ? author.id : "host", name }} size="m" plain={author.kind !== "person"} />;
+  if (author.kind !== "person") return <Avatar person={{ id: "host", name }} size="m" plain />;
+  return (
+    <button type="button" className="avatar-button" aria-label={t("message.person.open", { name })} title={name} onClick={() => dispatch({ type: "personCard", person: author.id })}>
+      <Avatar person={{ id: author.id, name }} size="m" />
+    </button>
+  );
+}
+
+/** A speaker's name above their bubble; a person's opens their page. */
+function AuthorName({ author, name }: { author: Author; name: string }) {
+  const t = useT();
+  const dispatch = useDispatch();
+  const text = t("message.author", { name });
+  if (author.kind !== "person") return <span>{text}</span>;
+  return (
+    <button type="button" className="author-name" onClick={() => dispatch({ type: "personCard", person: author.id })}>
+      {text}
+    </button>
+  );
 }
 
 function SceneLines({ lines }: { lines: string[] }) {
@@ -267,7 +287,7 @@ const BubbleMessage = memo(function BubbleMessage({
   const label =
     first && !mine && !direct ? (
       <p className={`author hue-${hueOf(message.author)}`}>
-        <span>{t("message.author", { name })}</span>
+        <AuthorName author={message.author} name={name} />
         {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
         {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
       </p>

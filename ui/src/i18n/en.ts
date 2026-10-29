@@ -272,6 +272,7 @@ export const en = {
   "person.talk": "Talk",
   "person.ask": "Ask {pronoun} something",
   "person.back": "Back to roster",
+  "message.person.open": "Open {name}'s page",
   "person.voice": "Read-aloud voice",
   "person.voice.default": "Endpoint default",
   "person.voice.custom": "Or a voice id",
