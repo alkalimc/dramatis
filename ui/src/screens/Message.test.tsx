@@ -111,19 +111,35 @@ test("a host message that found people or made a group offers them, and a click 
   expect(store.getState().channel).toBe("dm:mira");
 });
 
-test("a person's group suggestion is a button that makes the group only when pressed", async () => {
-  const { store } = renderWith(
-    <MessageView
-      showPlay={false}
-      message={{
-        ...base,
-        channel: "dm:mira",
-        author: { kind: "person", id: "mira" },
-        text: "Oren knows this better than I do.",
-        actions: [{ tool: "create_group", members: [{ id: "mira", name: "Mira" }, { id: "oren", name: "Oren" }], channel: null }],
-      }}
-    />,
-  );
+test("a person's group suggestion makes the group only when pressed, and only once", async () => {
+  // The engine records the group on the stored line; the stand-in does the same.
+  let made: string | null = null;
+  let calls = 0;
+  const { store } = renderWith(<ChannelView channel="dm:mira" />, {
+    patch: (api) => ({
+      ...api,
+      commands: {
+        ...api.commands,
+        openOffer: async () => {
+          calls++;
+          if (made) return { status: "ok", data: made };
+          const r = await api.commands.createGroup(["mira", "oren"], null);
+          if (r.status === "ok") made = r.data;
+          return r;
+        },
+      },
+    }),
+  });
+  const suggestion: Message = {
+    ...base,
+    channel: "dm:mira",
+    text: "Oren knows this better than I do.",
+    actions: [{ tool: "create_group", members: [{ id: "mira", name: "Mira" }, { id: "oren", name: "Oren" }], channel: null }],
+  };
+  await act(async () => {
+    store.dispatch({ type: "names", persons: [{ id: "mira", name: "Mira" }] });
+    store.dispatch({ type: "messageAdded", event: { message: suggestion } });
+  });
   expect(screen.getByText(/suggesting a group with Mira, Oren/)).toBeDefined();
   expect(store.getState().channel).toBeNull();
   await act(async () => {
@@ -131,6 +147,17 @@ test("a person's group suggestion is a button that makes the group only when pre
   });
   const open = store.getState().channel;
   expect(store.getState().channels.find((c) => c.id === open)?.kind).toBe("group");
+  // The button now reads as opened and goes to the same group.
+  expect(screen.queryByRole("button", { name: "Start a group with Mira, Oren" })).toBeNull();
+  await act(async () => {
+    store.dispatch({ type: "open", channel: "dm:mira" });
+  });
+  await act(async () => {
+    screen.getByRole("button", { name: "Open the group with Mira, Oren" }).click();
+  });
+  expect(store.getState().channel).toBe(open);
+  expect(calls).toBe(1);
+  expect(made).toBe(open);
 });
 
 test("a host message that listed conversations offers each one", async () => {

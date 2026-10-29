@@ -125,6 +125,15 @@ pub fn complete(
     Ok(())
 }
 
+/// Replace the tool calls a stored message carries.
+pub fn set_tool_calls(conn: &Connection, id: MessageId, tool_calls: &Value) -> Result<()> {
+    conn.execute(
+        "UPDATE message SET tool_calls = ?2 WHERE id = ?1",
+        (id, tool_calls.to_string()),
+    )?;
+    Ok(())
+}
+
 /// Replace what a stored message's attachment holds.
 pub fn set_attachment(conn: &Connection, id: MessageId, attachment: &Value) -> Result<()> {
     conn.execute(

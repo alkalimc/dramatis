@@ -227,6 +227,52 @@ impl Engine {
         Ok(id)
     }
 
+    pub(crate) fn open_offer_impl(&self, msg: &MessageId, action: u32) -> ApiResult<ChannelId> {
+        let invalid = || ApiError::Invalid {
+            field: "action".into(),
+        };
+        let mid = convert::world_message(msg)?;
+        let stored = message::get(&self.w(), mid).map_err(world_err)?;
+        let mut actions: Vec<ToolAction> = stored
+            .tool_calls
+            .as_ref()
+            .and_then(|a| serde_json::from_value(a.clone()).ok())
+            .unwrap_or_default();
+        let ToolAction::CreateGroup { members, channel } =
+            actions.get(action as usize).ok_or_else(invalid)?
+        else {
+            return Err(invalid());
+        };
+        let people: Vec<PersonId> = members.iter().map(|m| m.id.clone()).collect();
+        for p in &people {
+            self.require_available(p)?;
+        }
+        let members = members.clone();
+        let existing = channel.clone();
+        // One lock from the check to the record, so two clicks cannot both create.
+        let w = self.w();
+        if let Some(c) = existing
+            && channel::get(&w, convert::world_channel(&c)?).is_ok_and(|ch| ch.deleted_at.is_none())
+        {
+            return Ok(c);
+        }
+        let ids: Vec<world::PersonId> = people.iter().map(world_person).collect();
+        let created =
+            channel::create_group(&w, &ids, None, world::Origin::User).map_err(world_err)?;
+        let created = convert::channel_id(created);
+        actions[action as usize] = ToolAction::CreateGroup {
+            members,
+            channel: Some(created.clone()),
+        };
+        let value = serde_json::to_value(&actions).map_err(|_| invalid())?;
+        message::set_tool_calls(&w, mid, &value).map_err(world_err)?;
+        drop(w);
+        self.changed(vec![WorldChange::Channel {
+            id: created.clone(),
+        }]);
+        Ok(created)
+    }
+
     pub(crate) fn delete_group_impl(&self, ch: &ChannelId) -> ApiResult<()> {
         let id = convert::world_channel(ch)?;
         let now = self.now().ms;

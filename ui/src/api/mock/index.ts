@@ -746,6 +746,18 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       setTimeout(() => announceWorld({ kind: "channel", id }));
       return ok(id);
     },
+    openOffer: (message, action) => {
+      const m = [...channels.values()].flatMap((c) => c.log).find((x) => x.id === message);
+      const line = m?.actions[action];
+      if (!m || !line) return fail({ code: "not_found" });
+      if (line.tool !== "create_group") return fail({ code: "invalid", field: "action" });
+      if (line.channel && channels.has(line.channel)) return ok(line.channel);
+      const id = nextId("g");
+      addChannel({ id, kind: "group", origin: "user", participants: line.members, topic: null, mode: "frozen" });
+      m.actions[action] = { ...line, channel: id };
+      setTimeout(() => announceWorld({ kind: "channel", id }));
+      return ok(id);
+    },
     deleteGroup: (channel) => {
       if (channels.get(channel)?.kind !== "group") return fail({ code: "not_found" });
       channels.delete(channel);

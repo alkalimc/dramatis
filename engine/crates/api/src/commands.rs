@@ -146,6 +146,11 @@ commands! {
     /// Everything before this message has been seen.
     fn mark_read(channel: ChannelId, up_to: MessageId) -> ();
     fn create_group(members: Vec<PersonId>, topic: Option<String>) -> ChannelId;
+    /// Take a group a person suggested: the `action`-th action line of `message`, a group
+    /// with no channel yet. Creates it the first time and records its channel on the line;
+    /// every later call returns that same group (`Invalid` for any other action). A group
+    /// deleted since is made again.
+    fn open_offer(message: MessageId, action: u32) -> ChannelId;
     fn delete_group(channel: ChannelId) -> ();
     /// Title a channel. `None` or blank returns to the derived title.
     fn rename_channel(channel: ChannelId, name: Option<String>) -> ();

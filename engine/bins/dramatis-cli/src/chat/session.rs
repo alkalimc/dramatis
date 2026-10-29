@@ -616,10 +616,17 @@ impl Session {
                 };
                 self.enter_group(channel.clone(), group.members()).await;
             }
-            // Accepting is what creates it.
+            // Accepting is what creates it; taking it again returns the same group.
             group @ Offer::NewGroup { .. } => {
                 let members = group.members();
-                match self.engine.create_group(members.clone(), None).await {
+                let Offer::NewGroup { line, .. } = &group else {
+                    return;
+                };
+                match self
+                    .engine
+                    .open_offer(line.message.clone(), line.index)
+                    .await
+                {
                     Ok(channel) => self.enter_group(channel, members).await,
                     Err(e) => self.term.error(&e.to_string()),
                 }

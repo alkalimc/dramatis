@@ -30,10 +30,11 @@ export function ActionLines({ author, actions }: { author: Author; actions: Tool
 }
 
 /** What the host or a person offered the user: each button takes them to a conversation, or makes the suggested group. */
-function Choices({ actions }: { actions: ToolAction[] }) {
+function Choices({ actions, message }: { actions: ToolAction[]; message: Message }) {
   const t = useT();
   const acts = useActions();
   const api = useApi();
+  const dispatch = useDispatch();
   const choices = useMemo(() => choicesOf(actions), [actions]);
   if (choices.length === 0) return null;
   return (
@@ -49,8 +50,12 @@ function Choices({ actions }: { actions: ToolAction[] }) {
             type="button"
             className="ghost"
             onClick={async () => {
-              const channel = await acts.attempt(api.commands.createGroup(c.members, null));
-              if (channel) await acts.openChannel(channel);
+              // One group per suggestion: the engine records it on the line, so a second
+              // click gets the same group.
+              const group = await acts.attempt(api.commands.openOffer(message.id, c.action));
+              if (!group) return;
+              dispatch({ type: "offerTaken", channel: message.channel, message: message.id, action: c.action, group });
+              await acts.openChannel(group);
             }}
           >
             {t("choice.new_group", { names: nameList(c.names, t) })}
@@ -317,7 +322,7 @@ export const MessageView = memo(function MessageView({
       </div>
       {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}
     </article>
-    {message.author.kind !== "user" && <Choices actions={message.actions} />}
+    {message.author.kind !== "user" && <Choices actions={message.actions} message={message} />}
     </>
   );
 });
