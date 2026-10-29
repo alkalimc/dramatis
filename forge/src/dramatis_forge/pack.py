@@ -768,15 +768,17 @@ class Publication:
     contact_email: str = ""
     #: Who built the corpus, as it should be credited.
     credit_by: str = ""
-    #: Where the builder can be found (a project page).
+    #: Where that person can be found (their own page, not the project's).
     credit_url: str = ""
+    #: The project the corpus was built with (its source and its issues).
+    project_url: str = ""
     #: The terms the project's own part of the corpus is released under.
     licence: str = ""
 
     def credits(self) -> dict[str, str]:
         """The folio's `credits`: only the fields that are set."""
         return {k: v for k, v in (("by", self.credit_by), ("url", self.credit_url),
-                                  ("licence", self.licence)) if v}
+                                  ("project", self.project_url), ("licence", self.licence)) if v}
 
 
 @dataclass(frozen=True)

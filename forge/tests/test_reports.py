@@ -327,9 +327,11 @@ def test_credits_go_into_the_folio_without_moving_the_fingerprint(built, pack):
     import dramatis_forge.cli as cli
     from dramatis_forge.pack import Publication
 
-    credited = replace(pack, publication=Publication(credit_by="someone", credit_url="https://example.org/x",
-                                                     licence="CC BY-SA 4.0"))
-    assert credited.publication.credits() == {"by": "someone", "url": "https://example.org/x", "licence": "CC BY-SA 4.0"}
+    credited = replace(pack, publication=Publication(credit_by="someone", credit_url="https://example.org/someone",
+                                                     project_url="https://example.org/tool", licence="CC BY-SA 4.0"))
+    expected = {"by": "someone", "url": "https://example.org/someone", "project": "https://example.org/tool",
+                "licence": "CC BY-SA 4.0"}
+    assert credited.publication.credits() == expected
     assert Publication(credit_by="a").credits() == {"by": "a"}
     with Folio(built.folio) as folio:
         before = folio.get_meta("build_fingerprint")
@@ -341,6 +343,6 @@ def test_credits_go_into_the_folio_without_moving_the_fingerprint(built, pack):
         cli._resolve = real
     assert out.exit_code == 0, out.output
     with Folio(built.folio, readonly=True) as folio:
-        assert folio.get_meta("credits") == {"by": "someone", "url": "https://example.org/x", "licence": "CC BY-SA 4.0"}
+        assert folio.get_meta("credits") == expected
         # Who is credited is not part of what the corpus is.
         assert folio.get_meta("build_fingerprint") == before
