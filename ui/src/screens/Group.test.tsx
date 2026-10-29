@@ -152,6 +152,50 @@ test("group menu: deleting asks first and removes the group", async () => {
   expect(confirm).toHaveBeenCalledTimes(2);
 });
 
+test("a member is taken out after asking, the title follows, and the group says so", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await user.click(within(panel).getByRole("button", { name: "Take Tess Arden out" }));
+  expect(within(panel).getByText("3 members")).toBeDefined();
+  await user.click(within(panel).getByRole("button", { name: "Take Tess Arden out" }));
+  expect(confirm).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(within(panel).getByText("2 members")).toBeDefined());
+  // No custom name: the title is the remaining members' names, in the list and the header.
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Oren Lark, Mira Vale" }).length).toBeGreaterThan(0));
+  expect(await within(await screen.findByRole("log")).findByText("Tess Arden leaves the conversation.")).toBeDefined();
+  expect(within(panel).queryByRole("button", { name: "Take Tess Arden out" })).toBeNull();
+});
+
+test("people are added from a picker that leaves out the members, and the title follows", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  await user.click(within(panel).getByRole("button", { name: "Add people" }));
+  const dialog = await screen.findByRole("dialog", { name: "Add people to this group" });
+  const search = within(dialog).getByRole("searchbox");
+  await user.type(search, "Tess");
+  expect(within(dialog).queryByRole("button", { name: "Tess Arden" })).toBeNull();
+  await user.clear(search);
+  await user.type(search, "Juno");
+  await user.click(await within(dialog).findByRole("button", { name: "Juno Reyes" }));
+  await waitFor(() => expect(within(panel).getByText("4 members")).toBeDefined());
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Oren Lark, Mira Vale (4 in all)" }).length).toBeGreaterThan(0));
+  expect(await within(await screen.findByRole("log")).findByText("Juno Reyes joins the conversation.")).toBeDefined();
+});
+
+test("a colleague's invitation is a button under the message, and goes once the person is in", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  const log = await screen.findByRole("log");
+  const invite = await within(log).findByRole("button", { name: "Invite Juno Reyes to join" });
+  await user.click(invite);
+  await waitFor(() => expect(within(panel).getByText("4 members")).toBeDefined());
+  await waitFor(() => expect(within(log).queryByRole("button", { name: "Invite Juno Reyes to join" })).toBeNull());
+});
+
 test("a group made from the dialog has an info panel before anyone has spoken in it", async () => {
   const user = userEvent.setup();
   // As in the engine, a group nobody has spoken in is not in the list yet.

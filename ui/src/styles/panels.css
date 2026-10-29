@@ -43,6 +43,11 @@
   display: flex;
   flex-direction: column;
 }
+.member-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
 button.member {
   justify-content: flex-start;
   width: 100%;

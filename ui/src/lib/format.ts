@@ -72,6 +72,8 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
     case "find_people":
       // A named person rather than a subject: only the offer to talk.
       return a.topic ? t("action.find_people", { topic: a.topic }) : t("action.talk_offer", { names: list(a.persons ?? []) });
+    case "invite_to_group":
+      return t("action.invite", { names: list(a.persons) });
     case "ask":
       return t("action.ask", { name: a.person.name, question: a.question });
     case "create_group":
@@ -96,7 +98,9 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
 export type Choice =
   | { kind: "person"; id: string; name: string; /** The find line this person came from, so the reason they were found is written when they are taken. */ found?: number }
   | { kind: "group"; channel: string; names: string[]; members: PersonRef[] }
-  | { kind: "new_group"; members: string[]; names: string[]; action: number };
+  | { kind: "new_group"; members: string[]; names: string[]; action: number }
+  /** A person a colleague suggested bringing into the group the message is in. */
+  | { kind: "invite"; id: string; name: string; channel: string; action: number };
 
 export function choicesOf(actions: ToolAction[]): Choice[] {
   const out: Choice[] = [];
@@ -105,7 +109,9 @@ export function choicesOf(actions: ToolAction[]): Choice[] {
     const found: Choice[] =
       a.tool === "find_people"
         ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name, found: index }))
-        : a.tool === "create_group" && a.channel
+        : a.tool === "invite_to_group"
+          ? a.persons.map((p) => ({ kind: "invite", id: p.id, name: p.name, channel: a.channel, action: index }))
+          : a.tool === "create_group" && a.channel
           ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name), members: a.members }]
           : a.tool === "create_group" && a.members.length >= 2
             ? [{ kind: "new_group", members: a.members.map((m) => m.id), names: a.members.map((m) => m.name), action: index }]
@@ -119,7 +125,8 @@ export function choicesOf(actions: ToolAction[]): Choice[] {
                 )
               : [];
     for (const c of found) {
-      const key = c.kind === "person" ? `p:${c.id}` : c.kind === "group" ? `g:${c.channel}` : `n:${c.members.join(",")}`;
+      const key =
+        c.kind === "person" ? `p:${c.id}` : c.kind === "invite" ? `i:${c.channel}:${c.id}` : c.kind === "group" ? `g:${c.channel}` : `n:${c.members.join(",")}`;
       if (!seen.has(key)) {
         seen.add(key);
         out.push(c);

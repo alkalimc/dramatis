@@ -4,6 +4,7 @@ action.digest
 action.find_people
 action.forget
 action.get_chunk
+action.invite
 action.line
 action.list_channels
 action.remember
@@ -105,6 +106,7 @@ chatmenu.unarchive
 chatmenu.unpin
 chatmenu.unread
 choice.group
+choice.invite
 choice.new_group
 choice.person
 citation.gone
@@ -189,6 +191,7 @@ cli.help.settings
 cli.history.none
 cli.host.none
 cli.interrupted
+cli.invite.already
 cli.lang.current
 cli.lang.set
 cli.leave.ask
@@ -222,6 +225,7 @@ cli.mode.set
 cli.name.set
 cli.no_channel
 cli.offer.group
+cli.offer.invite
 cli.offer.new_group
 cli.offer.person
 cli.password.again
@@ -259,6 +263,8 @@ cli.read.marked.one
 cli.read.no_results
 cli.read.no_such
 cli.read.no_unit
+cli.remove.last
+cli.remove.not_member
 cli.rename.cleared
 cli.rename.done
 cli.requests.nobody
@@ -358,6 +364,7 @@ cli.usage.forget
 cli.usage.go
 cli.usage.group
 cli.usage.history
+cli.usage.invite
 cli.usage.lang
 cli.usage.library
 cli.usage.logout
@@ -365,6 +372,7 @@ cli.usage.mode
 cli.usage.name
 cli.usage.password
 cli.usage.quiet
+cli.usage.remove
 cli.usage.resend
 cli.usage.restore
 cli.usage.save
@@ -522,14 +530,18 @@ group.description
 group.list
 group.list.empty
 group.members
+group.members.add
+group.members.add.search
+group.members.add.title
 group.members.count
+group.members.remove
+group.members.remove.confirm
 group.mode
 group.name.label
 group.name.more
 group.name.separator
 group.new
 group.next
-group.rename
 group.start
 group.title
 group.topic
@@ -575,6 +587,11 @@ harness.found_for
 harness.group_created
 harness.group_mark
 harness.group_purpose
+harness.group_reused
+harness.groups
+harness.groups.about
+harness.groups.line
+harness.groups.line_named
 harness.guide.app
 harness.guide.app.channels
 harness.guide.app.group
@@ -599,6 +616,7 @@ harness.host.manner
 harness.host_offline
 harness.interject
 harness.joined
+harness.left
 harness.lines
 harness.low_match
 harness.memories

@@ -322,7 +322,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     msg(group.id, person("tess"), "I carried the new rota up this morning. Kael counted the copies twice.", 60 * 3 - 2);
     msg(group.id, USER, "Tess, who built the old bridge?", 60 * 2);
     msg(group.id, person("tess"), "The old bridge? I don't know much about how it was built. Juno might.", 60 * 2 - 1, {
-      actions: [{ tool: "search", query: "old bridge builder" }],
+      actions: [{ tool: "search", query: "old bridge builder" }, { tool: "invite_to_group", channel: group.id, persons: [ref("juno")] }],
       confidence: "low",
     });
 
@@ -772,6 +772,18 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!m || !line) return fail({ code: "not_found" });
       if (line.tool !== "create_group") return fail({ code: "invalid", field: "action" });
       if (line.channel && channels.has(line.channel)) return ok(line.channel);
+      // The same people already have a live group that is not archived: that one.
+      const same = [...channels.values()].find(
+        (c) =>
+          c.kind === "group" &&
+          !c.archived &&
+          c.participants.length === line.members.length &&
+          line.members.every((p) => c.participants.some((x) => x.id === p.id)),
+      );
+      if (same) {
+        m.actions[action] = { ...line, channel: same.id };
+        return ok(same.id);
+      }
       const id = nextId("g");
       const purpose = line.purpose ?? null;
       addChannel({ id, kind: "group", origin: "user", participants: line.members, topic: purpose, mode: "frozen" });
@@ -797,6 +809,44 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const text = `${by} suggested you could help the user with: ${line.topic}`;
       if (home && !home.log.some((x) => x.service && x.text === text)) msg(cid, USER, text, 0, { service: true });
       return ok(cid);
+    },
+    addMembers: (channel, ids) => {
+      const ch = channels.get(channel);
+      if (ch?.kind !== "group") return fail({ code: "invalid", field: "request" });
+      const off = ids.find((id) => persons.get(id)?.mode === "disabled");
+      if (off) return fail({ code: "disabled", person: off });
+      const added = ids.filter((id, i) => !ch.participants.some((p) => p.id === id) && ids.indexOf(id) === i);
+      for (const id of added) {
+        ch.participants = [...ch.participants, ref(id)];
+        msg(channel, USER, `${ref(id).name} joins the conversation.`, 0, { service: true });
+      }
+      if (added.length) setTimeout(() => announceWorld({ kind: "channel", id: channel }));
+      return ok(null);
+    },
+    removeMember: (channel, person) => {
+      const ch = channels.get(channel);
+      if (ch?.kind !== "group") return fail({ code: "invalid", field: "request" });
+      if (!ch.participants.some((p) => p.id === person)) return ok(null);
+      if (ch.participants.length <= 1) return fail({ code: "invalid", field: "request" });
+      ch.participants = ch.participants.filter((p) => p.id !== person);
+      msg(channel, USER, `${ref(person).name} leaves the conversation.`, 0, { service: true });
+      setTimeout(() => announceWorld({ kind: "channel", id: channel }));
+      return ok(null);
+    },
+    openInvite: (message, action, person) => {
+      const m = [...channels.values()].flatMap((c) => c.log).find((x) => x.id === message);
+      const line = m?.actions[action];
+      if (!m || !line) return fail({ code: "not_found" });
+      if (line.tool !== "invite_to_group" || !line.persons.some((p) => p.id === person)) return fail({ code: "invalid", field: "action" });
+      const ch = channels.get(line.channel);
+      if (ch?.kind !== "group") return fail({ code: "not_found" });
+      if (persons.get(person)?.mode === "disabled") return fail({ code: "disabled", person });
+      if (!ch.participants.some((p) => p.id === person)) {
+        ch.participants = [...ch.participants, ref(person)];
+        msg(line.channel, USER, `${ref(person).name} joins the conversation.`, 0, { service: true });
+        setTimeout(() => announceWorld({ kind: "channel", id: line.channel }));
+      }
+      return ok(line.channel);
     },
     deleteGroup: (channel) => {
       if (channels.get(channel)?.kind !== "group") return fail({ code: "not_found" });

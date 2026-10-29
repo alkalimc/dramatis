@@ -35,12 +35,32 @@ function Choices({ actions, message }: { actions: ToolAction[]; message: Message
   const acts = useActions();
   const api = useApi();
   const dispatch = useDispatch();
-  const choices = useMemo(() => choicesOf(actions), [actions]);
+  const channels = useStore((s) => s.channels);
+  // An invitation is spent once the person is in the group, whoever added them.
+  const choices = useMemo(
+    () =>
+      choicesOf(actions).filter(
+        (c) => c.kind !== "invite" || !channels.find((x) => x.id === c.channel)?.participants.some((p) => p.id === c.id),
+      ),
+    [actions, channels],
+  );
   if (choices.length === 0) return null;
   return (
     <div className="choices message-offers">
       {choices.map((c) =>
-        c.kind === "person" ? (
+        c.kind === "invite" ? (
+          <button
+            key={`i:${c.channel}:${c.id}`}
+            type="button"
+            className="ghost"
+            onClick={async () => {
+              if ((await acts.attempt(api.commands.openInvite(message.id, c.action, c.id))) === undefined) return;
+              await acts.refreshChannels();
+            }}
+          >
+            {t("choice.invite", { name: c.name })}
+          </button>
+        ) : c.kind === "person" ? (
           <button key={`p:${c.id}`} type="button" className="ghost" onClick={() => (c.found === undefined ? acts.openDirect(c.id) : acts.openFound(message.id, c.found, c.id, c.name))}>
             {t("choice.person", { name: c.name })}
           </button>
