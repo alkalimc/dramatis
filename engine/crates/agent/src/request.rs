@@ -161,6 +161,26 @@ pub fn user(text: &str, image: Option<&Image>) -> Message {
     m
 }
 
+/// The entries with `text` taken out of the harness's own text (the user's and the
+/// harness's entries; a reply is never touched).
+pub fn without_text(messages: &[Message], text: &str) -> Vec<Message> {
+    let cut = format!("\n\n{}", text.trim_end());
+    messages
+        .iter()
+        .map(|m| {
+            let mut m = m.clone();
+            if m.role != Role::Assistant {
+                for p in &mut m.parts {
+                    if let Part::Text(t) = p {
+                        *t = t.replace(&cut, "");
+                    }
+                }
+            }
+            m
+        })
+        .collect()
+}
+
 /// Whether any entry carries a picture.
 pub fn has_picture(messages: &[Message]) -> bool {
     messages

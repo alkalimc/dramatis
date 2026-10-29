@@ -623,6 +623,63 @@ impl Agent {
         Ok(())
     }
 
+    /// Keep a reply's line for a group for after the turn: the group it means, among the
+    /// live ones the speaker is in. Written as the group's name, its purpose, or its other
+    /// members; the speaker's only group is the one meant by "the group". A line meant for
+    /// no group of his is dropped (and logged), like a refused proposal.
+    pub(crate) fn plan_say(&self, turn: &mut Turn, group: &str, words: &str) -> Result<()> {
+        let Some(me) = turn.speaker.person().cloned() else {
+            return Ok(());
+        };
+        if turn.shape != world::Shape::Direct || turn.say.is_some() {
+            return Ok(());
+        }
+        let groups: Vec<_> = channel::groups_of(&self.db(), &me)?
+            .into_iter()
+            .filter(|g| g.mode != world::Mode::Disabled)
+            .collect();
+        let want = group.trim();
+        let mut hit = groups
+            .iter()
+            .find(|g| {
+                [g.name.as_deref(), g.topic.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|t| t.trim() == want)
+            })
+            .map(|g| g.id);
+        if hit.is_none() {
+            let roster = self.roster()?;
+            let mut asked = Vec::new();
+            for n in assemble::split_names(want) {
+                if let Some(p) = self.person_named(&n, &roster)?
+                    && p != me
+                    && !asked.contains(&p)
+                {
+                    asked.push(p);
+                }
+            }
+            hit = groups
+                .iter()
+                .find(|g| {
+                    let others: Vec<PersonId> =
+                        g.persons().into_iter().filter(|p| *p != me).collect();
+                    !asked.is_empty()
+                        && others.len() == asked.len()
+                        && others.iter().all(|p| asked.contains(p))
+                })
+                .map(|g| g.id);
+        }
+        if hit.is_none() && groups.len() == 1 {
+            hit = groups.first().map(|g| g.id);
+        }
+        match hit {
+            Some(id) => turn.say = Some((id, words.chars().take(crate::flows::SAY_MAX).collect())),
+            None => self.diagnose(turn, "no group for a say line", group),
+        }
+        Ok(())
+    }
+
     /// The offerable person a name, id or alias stands for, if exactly one.
     fn person_named(&self, name: &str, offer: &[String]) -> Result<Option<PersonId>> {
         if name.is_empty() {

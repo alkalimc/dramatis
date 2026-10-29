@@ -680,6 +680,7 @@ pub fn env_in(
     let office = tempdir::Dir::new();
     let mut config = Config {
         office: office.0.clone(),
+        logs: office.0.join("logs"),
         ..Config::default()
     };
     // Scripts do not expect the extra audience request unless a test asks for it.

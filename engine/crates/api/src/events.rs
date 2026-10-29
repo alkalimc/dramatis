@@ -144,6 +144,8 @@ pub enum ActivityFailure {
     QuotaExhausted,
     /// The endpoint refused a request that carried a picture: this model cannot see it.
     ImageUnsupported,
+    /// The endpoint answered twice with canned boilerplate instead of a reply.
+    Refused,
     /// The future was dropped before the turn ended.
     Cancelled,
     Error,

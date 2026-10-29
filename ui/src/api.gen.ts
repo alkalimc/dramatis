@@ -316,6 +316,8 @@ export type Activity = { kind: "messaged"; at: Timestamp } | { kind: "replied"; 
 export type ActivityFailure = "rate_limited" | "quota_exhausted" | 
 /**  The endpoint refused a request that carried a picture: this model cannot see it. */
 "image_unsupported" | 
+/**  The endpoint answered twice with canned boilerplate instead of a reply. */
+"refused" | 
 /**  The future was dropped before the turn ended. */
 "cancelled" | "error";
 

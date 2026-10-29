@@ -760,7 +760,7 @@ async fn a_canned_refusal_is_retried_once_and_never_shown_or_kept() {
 }
 
 #[tokio::test]
-async fn a_repeated_refusal_leaves_the_turn_without_a_reply() {
+async fn a_repeated_refusal_fails_the_turn_and_leaves_a_line_in_the_log() {
     let e = env_cjk(WireApi::Chat);
     let ch = direct(&e, "ann");
     // Worded differently each time.
@@ -768,16 +768,49 @@ async fn a_repeated_refusal_leaves_the_turn_without_a_reply() {
         say(REFUSAL),
         say("I encountered an error doing what you asked. Could you try again?"),
     ]);
+    let err = e
+        .agent
+        .send(ch, "how should I brew tea?", None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, agent::error::Error::Refused));
+    let hist = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(hist.len(), 1);
+    let shown = shown_text(&e);
+    assert!(!shown.contains("hard time"));
+    assert!(shown.contains("Failed") && shown.contains("Refused"));
+    assert!(!log_bytes(&e.agent, ch).contains("hard time"));
+    assert!(!log_bytes(&e.agent, ch).contains("encountered"));
+    assert_eq!(meter(&e.agent).len(), 2);
+    // Both answers are in the diagnostics log, with who and which model, but not the prompt.
+    let log = std::fs::read_to_string(e._office.0.join("logs/dramatis.log")).unwrap();
+    assert_eq!(log.lines().count(), 2);
+    assert!(log.contains("what=refused channel="));
+    assert!(log.contains("speaker=ann model=p/"));
+    assert!(log.contains("hard time") && log.contains("encountered an error"));
+    assert!(!log.contains("brew tea"));
+}
+
+#[tokio::test]
+async fn the_second_try_after_a_refusal_goes_without_the_passages() {
+    let e = env_cjk(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say(REFUSAL), say("Cooler water.")]);
     e.agent
         .send(ch, "how should I brew tea?", None)
         .await
         .unwrap();
-    let hist = e.agent.history(ch, None, 10).unwrap();
-    assert_eq!(hist.len(), 1);
-    assert!(!shown_text(&e).contains("hard time"));
-    assert!(!log_bytes(&e.agent, ch).contains("hard time"));
-    assert!(!log_bytes(&e.agent, ch).contains("encountered"));
-    assert_eq!(meter(&e.agent).len(), 2);
+    let bodies = e.fake.json();
+    assert_eq!(bodies.len(), 2);
+    let last = |v: &Value| list(v).last().unwrap().to_string();
+    assert!(
+        last(&bodies[0]).contains("[#u"),
+        "the first try carries passages"
+    );
+    assert!(!last(&bodies[1]).contains("[#u"), "the second does not");
+    assert!(last(&bodies[1]).contains("brew tea"));
+    // The log keeps them, for the turns after.
+    assert!(log_bytes(&e.agent, ch).contains("[#u"));
 }
 
 #[tokio::test]
@@ -1261,6 +1294,11 @@ async fn the_host_has_its_own_log_tools_and_authorised_actions() {
 
 async fn host_log(wire: WireApi) {
     let e = env(wire);
+    // A birthday is news only for someone the user has talked to.
+    let ann = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        world::message::append(w, ann, &Actor::User, "hello", None, None, T0).unwrap();
+    });
     // First open: the host's welcome is pre-written, so no model call is made.
     let out = e.agent.presence(true).await.unwrap();
     assert!(out.host_spoke && e.fake.bodies().is_empty());
@@ -1682,6 +1720,11 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
         bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap();
         settings::set(w, settings::USER_BIRTHDAY, "03-10").unwrap();
     });
+    // A birthday is news only for someone the user has talked to.
+    let ann = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        world::message::append(w, ann, &Actor::User, "hello", None, None, T0).unwrap();
+    });
     // The first open is the welcome alone.
     let first = e.agent.presence(true).await.unwrap();
     assert!(first.host_spoke && first.opened.is_none() && e.fake.bodies().is_empty());
@@ -1695,7 +1738,7 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
     let entry = list(&e.fake.json()[1]).last().unwrap().to_string();
     assert!(entry.contains("ann speaks first.") && entry.contains("Doc's birthday"));
     let msgs = e.agent.history(ch, None, 5).unwrap();
-    assert_eq!(msgs[0].text, "Happy birthday, Dr.Doc.");
+    assert_eq!(msgs.last().unwrap().text, "Happy birthday, Dr.Doc.");
     assert!(
         e.sink
             .take()
@@ -1728,6 +1771,11 @@ async fn the_host_announces_each_waiting_item_once_even_across_a_restart() {
         );
         e.agent
             .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
+        // A birthday is news only for someone the user has talked to.
+        let ann = direct(&e, "ann");
+        e.agent.with_world(|w| {
+            world::message::append(w, ann, &Actor::User, "hello", None, None, T0).unwrap();
+        });
         e
     };
     let e = open();
@@ -3651,5 +3699,66 @@ async fn the_hosts_groups_are_capped_named_by_purpose_and_reused_only_for_it() {
         e.agent
             .with_world(|w| channel::get(w, by_hand).unwrap().name),
         None
+    );
+}
+
+#[tokio::test]
+async fn an_emulated_person_posts_a_line_into_a_group_and_the_others_answer() {
+    let (e, ch) = emulated_env();
+    let group = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("plan the tea"))
+        .unwrap();
+    e.fake.push([
+        say("I will ask them.\n\u{21d2} say: plan the tea | How far along are you?"),
+        say("Nearly done."),
+    ]);
+    e.agent
+        .send(ch, "ask the group how it goes", None)
+        .await
+        .unwrap();
+    // The direct chat shows only the reply; the line is not part of it.
+    let direct_last = e.agent.history(ch, None, 5).unwrap();
+    assert_eq!(direct_last.last().unwrap().text, "I will ask them.");
+    // In the group, the line is her message and Bo answered it.
+    let hist = e.agent.history(group, None, 5).unwrap();
+    let said: Vec<_> = hist
+        .iter()
+        .map(|m| (m.author.clone(), m.text.as_str()))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            (
+                agent::view::author(&Actor::Person(p("ann"))),
+                "How far along are you?"
+            ),
+            (agent::view::author(&Actor::Person(p("bo"))), "Nearly done."),
+        ]
+    );
+    // Bo was shown the line as Ann's, and the protocol was explained to Ann.
+    let bodies = e.fake.bodies();
+    assert!(
+        body_text(&bodies[1]).contains("says in the group: How far along are you?"),
+        "{}",
+        body_text(&bodies[1])
+    );
+    assert!(body_text(&bodies[0]).contains("\u{21d2} say:"));
+}
+
+#[tokio::test]
+async fn a_say_line_for_no_group_of_hers_posts_nothing() {
+    let (e, ch) = emulated_env();
+    let other = e
+        .agent
+        .create_group(&[p("bo"), p("dee")], Some("elsewhere"))
+        .unwrap();
+    e.fake
+        .push([say("Yes.\n\u{21d2} say: elsewhere | Hello there")]);
+    e.agent.send(ch, "tell them", None).await.unwrap();
+    assert!(e.agent.history(other, None, 5).unwrap().is_empty());
+    assert_eq!(
+        e.agent.history(ch, None, 5).unwrap().last().unwrap().text,
+        "Yes."
     );
 }

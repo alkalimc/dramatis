@@ -49,6 +49,12 @@ pub struct Posted {
     pub authorized: bool,
 }
 
+/// A line a person was asked to post in a group: who, where, and the words.
+type Said = Option<(PersonId, ChannelId, String)>;
+
+/// Longest line a person posts in a group for the user, in characters.
+pub(crate) const SAY_MAX: usize = 400;
+
 /// What a presence step did.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PresenceOutcome {
@@ -156,6 +162,7 @@ impl Agent {
 
     async fn respond_inner(&self, posted: Posted) -> Result<()> {
         let mut asks = Vec::new();
+        let mut said = None;
         let first = {
             let _turn = self.lock_channel(posted.channel).await;
             // Taken back between the post and now: nothing to answer.
@@ -179,7 +186,7 @@ impl Agent {
                 let person = ch.person().cloned().ok_or_else(|| {
                     Error::Invalid(format!("channel {} has no owner", posted.channel))
                 })?;
-                self.direct_turn(&posted, &person).await
+                self.direct_turn(&posted, &person).await.map(|s| said = s)
             }
         };
         // Requests the host made run in the asked person's channel, after the host's own
@@ -187,7 +194,15 @@ impl Agent {
         // they are not run (the endpoint is likely still failing); they end as failed and
         // the host sees that on its next turn.
         let ran = self.run_asks(asks, first.is_err()).await;
-        first.and(ran)
+        // The line a person was asked to post in a group goes out after the direct chat's
+        // lock is released, for the same reason.
+        let posted_say = match (&first, said) {
+            (Ok(()), Some((person, group, words))) => {
+                self.say_in_group(&person, group, &words).await
+            }
+            _ => Ok(()),
+        };
+        first.and(ran).and(posted_say)
     }
 
     /// Run the requests of one host turn in order. Every one ends in a state: after the
@@ -400,7 +415,7 @@ impl Agent {
         Ok((lines, told))
     }
 
-    async fn direct_turn(&self, posted: &Posted, person: &PersonId) -> Result<()> {
+    async fn direct_turn(&self, posted: &Posted, person: &PersonId) -> Result<Said> {
         let now = self.now();
         {
             let conn = self.db();
@@ -438,7 +453,10 @@ impl Agent {
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         self.replied(posted.channel, person)?;
-        Ok(())
+        Ok(turn
+            .say
+            .take()
+            .map(|(group, words)| (person.clone(), group, words)))
     }
 
     /// The person who wrote the last person message before `posted` in its channel.
@@ -496,6 +514,7 @@ impl Agent {
         );
         turn.level = m.level;
         turn.shown.extend(m.shown);
+        turn.material = m.text.clone();
         Ok(vec![m.text])
     }
 
@@ -1019,6 +1038,64 @@ impl Agent {
         self.run(&mut turn, 1).await?;
         self.replied(ch, person)?;
         Ok(std::mem::take(&mut turn.hand_off))
+    }
+
+    /// A person's line, asked for by the user in a direct chat, posted in a group he is
+    /// in. It is his message there, and the others answer as they would a hand-off:
+    /// each reply passes the quota band, and `group.collective_max` bounds the round.
+    /// Those the line names answer first.
+    async fn say_in_group(&self, from: &PersonId, group: ChannelId, words: &str) -> Result<()> {
+        let _turn = self.lock_channel(group).await;
+        let (members, id) = {
+            let conn = self.db();
+            let ch = channel::get(&conn, group)?;
+            if ch.kind != ChannelKind::Group
+                || ch.deleted_at.is_some()
+                || ch.mode == world::Mode::Disabled
+                || !ch.persons().contains(from)
+            {
+                return Ok(());
+            }
+            let now = self.now();
+            let id = message::append(
+                &conn,
+                group,
+                &Actor::Person(from.clone()),
+                words,
+                None,
+                None,
+                now.ms,
+            )?;
+            session::touch_channel(&conn, group, now.ms)?;
+            let stored = message::get(&conn, id)?;
+            let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+            drop(conn);
+            self.emit(Event::MessageAdded(MessageAdded { message: shown }));
+            let members: Vec<PersonId> = self.corpus.personas.filter(bond::filter_disabled(
+                &self.db(),
+                ch.persons().into_iter().filter(|p| p != from).collect(),
+            )?);
+            (members, id)
+        };
+        let seg = self.ensure_segment(group, Some(id)).await?;
+        let seg = self.admit(group, seg, from, Some(id)).await?;
+        let names = self.segment_names(seg)?;
+        let name = self.display(from.as_str())?;
+        let line =
+            self.corpus
+                .wording
+                .fill("harness.said", &names, &[("name", &name), ("text", words)]);
+        self.append_user(seg, &line, None)?;
+        let mut queue = VecDeque::new();
+        for named in [true, false] {
+            for p in &members {
+                if self.is_named(words, p)? == named && !queue.contains(p) {
+                    queue.push_back(p.clone());
+                }
+            }
+        }
+        let mut spoken = vec![from.clone()];
+        self.round(group, &mut spoken, queue, &[]).await
     }
 
     // ---- channels and modes ----

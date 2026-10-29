@@ -27,6 +27,7 @@ use world::{
 
 use crate::agent::{Agent, Event};
 use crate::assemble::{self, Ctx, Member};
+use crate::diag;
 use crate::endpoint::ChatRole;
 use crate::error::{Error, Result};
 use crate::meter;
@@ -77,6 +78,13 @@ pub(crate) struct Turn {
     /// This turn's person has no tool list (emulated tools), so a proposal to the host is a
     /// closing line of the reply.
     pub proposing: bool,
+    /// The retrieved passages the turn's entry carries, so a second try can leave them out.
+    pub material: String,
+    /// A line this turn's person is to post in a group, once the turn is over: the group
+    /// and the words.
+    pub say: Option<(ChannelId, String)>,
+    /// `profile/model` of the last call, for the diagnostics log.
+    pub model: String,
 }
 
 impl Turn {
@@ -100,6 +108,9 @@ impl Turn {
             activity: None,
             hand_off: Vec::new(),
             proposing: false,
+            material: String::new(),
+            say: None,
+            model: String::new(),
         }
     }
 
@@ -143,6 +154,7 @@ fn failure(e: &Error) -> ActivityFailure {
         Error::RateLimited { .. } => ActivityFailure::RateLimited,
         Error::QuotaExhausted { .. } => ActivityFailure::QuotaExhausted,
         Error::ImageRejected { .. } => ActivityFailure::ImageUnsupported,
+        Error::Refused => ActivityFailure::Refused,
         _ => ActivityFailure::Error,
     }
 }
@@ -676,17 +688,24 @@ impl Agent {
             &log.items
         };
         let sent_picture = request::has_picture(items);
-        let mut req = request::build(
-            &Call {
-                shape: &shape,
-                cache_key: cache_key(seg),
-                system: [&log.system[0], &log.system[1], &log.system[2]],
-                messages: items,
-                choice,
-            },
-            &ep,
-        )?;
-        req.output_schema = schema;
+        turn.model = model_key.clone();
+        let build = |messages: &[Message]| {
+            request::build(
+                &Call {
+                    shape: &shape,
+                    cache_key: cache_key(seg),
+                    system: [&log.system[0], &log.system[1], &log.system[2]],
+                    messages,
+                    choice: choice.clone(),
+                },
+                &ep,
+            )
+            .map(|mut r| {
+                r.output_schema = schema.clone();
+                r
+            })
+        };
+        let mut req = build(items)?;
         let mut retried = false;
         let (reply, refused) = loop {
             let mut events = match self.llm.stream(&ep, &req).await {
@@ -758,15 +777,23 @@ impl Agent {
             if !refused && !tail.is_empty() && assemble::split_closing(&tail, marks).text == tail {
                 self.stream_delta(turn, &mut streamed, std::mem::take(&mut tail))?;
             }
+            if refused {
+                self.diagnose(turn, "refused", &reply.text());
+            }
             if refused && !retried {
-                // A fresh request, paid like any other; the refusal is not kept.
+                // A fresh request, paid like any other; the refusal is not kept. A long
+                // passage unrelated to the talk is a likely trigger, so this one goes
+                // without the turn's passages (the log keeps them).
                 retried = true;
                 self.record_usage(turn, seg, &shape.model, &role, reply.usage)?;
+                if !turn.material.is_empty() {
+                    req = build(&request::without_text(items, &turn.material))?;
+                }
                 continue;
             }
             break (reply, refused);
         };
-        let mut reply = if structured {
+        let reply = if structured {
             adopt_json_call(reply)
         } else if role.model.emulated_tools() && !shape.tools.is_empty() {
             adopt_text_call(reply, false, &shape.tools)
@@ -774,21 +801,38 @@ impl Agent {
             reply
         };
         if refused {
-            // Twice in a row: the turn goes on without a reply, and the log keeps no
-            // words that are not the person's.
-            reply.parts.clear();
-        } else {
-            let item = Message::assistant(reply.parts.clone());
-            log::append(
-                &self.db(),
-                seg,
-                Role::Assistant,
-                &request::to_bytes(&item),
-                self.now().ms,
-            )?;
+            // Twice in a row: the turn fails, and the log keeps no words that are not the
+            // person's.
+            self.record_usage(turn, seg, &shape.model, &role, reply.usage)?;
+            return Err(Error::Refused);
         }
+        let item = Message::assistant(reply.parts.clone());
+        log::append(
+            &self.db(),
+            seg,
+            Role::Assistant,
+            &request::to_bytes(&item),
+            self.now().ms,
+        )?;
         self.record_usage(turn, seg, &shape.model, &role, reply.usage)?;
         Ok(reply)
+    }
+
+    /// One line in the diagnostics log: what ended the turn and the first of the endpoint's
+    /// words.
+    pub(crate) fn diagnose(&self, turn: &Turn, what: &str, text: &str) {
+        let channel = turn.channel.to_string();
+        diag::record(
+            &self.config.logs,
+            self.now().ms,
+            &[
+                ("what", what),
+                ("channel", &channel),
+                ("speaker", turn.speaker.as_str()),
+                ("model", &turn.model),
+            ],
+            text,
+        );
     }
 
     /// The error of a failed call. A client error on a request that carried a picture is
@@ -969,7 +1013,13 @@ impl Agent {
         guard.ended = true;
         let end = match &out {
             Ok(()) => ActivityState::Done,
-            Err(e) => ActivityState::Failed { reason: failure(e) },
+            Err(e) => {
+                // A refusal already left its own line, with the words.
+                if !matches!(e, Error::Refused) && !turn.wrapup {
+                    self.diagnose(turn, "failed", &e.to_string());
+                }
+                ActivityState::Failed { reason: failure(e) }
+            }
         };
         self.set_activity(turn, end);
         out
@@ -1234,6 +1284,9 @@ impl Agent {
         let closing = assemble::split_closing(&turn.text, marks);
         turn.text = closing.text.clone();
         turn.hand_off = closing.hand_off.clone();
+        if let Some((group, words)) = &closing.say {
+            self.plan_say(turn, group, words)?;
+        }
         if turn.proposing && (closing.find.is_some() || closing.group.is_some()) {
             self.propose(turn, closing)?;
         }

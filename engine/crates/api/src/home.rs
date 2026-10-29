@@ -60,6 +60,7 @@ impl Home {
     pub fn create(&self) -> io::Result<()> {
         for dir in [
             self.office(),
+            self.logs(),
             self.avatars(),
             self.uploads(),
             self.tts(),
@@ -211,6 +212,11 @@ impl Home {
 
     pub fn office(&self) -> PathBuf {
         self.root.join("office")
+    }
+
+    /// Diagnostics: what a turn that ended without a reply leaves behind.
+    pub fn logs(&self) -> PathBuf {
+        self.root.join("logs")
     }
 
     pub fn media(&self) -> PathBuf {

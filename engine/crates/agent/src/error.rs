@@ -43,6 +43,11 @@ pub enum Error {
     #[error("endpoint: {detail}")]
     Endpoint { detail: String },
 
+    /// The endpoint answered twice with canned boilerplate instead of a reply. What it
+    /// said is in the diagnostics log.
+    #[error("the model returned a canned reply twice")]
+    Refused,
+
     /// The endpoint refused a request that carried a picture. `detail` is its own text.
     #[error("the endpoint did not accept the picture: {detail}")]
     ImageRejected { detail: String },
@@ -149,7 +154,7 @@ impl From<Error> for ApiError {
             e @ Error::RateLimited { .. } => ApiError::Endpoint {
                 detail: e.to_string(),
             },
-            e @ Error::ImageRejected { .. } => ApiError::Endpoint {
+            e @ (Error::ImageRejected { .. } | Error::Refused) => ApiError::Endpoint {
                 detail: e.to_string(),
             },
             Error::Endpoint { detail } => ApiError::Endpoint { detail },

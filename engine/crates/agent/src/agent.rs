@@ -99,6 +99,8 @@ pub struct Config {
     pub agent: params::Params,
     /// `$DRAMATIS_HOME/office`.
     pub office: PathBuf,
+    /// `$DRAMATIS_HOME/logs`, where failed turns leave a line; empty: no log.
+    pub logs: PathBuf,
 }
 
 /// What [`Agent::new`] is built from.

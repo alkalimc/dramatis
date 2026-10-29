@@ -506,6 +506,7 @@ error.turn.error
 error.turn.image_unsupported
 error.turn.quota_exhausted
 error.turn.rate_limited
+error.turn.refused
 error.unknown
 error.wrong_password
 events.count.0
@@ -662,6 +663,9 @@ harness.read_recent.none
 harness.recent
 harness.remembered
 harness.rules
+harness.said
+harness.say
+harness.say_mark
 harness.speaker
 harness.suggested
 harness.summary

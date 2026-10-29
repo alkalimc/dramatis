@@ -51,6 +51,10 @@ pub fn block_a(ctx: &Ctx<'_>, group: bool, proposing: bool) -> String {
             "harness.propose",
             &[("find", marks.find), ("group", marks.group)],
         ));
+        // Only a direct chat can reach into a group; inside one the person is already there.
+        if !group {
+            parts.push(ctx.fill("harness.say", &[("say", marks.say)]));
+        }
     }
     parts.join("\n\n")
 }
@@ -403,11 +407,14 @@ pub struct Marks<'a> {
     pub find: &'a str,
     /// A proposal for a group (`harness.group_mark`).
     pub group: &'a str,
+    /// A line to post in a group the person is in (`harness.say_mark`), written in a
+    /// direct chat where tools are emulated.
+    pub say: &'a str,
 }
 
 impl<'a> Marks<'a> {
     pub fn list(&self) -> Vec<&'a str> {
-        [self.hand_off, self.find, self.group]
+        [self.hand_off, self.find, self.group, self.say]
             .into_iter()
             .filter(|m| !m.is_empty())
             .collect()
@@ -415,7 +422,7 @@ impl<'a> Marks<'a> {
 }
 
 /// The marks for a turn: the hand-off mark in a group, the proposal marks where the
-/// person's tools are emulated.
+/// person's tools are emulated, and there the say mark in a direct chat.
 pub fn closing_marks(wording: &Wording, group: bool, proposing: bool) -> Marks<'_> {
     Marks {
         hand_off: if group { hand_off_mark(wording) } else { "" },
@@ -426,6 +433,11 @@ pub fn closing_marks(wording: &Wording, group: bool, proposing: bool) -> Marks<'
         },
         group: if proposing {
             wording.get("harness.group_mark").trim()
+        } else {
+            ""
+        },
+        say: if proposing && !group {
+            wording.get("harness.say_mark").trim()
         } else {
             ""
         },
@@ -468,7 +480,7 @@ fn split_line(text: &str, mark: &str, others: &[&str]) -> (String, Option<String
 }
 
 /// Names separated by commas (ASCII or full-width), enumeration commas or semicolons.
-fn split_names(list: &str) -> Vec<String> {
+pub(crate) fn split_names(list: &str) -> Vec<String> {
     list.split([',', '\u{ff0c}', '\u{3001}', ';', '\u{ff1b}'])
         .map(|n| n.trim().trim_matches(['"', '\'', '`']).trim())
         .filter(|n| !n.is_empty())
@@ -495,6 +507,8 @@ pub struct Closing {
     pub group: Option<Vec<String>>,
     /// Why the group is proposed, when the line gives a reason after the names.
     pub purpose: Option<String>,
+    /// A line to post in a group: which group, as the person wrote it, and the words.
+    pub say: Option<(String, String)>,
 }
 
 /// Separators between a group line's names and its purpose: ASCII or full-width bar.
@@ -541,6 +555,16 @@ pub fn split_closing(text: &str, marks: Marks<'_>) -> Closing {
         out.text = kept;
         out.group = Some(names);
         out.purpose = purpose;
+    }
+    let (kept, rest) = split_line(&out.text, marks.say, &others(marks.say));
+    if let Some((group, words)) = rest
+        .as_deref()
+        .and_then(|r| r.split_once(PURPOSE_BARS))
+        .map(|(g, w)| (g.trim().to_owned(), w.trim().to_owned()))
+        .filter(|(g, w)| !g.is_empty() && !w.is_empty())
+    {
+        out.text = kept;
+        out.say = Some((group, words));
     }
     out
 }

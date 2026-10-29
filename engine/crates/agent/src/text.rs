@@ -154,6 +154,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.next_mark", "→"),
     ("harness.find_mark", "⇒ find:"),
     ("harness.group_mark", "⇒ group:"),
+    ("harness.say_mark", "⇒ say:"),
     (
         "harness.propose",
         "You help {user} yourself first: you answer, offer to do the thing, and take it on \
@@ -173,6 +174,17 @@ const DEFAULTS: &[(&str, &str)] = &[
          already have with those people, write its name as the purpose; any other purpose \
          makes a new group. Such a line comes at most once per reply. If a citation line is also written, these lines come last.",
     ),
+    (
+        "harness.say",
+        "You cannot write in any group from here; the host and the other chats are out of \
+         your reach. Only when {user} has just asked you to say something in a group you are \
+         in, end the reply with one final line that starts with {say} followed by the group \
+         (its name, its purpose or its other members), a bar and the one line to post there. \
+         It goes out under your name and the others answer there, so say in the reply that you \
+         will ask, and never that they have answered. Otherwise say what you would do, \
+         never that you did it.",
+    ),
+    ("harness.said", "{name} says in the group: {text}"),
     (
         "harness.next",
         "In a group, a member may hand the turn on. Only if the reply really calls for one \

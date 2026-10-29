@@ -196,6 +196,7 @@ impl AgentBridge {
                 find_people: p.params.find_people.clone(),
                 agent: self.agent_params.clone(),
                 office: p.home.office(),
+                logs: p.home.logs(),
             },
             endpoints: self
                 .endpoints
