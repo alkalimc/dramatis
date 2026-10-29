@@ -2,6 +2,7 @@
 //! the delivery of events to the window. The engine and its ports come from `runtime`.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -16,31 +17,52 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
 
+use crate::presence;
+
 /// How often idle conversations are wrapped up and due seeds looked at.
 const TICK: Duration = Duration::from_secs(60);
 
 // ---- events and notifications ----
 
-/// Everything the engine and the agent push goes to the window; a person's unprompted
-/// line also becomes a system notification when the window is not in front.
+/// Everything the engine and the agent push goes to the window. A message from the host
+/// or a person (an opening, a reply, a due item, a group line) also becomes one system
+/// notification while the window is hidden or not in front.
 pub struct AppSink {
     app: AppHandle,
     engine: Mutex<Weak<Engine>>,
 }
 
+/// State that outlives a reopened corpus: the ids already notified, and how many arrivals
+/// nobody has looked at yet (the tray's number).
+#[derive(Default)]
+pub struct Arrivals {
+    recent: Mutex<presence::Recent>,
+    unseen: AtomicU32,
+}
+
 impl AppSink {
     fn deliver(&self, event: port::Event) {
-        if let port::Event::Notification(n) = &event {
-            self.notify(n);
+        // The `Notification` event the agent sends for an opening is not used: the same
+        // line arrives as a message, which covers every kind of arrival once.
+        if let port::Event::MessageAdded(added) = &event {
+            self.notify(&added.message);
         }
         api::emit(&self.app, event);
     }
 
-    fn notify(&self, n: &api::events::Notification) {
-        let in_front = self
-            .app
-            .get_webview_window("main")
-            .is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    fn notify(&self, m: &api::views::Message) {
+        if matches!(m.author, api::types::Author::User) {
+            return;
+        }
+        let window = self.app.get_webview_window("main");
+        let flag = |f: Option<bool>| f.unwrap_or(false);
+        let (visible, focused) = (
+            flag(window.as_ref().and_then(|w| w.is_visible().ok())),
+            flag(window.as_ref().and_then(|w| w.is_focused().ok())),
+        );
+        if !presence::unattended(visible, focused) {
+            return;
+        }
         let engine = self
             .engine
             .lock()
@@ -49,23 +71,100 @@ impl AppSink {
         let Some(engine) = engine else { return };
         // The switch and the quiet hours are the user's: honoured here, at the one place
         // a notification leaves the app.
-        if in_front || !engine.may_notify().unwrap_or(false) {
+        if !engine.may_notify().unwrap_or(false) {
             return;
         }
-        let name = engine
-            .corpus_handle()
-            .map_or_else(|| n.person.0.clone(), |c| c.display(&n.person.0));
+        let corpus = engine.corpus_handle();
+        let (host_name, scene) = corpus.as_ref().map_or_else(
+            || (String::from("host"), ("*".to_owned(), "*".to_owned())),
+            |c| {
+                let host = c.manifest.wording.get("host.name").cloned();
+                (
+                    host.unwrap_or_else(|| "host".into()),
+                    c.manifest.scene_marker.clone(),
+                )
+            },
+        );
+        let style = presence::Style {
+            host_name: &host_name,
+            scene: (&scene.0, &scene.1),
+        };
+        let arrivals = self.app.state::<Arrivals>();
+        let found = presence::arrival(
+            &m.author,
+            &m.id.0,
+            &m.text,
+            &style,
+            |id| {
+                corpus
+                    .as_ref()
+                    .map_or_else(|| id.to_owned(), |c| c.display(id))
+            },
+            &mut arrivals.recent.lock().unwrap_or_else(|e| e.into_inner()),
+        );
+        let Some(found) = found else { return };
+        let unseen = arrivals.unseen.fetch_add(1, Ordering::Relaxed) + 1;
+        set_badge(&self.app, unseen);
         if let Err(e) = self
             .app
             .notification()
             .builder()
-            .title(name)
-            .body(&n.text)
+            .title(found.title)
+            .body(found.body)
             .show()
         {
             eprintln!("dramatis: notification failed: {e}");
         }
     }
+}
+
+const TRAY: &str = "main";
+
+/// The number beside the tray icon and in its tooltip.
+fn set_badge(app: &AppHandle, unseen: u32) {
+    let Some(tray) = app.tray_by_id(TRAY) else {
+        return;
+    };
+    let _ = tray.set_title(presence::badge(unseen));
+    let _ = tray.set_tooltip(Some(match unseen {
+        0 => "dramatis".to_owned(),
+        n => format!("dramatis ({n} new)"),
+    }));
+}
+
+/// The window came to the front: what arrived is seen.
+pub fn seen(app: &AppHandle) {
+    if app.state::<Arrivals>().unseen.swap(0, Ordering::Relaxed) > 0 {
+        set_badge(app, 0);
+    }
+}
+
+/// Put the Dock icon in step with the window: shown while it is open, the menu bar alone
+/// otherwise.
+pub fn sync_dock(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let visible = app
+            .get_webview_window("main")
+            .is_some_and(|w| w.is_visible().unwrap_or(false));
+        let policy = match presence::dock_for(visible) {
+            presence::Dock::Shown => tauri::ActivationPolicy::Regular,
+            presence::Dock::Hidden => tauri::ActivationPolicy::Accessory,
+        };
+        if let Err(e) = app.set_activation_policy(policy) {
+            eprintln!("dramatis: could not change the Dock icon: {e}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+/// Close to the menu bar: hide the window and leave the Dock.
+pub fn hide(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+    sync_dock(app);
 }
 
 impl port::Sink for AppSink {
@@ -192,14 +291,18 @@ pub fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
+        // The Dock icon must be back before the window is asked to take the focus.
+        sync_dock(app);
         let _ = w.set_focus();
     }
+    seen(app);
 }
 
 /// Window, tray and background steps. Called once from `setup`.
 pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     app.manage(Current::default());
+    app.manage(Arrivals::default());
     let home = Home::from_env();
     // The webview may read the cached media, the notes people write and the pictures the
     // user chose, and nothing else; the home can be moved by `DRAMATIS_HOME`, so the scope
@@ -221,7 +324,8 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_item = MenuItem::with_id(app, "open", "Open corpus...", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &open_item, &quit_item])?;
-    let mut tray = TrayIconBuilder::new()
+    let mut tray = TrayIconBuilder::with_id(TRAY)
+        .tooltip("dramatis")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
@@ -244,6 +348,8 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    // The window starts shown, so the Dock icon starts shown.
+    sync_dock(&handle);
 
     // The app keeps running with the window closed: conversations that went idle are
     // wrapped up and due commitments may open, without anyone looking.
