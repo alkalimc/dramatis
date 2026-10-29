@@ -135,6 +135,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let corpusLoaded = params.get("corpus") !== "missing";
   // `?locked=1` starts on an encrypted save; its password is "hunter2".
   let locked = params.get("locked") === "1";
+  // `?changed=1` starts as if another window had replaced the open save's file.
+  let changedElsewhere = params.get("changed") === "1";
   let saves: SaveInfo[] =
     params.get("saves") === "0"
       ? []
@@ -545,6 +547,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         corpus: corpusLoaded ? { state: "loaded", name: "demo" } : { state: "missing" },
         needs_setup: settings.user_name === null,
         locked,
+        changed_elsewhere: changedElsewhere,
         save: openSave,
         missing_save: openSave === null ? params.get("missing") : null,
         home_dir: "/Users/demo/.dramatis",
@@ -562,6 +565,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     logOut: () => {
       openSave = null;
       locked = false;
+      changedElsewhere = false;
       return ok(null);
     },
     setupEndpoint: (setup: EndpointSetup) => {
@@ -1011,6 +1015,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!target) return fail({ code: "not_found" });
       if (target.encrypted && !known.has(name)) return fail({ code: "locked" });
       openSave = name;
+      changedElsewhere = false;
       return ok(null);
     },
     unlock: (name, password) => {

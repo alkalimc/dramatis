@@ -333,6 +333,11 @@ export type ApiError = { code: "not_implemented" } | { code: "not_found" } |
  *  `unlock`.
  */
 { code: "locked" } | 
+/**
+ *  The save is open in another window or process, so a step that would rewrite, move
+ *  or delete its file waits until it is closed there.
+ */
+{ code: "open_elsewhere" } | 
 /**  A password was given and does not open the save. */
 { code: "wrong_password" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
 
@@ -352,6 +357,12 @@ export type AppStatus = {
 	 *  save) works until then.
 	 */
 	locked: boolean,
+	/**
+	 *  The open save's file was replaced, renamed, deleted or encrypted by another window
+	 *  or process, so this one stopped using it: only `switch_save` to the same name
+	 *  (reopen) or another save works until then.
+	 */
+	changed_elsewhere: boolean,
 	/**
 	 *  The save this process has open. `None`: none (first run, the last one is gone, or
 	 *  the user logged out), so the save picker shows.
@@ -1048,7 +1059,12 @@ export type Wording = {
 	scene_marker: SceneMarker,
 };
 
-export type WorldChange = { kind: "fact"; id: FactId } | { kind: "task"; id: TaskId } | { kind: "channel"; id: ChannelId } | { kind: "trust"; person: PersonId } | { kind: "digest" };
+export type WorldChange = { kind: "fact"; id: FactId } | { kind: "task"; id: TaskId } | { kind: "channel"; id: ChannelId } | { kind: "trust"; person: PersonId } | { kind: "digest" } | 
+/**
+ *  The open save's file was changed by another process and this one stopped using it
+ *  (see `AppStatus::changed_elsewhere`).
+ */
+{ kind: "save" };
 
 /**  Narrative state changed; the UI refetches what it shows of it. */
 export type WorldChanged = {

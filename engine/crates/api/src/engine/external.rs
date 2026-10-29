@@ -4,7 +4,9 @@
 
 use std::time::Duration;
 
-use world::message;
+use std::sync::atomic::Ordering;
+
+use world::{World, message};
 
 use super::Engine;
 use crate::convert::{self, world_err};
@@ -49,6 +51,9 @@ impl Engine {
     /// once it is idle. The first look only records where things stand. Returns how many
     /// messages were announced.
     pub fn poll_external(&self) -> ApiResult<usize> {
+        if self.check_open_file() {
+            return Ok(0);
+        }
         // The name is held until the connection is read: a switch swaps both under this
         // lock, so the numbers below always belong to the save they are filed under.
         let open = self.save.lock().unwrap_or_else(|e| e.into_inner());
@@ -155,6 +160,47 @@ impl Engine {
         watch.dirty = false;
         self.changed(changes);
         Ok(announced)
+    }
+
+    /// Whether the file the open save was opened from is still what its path names. If
+    /// another process replaced, renamed, deleted or encrypted it, the connection here
+    /// points at a file nobody will read: it is dropped for an empty stand-in, the agent is
+    /// pointed at nothing, and `WorldChange::Save` is announced once. The window or
+    /// terminal then offers to reopen (`switch_save` on the same name). Returns whether the
+    /// save is in that state.
+    pub fn check_open_file(&self) -> bool {
+        let open = self.save.lock().unwrap_or_else(|e| e.into_inner());
+        if open.is_empty() {
+            return false;
+        }
+        if self.elsewhere.load(Ordering::Relaxed) {
+            return true;
+        }
+        let path = self.home().save_path(&open);
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(lock) = held.as_ref() else {
+            return false;
+        };
+        // An unlocked save is encrypted exactly when a password is known here; an
+        // in-place re-key by a process that ignores the lock keeps the inode.
+        let swapped = !self.locked.load(Ordering::Relaxed)
+            && world::cipher::is_encrypted(&path) != self.password_of(&open).is_some();
+        if !lock.moved() && !swapped {
+            return false;
+        }
+        held.take();
+        drop(held);
+        if let Ok(stand_in) = World::in_memory() {
+            *self.w() = stand_in;
+        }
+        self.locked.store(false, Ordering::Relaxed);
+        self.elsewhere.store(true, Ordering::Relaxed);
+        self.ports
+            .agent
+            .switch_world(std::path::Path::new(""), None);
+        drop(open);
+        self.changed(vec![WorldChange::Save]);
+        true
     }
 
     /// Poll for other processes' writes every [`POLL`] until the engine is dropped (a

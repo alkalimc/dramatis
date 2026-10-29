@@ -908,7 +908,8 @@ async fn saves_list_switch_and_ask_before_deleting() {
 
     // The save in use is protected; another asks first, and a no (or anything else) keeps it.
     assert!(r.run("/save delete second").await.contains("save in use"));
-    assert!(r.run("/save delete default").await.contains("(y/n)"));
+    r.run("/save delete default").await;
+    assert!(r.session.prompt().contains("(y/n)"));
     assert!(r.run("n").await.contains("cancelled"));
     assert!(r.run("/save").await.contains("default"));
     r.run("/save delete default").await;
@@ -925,7 +926,8 @@ async fn saves_export_and_import_through_a_file() {
     let cmd = format!("/save export default \"{}\"", file.display());
     assert!(r.run(&cmd).await.contains("wrote"));
     // A second export to the same place asks before replacing.
-    assert!(r.run(&cmd).await.contains("replace it? (y/n)"));
+    r.run(&cmd).await;
+    assert!(r.session.prompt().contains("replace it? (y/n)"));
     assert!(r.run("no").await.contains("cancelled"));
     r.run(&cmd).await;
     assert!(r.run("y").await.contains("wrote"));
@@ -1071,9 +1073,12 @@ async fn password_turns_encryption_on_changes_it_and_turns_it_off() {
     // The warning comes before the question, and a no changes nothing.
     let asked = answers(&mut r, &["one", "one"]);
     let ask = r.run("/password on").await;
-    assert!(
-        ask.contains("cannot be recovered") && ask.contains("(y/n)"),
-        "{ask}"
+    assert!(ask.contains("cannot be recovered"), "{ask}");
+    // The question is the prompt, so the line editor cannot draw over it.
+    assert!(r.session.prompt().contains("(y/n)"));
+    assert_eq!(
+        r.session.question(),
+        Some("encrypt this save with a password? (y/n)")
     );
     assert!(r.run("n").await.contains("cancelled"));
     assert!(!world::cipher::is_encrypted(&file));
@@ -1422,7 +1427,8 @@ async fn history_marks_pictures_and_storage_clears_only_caches() {
     assert!(usage.contains("pictures in this save: 1"), "{usage}");
 
     // A no keeps the cache; a yes empties it and nothing else.
-    assert!(r.run("/storage clear audio").await.contains("(y/n)"));
+    r.run("/storage clear audio").await;
+    assert!(r.session.prompt().contains("(y/n)"));
     assert!(r.run("n").await.contains("cancelled"));
     assert!(home.tts().join("a.mp3").exists());
     r.run("/storage clear audio").await;
@@ -1517,7 +1523,8 @@ async fn a_group_can_be_listed_and_deleted_after_asking() {
     let mut r = rig().await;
     r.run("/group ann cy").await;
     assert!(r.run("/members").await.contains("ann, cy"));
-    assert!(r.run("/leave").await.contains("(y/n)"));
+    r.run("/leave").await;
+    assert!(r.session.prompt().contains("(y/n)"));
     assert!(r.run("n").await.contains("cancelled"));
     r.run("/leave").await;
     assert!(r.run("y").await.contains("group deleted"));
@@ -1621,4 +1628,51 @@ async fn library_mode_can_be_chosen_and_left_when_a_model_is_set_up() {
         .unwrap()
         .push_back(Reply::Say("Hello again."));
     assert!(r.run("hello").await.contains("Hello again."));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_confirmation_is_the_prompt_and_an_unclear_answer_is_asked_once_more() {
+    let mut r = rig().await;
+    let normal = r.session.prompt();
+    r.run("/password on").await;
+    assert_ne!(r.session.prompt(), normal);
+    // Neither yes nor no: asked again, still the prompt; the second time it cancels.
+    assert!(r.run("maybe").await.contains("answer y or n"));
+    assert!(r.session.question().is_some());
+    assert!(r.run("what?").await.contains("cancelled"));
+    assert!(r.session.question().is_none());
+    assert_eq!(r.session.prompt(), normal);
+    // A typed password-looking line is never taken for a yes, and nothing was encrypted.
+    let file = r._home.0.join("saves/default.sqlite");
+    assert!(!world::cipher::is_encrypted(&file));
+    // Passwords come only from the secret reader: a yes then asks for them through it.
+    let asked = answers(&mut r, &["one", "one"]);
+    r.run("/password on").await;
+    assert!(r.run("yes").await.contains("is encrypted now"));
+    assert_eq!(*asked.lock().unwrap(), ["new password: ", "again: "]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_save_changed_in_another_window_is_reopened_or_the_list_comes_back() {
+    let mut r = rig().await;
+    let file = r._home.0.join("saves/default.sqlite");
+    // Another process encrypts the save by swapping a new file in.
+    let part = r._home.0.join("saves/swap.part");
+    std::fs::copy(&file, &part).unwrap();
+    world::cipher::encrypt(&part, "secret").unwrap();
+    std::fs::rename(&part, &file).unwrap();
+
+    // The line typed is not sent anywhere; the password is asked for, hidden.
+    let asked = answers(&mut r, &["secret"]);
+    let out = r.run("hello").await;
+    assert!(out.contains("changed in another window"), "{out}");
+    assert_eq!(*asked.lock().unwrap(), ["password for default: "]);
+    assert!(out.contains("playing"), "{out}");
+    assert!(!r.session.picking());
+
+    // Gone for good: back to the list of saves.
+    std::fs::rename(&file, r._home.0.join("saves/else.sqlite")).unwrap();
+    let out = r.run("hello").await;
+    assert!(out.contains("changed in another window"), "{out}");
+    assert!(r.session.picking(), "{out}");
 }

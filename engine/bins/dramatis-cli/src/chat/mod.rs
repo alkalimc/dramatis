@@ -403,6 +403,7 @@ impl Input {
         &mut self,
         prompt: String,
         initial: Option<String>,
+        remember: bool,
         interrupt: &Interrupt,
     ) -> Option<String> {
         match self {
@@ -418,7 +419,8 @@ impl Input {
                         Some(text) => editor.readline_with_initial(&prompt, (text, "")),
                         None => editor.readline(&prompt),
                     };
-                    if let Ok(l) = &line
+                    if remember
+                        && let Ok(l) = &line
                         && !l.trim().is_empty()
                     {
                         let _ = editor.add_history_entry(l.as_str());
@@ -478,7 +480,13 @@ async fn repl(
             // No editor to put it in: show it, to be typed again.
             println!("{text}");
         }
-        let Some(line) = input.next(prompt, initial, &interrupt).await else {
+        // The answer to a question is not a message: it stays out of the history, and a
+        // pipe or file has no prompt to show it on.
+        let remember = session.question().is_none();
+        if !interactive && let Some(question) = session.question() {
+            println!("{question}");
+        }
+        let Some(line) = input.next(prompt, initial, remember, &interrupt).await else {
             println!();
             return Ok(());
         };

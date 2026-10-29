@@ -101,11 +101,22 @@ events! {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorldChange {
-    Fact { id: FactId },
-    Task { id: TaskId },
-    Channel { id: ChannelId },
-    Trust { person: PersonId },
+    Fact {
+        id: FactId,
+    },
+    Task {
+        id: TaskId,
+    },
+    Channel {
+        id: ChannelId,
+    },
+    Trust {
+        person: PersonId,
+    },
     Digest,
+    /// The open save's file was changed by another process and this one stopped using it
+    /// (see `AppStatus::changed_elsewhere`).
+    Save,
 }
 
 /// The step a speaker's turn is in. Sent only when it changes.

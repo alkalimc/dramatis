@@ -142,6 +142,7 @@ dependencies = [
  "chrono",
  "folio",
  "index",
+ "libc",
  "md-5",
  "rusqlite",
  "schemars 1.2.2",

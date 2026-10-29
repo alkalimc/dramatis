@@ -20,6 +20,7 @@ import { LeftDrawer, ProfileCard } from "./screens/Profile";
 import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
+import { ChangedScreen } from "./screens/Changed";
 import { UnlockScreen } from "./screens/Unlock";
 import { CorpusSetup, ModelStep, SavePicker } from "./screens/Welcome";
 import { WorldDrawer } from "./screens/World";
@@ -100,6 +101,7 @@ function Shell() {
       </p>
     );
   }
+  if (status.changed_elsewhere) return <ChangedScreen />;
   if (status.locked) return <UnlockScreen />;
   if (status.corpus.state !== "loaded") return <CorpusSetup corpus={status.corpus} />;
   if (status.save === null) return <SavePicker />;

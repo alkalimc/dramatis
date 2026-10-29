@@ -32,6 +32,7 @@ use crate::endpoints::{Endpoints, Profile, Role};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{QuotaChanged, WorldChange, WorldChanged};
 use crate::home::{Home, Start};
+use crate::lock::SaveLock;
 use crate::media::MediaCache;
 use crate::params::Params;
 use crate::port::{
@@ -96,6 +97,11 @@ pub struct Engine {
     missing_save: Mutex<Option<String>>,
     /// The open save is encrypted and was not unlocked: `world` is an empty stand-in.
     locked: AtomicBool,
+    /// The shared lock telling other processes this one has the open save (see `lock.rs`).
+    held: Mutex<Option<SaveLock>>,
+    /// The file of the open save was replaced, renamed, deleted or encrypted by another
+    /// process: `world` is an empty stand-in, so nothing is written to the old file.
+    elsewhere: AtomicBool,
     /// Passwords entered in this process, by save name. Memory only, never written.
     passwords: Mutex<HashMap<String, String>>,
     corpus: Option<Arc<Corpus>>,
@@ -137,8 +143,10 @@ impl Engine {
         home.create().map_err(io)?;
         let params = Params::load(&home.params()).map_err(io)?;
         let mut passwords = HashMap::new();
+        let mut held = None;
         let (save, missing, world, locked) = match home.start_save() {
             Start::Open(save) => {
+                held = Some(SaveLock::shared(&home.save_path(&save))?);
                 match World::open_with(home.save_path(&save), password.as_deref()) {
                     Ok(w) => {
                         passwords.extend(password.map(|p| (save.clone(), p)));
@@ -183,6 +191,8 @@ impl Engine {
             save: Mutex::new(save),
             missing_save: Mutex::new(missing),
             locked: AtomicBool::new(locked),
+            held: Mutex::new(held),
+            elsewhere: AtomicBool::new(false),
             passwords: Mutex::new(passwords),
             corpus,
             state,
@@ -347,6 +357,7 @@ impl Engine {
                 .flatten()
                 .is_none(),
             locked: self.locked.load(Ordering::Relaxed),
+            changed_elsewhere: self.elsewhere.load(Ordering::Relaxed),
             save: Some(self.open_save()).filter(|s| !s.is_empty()),
             missing_save: self
                 .missing_save

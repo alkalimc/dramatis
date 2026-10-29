@@ -75,8 +75,9 @@ pub struct Session {
     listed: Vec<FactView>,
     /// The channels of the last `/chats` list, which `/chat` numbers into.
     chats: Vec<ChannelSummary>,
-    /// What the next line answers (y/n), when a command asked.
-    pending: Option<Pending>,
+    /// What the next line answers (y/n), when a command asked. The question is the input
+    /// prompt while it waits, so it is never drawn over by a fresh prompt.
+    pending: Option<Asking>,
     /// Asks for a password with nothing echoed; `None` is no answer. Replaced in tests.
     secret: Secret,
     /// No save is open (first run, the last one is gone, or the user logged out): every
@@ -102,6 +103,13 @@ enum Change {
     Forget,
     Restore,
     Edit(String),
+}
+
+/// A confirmation on screen: the step, its question, and whether it was asked twice.
+struct Asking {
+    what: Pending,
+    question: String,
+    repeated: bool,
 }
 
 /// A destructive step waiting for a yes.
@@ -213,6 +221,9 @@ impl Session {
     /// line being typed is theirs and not the channel's.
     pub fn prompt(&self) -> String {
         let style = self.term.style;
+        if let Some(asking) = &self.pending {
+            return format!("{} ", asking.question);
+        }
         if self.picking {
             return format!("{} ", self.term.style.bold(&self.msg("cli.prompt.save")));
         }
@@ -242,6 +253,26 @@ impl Session {
         let text = self.names.api_error(e);
         self.term
             .error(&self.names.say("cli.error", &[("text", &text)]));
+    }
+
+    /// Wait for a y/n answer to `question`, which becomes the input prompt.
+    fn confirm(&mut self, question: String, what: Pending) {
+        self.pending = Some(Asking {
+            what,
+            question,
+            repeated: false,
+        });
+    }
+
+    /// The confirmation waiting for an answer, which the line editor must not record.
+    pub fn question(&self) -> Option<&str> {
+        self.pending.as_ref().map(|a| a.question.as_str())
+    }
+
+    /// Whether a typed answer is a no.
+    fn is_no(&self, line: &str) -> bool {
+        let line = line.trim().to_lowercase();
+        self.msg("cli.answer.no").split('|').any(|n| n == line)
     }
 
     /// Whether a typed answer is a yes.
@@ -286,17 +317,25 @@ impl Session {
 
     /// One line of input: the answer to a question just asked, else a command or message.
     pub async fn input(&mut self, line: &str) -> Flow {
+        if self.save_changed().await {
+            return Flow::Continue;
+        }
         if self.picking {
             return self.pick(line).await;
         }
-        let Some(pending) = self.pending.take() else {
+        let Some(mut asking) = self.pending.take() else {
             return self.handle(parse(line)).await;
         };
         if self.is_yes(line) {
-            self.confirmed(pending).await;
+            self.confirmed(asking.what).await;
             self.refresh_completions().await;
-        } else {
+        } else if self.is_no(line) || line.trim().is_empty() || asking.repeated {
             self.term.note(&self.msg("cli.cancelled"));
+        } else {
+            // Neither yes nor no: ask once more, then give up.
+            asking.repeated = true;
+            self.term.note(&self.msg("cli.answer.again"));
+            self.pending = Some(asking);
         }
         Flow::Continue
     }
@@ -943,8 +982,10 @@ impl Session {
                 kind: Kind::Group(_),
                 ..
             }) => {
-                self.term.print(&format!("{} ", self.msg("cli.leave.ask")));
-                self.pending = Some(Pending::DeleteGroup(channel.clone()));
+                self.confirm(
+                    self.msg("cli.leave.ask"),
+                    Pending::DeleteGroup(channel.clone()),
+                );
             }
             Some(_) => self.term.line(&self.msg("cli.leave.only_group")),
             None => self.term.line(&self.msg("cli.no_channel")),
@@ -1781,14 +1822,10 @@ impl Session {
             (None, false) => self.term.note(&self.msg("cli.password.is_off")),
             (Some(PasswordAct::On), false) => {
                 self.term.line(&self.msg("cli.password.warning"));
-                self.term
-                    .print(&format!("{} ", self.msg("cli.password.ask_on")));
-                self.pending = Some(Pending::PasswordOn);
+                self.confirm(self.msg("cli.password.ask_on"), Pending::PasswordOn);
             }
             (Some(PasswordAct::Off), true) => {
-                self.term
-                    .print(&format!("{} ", self.msg("cli.password.ask_off")));
-                self.pending = Some(Pending::PasswordOff);
+                self.confirm(self.msg("cli.password.ask_off"), Pending::PasswordOff);
             }
             (Some(PasswordAct::Change), true) => {
                 let Some(old) = (self.secret)(&self.msg("cli.password.current")) else {
@@ -1986,6 +2023,7 @@ impl Session {
     fn why(&self, e: &api::ApiError) -> String {
         let key = match e {
             api::ApiError::Busy => "cli.save.busy",
+            api::ApiError::OpenElsewhere => "cli.save.open_elsewhere",
             api::ApiError::Exists => "cli.save.exists",
             api::ApiError::Locked => "cli.save.locked",
             api::ApiError::WrongPassword => "cli.save.wrong_password",
@@ -2073,6 +2111,11 @@ impl Session {
         if let Err(e) = switched {
             return self.term.line(&self.why(&e));
         }
+        self.opened(name).await;
+    }
+
+    /// A save is open now: nothing of the last one carries over.
+    async fn opened(&mut self, name: &str) {
         self.current = None;
         self.offers.clear();
         self.listed.clear();
@@ -2089,6 +2132,44 @@ impl Session {
         }
         self.term
             .note(&self.names.say("cli.save.playing", &[("name", &name)]));
+    }
+
+    /// Whether another process replaced, renamed, deleted or encrypted the open save's
+    /// file under this one. Says so, then reopens it (asking for the password when it is
+    /// encrypted now) or, when it cannot be, goes back to the list. True when it did
+    /// either, so the line typed is dropped rather than sent to a different save.
+    async fn save_changed(&mut self) -> bool {
+        if self.picking || !self.engine.check_open_file() {
+            return false;
+        }
+        self.pending = None;
+        let name = match self.engine.app_status().await {
+            Ok(status) => status.save.unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+        self.term.line(&self.msg("cli.save.changed"));
+        let mut reopened = match self.engine.switch_save(name.clone()).await {
+            Ok(()) => true,
+            Err(e) => {
+                self.term.line(&self.why(&e));
+                false
+            }
+        };
+        let locked = reopened
+            && self
+                .engine
+                .app_status()
+                .await
+                .is_ok_and(|status| status.locked);
+        if locked {
+            reopened = self.unlock(&name).await;
+        }
+        if reopened {
+            self.opened(&name).await;
+        } else {
+            self.log_out().await;
+        }
+        true
     }
 
     /// Whether no save is open and the lines typed choose one.
@@ -2259,21 +2340,19 @@ impl Session {
         if in_use {
             return self.term.line(&self.msg("cli.delete.in_use"));
         }
-        self.term.print(&format!(
-            "{} ",
-            self.names.say("cli.delete.ask", &[("name", &name)])
-        ));
-        self.pending = Some(Pending::DeleteSave(name));
+        self.confirm(
+            self.names.say("cli.delete.ask", &[("name", &name)]),
+            Pending::DeleteSave(name),
+        );
     }
 
     async fn export_save(&mut self, name: String, path: String) {
         let path = expand(&path);
         if std::path::Path::new(&path).exists() {
-            self.term.print(&format!(
-                "{} ",
-                self.names.say("cli.export.replace", &[("path", &path)])
-            ));
-            self.pending = Some(Pending::Overwrite { name, path });
+            self.confirm(
+                self.names.say("cli.export.replace", &[("path", &path)]),
+                Pending::Overwrite { name, path },
+            );
             return;
         }
         self.export_now(&name, path).await;
@@ -2381,11 +2460,10 @@ impl Session {
                     .filter(|c| kinds.contains(&c.kind))
                     .map(|c| c.kb)
                     .sum();
-                self.term.print(&format!(
-                    "{} ",
-                    self.names.say("cli.storage.ask", &[("size", &size(kb))])
-                ));
-                self.pending = Some(Pending::ClearStorage(kinds));
+                self.confirm(
+                    self.names.say("cli.storage.ask", &[("size", &size(kb))]),
+                    Pending::ClearStorage(kinds),
+                );
             }
         }
     }
