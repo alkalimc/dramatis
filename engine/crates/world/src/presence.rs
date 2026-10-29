@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use rusqlite::Connection;
 
-use crate::clock::{Date, Now};
+use crate::clock::{Date, Now, days_from_civil};
 use crate::params::Params;
 use crate::quota::{self, CallKind};
 use crate::seed::{self, Held, Limits, Occasion, Planned, TopicMatch, WordsHit};
@@ -35,7 +35,8 @@ pub enum Activity {
     },
     /// He opened with a seed and the user has not read it.
     CameBy { message: MessageId, at: i64 },
-    /// It is his birthday today (his corpus profile's field).
+    /// It is his birthday today (his corpus profile's field). Only for someone the user
+    /// has talked to: with hundreds of people, nearly every day has a birthday.
     Birthday,
 }
 
@@ -58,13 +59,28 @@ impl Digest {
         self.items.is_empty()
     }
 
-    /// The items the host has not announced yet.
+    /// The items the host has not announced yet. A birthday is brought up unprompted at
+    /// most one in [`BIRTHDAY_GAP_DAYS`] days, and one at a time; the panel and the
+    /// digest the user asks for still list them all.
     pub fn unannounced(&self, conn: &Connection, today: Date) -> Result<Digest> {
         let seen = announced(conn)?;
+        let birthday_ok = match settings::get::<Date>(conn, BIRTHDAY_SAID)? {
+            Some(last) => days_from_civil(today) - days_from_civil(last) >= BIRTHDAY_GAP_DAYS,
+            None => true,
+        };
+        let mut birthday_left = usize::from(birthday_ok);
         let items = self
             .items
             .iter()
             .filter(|w| !seen.contains(&w.key(today)))
+            .filter(|w| {
+                if w.activity != Activity::Birthday {
+                    return true;
+                }
+                let keep = birthday_left > 0;
+                birthday_left = 0;
+                keep
+            })
             .cloned()
             .collect();
         Ok(Digest { items })
@@ -96,6 +112,12 @@ impl Waiting {
 
 const ANNOUNCED: &str = "presence.announced";
 
+/// The local date the host last brought up a birthday on its own.
+const BIRTHDAY_SAID: &str = "presence.birthday_said";
+
+/// Days between two birthdays the host brings up unprompted.
+pub const BIRTHDAY_GAP_DAYS: i64 = 7;
+
 fn announced(conn: &Connection) -> Result<Vec<String>> {
     Ok(settings::get(conn, ANNOUNCED)?.unwrap_or_default())
 }
@@ -105,6 +127,9 @@ fn announced(conn: &Connection) -> Result<Vec<String>> {
 pub fn mark_announced(conn: &Connection, full: &Digest, said: &Digest, today: Date) -> Result<()> {
     let mut keys = announced(conn)?;
     keys.extend(said.items.iter().map(|w| w.key(today)));
+    if said.items.iter().any(|w| w.activity == Activity::Birthday) {
+        settings::set(conn, BIRTHDAY_SAID, &today)?;
+    }
     let live: Vec<String> = full.items.iter().map(|w| w.key(today)).collect();
     keys.retain(|k| live.contains(k));
     keys.sort();
@@ -209,7 +234,13 @@ pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<
     }
 
     for person in birthdays.born_on(now.local_date().month_day()) {
-        let channel = channel::find_direct_with(conn, &person)?;
+        // Someone the user has not talked to is not news, whoever has a birthday.
+        let Some(channel) = channel::find_direct_with(conn, &person)?
+            .filter(|c| message::last(conn, *c).is_ok_and(|m| m.is_some()))
+        else {
+            continue;
+        };
+        let channel = Some(channel);
         items.push(Waiting {
             person,
             channel,
@@ -369,9 +400,12 @@ mod tests {
         let cd = channel::direct(&w, &p("d")).unwrap();
         message::append(&w, cd, &Actor::Person(p("d")), "psst", None, None, T0).unwrap();
         bond::set_mode(&w, &p("d"), Mode::Disabled).unwrap();
+        // The user has talked to e, not to f.
+        let ce = channel::direct(&w, &p("e")).unwrap();
+        message::append(&w, ce, &Actor::User, "hi", None, None, T0).unwrap();
         let born = vec![
             (p("e"), MonthDay { month: 3, day: 10 }),
-            (p("f"), MonthDay { month: 3, day: 11 }),
+            (p("f"), MonthDay { month: 3, day: 10 }),
         ];
 
         let d = digest(&w, at(T0 + 10), &born).unwrap();
@@ -479,6 +513,8 @@ mod tests {
         let w = world();
         let cb = channel::direct(&w, &p("b")).unwrap();
         message::append(&w, cb, &Actor::Person(p("b")), "hi", None, None, T0).unwrap();
+        let ce = channel::direct(&w, &p("e")).unwrap();
+        message::append(&w, ce, &Actor::User, "hi", None, None, T0).unwrap();
         let born = vec![(p("e"), MonthDay { month: 3, day: 10 })];
         let params = Params::default();
         let run =
@@ -515,6 +551,40 @@ mod tests {
             b.key(at(T0).local_date()),
             b.key(at(T0 + 24 * HOUR).local_date())
         );
+    }
+
+    #[test]
+    fn a_birthday_is_brought_up_at_most_once_a_week_and_one_at_a_time() {
+        let w = world();
+        for who in ["e", "f"] {
+            let c = channel::direct(&w, &p(who)).unwrap();
+            message::append(&w, c, &Actor::User, "hi", None, None, T0).unwrap();
+        }
+        let params = Params::default();
+        let day = 24 * HOUR;
+        let on = |ms: i64, born: &Vec<(PersonId, MonthDay)>| {
+            on_presence(&w, at(ms), Tier::Middle, &params, born, &[], &NoTopic).unwrap()
+        };
+        // Two known people and a stranger share the day: the panel lists the two the
+        // user knows, the host brings up one.
+        let md = at(T0).local_date().month_day();
+        let born = vec![(p("e"), md), (p("f"), md), (p("z"), md)];
+        let first = on(T0, &born);
+        assert_eq!(first.digest.items.len(), 2);
+        let [Call::HostLine(news)] = first.calls.as_slice() else {
+            panic!("one line")
+        };
+        assert_eq!(news.items.len(), 1);
+        mark_announced(&w, &first.digest, news, at(T0).local_date()).unwrap();
+        // Days later, someone else's birthday is only in the panel.
+        let md = at(T0 + 3 * day).local_date().month_day();
+        let later = on(T0 + 3 * day, &vec![(p("f"), md)]);
+        assert_eq!(later.digest.items.len(), 1);
+        assert!(later.calls.is_empty(), "{:?}", later.calls);
+        // A week on, it may be brought up again.
+        let md = at(T0 + 7 * day).local_date().month_day();
+        let week = on(T0 + 7 * day, &vec![(p("f"), md)]);
+        assert!(matches!(week.calls.as_slice(), [Call::HostLine(_)]));
     }
 
     #[test]

@@ -174,6 +174,16 @@ async fn presence_makes_it_too() {
     let posted = posts(&e);
     assert_eq!(posted.len(), 3, "the welcome, the birthday line, the event");
     assert!(posted[2].text.contains(TEA));
+    // Today's birthdays are no material for the event: with hundreds of people nearly
+    // every day has one.
+    let ask = e
+        .fake
+        .bodies()
+        .iter()
+        .map(|b| String::from_utf8(b.clone()).unwrap())
+        .find(|b| b.contains(ASK))
+        .expect("the event request");
+    assert!(!ask.contains("birthday"), "{ask}");
 }
 
 #[tokio::test]

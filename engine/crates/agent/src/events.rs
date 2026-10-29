@@ -199,8 +199,9 @@ impl Agent {
             let mut seen = std::collections::HashSet::new();
             assemble::units(&self.ctx(&names), &units, &mut seen).text
         };
-        // Who it may involve: the people of the material, today's birthdays, then a
-        // rotating handful so the same few do not carry every day.
+        // Who it may involve: the people of the material, then a rotating handful so the
+        // same few do not carry every day. Birthdays are not a reason: with hundreds of
+        // people nearly every day has one.
         let mut pool: Vec<String> = Vec::new();
         let push = |p: &str, pool: &mut Vec<String>| {
             if offerable.iter().any(|o| o == p) && !pool.iter().any(|x| x == p) {
@@ -210,18 +211,6 @@ impl Agent {
         for u in &units {
             for p in &u.persons {
                 push(p, &mut pool);
-            }
-        }
-        let today_md = now.local_date().month_day();
-        let mut birthdays = Vec::new();
-        for (p, md) in self.birthdays()? {
-            if md == today_md {
-                birthdays.push(w.fill(
-                    "harness.digest.birthday",
-                    &names,
-                    &[("name", &self.display(p.as_str())?)],
-                ));
-                push(p.as_str(), &mut pool);
             }
         }
         let pool_max = self.config.world.events.pool as usize;
@@ -241,7 +230,7 @@ impl Agent {
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
         let (role, _) = self.role_for(LogKind::Host)?;
         let schema = schema();
-        let mut extra = birthdays;
+        let mut extra = Vec::new();
         if !group_topics.is_empty() {
             extra.push(w.fill(
                 "harness.event.recent",
