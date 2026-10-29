@@ -189,11 +189,13 @@ test("library: always reachable from the rail, filtered search, a unit read with
 test("first open: name, then the host introduces itself with the coldstart card", async () => {
   const user = userEvent.setup();
   renderApp("first=1");
-  await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
+  // Several steps in a row: each wait is generous, so a loaded machine does not fail it.
+  const slow = { timeout: 5000 };
+  await user.type(await screen.findByLabelText("What should they call you?", {}, slow), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
-  await user.click(await screen.findByRole("button", { name: "Keep the default" }));
-  expect(await screen.findByRole("heading", { name: "You could start with them" })).toBeDefined();
-  expect(await within(await screen.findByRole("log")).findByText(/Hello, Rowan\./)).toBeDefined();
+  await user.click(await screen.findByRole("button", { name: "Keep the default" }, slow));
+  expect(await screen.findByRole("heading", { name: "You could start with them" }, slow)).toBeDefined();
+  expect(await within(await screen.findByRole("log", {}, slow)).findByText(/Hello, Rowan\./, {}, slow)).toBeDefined();
   expect(screen.getByText("They are all frozen now: they answer when you reach out.")).toBeDefined();
 });
 
