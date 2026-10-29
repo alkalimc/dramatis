@@ -94,3 +94,21 @@ test("an encrypted save is marked, and opening one asks for its password once", 
   expect(within(row("vault")).getByText("Encrypted")).toBeDefined();
   expect(within(row("default")).queryByText("Encrypted")).toBeNull();
 });
+
+test("shows where the saves are kept and copies the path", async () => {
+  const user = userEvent.setup();
+  const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  const { actions } = await open();
+  await actions.refreshStatus();
+  expect(await screen.findByText("/Users/demo/.dramatis/saves")).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Copy path" }));
+  expect(write).toHaveBeenCalledWith("/Users/demo/.dramatis/saves");
+});
+
+test("logging out closes the save and the status says none is open", async () => {
+  const user = userEvent.setup();
+  const { store, actions } = await open();
+  await actions.refreshStatus();
+  await user.click(await screen.findByRole("button", { name: "Log out of this save" }));
+  await waitFor(() => expect(store.getState().status?.save).toBeNull());
+});

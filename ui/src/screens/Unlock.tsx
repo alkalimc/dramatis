@@ -68,6 +68,11 @@ export function UnlockScreen() {
         <button type="submit" className="wide" disabled={busy || !save || !password}>
           {t("unlock.submit")}
         </button>
+        <p className="center">
+          <button type="button" className="link" onClick={() => void actions.logOut()}>
+            {t("unlock.logout")}
+          </button>
+        </p>
       </form>
     </main>
   );

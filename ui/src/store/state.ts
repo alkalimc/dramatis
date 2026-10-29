@@ -215,6 +215,8 @@ export function initialState(): State {
 }
 
 export type Action =
+  /** Forget everything loaded from the world that was open (a log out); the window's own choices stay. */
+  | { type: "reset" }
   | { type: "status"; status: AppStatus }
   | { type: "wording"; wording: Wording }
   | { type: "clock"; clock: Clock }

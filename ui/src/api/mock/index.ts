@@ -5,7 +5,11 @@
 // Demo switches (query string): `form=library` (no endpoint yet), `first=1` (first open),
 // `tts=0` (no read-aloud role), `tier=ultra`, `band=quiet|exhausted`, `marker=paren`
 // (scene lines in `(...)` instead of `*...*`). Sending a message that contains the word
-// `fail` ends the turn in a rate-limit failure instead of a reply.
+// `fail` ends the turn in a rate-limit failure instead of a reply. First-run switches:
+// `nosave=1` (no save open: the picker), `saves=0` (and none exist), `missing=NAME` (the
+// last used save is gone), `corpus=missing` (no corpus yet; a path with `newer` in it is
+// from a newer format, one not ending in `.folio` is not a corpus), `dialog=1` (a file
+// dialog exists).
 //
 // `ui/wording.local.json` (git-ignored; exported by the forge) supplies a corpus's wording
 // when present, so the preview shows that corpus's language.
@@ -18,6 +22,7 @@ import type {
   ChannelSummary,
   Citation,
   Confidence,
+  EndpointSetup,
   EndpointsView,
   FactFilter,
   FactId,
@@ -121,13 +126,17 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     notifications: true,
   };
   let introPending = settings.user_name === null;
-  let openSave = "default";
+  let openSave: string | null = params.get("nosave") === "1" ? null : "default";
+  let corpusLoaded = params.get("corpus") !== "missing";
   // `?locked=1` starts on an encrypted save; its password is "hunter2".
   let locked = params.get("locked") === "1";
-  let saves: SaveInfo[] = [
-    { name: "default", size_kb: 412, played_at: iso(5), current: true, encrypted: locked },
-    { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false, encrypted: false },
-  ];
+  let saves: SaveInfo[] =
+    params.get("saves") === "0"
+      ? []
+      : [
+          { name: "default", size_kb: 412, played_at: iso(5), current: true, encrypted: locked },
+          { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false, encrypted: false },
+        ];
   /** Passwords of encrypted saves, and the ones entered in this session. */
   const passwords = new Map<string, string>(locked ? [["default", "hunter2"]] : []);
   const known = new Set<string>(locked ? [] : saves.map((s) => s.name));
@@ -505,10 +514,48 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     appStatus: () =>
       ok<AppStatus>({
         form: library ? "library" : "full",
-        corpus: { state: "loaded", name: "demo" },
+        corpus: corpusLoaded ? { state: "loaded", name: "demo" } : { state: "missing" },
         needs_setup: settings.user_name === null,
         locked,
+        save: openSave,
+        missing_save: openSave === null ? params.get("missing") : null,
+        home_dir: "/Users/demo/.dramatis",
+        saves_dir: "/Users/demo/.dramatis/saves",
       }),
+    setCorpus: (path) => {
+      const p = path.trim().replace(/^["']|["']$/g, "");
+      if (!p || p.includes("missing")) return fail({ code: "not_found" });
+      if (p.includes("newer")) return fail({ code: "invalid", field: "corpus_version" });
+      if (!p.endsWith(".folio")) return fail({ code: "invalid", field: "corpus" });
+      corpusLoaded = true;
+      return ok(null);
+    },
+    chooseCorpus: () => (params.get("dialog") === "1" ? ok<string | null>("/Users/demo/corpus/demo.folio") : fail({ code: "not_implemented" })),
+    logOut: () => {
+      openSave = null;
+      locked = false;
+      return ok(null);
+    },
+    setupEndpoint: (setup: EndpointSetup) => {
+      const word = (v: string) => v.trim() !== "" && !/\s/.test(v.trim());
+      if (!setup.name.trim()) return fail({ code: "invalid", field: "name" });
+      if (!/^https?:\/\/\S+$/.test(setup.base_url.trim())) return fail({ code: "invalid", field: "base_url" });
+      if (!word(setup.model)) return fail({ code: "invalid", field: "model" });
+      const host = setup.host_model?.trim() || null;
+      if (host && !word(host)) return fail({ code: "invalid", field: "host_model" });
+      const name = setup.name.trim();
+      const known = endpoints.profiles.find((p) => p.profile.name === name);
+      const ids = new Set([...(known?.profile.model?.map((m) => m.id) ?? []), setup.model.trim(), ...(host ? [host] : [])]);
+      const profile: Profile = { name, base_url: setup.base_url.trim(), wire_api: setup.wire_api, model: [...ids].map((id) => ({ id })) };
+      const has_key = Boolean(setup.key?.trim()) || (known?.has_key ?? false);
+      endpoints = {
+        ...endpoints,
+        profiles: [...endpoints.profiles.filter((p) => p.profile.name !== name), { profile, has_key }],
+        roles: { chat: { profile: name, model: setup.model.trim() }, host: host ? { profile: name, model: host } : null, tts: endpoints.roles?.tts ?? null },
+      };
+      library = false;
+      return ok(null);
+    },
     wording: () => ok({ entries: Object.values(localWording)[0] ?? {}, scene_marker: scene }),
     presence: async () => {
       const r = ok({ items: [...digestItems] });

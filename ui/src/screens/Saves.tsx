@@ -2,52 +2,43 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { settle, type Failure, type SaveInfo } from "../api";
 import { useT } from "../i18n";
 import { when } from "../lib/format";
-import { useActions, useApi, useDispatch } from "../store";
+import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { PasswordDialog } from "./Unlock";
 
-type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
+/** A folder's full path, selectable, with a button that copies it (there is no file manager to open from here). */
+export function FolderNote({ text, path }: { text: string; path: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  return (
+    <p className="folder-note muted small">
+      {text} <code className="raw">{path}</code>{" "}
+      <button
+        type="button"
+        className="link"
+        onClick={() => {
+          void Promise.resolve(navigator.clipboard?.writeText(path)).then(() => setCopied(true), () => setCopied(false));
+        }}
+      >
+        {t("saves.folder.copy")}
+      </button>
+      <span role="status">{copied ? ` ${t("saves.folder.copied")}` : ""}</span>
+    </p>
+  );
+}
+
+type Prompt = { title: string; submit: (password: string) => Promise<Failure | null> };
 
 /**
- * System drawer, third tab: the saves of this home. Opening another one reloads the
- * window, since every list on screen belongs to the world that was open.
+ * Open a save by name. An encrypted one not yet unlocked in this window asks for its
+ * password first; `onSwitched` runs once it is open, and the window reloads by default.
  */
-export function SavesPage({ onSwitched = () => window.location.reload() }: { onSwitched?: () => void }) {
+export function useOpenSave(onSwitched: () => void, refresh: () => Promise<void> = async () => undefined) {
   const t = useT();
   const api = useApi();
-  const actions = useActions();
   const dispatch = useDispatch();
-  const id = useId();
-  const [saves, setSaves] = useState<SaveInfo[] | null>(null);
-  const [ask, setAsk] = useState<Ask | null>(null);
-  const [name, setName] = useState("");
-  const [file, setFile] = useState("");
-  const [fresh, setFresh] = useState("");
-  const [source, setSource] = useState("");
-  const [importName, setImportName] = useState("");
-  const [note, setNote] = useState("");
-  const [prompt, setPrompt] = useState<{ title: string; submit: (password: string) => Promise<Failure | null> } | null>(null);
-
-  const refresh = useCallback(async () => {
-    const list = await actions.attempt(api.commands.saves());
-    if (list) setSaves(list);
-  }, [actions, api]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  /** Run a command; on success refresh the list and say what happened if there is a note. */
-  const run = async (p: ReturnType<typeof api.commands.saves> | Parameters<typeof actions.attempt>[0], done = "") => {
-    const r = await actions.attempt(p);
-    if (r === undefined) return false;
-    setNote(done);
-    await refresh();
-    return true;
-  };
-
-  /** Open another save. An encrypted one not yet unlocked in this window asks for its password first. */
+  const [prompt, setPrompt] = useState<Prompt | null>(null);
   const open = async (name: string) => {
     const r = await settle(api.commands.switchSave(name));
     if (r.ok) {
@@ -70,6 +61,50 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
     } else {
       dispatch({ type: "error", error: r.error });
     }
+  };
+  return { open, prompt, setPrompt };
+}
+
+type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
+
+/**
+ * System drawer, third tab: the saves of this home. Opening another one reloads the
+ * window, since every list on screen belongs to the world that was open.
+ */
+export function SavesPage({ onSwitched = () => window.location.reload() }: { onSwitched?: () => void }) {
+  const t = useT();
+  const api = useApi();
+  const actions = useActions();
+  const dispatch = useDispatch();
+  const id = useId();
+  const status = useStore((s) => s.status);
+  const [saves, setSaves] = useState<SaveInfo[] | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [name, setName] = useState("");
+  const [file, setFile] = useState("");
+  const [fresh, setFresh] = useState("");
+  const [source, setSource] = useState("");
+  const [importName, setImportName] = useState("");
+  const [note, setNote] = useState("");
+
+  const refresh = useCallback(async () => {
+    const list = await actions.attempt(api.commands.saves());
+    if (list) setSaves(list);
+  }, [actions, api]);
+
+  const { open, prompt, setPrompt } = useOpenSave(onSwitched, refresh);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  /** Run a command; on success refresh the list and say what happened if there is a note. */
+  const run = async (p: ReturnType<typeof api.commands.saves> | Parameters<typeof actions.attempt>[0], done = "") => {
+    const r = await actions.attempt(p);
+    if (r === undefined) return false;
+    setNote(done);
+    await refresh();
+    return true;
   };
 
   /** Import the file; an encrypted one asks for the password it was exported with. */
@@ -95,6 +130,15 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
     <section className="saves" aria-labelledby={`${id}-h`}>
       <h3 id={`${id}-h`}>{t("saves.title")}</h3>
       <p className="muted small">{t("saves.hint")}</p>
+      {status && <FolderNote text={t("saves.folder")} path={status.saves_dir} />}
+      {status?.save && (
+        <p className="row wrap">
+          <button type="button" className="ghost" onClick={() => void actions.logOut()}>
+            <Icon name="leave" size={16} /> {t("logout")}
+          </button>
+          <span className="muted small">{t("logout.hint")}</span>
+        </p>
+      )}
       {saves?.length === 0 && <p className="muted">{t("saves.empty")}</p>}
       <ul className="save-list">
         {saves?.map((s) => (

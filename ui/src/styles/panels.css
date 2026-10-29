@@ -764,3 +764,42 @@ button.wide {
   margin: 0;
   padding: var(--s-2) var(--s-4) 0;
 }
+
+/* ---- first run: corpus, save picker, model ---- */
+.setup {
+  overflow-y: auto;
+}
+.setup .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.setup .picker .card,
+.picker .card {
+  width: min(34rem, 100%);
+}
+.setup select,
+.underline-field select {
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  padding: var(--s-2) 0;
+}
+.picker .save {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.picker .stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.folder-note {
+  overflow-wrap: anywhere;
+}
+.center {
+  text-align: center;
+}

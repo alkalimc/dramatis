@@ -207,9 +207,21 @@ export function createActions(api: Api, store: Store) {
     return true;
   }
 
+  /**
+   * Close the open save and show the save list. What was loaded belonged to that world, so
+   * it goes; the status that follows says no save is open.
+   */
+  async function logOut() {
+    if ((await attempt(c.logOut())) === undefined) return false;
+    d({ type: "reset" });
+    await boot();
+    return true;
+  }
+
   return {
     attempt,
     boot,
+    logOut,
     presence,
     refreshStatus,
     refreshDigest,
