@@ -308,6 +308,9 @@ pub struct Show {
     term: Arc<Term>,
     bound: OnceLock<Bound>,
     state: Mutex<State>,
+    /// The newest message printed per channel since the session last took them, so what
+    /// the user has seen counts as read.
+    shown: Mutex<BTreeMap<ChannelId, MessageId>>,
 }
 
 impl Show {
@@ -316,7 +319,32 @@ impl Show {
             term,
             bound: OnceLock::new(),
             state: Mutex::new(State::default()),
+            shown: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    fn saw(&self, m: &Message) {
+        if m.author == Author::User {
+            return;
+        }
+        let mut shown = self.shown.lock().unwrap_or_else(|e| e.into_inner());
+        let newer = |a: &MessageId, b: &MessageId| match (a.0.parse::<i64>(), b.0.parse::<i64>()) {
+            (Ok(a), Ok(b)) => a > b,
+            _ => a > b,
+        };
+        match shown.get(&m.channel) {
+            Some(old) if !newer(&m.id, old) => {}
+            _ => {
+                shown.insert(m.channel.clone(), m.id.clone());
+            }
+        }
+    }
+
+    /// The newest message printed in each channel since the last call.
+    pub fn take_shown(&self) -> Vec<(ChannelId, MessageId)> {
+        std::mem::take(&mut *self.shown.lock().unwrap_or_else(|e| e.into_inner()))
+            .into_iter()
+            .collect()
     }
 
     pub fn bind(&self, names: Arc<Names>, marker: Marker) {
@@ -386,6 +414,7 @@ impl Show {
         let Some(b) = self.bound.get() else {
             return String::new();
         };
+        self.saw(m);
         let style = self.term.style;
         let mut out = String::new();
         for a in &m.actions {
@@ -468,6 +497,7 @@ impl Sink for Show {
                 if m.author == Author::User {
                     return;
                 }
+                self.saw(&m);
                 let streamed = st.named.as_ref() == Some(&m.id);
                 self.close(&mut st);
                 st.named = None;

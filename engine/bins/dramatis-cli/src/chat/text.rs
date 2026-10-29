@@ -15,7 +15,9 @@ anything else       send it to the current channel
 /resend [n]         take back your n-th last message (default 1) and everything after it,
                     and put its text back in the input line to edit and send again
 /sources [n]        list in full the sources of the n-th last reply that has any (default 1)
-/wrapup             end the current conversation and show the memories it wrote",
+/wrapup             end the current conversation and show the memories it wrote
+/read [all]         mark this conversation (or every one) read; what is printed here counts
+                    as read, in the app too",
     ),
     (
         "cli.help.channels",
@@ -24,7 +26,28 @@ anything else       send it to the current channel
 /talk <person>      open the direct channel with a person (id, name or alias)
 /group <p1> <p2>    start a group channel with several persons
 /host               switch to {host}'s channel
-/go <n>             take choice n from the list {host} just offered",
+/go <n>             take choice n from the list {host} just offered
+/chats [archived]   your conversations, newest first, with what is unread; /chat <n> opens one
+/rename [title]     title this conversation; no title returns to the members' names
+/members            who is in this group
+/archive, /unarchive  take this conversation out of the list, or put it back
+/leave              delete this group and what was said in it (asks first)",
+    ),
+    (
+        "cli.help.people",
+        "People and requests
+/who <person>       profile: mode, trust, last seen, requests done
+/mode [person] <enabled|frozen|disabled>
+                    enabled may speak first, frozen only answers, disabled is out of reach;
+                    without a person, this conversation's (a group has its own)
+/ask <person> <question>
+                    ask a person to look into something; \"quotes\" hold a name with spaces
+/requests           the requests made so far and whether they are done
+/clock              the date in the world and the local time
+/find <topic>       who knows about it, with a line from their material
+/waiting            who has something waiting for you
+/birthday [MM-DD|clear]
+                    show, set or clear your birthday",
     ),
     (
         "cli.help.memories",

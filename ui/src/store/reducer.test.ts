@@ -1,4 +1,4 @@
-import type { Message, Roster } from "../api";
+import type { ChannelSummary, Message, Roster } from "../api";
 import { reduce } from "./reducer";
 import { initialState, type State } from "./state";
 
@@ -267,7 +267,7 @@ test("pinning, marking unread and the temporary row", () => {
 });
 
 test("marking read clears the saved count in the list with the local one", () => {
-  const row = { id: "c1", kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 3 } as const;
+  const row = { id: "c1", kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 3 } satisfies ChannelSummary;
   let s = reduce(initialState(), { type: "channels", channels: [row, { ...row, id: "c2" }] });
   s = reduce(s, { type: "unread", channel: "c1", count: 0 });
   expect(s.channels.map((c) => c.unread)).toEqual([0, 3]);
