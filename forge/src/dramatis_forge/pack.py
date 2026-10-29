@@ -761,10 +761,22 @@ class DocAudit:
 
 @dataclass(frozen=True)
 class Publication:
-    """Who to contact about a published corpus. Declared once; the notice files read it."""
+    """Who made a published corpus and how to reach them. Declared once; the notice files
+    and the folio's `credits` read it."""
 
     issue_url: str = ""
     contact_email: str = ""
+    #: Who built the corpus, as it should be credited.
+    credit_by: str = ""
+    #: Where the builder can be found (a project page).
+    credit_url: str = ""
+    #: The terms the project's own part of the corpus is released under.
+    licence: str = ""
+
+    def credits(self) -> dict[str, str]:
+        """The folio's `credits`: only the fields that are set."""
+        return {k: v for k, v in (("by", self.credit_by), ("url", self.credit_url),
+                                  ("licence", self.licence)) if v}
 
 
 @dataclass(frozen=True)
