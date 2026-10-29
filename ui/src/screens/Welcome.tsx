@@ -150,7 +150,7 @@ export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void })
                     )}
                     <div className="muted small">
                       {t("saves.size", { kb: s.size_kb })}
-                      {s.played_at && <> · {t("saves.played", { when: when(s.played_at) })}</>}
+                      {s.played_at && <> · {t("saves.played", { when: when(s.played_at, t) })}</>}
                     </div>
                   </div>
                   <button type="button" onClick={() => void open(s.name)} aria-label={`${t("saves.switch")} ${s.name}`}>

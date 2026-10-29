@@ -14,14 +14,15 @@ export function authorName(a: Author, t: T, names: Names, userName: string | nul
   }
 }
 
-/** A short, locale-formatted "when" for timestamps: time today, else date. */
-export function when(iso: string, now: Date = new Date()): string {
+/** A short "when" for timestamps, in the wording's locale (not the browser's): time today, else date. */
+export function when(iso: string, t: T, now: Date = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
+  const locale = t("locale");
   const sameDay = d.toDateString() === now.toDateString();
   return sameDay
-    ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    ? d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 export function activityText(a: Activity, t: T): string {

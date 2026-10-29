@@ -15,6 +15,10 @@ export const en = {
   "person.noun_plural": "people",
   "org.name": "the team",
   "person.unknown": "Someone",
+  // The corpus language's own name, shown as the label of its choice in the language setting.
+  "lang.corpus": "Corpus language",
+  // BCP 47 tag the interface formats dates and numbers with; a -u-hc-h23 extension asks for a 24-hour clock.
+  "locale": "en",
 
   // ---- the host's fixed lines, shown without a model call ----
   "host.quota_exhausted": "The quota for now is used up. It frees up at {when}; until then the archive and search work as usual.",
@@ -335,6 +339,7 @@ export const en = {
   "settings.page.saves": "Saves",
   "settings.page.privacy": "Privacy and security",
   "settings.page.storage": "Advanced: data and storage",
+  "settings.page.language": "Language",
   "system.tab.endpoints": "Endpoints",
   "system.tab.saves": "Saves",
   "unlock.title": "Enter your password",
@@ -458,6 +463,7 @@ export const en = {
   "quiet.dnd": "Do not disturb",
   "quiet.from": "From",
   "quiet.to": "To",
+  "quiet.time.placeholder": "HH:MM",
   "quiet.notifications": "Notifications",
   "quiet.notifications.hint": "Only when someone has a reason to reach you while the window is closed.",
   "you.title": "You",
@@ -601,7 +607,12 @@ export const en = {
   "first.title": "Welcome to {org}",
   "first.name": "What should they call you?",
   "first.birthday": "Birthday (optional, you can skip this)",
+  "first.bio": "About you (optional, you can skip this)",
   "first.submit": "Continue",
+  "first.language": "Language",
+  "lang.english": "English",
+  "lang.hint": "The words of this app and of the terminal. The people keep speaking the corpus's language whichever you choose.",
+
   "coldstart.title": "You could start with them",
   "coldstart.frozen": "They are all frozen now: they answer when you reach out.",
   "coldstart.roster": "Anyone on the roster can be reached directly.",

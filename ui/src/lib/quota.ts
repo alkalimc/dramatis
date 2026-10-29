@@ -6,5 +6,5 @@ import { when } from "./format";
 export function quotaExhaustedLine(quota: QuotaStatus | null, t: T): string | null {
   if (!quota || quota.band !== "exhausted") return null;
   const at = quota.window?.release_at;
-  return t("host.quota_exhausted", { when: at ? when(at) : t("quota.release.unknown") });
+  return t("host.quota_exhausted", { when: at ? when(at, t) : t("quota.release.unknown") });
 }

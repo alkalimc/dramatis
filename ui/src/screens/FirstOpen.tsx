@@ -1,9 +1,11 @@
 import { useId, useState } from "react";
 import { useT } from "../i18n";
 import { useActions, useStore } from "../store";
+import { LanguageChoice } from "./Language";
+import { BIO_MAX } from "./Profile";
 import { birthday, NameAndBirthday } from "./Quota";
 
-/** First open: a name, an optional birthday, and straight into the app. */
+/** First open: the language, a name, an optional birthday and bio, and straight into the app. */
 export function FirstOpen() {
   const t = useT();
   const actions = useActions();
@@ -12,6 +14,7 @@ export function FirstOpen() {
   const [name, setName] = useState("");
   const [month, setMonth] = useState("");
   const [day, setDay] = useState("");
+  const [bio, setBio] = useState("");
   const [busy, setBusy] = useState(false);
 
   return (
@@ -20,13 +23,14 @@ export function FirstOpen() {
         className="card"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!name.trim() || !settings) return;
+          if (!name.trim() || !settings || Array.from(bio.trim()).length > BIO_MAX) return;
           setBusy(true);
-          await actions.saveSettings({ ...settings, user_name: name.trim(), birthday: birthday(month, day) });
+          await actions.saveSettings({ ...settings, user_name: name.trim(), birthday: birthday(month, day), bio: bio.trim() || null });
           setBusy(false);
         }}
       >
         <h1>{t("first.title")}</h1>
+        <LanguageChoice legend={t("first.language")} />
         <NameAndBirthday
           id={id}
           name={name}
@@ -38,8 +42,13 @@ export function FirstOpen() {
           nameLabel={t("first.name")}
           birthdayLabel={t("first.birthday")}
         />
+        <label htmlFor={`${id}-bio`}>{t("first.bio")}</label>
+        <textarea id={`${id}-bio`} rows={3} value={bio} onChange={(e) => setBio(e.target.value)} aria-describedby={`${id}-bio-hint`} />
+        <p id={`${id}-bio-hint`} className="muted small">
+          {t("profile.bio.hint")}
+        </p>
         <p className="row end">
-          <button type="submit" disabled={busy || !name.trim()}>
+          <button type="submit" disabled={busy || !name.trim() || Array.from(bio.trim()).length > BIO_MAX}>
             {t("first.submit")}
           </button>
         </p>

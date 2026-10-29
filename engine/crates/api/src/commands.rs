@@ -94,6 +94,11 @@ commands! {
     });
     /// The corpus's runtime phrasing.
     fn wording() -> Wording = Ok(Wording::default());
+    /// The interface language this home uses; `wording` already follows it.
+    fn interface_language() -> InterfaceLanguage = Ok(InterfaceLanguage::default());
+    /// Change the interface language for this home. The caller then reads `wording` again;
+    /// nothing restarts.
+    fn set_interface_language(language: InterfaceLanguage) -> ();
     /// The user opened the app or came back from idle. Returns the waiting panel at once
     /// (no model call). What the engine then says arrives as `MessageAdded` (streamed
     /// through `MessageDelta` first) in the host's channel: on the very first open with a

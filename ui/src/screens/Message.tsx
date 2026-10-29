@@ -288,7 +288,7 @@ export const MessageView = memo(function MessageView({
           </button>
         )}
       </span>
-      <time dateTime={message.at}>{when(message.at)}</time>
+      <time dateTime={message.at}>{when(message.at, t)}</time>
     </div>
   );
 

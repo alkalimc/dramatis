@@ -294,6 +294,64 @@ async fn status_clock_and_wording() {
 }
 
 #[tokio::test]
+async fn interface_language_is_the_homes_and_applies_at_once() {
+    let r = rig();
+    let e = &r.engine;
+    assert_eq!(
+        e.interface_language().await.unwrap(),
+        InterfaceLanguage::Corpus
+    );
+    assert_eq!(e.wording().await.unwrap().entries["user.you"], "Doc");
+    e.set_interface_language(InterfaceLanguage::English)
+        .await
+        .unwrap();
+    // Built-in defaults take over; the corpus's names stay.
+    let w = e.wording().await.unwrap();
+    assert!(!w.entries.contains_key("user.you"));
+    assert_eq!(w.entries["host.name"], "Host");
+    assert_eq!(
+        e.home.interface_language(),
+        Some(InterfaceLanguage::English)
+    );
+    e.set_interface_language(InterfaceLanguage::Corpus)
+        .await
+        .unwrap();
+    assert_eq!(e.wording().await.unwrap().entries["user.you"], "Doc");
+}
+
+#[test]
+fn english_keeps_names_and_model_facing_wording() {
+    let all: BTreeMap<String, String> = [
+        ("host.name", "H"),
+        ("org.name", "O"),
+        ("user.title", "Dr.{name}"),
+        ("lang.corpus", "L"),
+        ("gender.facet", "g"),
+        ("harness.x", "m"),
+        ("tool.search", "t"),
+        ("nav.chats", "c"),
+        ("host.role", "r"),
+        ("locale", "z"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+    let kept: Vec<_> = english_entries(&all).into_keys().collect();
+    assert_eq!(
+        kept,
+        [
+            "gender.facet",
+            "harness.x",
+            "host.name",
+            "lang.corpus",
+            "org.name",
+            "tool.search",
+            "user.title"
+        ]
+    );
+}
+
+#[tokio::test]
 async fn missing_and_refused_corpora_are_states_not_failures() {
     let home = temp_home();
     let e = Engine::open(home.clone(), None, Ports::default()).unwrap();

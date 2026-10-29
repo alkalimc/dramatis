@@ -20,7 +20,7 @@ export function errorText(e: Failure, t: T, names: Names): { text: string; detai
     case "disabled":
       return { text: t("error.disabled", { name: names[e.person] ?? t("person.unknown") }) };
     case "quota_exhausted":
-      return { text: t("error.quota_exhausted", { when: when(e.release_at) }) };
+      return { text: t("error.quota_exhausted", { when: when(e.release_at, t) }) };
     case "endpoint":
     case "keychain":
     case "io":

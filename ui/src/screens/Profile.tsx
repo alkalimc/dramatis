@@ -60,7 +60,8 @@ export function useCurrentSave(): string | null {
   return name;
 }
 
-const monthDay = (b: { month: number; day: number }) => new Date(2000, b.month - 1, b.day).toLocaleDateString(undefined, { month: "long", day: "numeric" });
+const monthDay = (t: ReturnType<typeof useT>, b: { month: number; day: number }) =>
+  new Date(2000, b.month - 1, b.day).toLocaleDateString(t("locale"), { month: "long", day: "numeric" });
 
 /** The line under the name: the in-world title, when the name is set. */
 export function statusLine(t: ReturnType<typeof useT>, name: string | null): string | null {
@@ -115,7 +116,7 @@ export function ProfileCard({ mode }: { mode: "view" | "edit" }) {
           </div>
           <div className="pc-rows">
             <InfoRow icon="profile" value={settings.user_name?.trim() || t("user.you")} label={t("profile.name")} />
-            <InfoRow icon="calendar" value={settings.birthday ? monthDay(settings.birthday) : t("profile.birthday.none")} label={t("profile.birthday")} />
+            <InfoRow icon="calendar" value={settings.birthday ? monthDay(t, settings.birthday) : t("profile.birthday.none")} label={t("profile.birthday")} />
             {save && <InfoRow icon="bookmark" value={save} label={t("profile.save")} />}
           </div>
         </>
@@ -229,7 +230,7 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
             <input id={`${id}-name`} value={name} required autoFocus autoComplete="nickname" onChange={(e) => setName(e.target.value)} />
           </div>
         )}
-        <InfoRow icon="calendar" value={when ? monthDay(when) : t("profile.birthday.none")} label={t("profile.birthday")} onClick={() => toggle("birthday")} open={editing === "birthday"} />
+        <InfoRow icon="calendar" value={when ? monthDay(t, when) : t("profile.birthday.none")} label={t("profile.birthday")} onClick={() => toggle("birthday")} open={editing === "birthday"} />
         {editing === "birthday" && (
           <div className="pc-field pc-birthday">
             <label>

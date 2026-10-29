@@ -11,6 +11,13 @@ export const commands = {
 	appStatus: () => typedError<AppStatus, ApiError>(__TAURI_INVOKE("app_status")),
 	/**  The corpus's runtime phrasing. */
 	wording: () => typedError<Wording, ApiError>(__TAURI_INVOKE("wording")),
+	/**  The interface language this home uses; `wording` already follows it. */
+	interfaceLanguage: () => typedError<InterfaceLanguage, ApiError>(__TAURI_INVOKE("interface_language")),
+	/**
+	 *  Change the interface language for this home. The caller then reads `wording` again;
+	 *  nothing restarts.
+	 */
+	setInterfaceLanguage: (language: InterfaceLanguage) => typedError<null, ApiError>(__TAURI_INVOKE("set_interface_language", { language })),
 	/**
 	 *  The user opened the app or came back from idle. Returns the waiting panel at once
 	 *  (no model call). What the engine then says arrives as `MessageAdded` (streamed
@@ -541,6 +548,17 @@ export type InWorldDate = {
 	month: number,
 	day: number,
 };
+
+/**
+ *  Which words the interface speaks. The person's choice, kept in the home, so the app and
+ *  the terminal agree. Model-facing text is not affected: characters keep speaking the
+ *  corpus's language.
+ */
+export type InterfaceLanguage = 
+/**  The corpus's own wording (its language). */
+"corpus" | 
+/**  The built-in English defaults; only the corpus's names and its model-facing text stay. */
+"english";
 
 /**  A file on this machine the UI may display or play (avatar, note, audio, attachment). */
 export type MediaFile = {
