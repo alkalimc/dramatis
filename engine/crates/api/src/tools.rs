@@ -160,8 +160,9 @@ pub struct Hurt {
 #[serde(deny_unknown_fields)]
 pub struct Digest {}
 
-/// Find people who know about something. The user is shown a way to talk to them; you
-/// cannot move the user yourself.
+/// Find people who know about a subject. When the subject is one person (a name, an alias,
+/// or a description that fits one person on the roster) only that person is offered. The
+/// user is shown a way to talk to them; you cannot move the user yourself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindPeople {
@@ -183,12 +184,13 @@ pub struct Ask {
     pub turns: Option<u32>,
 }
 
-/// Start a group conversation. The result gives the group id, and the user is shown a way
-/// to open it; you cannot move the user yourself.
+/// Start a group conversation among two or more people. One person is never a group: the
+/// user is then only shown a way to talk to them. The result gives the group id when one
+/// was made, and the user is shown a way to open it; you cannot move the user yourself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateGroup {
-    /// Roster ids.
+    /// Roster ids, two or more.
     #[schemars(length(min = 1))]
     pub members: Vec<String>,
     /// Why the group exists, in one short line (about sixty characters), for example

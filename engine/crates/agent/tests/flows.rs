@@ -3190,12 +3190,76 @@ async fn a_new_save_opens_with_the_hosts_welcome_once_and_without_a_model_call()
         .await
         .unwrap();
     let first = body_text(&e.fake.bodies()[0]);
-    assert!(
-        first.contains("You can talk to anyone here with /talk"),
-        "{first}"
-    );
+    assert!(first.contains("I am Hostess. Try /talk"), "{first}");
     assert!(
         first.contains("You assist Doc."),
         "the host's manner is in its own session"
     );
+}
+
+#[tokio::test]
+async fn pre_written_host_lines_have_no_unfilled_placeholder() {
+    let e = env(WireApi::Responses);
+    assert!(e.agent.presence(true).await.unwrap().host_spoke);
+    let lines: Vec<String> = e.agent.with_world(|w| {
+        let host = channel::host(w).unwrap();
+        world::message::history(w, host, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.text)
+            .collect()
+    });
+    assert!(!lines.is_empty());
+    for line in &lines {
+        assert!(line.contains("Hostess"), "{line}");
+        assert!(!line.contains('{') && !line.contains('}'), "{line}");
+    }
+}
+
+#[tokio::test]
+async fn one_named_person_is_a_talk_offer_never_a_group() {
+    use agent::Event;
+    use api::views::ToolAction;
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        call("create_group", json!({"members": ["ann", "ann"]})),
+        call("find_people", json!({"topic": "ANN"})),
+        say("Ann can be reached from the offer."),
+    ]);
+    e.agent.send(host, "find ann", None).await.unwrap();
+    let actions: Vec<ToolAction> = e
+        .sink
+        .take()
+        .into_iter()
+        .filter_map(|ev| match ev {
+            Event::ToolCalled(t) => Some(t.action),
+            _ => None,
+        })
+        .collect();
+    let offers = actions
+        .iter()
+        .filter(|a| {
+            matches!(a, ToolAction::FindPeople { topic, persons }
+                if topic.is_empty() && persons.len() == 1 && persons[0].id.0 == "ann")
+        })
+        .count();
+    assert_eq!(offers, 2, "{actions:?}");
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, ToolAction::CreateGroup { .. })),
+        "{actions:?}"
+    );
+    let groups: i64 = e.agent.with_world(|w| {
+        w.query_row(
+            "SELECT COUNT(*) FROM channel WHERE kind = 'group'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    });
+    assert_eq!(groups, 0);
+    let said = log_bytes(&e.agent, host);
+    assert!(said.contains("No group exists"), "{said}");
 }

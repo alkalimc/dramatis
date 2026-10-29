@@ -390,11 +390,7 @@ impl Agent {
         }
         let frames: Vec<&str> = w.get("host.event.frame").split('|').collect();
         let frame = frames[id as usize % frames.len()].trim();
-        let line = names
-            .sub(frame)
-            .replace("{user}", names.user())
-            .replace("{title}", &title)
-            .replace("{text}", &text);
+        let line = w.fill_text(frame, &names, &[("title", &title), ("text", &text)]);
         let calls =
             serde_json::to_value(&actions).map_err(|e| world::Error::Invalid(e.to_string()))?;
         let conn = self.db();

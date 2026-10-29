@@ -384,6 +384,11 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.found_for",
         "{name} suggested you could help {user} with: {topic}",
     ),
+    (
+        "harness.talk_offered",
+        "{user} is shown a way to open a chat with {name} ({id}). No group exists and nothing \
+         has happened yet; the chat opens only if {user} takes it.",
+    ),
     ("harness.remembered", "Noted."),
 ];
 
@@ -410,11 +415,19 @@ impl Wording {
             .unwrap_or(key)
     }
 
-    /// `get` with `{field}` placeholders filled, `{user}` included. The template's own
-    /// name placeholders are replaced before the fields go in, so a field (a question the
-    /// user typed) reaches the model exactly as written.
+    /// `get` with `{field}` placeholders filled, `{user}` and `{host}` included. The
+    /// template's own name placeholders are replaced before the fields go in, so a field (a
+    /// question the user typed) reaches the model exactly as written.
     pub fn fill(&self, key: &str, names: &Names, fields: &[(&str, &str)]) -> String {
-        let mut out = names.sub(self.get(key)).replace("{user}", names.user());
+        self.fill_text(self.get(key), names, fields)
+    }
+
+    /// [`Wording::fill`] for a template already in hand (one variant of several).
+    pub fn fill_text(&self, template: &str, names: &Names, fields: &[(&str, &str)]) -> String {
+        let mut out = names
+            .sub(template)
+            .replace("{user}", names.user())
+            .replace("{host}", self.get("host.name"));
         for (k, v) in fields {
             out = out.replace(&format!("{{{k}}}"), v);
         }
@@ -521,5 +534,16 @@ mod tests {
             "Today is Rhea's birthday."
         );
         assert_eq!(w.get("no.such.key"), "no.such.key");
+    }
+
+    #[test]
+    fn the_host_name_fills_wherever_the_template_comes_from() {
+        let w = wording(&[("host.name", "Hostess"), ("a", "I am {host}, hi <U>.")]);
+        let n = Names::new("<U>", Some("Rhea"), &w);
+        assert_eq!(w.fill("a", &n, &[]), "I am Hostess, hi Rhea.");
+        assert_eq!(
+            w.fill_text("{host}|{t}", &n, &[("t", "{host}")]),
+            "Hostess|{host}"
+        );
     }
 }

@@ -157,6 +157,7 @@ export const en = {
   "action.report": "reporting back",
   "action.digest": "checking what's new",
   "action.find_people": "finding who knows \"{topic}\"",
+  "action.talk_offer": "offering a chat with {names}",
   "action.ask": "asking {name}: {question}",
   "action.create_group": "starting a group with {names}",
   "action.suggest_group": "suggesting a group with {names}",
