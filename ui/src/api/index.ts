@@ -68,6 +68,7 @@ const CODES: Record<gen.ApiError["code"], true> = {
   io: true,
   busy: true,
   exists: true,
+  open_elsewhere: true,
   locked: true,
   wrong_password: true,
 };

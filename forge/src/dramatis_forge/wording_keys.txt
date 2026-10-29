@@ -67,6 +67,10 @@ cases.other
 cases.pin
 cases.pinned
 cases.title
+changed.body
+changed.pick
+changed.reopen
+changed.title
 channel.delete
 channel.delete.confirm
 channel.earlier
@@ -115,6 +119,7 @@ cli.action.forget
 cli.action.join
 cli.action.list_channels
 cli.action.wrapup
+cli.answer.again
 cli.answer.no
 cli.answer.yes
 cli.archive.host
@@ -263,6 +268,7 @@ cli.save.bad_file
 cli.save.bad_name
 cli.save.bad_password
 cli.save.busy
+cli.save.changed
 cli.save.copied
 cli.save.created
 cli.save.encrypted
@@ -271,6 +277,7 @@ cli.save.imported
 cli.save.locked
 cli.save.logged_out
 cli.save.not_found
+cli.save.open_elsewhere
 cli.save.playing
 cli.save.renamed
 cli.save.wrong_password
@@ -476,6 +483,7 @@ error.no_endpoint
 error.no_persona
 error.not_found
 error.not_implemented
+error.open_elsewhere
 error.quota_exhausted
 error.turn.cancelled
 error.turn.error

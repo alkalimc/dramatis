@@ -38,6 +38,10 @@ pub enum ApiError {
     /// `unlock`.
     #[error("locked")]
     Locked,
+    /// The save is open in another window or process, so a step that would rewrite, move
+    /// or delete its file waits until it is closed there.
+    #[error("open elsewhere")]
+    OpenElsewhere,
     /// A password was given and does not open the save.
     #[error("wrong password")]
     WrongPassword,

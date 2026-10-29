@@ -19,6 +19,7 @@ use world::World;
 use super::{Engine, io};
 use crate::convert::world_err;
 use crate::error::{ApiError, ApiResult};
+use crate::lock::{self, SaveLock};
 use crate::saves;
 use crate::views::SaveInfo;
 
@@ -50,6 +51,28 @@ impl Engine {
         };
     }
 
+    /// Be the only process with save `name` open, for a step that rewrites, moves or
+    /// deletes its file. `ours`: this process has it open, and lets its own hold go for the
+    /// moment (a process conflicts with itself); it is back if the lock is refused.
+    fn exclusive(&self, name: &str, ours: bool) -> ApiResult<SaveLock> {
+        let path = self.home.save_path(name);
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        let mine = if ours { held.take() } else { None };
+        let opened = mine.as_ref().and_then(SaveLock::opened);
+        // Dropped before asking, or this process is the one that refuses.
+        drop(mine);
+        SaveLock::exclusive(&path).inspect_err(|_| {
+            if ours {
+                *held = SaveLock::shared(&path).ok().map(|l| l.with_opened(opened));
+            }
+        })
+    }
+
+    /// Lock the open save shared again after a step that held it exclusively.
+    fn settle(&self, exclusive: SaveLock) {
+        *self.held.lock().unwrap_or_else(|e| e.into_inner()) = exclusive.downgrade().ok();
+    }
+
     pub(crate) fn saves_impl(&self) -> Vec<SaveInfo> {
         saves::list(&self.home, &self.open_save(), self.now())
     }
@@ -57,21 +80,52 @@ impl Engine {
     pub(crate) fn switch_save_impl(&self, name: &str) -> ApiResult<()> {
         let path = saves::path_of(&self.home, name)?;
         let mut open = self.save.lock().unwrap_or_else(|e| e.into_inner());
-        if open.as_str() == name {
+        // The open save, found changed by another process, is opened again by its name.
+        let reopening = open.as_str() == name && self.elsewhere.load(Ordering::Relaxed);
+        if open.as_str() == name && !reopening {
             return Ok(());
         }
         if !self.ports.agent.idle() {
             return Err(ApiError::Busy);
         }
+        // Held before the file is read, and kept only if the save opens (or is the one
+        // already open): the lock of the save being left stays until then.
+        let lock = {
+            let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+            if reopening {
+                held.take();
+            }
+            SaveLock::shared(&path)?
+        };
         // Opened (and migrated) before anything changes: a file that will not open, or
         // that wants a password not yet entered (`Locked`), leaves the current world as it was.
-        let key = self.password_of(name);
-        let next = World::open_with(&path, key.as_deref()).map_err(world_err)?;
+        let key = self
+            .password_of(name)
+            .filter(|_| world::cipher::is_encrypted(&path));
+        let next = match World::open_with(&path, key.as_deref()) {
+            Ok(w) => w,
+            Err(world::Error::Locked) if reopening => {
+                // Encrypted now, under a password not known here: ask for it.
+                self.remember(name, None);
+                self.locked.store(true, Ordering::Relaxed);
+                self.elsewhere.store(false, Ordering::Relaxed);
+                *self.held.lock().unwrap_or_else(|e| e.into_inner()) = Some(lock);
+                return Ok(());
+            }
+            Err(e) => {
+                if reopening {
+                    *self.held.lock().unwrap_or_else(|e| e.into_inner()) = Some(lock);
+                }
+                return Err(world_err(e));
+            }
+        };
         self.home.set_current_save(name).map_err(io)?;
         *self.missing_save.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.w() = next;
         self.locked.store(false, Ordering::Relaxed);
+        self.elsewhere.store(false, Ordering::Relaxed);
         self.ports.agent.switch_world(&path, key.as_deref());
+        *self.held.lock().unwrap_or_else(|e| e.into_inner()) = Some(lock);
         *open = name.to_owned();
         Ok(())
     }
@@ -88,6 +142,8 @@ impl Engine {
             return Err(ApiError::Busy);
         }
         self.home.clear_current_save().map_err(io)?;
+        self.held.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.elsewhere.store(false, Ordering::Relaxed);
         // The connection is dropped so the file is settled and free for other processes.
         *self.w() = World::in_memory().map_err(world_err)?;
         self.locked.store(false, Ordering::Relaxed);
@@ -136,13 +192,29 @@ impl Engine {
         if open.is_empty() {
             return Err(ApiError::NotFound);
         }
-        if self.locked.load(Ordering::Relaxed) {
+        if self.locked.load(Ordering::Relaxed) || self.elsewhere.load(Ordering::Relaxed) {
             return Err(ApiError::Locked);
         }
         if !self.ports.agent.idle() {
             return Err(ApiError::Busy);
         }
-        let path = self.home.save_path(&open);
+        // The file is replaced, so no other process may have it open.
+        let exclusive = self.exclusive(&open, true)?;
+        let done = self.rewrite_password(&open, old, new);
+        self.settle(exclusive);
+        done
+    }
+
+    fn rewrite_password(
+        &self,
+        open: &str,
+        old: Option<String>,
+        new: Option<String>,
+    ) -> ApiResult<()> {
+        let invalid = |field: &str| ApiError::Invalid {
+            field: field.into(),
+        };
+        let path = self.home.save_path(open);
         // Whether `old` is expected is a fact of the file, not the caller's say.
         if world::cipher::is_encrypted(&path) != old.is_some() {
             return Err(invalid("old"));
@@ -163,7 +235,7 @@ impl Engine {
         let key = if done.is_ok() {
             new.clone()
         } else {
-            self.password_of(&open)
+            self.password_of(open)
         };
         let reopened = World::open_with(&path, key.as_deref()).map_err(world_err);
         match reopened {
@@ -173,7 +245,7 @@ impl Engine {
                 // it stays locked until the save opens again.
                 self.locked.store(true, Ordering::Relaxed);
                 if done.is_ok() {
-                    self.remember(&open, new.as_deref());
+                    self.remember(open, new.as_deref());
                     return Err(e);
                 }
             }
@@ -183,7 +255,7 @@ impl Engine {
             world::Error::Locked => ApiError::WrongPassword,
             other => world_err(other),
         })?;
-        self.remember(&open, new.as_deref());
+        self.remember(open, new.as_deref());
         self.ports.agent.switch_world(&path, new.as_deref());
         Ok(())
     }
@@ -191,14 +263,34 @@ impl Engine {
     pub(crate) fn rename_save_impl(&self, from: &str, to: &str) -> ApiResult<()> {
         let mut open = self.save.lock().unwrap_or_else(|e| e.into_inner());
         if open.as_str() != from {
-            saves::rename(&self.home, from, to)?;
-            self.move_password(from, to);
-            return Ok(());
+            saves::path_of(&self.home, from)?;
+            let exclusive = self.exclusive(from, false)?;
+            let moved = saves::rename(&self.home, from, to);
+            drop(exclusive);
+            if moved.is_ok() {
+                lock::forget(&self.home.save_path(from));
+                self.move_password(from, to);
+            }
+            return moved;
         }
         saves::path_of(&self.home, from)?;
         if !self.ports.agent.idle() {
             return Err(ApiError::Busy);
         }
+        let exclusive = self.exclusive(from, true)?;
+        let moved = self.rename_open(&mut open, from, to);
+        if moved.is_ok() {
+            drop(exclusive);
+            lock::forget(&self.home.save_path(from));
+            *self.held.lock().unwrap_or_else(|e| e.into_inner()) =
+                SaveLock::shared(&self.home.save_path(to)).ok();
+        } else {
+            self.settle(exclusive);
+        }
+        moved
+    }
+
+    fn rename_open(&self, open: &mut String, from: &str, to: &str) -> ApiResult<()> {
         // The open connection is dropped first so its journal is settled and the file can
         // move whole.
         let key = self.password_of(from);
@@ -262,9 +354,15 @@ impl Engine {
                 field: "name".into(),
             });
         }
-        saves::delete(&self.home, name)?;
-        self.remember(name, None);
-        Ok(())
+        saves::path_of(&self.home, name)?;
+        let exclusive = self.exclusive(name, false)?;
+        let deleted = saves::delete(&self.home, name);
+        drop(exclusive);
+        if deleted.is_ok() {
+            lock::forget(&self.home.save_path(name));
+            self.remember(name, None);
+        }
+        deleted
     }
 
     pub(crate) fn export_save_impl(&self, name: &str, path: &str) -> ApiResult<()> {

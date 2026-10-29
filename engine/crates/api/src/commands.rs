@@ -87,6 +87,7 @@ commands! {
         corpus: CorpusState::Missing,
         needs_setup: true,
         locked: false,
+        changed_elsewhere: false,
         save: None,
         missing_save: None,
         home_dir: String::new(),

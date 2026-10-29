@@ -1820,10 +1820,11 @@ async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_pa
     );
     name_user(e, "Bea").await;
 
-    // Nothing but the one file; its words are not readable.
+    // Nothing but the one file (and its lock); its words are not readable.
     let names: Vec<_> = std::fs::read_dir(e.home.saves())
         .unwrap()
         .map(|f| f.unwrap().file_name())
+        .filter(|n| !n.to_string_lossy().ends_with(".lock"))
         .collect();
     assert_eq!(names.len(), 1, "{names:?}");
     assert!(
@@ -1869,7 +1870,9 @@ async fn encryption_turns_on_changes_and_off_and_a_locked_start_waits_for_the_pa
         Err(ApiError::Locked)
     );
 
-    // Change it: the old one stops working, and the old one is asked for.
+    // Change it: the old one stops working, and the old one is asked for. (Another
+    // process with the save open would refuse the rewrite, so they leave first.)
+    drop((locked, wrong));
     assert_eq!(
         e.set_password(Some("bad".into()), Some("two".into())).await,
         Err(ApiError::WrongPassword)
@@ -2389,4 +2392,134 @@ async fn storage_usage_counts_each_kind_and_clearing_touches_only_caches() {
     assert_eq!(of(&after, StorageKind::Corpus).kb, 9);
     assert_eq!(after.pictures, 1, "pictures inside the save stay");
     assert!(home.world().unwrap().is_file() && home.root().join("pack.folio").is_file());
+}
+
+#[tokio::test]
+async fn rewriting_a_save_is_refused_while_another_process_has_it_open() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+    let file = e.home.save_path("default");
+    let other = reopen(&r, None);
+
+    // Encrypting, re-keying and decrypting replace the file; so do rename and delete.
+    assert_eq!(
+        e.set_password(None, Some("one".into())).await,
+        Err(ApiError::OpenElsewhere)
+    );
+    assert!(!world::cipher::is_encrypted(&file));
+    assert_eq!(
+        e.rename_save("default".into(), "moved".into()).await,
+        Err(ApiError::OpenElsewhere)
+    );
+    assert!(file.is_file());
+    crate::saves::create(&e.home, "spare").unwrap();
+    let spare = other.save.lock().unwrap().clone();
+    assert_eq!(spare, "default");
+    other.switch_save("spare".into()).await.unwrap();
+    assert_eq!(
+        e.delete_save("spare".into()).await,
+        Err(ApiError::OpenElsewhere)
+    );
+    // The refusal leaves this process's own hold and detection as they were.
+    assert!(!e.check_open_file());
+    // Once the other has left the save, the step goes through.
+    e.set_password(None, Some("one".into())).await.unwrap();
+    assert!(world::cipher::is_encrypted(&file));
+    assert!(!e.check_open_file());
+    // And now the other cannot take the save back while it is being rewritten, but can
+    // after: the shared hold is back once the step ends.
+    assert_eq!(
+        e.set_password(Some("one".into()), Some("two".into())).await,
+        Ok(())
+    );
+    other.unlock("default".into(), "two".into()).await.unwrap();
+    other.switch_save("default".into()).await.unwrap();
+    assert_eq!(
+        e.set_password(Some("two".into()), None).await,
+        Err(ApiError::OpenElsewhere)
+    );
+    drop(other);
+    e.set_password(Some("two".into()), None).await.unwrap();
+    assert!(!world::cipher::is_encrypted(&file));
+    e.delete_save("spare".into()).await.unwrap();
+    assert!(!e.home.save_path("spare").exists());
+    assert!(!crate::lock::lock_path(&e.home.save_path("spare")).exists());
+}
+
+#[tokio::test]
+async fn a_save_replaced_by_another_process_is_noticed_and_never_written_again() {
+    let r = rig();
+    let e = &r.engine;
+    name_user(e, "Ada").await;
+    let file = e.home.save_path("default");
+    assert!(!e.check_open_file());
+    assert!(!e.app_status().await.unwrap().changed_elsewhere);
+
+    // A process that ignores the lock encrypts the save by swapping a new file in.
+    let part = e.home.saves().join("swap.part");
+    std::fs::copy(&file, &part).unwrap();
+    world::cipher::encrypt(&part, "secret").unwrap();
+    std::fs::rename(&part, &file).unwrap();
+    r.events.take();
+
+    assert_eq!(e.poll_external().unwrap(), 0);
+    let status = e.app_status().await.unwrap();
+    assert!(status.changed_elsewhere && !status.locked);
+    assert!(
+        r.events.take().iter().any(
+            |ev| matches!(ev, Event::WorldChanged(w) if w.changes.contains(&WorldChange::Save))
+        )
+    );
+    // Announced once, and what is written now does not reach the file.
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(r.events.take().is_empty());
+    let before = std::fs::read(&file).unwrap();
+    let _ = e
+        .update_settings(Settings {
+            user_name: Some("Eve".into()),
+            ..e.settings().await.unwrap()
+        })
+        .await;
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(
+        e.set_password(None, Some("x".into())).await,
+        Err(ApiError::Locked)
+    );
+
+    // Reopening finds it encrypted and asks for the password; the lock is held again.
+    e.switch_save("default".into()).await.unwrap();
+    let status = e.app_status().await.unwrap();
+    assert!(status.locked && !status.changed_elsewhere);
+    e.unlock("default".into(), "secret".into()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().user_name.as_deref(),
+        Some("Ada")
+    );
+    assert_eq!(
+        reopen(&r, Some("secret"))
+            .rename_save("default".into(), "x".into())
+            .await,
+        Err(ApiError::OpenElsewhere)
+    );
+}
+
+#[tokio::test]
+async fn a_renamed_or_deleted_save_is_noticed_too() {
+    let r = rig();
+    let e = &r.engine;
+    let file = e.home.save_path("default");
+    std::fs::rename(&file, e.home.save_path("elsewhere")).unwrap();
+    assert!(e.check_open_file());
+    // Gone: reopening says so, and the other saves stay available.
+    assert_eq!(
+        e.switch_save("default".into()).await,
+        Err(ApiError::NotFound)
+    );
+    crate::saves::create(&e.home, "spare").unwrap();
+    e.switch_save("spare".into()).await.unwrap();
+    assert!(!e.app_status().await.unwrap().changed_elsewhere);
+    assert!(!e.check_open_file());
+    std::fs::remove_file(e.home.save_path("spare")).unwrap();
+    assert!(e.check_open_file());
 }

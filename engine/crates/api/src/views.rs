@@ -22,6 +22,10 @@ pub struct AppStatus {
     /// The open save is encrypted and not unlocked: only `unlock` (or switching to another
     /// save) works until then.
     pub locked: bool,
+    /// The open save's file was replaced, renamed, deleted or encrypted by another window
+    /// or process, so this one stopped using it: only `switch_save` to the same name
+    /// (reopen) or another save works until then.
+    pub changed_elsewhere: bool,
     /// The save this process has open. `None`: none (first run, the last one is gone, or
     /// the user logged out), so the save picker shows.
     pub save: Option<String>,

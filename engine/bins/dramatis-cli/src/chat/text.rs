@@ -137,6 +137,7 @@ line is one message.",
     ("cli.error", "error: {text}"),
     ("cli.cancelled", "cancelled"),
     ("cli.answer.yes", "y|yes"),
+    ("cli.answer.again", "answer y or n"),
     ("cli.prompt.save", "save>"),
     ("cli.prompt.library", "library"),
     ("cli.unknown_command", "unknown command /{name}; try /help"),
@@ -353,6 +354,14 @@ line is one message.",
     (
         "cli.save.busy",
         "a reply is still being written; try again when it ends",
+    ),
+    (
+        "cli.save.open_elsewhere",
+        "this save is open in another window; close it there first",
+    ),
+    (
+        "cli.save.changed",
+        "this save was changed in another window, so this one stopped using it",
     ),
     ("cli.save.exists", "a save with that name already exists"),
     (

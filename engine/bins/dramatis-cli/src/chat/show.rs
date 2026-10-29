@@ -343,6 +343,10 @@ impl Names {
             ApiError::NotFound => self.word("error.not_found", &e.to_string()),
             ApiError::NoEndpoint => self.word("error.no_endpoint", &e.to_string()),
             ApiError::Busy => self.word("error.busy", &e.to_string()),
+            ApiError::OpenElsewhere => self.word(
+                "error.open_elsewhere",
+                "this save is open in another window; close it there first",
+            ),
             ApiError::Exists => self.word("error.exists", &e.to_string()),
             ApiError::Locked => self.word("error.locked", &e.to_string()),
             ApiError::WrongPassword => self.word("error.wrong_password", &e.to_string()),

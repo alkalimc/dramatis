@@ -22,6 +22,7 @@ pub mod engine;
 pub mod error;
 pub mod events;
 pub mod home;
+mod lock;
 pub mod media;
 pub mod meta;
 pub mod params;
