@@ -264,7 +264,8 @@ that embeds the UI (`--features custom-protocol`, which `pnpm tauri build` enabl
 
 The app follows a chat client's layout: a conversation list on the left (search, pinned and
 archived conversations, unread counts, a right-click menu per row) and the conversation on the
-right, with a side panel for a person's or a group's profile. You can set your own name, birthday,
+right, with a side panel for a person's or a group's profile; a person's name or avatar in a chat
+opens their page as a card over the conversation. You can set your own name, birthday,
 bio and avatar, give a group a name and an avatar, paste pictures into the input line, and open a
 reply's sources to see the original passage and its page. Enter inserts a new line and Cmd-Enter
 sends. Saves are managed on the saves page (new, switch, copy, rename, delete, export) and the password
