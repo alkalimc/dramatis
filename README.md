@@ -26,8 +26,9 @@ export DRAMATIS_PACK=<name>                # or pass --pack <name> to every comm
 make test lint                             # pytest + ruff on a synthetic toy pack
 ```
 
-Artifacts are written outside the repository, to `<workspace>/artifacts/<pack>/` (override
-with `DRAMATIS_FORGE_HOME` or `--home`).
+Artifacts are written outside this repository, to `<workspace>/dramatis-artifacts/<pack>/`
+(override with `DRAMATIS_FORGE_HOME` or `--home`). That folder can be its own repository,
+for example a dataset repository with large files in Git LFS.
 
 ## Two commands
 
@@ -71,7 +72,7 @@ written three ways: as fetched, as records, as archived text. Read it, then:
 Generation uses the `persona` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another
 file); there is no fallback to `chat`, a missing role is an error. Models billed per request run 3 calls at once by default (`--jobs`); on HTTP 429 every
 worker waits together. A persona that fails a gate is not written. Reports go to
-`<workspace>/artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
+`<workspace>/dramatis-artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
 cached under `persona/raw/`; rebuilding the folio drops the personas, and running
 `./forge persona` again restores them from that cache with no model calls.
 
@@ -102,11 +103,11 @@ All generated; do not edit them.
 
 ```sh
 cd engine && cargo build --release
-export DRAMATIS_FOLIO=/path/to/artifacts/<pack>/<pack>.folio
+export DRAMATIS_FOLIO=/path/to/dramatis-artifacts/<pack>/<pack>.folio
 ./target/release/dramatis-cli inspect
 ./target/release/dramatis-cli search "<query>" --top-k 6
-./target/release/dramatis-cli evaluate --suite ../artifacts/<pack>/evals/structural.queries.jsonl \
-    --markdown ../artifacts/<pack>/reports/RESULTS.md
+./target/release/dramatis-cli evaluate --suite ../dramatis-artifacts/<pack>/evals/structural.queries.jsonl \
+    --markdown ../dramatis-artifacts/<pack>/reports/RESULTS.md
 ./target/release/dramatis-cli bench
 ```
 

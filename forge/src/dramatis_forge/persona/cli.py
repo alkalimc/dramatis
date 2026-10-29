@@ -22,7 +22,7 @@ def register(app: typer.Typer, *, resolve: Callable[[str, Path | None], tuple[Pa
         pack: Annotated[str, typer.Option("--pack", "-p",
                                           help="Pack to use (or set DRAMATIS_PACK).")] = "",
         home: Annotated[Path | None, typer.Option(
-            "--home", help="Artifact root (default: <workspace>/artifacts).")] = None,
+            "--home", help="Artifact root (default: <workspace>/dramatis-artifacts).")] = None,
         probe: Annotated[bool, typer.Option(
             "--probe", help="Only the probe set: thickest three, thinnest two.")] = False,
         only: Annotated[list[str] | None, typer.Option(

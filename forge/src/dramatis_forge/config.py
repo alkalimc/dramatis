@@ -3,8 +3,9 @@
 Artifacts are kept **outside the source tree** by default. They are large, and a
 working tree that contains them makes every `git status` a lie and every clone a
 hazard. The default resolves to a sibling
-`artifacts/` directory of the workspace, which is the same place whether you run
-the CLI from the repo root, from `forge/`, or from a scratch directory.
+`dramatis-artifacts/` directory of the workspace (its own repository, one folder per
+pack), which is the same place whether you run the CLI from the repo root, from
+`forge/`, or from a scratch directory.
 """
 
 from __future__ import annotations
@@ -21,19 +22,20 @@ from . import __version__
 
 ENV_HOME = "DRAMATIS_FORGE_HOME"
 BASELINES_FILE = "BASELINES.json"
-_MARKERS = ("artifacts", ".git", "pyproject.toml")
+ARTIFACTS_DIR = "dramatis-artifacts"
+_MARKERS = (ARTIFACTS_DIR, ".git", "pyproject.toml")
 
 
 def workspace_root(start: Path | None = None) -> Path:
     """Nearest ancestor that looks like a workspace, else the current directory.
 
-    An existing `artifacts/` wins over a `.git/`, so that a repo checked out
+    An existing `dramatis-artifacts/` wins over a `.git/`, so that a repo checked out
     inside a configured workspace still writes to the workspace's artifact store
     rather than starting a second one.
     """
     here = (start or Path.cwd()).resolve()
     for candidate in (here, *here.parents):
-        if (candidate / "artifacts").is_dir():
+        if (candidate / ARTIFACTS_DIR).is_dir():
             return candidate
     for candidate in (here, *here.parents):
         if any((candidate / m).exists() for m in _MARKERS[1:]):
@@ -45,7 +47,7 @@ def forge_home() -> Path:
     env = os.environ.get(ENV_HOME)
     if env:
         return Path(env).expanduser().resolve()
-    return workspace_root() / "artifacts"
+    return workspace_root() / ARTIFACTS_DIR
 
 
 @dataclass(frozen=True)

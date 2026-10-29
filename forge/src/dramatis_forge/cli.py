@@ -55,7 +55,7 @@ app.add_typer(report_app, name="report", help="Regenerate one report, or inspect
 #: No default. This repository ships no pack, so a default would name someone else's rules.
 PackOpt = Annotated[str, typer.Option("--pack", "-p", help="Pack to use (or set DRAMATIS_PACK).")]
 HomeOpt = Annotated[Path | None, typer.Option(
-    "--home", help="Artifact root (default: <workspace>/artifacts).")]
+    "--home", help="Artifact root (default: <workspace>/dramatis-artifacts).")]
 
 
 # --------------------------------------------------------------------------- #
