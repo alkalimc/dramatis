@@ -265,6 +265,9 @@ test("pinning, marking unread and the temporary row", () => {
   // Opening it keeps the row; opening anything else drops it.
   expect(reduce(s, { type: "open", channel: "t1" }).temp?.id).toBe("t1");
   expect(reduce(s, { type: "open", channel: "c9" }).temp).toBeNull();
+  // A mode change reaches the stand-in row too, as it is not in the list.
+  const changed = reduce(s, { type: "modeChanged", event: { target: { kind: "channel", id: "t1" }, mode: "frozen" } });
+  expect(changed.temp?.mode).toBe("frozen");
 });
 
 test("a picture arrives with the sent message and with the reloaded history alike", () => {

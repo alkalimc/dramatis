@@ -15,7 +15,8 @@ export function GroupInfo({ id }: { id: string }) {
   const actions = useActions();
   const dispatch = useDispatch();
   const nameId = useId();
-  const group = useStore((s) => s.channels.find((c) => c.id === id));
+  // A group nobody has spoken in yet is not in the list; the row made when it was opened stands in.
+  const group = useStore((s) => s.channels.find((c) => c.id === id) ?? (s.temp?.id === id ? s.temp : undefined));
   const roster = useStore((s) => s.roster);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");

@@ -197,6 +197,7 @@ export function reduce(s: State, a: Action): State {
         ...s,
         roster: setRosterMode(s.roster, target, mode),
         channels: s.channels.map((c) => (sameTarget(target, { kind: "channel", id: c.id }) ? { ...c, mode } : c)),
+        temp: s.temp && sameTarget(target, { kind: "channel", id: s.temp.id }) ? { ...s.temp, mode } : s.temp,
         coldstart: s.coldstart.map((c) =>
           sameTarget(target, { kind: "person", id: c.person.id }) ? { ...c, mode } : c,
         ),
