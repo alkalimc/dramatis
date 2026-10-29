@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "Offline forge: turn a collaborative wiki into a retrieval-grounded character corpus"
 requires-python = ">=3.13"
 license = "Apache-2.0"
+authors = [{ name = "alkali" }]
 dependencies = [
     "httpx>=0.28",
     "mwparserfromhell>=0.6.6",
@@ -14,6 +15,10 @@ dependencies = [
     "keyring==25.7.0",
     "anthropic==1.11.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alkalimc/dramatis"
+Repository = "https://github.com/alkalimc/dramatis"
 
 [project.optional-dependencies]
 # Word segmentation for CJK text on the lexical path. Optional because the build falls

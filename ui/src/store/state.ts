@@ -1,5 +1,6 @@
 import type {
   ActivityFailure,
+  AppInfo,
   AppStatus,
   Author,
   Candidate,
@@ -26,6 +27,7 @@ import type {
   ToolAction,
   ToolCalled,
   TurnActivity,
+  UpdateStatus,
   WorldChanged,
   Wording,
 } from "../api";
@@ -46,7 +48,7 @@ export type Drawer =
 export type ProfileMode = "view" | "edit";
 
 /** The pages of the settings card; `root` is its list. */
-export type SystemPage = "root" | "language" | "quota" | "quiet" | "endpoints" | "saves" | "privacy" | "storage";
+export type SystemPage = "root" | "language" | "quota" | "quiet" | "endpoints" | "saves" | "privacy" | "storage" | "about";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -110,6 +112,10 @@ export interface State {
   language: InterfaceLanguage;
   t: T;
   clock: Clock | null;
+  /** The build (version, author) and the corpus's credit; `null` until read. */
+  about: AppInfo | null;
+  /** What the last update check found; `null` until read. */
+  update: UpdateStatus | null;
   settings: Settings | null;
   endpoints: EndpointsView | null;
   digest: Digest;
@@ -186,6 +192,8 @@ export function initialState(): State {
     language: "corpus",
     t: makeT(emptyWording),
     clock: null,
+    about: null,
+    update: null,
     settings: null,
     endpoints: null,
     digest: { items: [] },
@@ -237,6 +245,8 @@ export type Action =
   | { type: "wording"; wording: Wording }
   | { type: "language"; language: InterfaceLanguage }
   | { type: "clock"; clock: Clock }
+  | { type: "about"; about: AppInfo }
+  | { type: "update"; update: UpdateStatus }
   | { type: "settings"; settings: Settings }
   | { type: "endpoints"; endpoints: EndpointsView }
   | { type: "digest"; digest: Digest }

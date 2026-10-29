@@ -122,6 +122,7 @@ anything else       send it to the current channel
 /read <n|unit id>   a unit of the corpus with its neighbours and its source link; n is a
                     number from /search
 /stats              model calls made in this session
+/about              version, author, source and whether a newer version is out
 /storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)
 Short forms: /ls /t /g /c /lib /req /time /mem /h /r /src /s /? /open /exit /q
@@ -451,6 +452,16 @@ line is one message.",
         "pictures in this save: {n} ({size})",
     ),
     ("cli.storage.total", "total    {size}"),
+    ("cli.about.title", "Dramatis {version}"),
+    ("cli.about.author", "Made by {author}"),
+    ("cli.about.license", "Licence {license}"),
+    ("cli.about.newer", "Update available: {version}, {url}"),
+    (
+        "cli.about.corpus",
+        "Corpus built by {by}, licence {licence}",
+    ),
+    ("cli.about.current", "Up to date"),
+    ("cli.about.unchecked", "Update check: no result yet"),
     ("cli.stats.none", "no model calls yet"),
     ("cli.stats.shape", "shape"),
     ("cli.stats.model", "model"),

@@ -18,6 +18,15 @@ pub const SUPPORTED_FORMAT_VERSION: i64 = 2;
 /// fetched by widening a ranked hit rather than read out of the unit itself.
 pub const IMPLEMENTED: &[&str] = &["neighbor_expand"];
 
+/// Who built a corpus and under what terms, from the optional `credits` key (a JSON object
+/// of optional strings). Shown, never acted on.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct Credits {
+    pub by: Option<String>,
+    pub url: Option<String>,
+    pub licence: Option<String>,
+}
+
 /// What a corpus says about itself.
 ///
 /// Read once at open. Every field here answers a question the reader would otherwise have
@@ -55,6 +64,9 @@ pub struct Manifest {
     pub user_placeholder: String,
     /// In-world year = local year minus this.
     pub year_offset: i64,
+    /// Absent, or not the expected shape: empty. It is a credit line, so a bad value never
+    /// refuses the corpus.
+    pub credits: Credits,
 }
 
 fn get<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<Option<T>> {
@@ -111,6 +123,7 @@ impl Manifest {
                 .unwrap_or_else(|| ("*".to_string(), "*".to_string())),
             user_placeholder: get(conn, "user_placeholder")?.unwrap_or_default(),
             year_offset: get(conn, "clock.year_offset")?.unwrap_or(0),
+            credits: get(conn, "credits").ok().flatten().unwrap_or_default(),
         })
     }
 

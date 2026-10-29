@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import { useT, userTitle } from "../i18n";
 import { readAvatar } from "../lib/image";
 import { isDark } from "../lib/prefs";
@@ -267,16 +266,6 @@ function ProfileEdit({ avatarId, onBack, onClose }: { avatarId: string; onBack: 
   );
 }
 
-function useAppVersion(): string | null {
-  const { mock } = useApi();
-  const [v, setV] = useState<string | null>(null);
-  useEffect(() => {
-    if (mock) return;
-    void getVersion().then(setV, () => undefined);
-  }, [mock]);
-  return v;
-}
-
 function Row({ icon, label, onClick }: { icon: IconName; label: string; onClick: () => void }) {
   return (
     <li>
@@ -298,7 +287,8 @@ export function LeftDrawer() {
   const hasSave = useStore((s) => Boolean(s.status?.save));
   const archivedCount = useStore((s) => s.channels.filter((c) => c.archived).length);
   const ref = useRef<HTMLElement>(null);
-  const version = useAppVersion();
+  const version = useStore((s) => s.about?.version);
+  const newer = useStore((s) => s.update?.newer ?? false);
   const close = () => dispatch({ type: "menu", open: false });
   const go = (fn: () => void) => () => {
     close();
@@ -341,10 +331,16 @@ export function LeftDrawer() {
             </label>
           </li>
         </ul>
-        <footer className="left-foot">
-          <p>{t("menu.app")}</p>
-          <p>{t("menu.version", { version: version ?? "dev" })}</p>
-        </footer>
+        <button type="button" className="left-foot" onClick={() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "about" } })}>
+          <span>{t("menu.app")}</span>
+          {version && <span>{t("menu.version", { version })}</span>}
+          {newer && (
+            <span className="update-note">
+              <span className="update-dot" aria-hidden="true" />
+              {t("menu.update")}
+            </span>
+          )}
+        </button>
       </aside>
     </div>
   );

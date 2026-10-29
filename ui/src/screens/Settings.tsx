@@ -6,6 +6,7 @@ import { Dialog } from "../ui/Dialog";
 import { Icon, type IconName } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { UserAvatar } from "../ui/Avatar";
+import { AboutPage } from "./About";
 import { EndpointsPage } from "./Endpoints";
 import { LanguagePage } from "./Language";
 import { QuietSection, QuotaSection } from "./Quota";
@@ -22,6 +23,7 @@ const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
   { page: "saves", icon: "bookmark" },
   { page: "privacy", icon: "lock" },
   { page: "storage", icon: "archive" },
+  { page: "about", icon: "info" },
 ];
 
 function Row({ icon, label, value, onClick }: { icon: IconName; label: string; value?: string; onClick: () => void }) {
@@ -44,6 +46,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
   const settings = useStore((s) => s.settings);
   const theme = useStore((s) => s.theme);
   const tier = useStore((s) => s.quota?.tier);
+  const newer = useStore((s) => s.update?.newer ?? false);
   const language = useStore((s) => s.language);
   const save = useCurrentSave();
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
@@ -112,7 +115,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           <ul className="settings-list settings-gap">
             <Row icon="profile" label={t("menu.profile")} onClick={() => dispatch({ type: "profile", mode: "view" })} />
             {PAGES.map((p) => (
-              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : p.page === "saves" ? (save ?? undefined) : p.page === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : undefined} onClick={() => go(p.page)} />
+              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : p.page === "saves" ? (save ?? undefined) : p.page === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : p.page === "about" && newer ? t("menu.update") : undefined} onClick={() => go(p.page)} />
             ))}
           </ul>
           <ul className="settings-list settings-gap">
@@ -134,6 +137,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           {page === "saves" && <SavesPage />}
           {page === "privacy" && <PrivacyPage />}
           {page === "storage" && <StoragePage />}
+          {page === "about" && <AboutPage />}
         </div>
       )}
     </Dialog>

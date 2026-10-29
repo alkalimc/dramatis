@@ -13,6 +13,7 @@ mod people;
 mod saves;
 mod storage;
 mod tasks;
+mod update;
 mod uploads;
 
 use std::collections::{BTreeMap, HashMap};
@@ -546,6 +547,18 @@ impl Api for Engine {
             .map_err(|e| ApiError::Io {
                 detail: e.to_string(),
             })
+    }
+    async fn app_info(&self) -> ApiResult<AppInfo> {
+        Ok(self.app_info_impl())
+    }
+    async fn update_status(&self) -> ApiResult<UpdateStatus> {
+        Ok(self.update_status_impl())
+    }
+    async fn check_update(&self, force: bool) -> ApiResult<UpdateStatus> {
+        self.check_update_impl(force).await
+    }
+    async fn set_auto_update_check(&self, auto: bool) -> ApiResult<()> {
+        self.home.set_auto_update_check(auto).map_err(io)
     }
     async fn presence(&self) -> ApiResult<Digest> {
         self.presence_impl().await

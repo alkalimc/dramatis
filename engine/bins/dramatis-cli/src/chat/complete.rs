@@ -54,6 +54,7 @@ const COMMANDS: &[&str] = &[
     "search",
     "stats",
     "storage",
+    "about",
     "help",
     "quit",
     "exit",

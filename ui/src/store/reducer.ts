@@ -72,6 +72,10 @@ export function reduce(s: State, a: Action): State {
       return { ...s, language: a.language };
     case "clock":
       return { ...s, clock: a.clock };
+    case "about":
+      return { ...s, about: a.about };
+    case "update":
+      return { ...s, update: a.update };
     case "settings":
       return { ...s, settings: a.settings };
     case "endpoints":

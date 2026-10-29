@@ -9,6 +9,22 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	/**  Which form the app is in and whether the corpus loaded. */
 	appStatus: () => typedError<AppStatus, ApiError>(__TAURI_INVOKE("app_status")),
+	/**
+	 *  The build's version, author and repository. Needs no window permission, so it
+	 *  reads the same in the app, the terminal and tests.
+	 */
+	appInfo: () => typedError<AppInfo, ApiError>(__TAURI_INVOKE("app_info")),
+	/**  The result of the last update check, from disk; no network. */
+	updateStatus: () => typedError<UpdateStatus, ApiError>(__TAURI_INVOKE("update_status")),
+	/**
+	 *  Ask GitHub for the latest release. Without `force` it asks only when automatic
+	 *  checks are on and the last result is over a day old, and otherwise answers
+	 *  `update_status`. A failed request is an `Endpoint` error and leaves the stored
+	 *  result alone. Nothing is downloaded or installed.
+	 */
+	checkUpdate: (force: boolean) => typedError<UpdateStatus, ApiError>(__TAURI_INVOKE("check_update", { force })),
+	/**  Turn automatic checks on or off for this home. */
+	setAutoUpdateCheck: (auto: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("set_auto_update_check", { auto })),
 	/**  The corpus's runtime phrasing. */
 	wording: () => typedError<Wording, ApiError>(__TAURI_INVOKE("wording")),
 	/**  The interface language this home uses; `wording` already follows it. */
@@ -376,6 +392,16 @@ export type AppForm =
 /**  Host channel and the waiting panel. */
 "full";
 
+/**  Who made the app and which build this is, from the build itself. */
+export type AppInfo = {
+	version: string,
+	author: string,
+	repository: string,
+	license: string,
+	/**  Who built the open corpus, when it says so. */
+	corpus_credits: CorpusCredits | null,
+};
+
 export type AppStatus = {
 	form: AppForm,
 	corpus: CorpusState,
@@ -520,6 +546,14 @@ export type Clock = {
 
 /**  How much the corpus supports an answer, as retrieval measured it. */
 export type Confidence = "high" | "medium" | "low";
+
+/**  A corpus's credit line, from its manifest. */
+export type CorpusCredits = {
+	by: string | null,
+	/**  An https address, or nothing. */
+	url: string | null,
+	licence: string | null,
+};
 
 export type CorpusState = { state: "missing" } | { state: "loaded"; name: string } | 
 /**  Refused: unknown format version. The user needs a newer app. */
@@ -1090,6 +1124,20 @@ export type UnitView = {
 	unit: Passage,
 	before: Passage[],
 	after: Passage[],
+};
+
+/**  What the last check for a newer release found. */
+export type UpdateStatus = {
+	current: string,
+	/**  The newest release's version; `None` before the first successful check. */
+	latest: string | null,
+	/**  Its release page. */
+	url: string | null,
+	/**  `latest` is higher than `current`. */
+	newer: boolean,
+	checked_at: Timestamp | null,
+	/**  Whether the app checks by itself, at most once a day. */
+	auto: boolean,
 };
 
 export type Waiting = {

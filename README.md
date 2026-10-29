@@ -244,7 +244,7 @@ the English defaults in `forge/src/dramatis_forge/text.py`.
 
 ## Licence
 
-Code: Apache-2.0. A corpus built with this tool is not covered by that licence; it carries
+Code: Apache-2.0, copyright 2026 alkali. A corpus built with this tool is not covered by that licence; it carries
 whatever terms its source has, and the attribution report gives the per-page provenance
 needed to honour them.
 
@@ -270,6 +270,14 @@ bio and avatar, give a group a name and an avatar, paste pictures into the input
 reply's sources to see the original passage and its page. Enter inserts a new line and Cmd-Enter
 sends. Saves are managed on the saves page (new, switch, copy, rename, delete, export) and the password
 setting is under privacy and security.
+
+Settings has an About page: the version, the author, links to the repository and the issue
+tracker, and an update check. The check asks the GitHub Releases API which version is the newest
+(`GET /repos/alkalimc/dramatis/releases/latest`), at most once a day after start-up and when you press
+Check now; the switch on that page turns the daily check off (`$DRAMATIS_HOME/update_check`, with
+the last result in `update_cache.json`). It only tells you and links the release page; nothing is
+downloaded or installed. The terminal has the same in `/about`, and `dramatis-cli --help` names the
+author and repository.
 
 The browser preview (`pnpm dev` without the app) shows the neutral English text. To preview a
 corpus's own wording, export it once and reload; the file is git-ignored:

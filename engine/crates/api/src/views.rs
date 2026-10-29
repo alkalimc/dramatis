@@ -38,6 +38,53 @@ pub struct AppStatus {
     pub saves_dir: String,
 }
 
+/// Who made the app and which build this is, from the build itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct AppInfo {
+    pub version: String,
+    pub author: String,
+    pub repository: String,
+    pub license: String,
+    /// Who built the open corpus, when it says so.
+    pub corpus_credits: Option<CorpusCredits>,
+}
+
+/// A corpus's credit line, from its manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct CorpusCredits {
+    pub by: Option<String>,
+    /// An https address, or nothing.
+    pub url: Option<String>,
+    pub licence: Option<String>,
+}
+
+impl AppInfo {
+    pub fn current() -> Self {
+        Self {
+            version: crate::update::VERSION.into(),
+            author: env!("CARGO_PKG_AUTHORS").into(),
+            repository: crate::update::REPOSITORY.into(),
+            license: env!("CARGO_PKG_LICENSE").into(),
+            corpus_credits: None,
+        }
+    }
+}
+
+/// What the last check for a newer release found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct UpdateStatus {
+    pub current: String,
+    /// The newest release's version; `None` before the first successful check.
+    pub latest: Option<String>,
+    /// Its release page.
+    pub url: Option<String>,
+    /// `latest` is higher than `current`.
+    pub newer: bool,
+    pub checked_at: Option<Timestamp>,
+    /// Whether the app checks by itself, at most once a day.
+    pub auto: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum AppForm {

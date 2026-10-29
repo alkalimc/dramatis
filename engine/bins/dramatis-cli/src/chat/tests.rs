@@ -42,8 +42,15 @@ fn sse(events: &[serde_json::Value]) -> String {
 
 #[async_trait]
 impl Transport for Scripted {
-    async fn send(&self, _: HttpRequest) -> llm::Result<HttpResponse> {
-        unreachable!("chat only streams")
+    /// Chat only streams; the one plain request is the update check, answered with a
+    /// release newer than any build.
+    async fn send(&self, req: HttpRequest) -> llm::Result<HttpResponse> {
+        assert_eq!(req.url, api::update::LATEST_URL);
+        Ok(HttpResponse {
+            status: 200,
+            body: br#"{"tag_name":"v99.0.0","html_url":"https://github.com/alkalimc/dramatis/releases/tag/v99.0.0"}"#.to_vec(),
+            retry_after: None,
+        })
     }
 
     async fn open(&self, _: HttpRequest) -> llm::Result<StreamResponse> {
@@ -106,7 +113,11 @@ fn corpus(wording: &str, host: bool) -> TempFolio {
     let mut b = Builder::new()
         .manifest("user_placeholder", r#""<U>""#)
         .manifest("wording", wording)
-        .manifest("scene_marker", r#"["(", ")"]"#);
+        .manifest("scene_marker", r#"["(", ")"]"#)
+        .manifest(
+            "credits",
+            r#"{"by":"Someone","url":"https://example.org/corpus","licence":"CC BY-NC-SA 4.0"}"#,
+        );
     b.person("ann", None).person("bo", None).person("cy", None);
     b.alias("Annie", "ann", "term_exact");
     b.alias("Lady A", "ann", "redirect");
@@ -1031,6 +1042,7 @@ async fn help_lists_every_name_the_parser_accepts() {
         "s",
         "stats",
         "storage",
+        "about",
         "help",
         "?",
         "quit",
@@ -1539,6 +1551,41 @@ async fn history_marks_pictures_and_storage_clears_only_caches() {
     assert!(!home.tts().join("a.mp3").exists());
     assert!(home.world().unwrap().is_file());
     assert!(r.run("/storage clear saves").await.contains("usage:"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn about_shows_the_build_and_checks_for_an_update_at_most_daily() {
+    let mut r = rig().await;
+    let about = r.run("/about").await;
+    assert!(
+        about.contains(&format!("Dramatis {}", env!("CARGO_PKG_VERSION"))),
+        "{about}"
+    );
+    assert!(about.contains("Made by alkali"), "{about}");
+    assert!(
+        about.contains("https://github.com/alkalimc/dramatis"),
+        "{about}"
+    );
+    assert!(about.contains("Licence Apache-2.0"), "{about}");
+    assert!(
+        about.contains("Corpus built by Someone, licence CC BY-NC-SA 4.0"),
+        "{about}"
+    );
+    assert!(about.contains("https://example.org/corpus"), "{about}");
+    assert!(
+        about.contains(
+            "Update available: 99.0.0, https://github.com/alkalimc/dramatis/releases/tag/v99.0.0"
+        ),
+        "{about}"
+    );
+    // The result is kept in the home, so the next one is the stored answer.
+    assert!(r.engine.home().update_cache().is_some());
+    // With automatic checks off and nothing stored, nothing is asked.
+    let mut off = rig().await;
+    off.engine.set_auto_update_check(false).await.unwrap();
+    let about = off.run("/about").await;
+    assert!(about.contains("Update check: no result yet"), "{about}");
+    assert!(off.engine.home().update_cache().is_none());
 }
 
 async fn unread_of(r: &Rig, who: &str) -> u32 {

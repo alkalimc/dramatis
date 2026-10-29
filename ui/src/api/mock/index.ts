@@ -9,7 +9,8 @@
 // `nosave=1` (no save open: the picker), `saves=0` (and none exist), `missing=NAME` (the
 // last used save is gone), `corpus=missing` (no corpus yet; a path with `newer` in it is
 // from a newer format, one not ending in `.folio` is not a corpus), `dialog=1` (a file
-// dialog exists).
+// dialog exists). Update check: `update=1` (a newer release was already found), `update=fail`
+// (the check cannot reach GitHub); "Check now" finds a newer release otherwise.
 //
 // `ui/wording.local.json` (git-ignored; exported by the forge) supplies a corpus's wording
 // when present, so the dev-server preview shows that corpus's language. Only the dev
@@ -17,6 +18,7 @@
 import type {
   ApiError,
   AppStatus,
+  AppInfo,
   Author,
   InterfaceLanguage,
   CaseFile,
@@ -50,8 +52,10 @@ import type {
   TaskSummary,
   Tier,
   ToolAction,
+  UpdateStatus,
   Waiting,
 } from "../../api.gen";
+import { version } from "../../../package.json";
 import type { Commands, Events } from "..";
 import { createBus } from "./bus";
 import { PASSAGES, PERSONS, passage, type MockPerson } from "./data";
@@ -136,6 +140,16 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let openSave: string | null = params.get("nosave") === "1" ? null : "default";
   let corpusLoaded = params.get("corpus") !== "missing";
   // `?locked=1` starts on an encrypted save; its password is "hunter2".
+  const repository = "https://github.com/alkalimc/dramatis";
+  const info: AppInfo = {
+    version,
+    author: "alkali",
+    repository,
+    license: "Apache-2.0",
+    corpus_credits: { by: "the demo team", url: "https://example.org/demo-corpus", licence: "CC BY-NC-SA 4.0" },
+  };
+  const found = (auto: boolean): UpdateStatus => ({ current: version, latest: "99.0.0", url: `${repository}/releases/tag/v99.0.0`, newer: true, checked_at: iso(), auto });
+  let update: UpdateStatus = params.get("update") === "1" ? found(true) : { current: version, latest: null, url: null, newer: false, checked_at: null, auto: true };
   let locked = params.get("locked") === "1";
   // `?changed=1` starts as if another window had replaced the open save's file.
   let changedElsewhere = params.get("changed") === "1";
@@ -559,6 +573,19 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         home_dir: "/Users/demo/.dramatis",
         saves_dir: "/Users/demo/.dramatis/saves",
       }),
+    appInfo: () => ok(info),
+    updateStatus: () => ok(update),
+    // Without `force` the mock asks nobody, as the engine does within its day.
+    checkUpdate: (force) => {
+      if (!force) return ok(update);
+      if (params.get("update") === "fail") return fail({ code: "endpoint", detail: "offline" });
+      update = found(update.auto);
+      return ok(update);
+    },
+    setAutoUpdateCheck: (auto) => {
+      update = { ...update, auto };
+      return ok(null);
+    },
     // The preview opens links itself; the call exists so the app's path can be tested.
     openExternal: (url) => (/^https?:\/\//.test(url) ? ok(null) : fail({ code: "invalid", field: "url" })),
     setCorpus: (path) => {

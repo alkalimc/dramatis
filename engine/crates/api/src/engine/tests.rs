@@ -2771,3 +2771,143 @@ async fn only_plain_web_addresses_go_to_the_browser() {
         Err(ApiError::NotImplemented)
     );
 }
+
+fn release(tag: &str) -> Arc<Net> {
+    let body = format!(
+        r#"{{"tag_name":"{tag}","html_url":"https://github.com/alkalimc/dramatis/releases/tag/{tag}"}}"#
+    );
+    Arc::new(Net(Some(body.into_bytes()), Mutex::new(0)))
+}
+
+#[tokio::test]
+async fn app_info_comes_from_the_build() {
+    let info = rig().engine.app_info().await.unwrap();
+    assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(info.author, "alkali");
+    assert_eq!(info.repository, "https://github.com/alkalimc/dramatis");
+    assert_eq!(info.license, "Apache-2.0");
+}
+
+#[tokio::test]
+async fn the_corpus_credit_comes_from_its_manifest_and_only_links_https() {
+    let open = |credits: Option<&str>| {
+        let mut b = Builder::new();
+        if let Some(c) = credits {
+            b = b.manifest("credits", c);
+        }
+        let folio = b.finish();
+        let home = temp_home();
+        home.create().unwrap();
+        drop(world::World::open(home.save_path("default")).unwrap());
+        let e = Engine::open(home, Some(folio.path().to_path_buf()), Ports::default()).unwrap();
+        (e, folio)
+    };
+    let (e, _f) = open(Some(
+        r#"{"by":"someone","url":"https://example.org/corpus","licence":"CC BY-NC-SA 4.0"}"#,
+    ));
+    let c = e.app_info().await.unwrap().corpus_credits.unwrap();
+    assert_eq!(c.by.as_deref(), Some("someone"));
+    assert_eq!(c.url.as_deref(), Some("https://example.org/corpus"));
+    assert_eq!(c.licence.as_deref(), Some("CC BY-NC-SA 4.0"));
+    // A link that is not https is dropped, the rest stays.
+    let (e, _f) = open(Some(r#"{"by":"someone","url":"http://example.org"}"#));
+    let c = e.app_info().await.unwrap().corpus_credits.unwrap();
+    assert_eq!((c.by.as_deref(), c.url), (Some("someone"), None));
+    // Absent, empty, or the wrong shape: no credit, and the corpus still opens.
+    for credits in [
+        None,
+        Some("{}"),
+        Some(r#"{"by":"  "}"#),
+        Some("[1]"),
+        Some(r#"{"by":3}"#),
+    ] {
+        let (e, _f) = open(credits);
+        assert_eq!(
+            e.app_info().await.unwrap().corpus_credits,
+            None,
+            "{credits:?}"
+        );
+        assert!(matches!(
+            e.app_status().await.unwrap().corpus,
+            CorpusState::Loaded { .. }
+        ));
+    }
+}
+
+#[tokio::test]
+async fn the_update_check_asks_at_most_once_a_day() {
+    let net = release("v99.0.0");
+    let r = rig_with(net.clone());
+    let e = &r.engine;
+    let none = e.update_status().await.unwrap();
+    assert!(!none.newer && none.latest.is_none() && none.auto);
+
+    let s = e.check_update(false).await.unwrap();
+    assert_eq!(s.latest.as_deref(), Some("99.0.0"));
+    assert!(s.newer && s.checked_at.is_some());
+    assert_eq!(
+        s.url.as_deref(),
+        Some("https://github.com/alkalimc/dramatis/releases/tag/v99.0.0")
+    );
+    // The result is kept: the same status comes back without asking again.
+    assert_eq!(e.update_status().await.unwrap(), s);
+    assert_eq!(e.check_update(false).await.unwrap(), s);
+    assert_eq!(*net.1.lock().unwrap(), 1);
+    // "Check now" always asks.
+    e.check_update(true).await.unwrap();
+    assert_eq!(*net.1.lock().unwrap(), 2);
+    // A result older than a day is asked for again.
+    let mut old = e.home.update_cache().unwrap();
+    old.at_ms -= crate::update::INTERVAL_MS;
+    e.home.set_update_cache(&old).unwrap();
+    e.check_update(false).await.unwrap();
+    assert_eq!(*net.1.lock().unwrap(), 3);
+}
+
+#[tokio::test]
+async fn the_off_switch_stops_automatic_checks_only() {
+    let net = release("v99.0.0");
+    let r = rig_with(net.clone());
+    let e = &r.engine;
+    e.set_auto_update_check(false).await.unwrap();
+    assert!(!e.home.auto_update_check());
+    let s = e.check_update(false).await.unwrap();
+    assert!(!s.auto && s.latest.is_none());
+    assert_eq!(*net.1.lock().unwrap(), 0);
+    assert!(e.check_update(true).await.unwrap().newer);
+    assert_eq!(*net.1.lock().unwrap(), 1);
+    e.set_auto_update_check(true).await.unwrap();
+    assert!(e.update_status().await.unwrap().auto);
+}
+
+#[tokio::test]
+async fn an_update_is_not_newer_when_it_is_the_running_version_and_a_failure_keeps_the_last_result()
+{
+    let same = release(&format!("v{}", env!("CARGO_PKG_VERSION")));
+    let r = rig_with(same);
+    let s = r.engine.check_update(true).await.unwrap();
+    assert!(!s.newer && s.latest.as_deref() == Some(env!("CARGO_PKG_VERSION")));
+
+    // Offline, a rate-limited answer or a reply that is not a release: an error, and the
+    // stored result stays.
+    for net in [
+        Arc::new(Net(None, Mutex::new(0))),
+        Arc::new(Net(
+            Some(b"{\"message\":\"rate limit\"}".to_vec()),
+            Mutex::new(0),
+        )),
+    ] {
+        let failing = rig_with(net);
+        failing
+            .engine
+            .home
+            .set_update_cache(&r.engine.home.update_cache().unwrap())
+            .unwrap();
+        let before = failing.engine.update_status().await.unwrap();
+        assert!(matches!(
+            failing.engine.check_update(true).await,
+            Err(ApiError::Endpoint { .. })
+        ));
+        assert_eq!(failing.engine.update_status().await.unwrap(), before);
+    }
+}

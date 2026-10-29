@@ -84,6 +84,32 @@ export function createActions(api: Api, store: Store) {
     if (digest) d({ type: "digest", digest });
   }
 
+  /**
+   * The About page's data, and the automatic update check (at most daily, decided by the
+   * engine). Nothing here shows an error or waits for the window: a failed check is only
+   * reported where the person asked for one.
+   */
+  async function loadAbout() {
+    const [about, stored] = await Promise.all([settle(c.appInfo()), settle(c.updateStatus())]);
+    if (about.ok) d({ type: "about", about: about.data });
+    if (stored.ok) d({ type: "update", update: stored.data });
+    const checked = await settle(c.checkUpdate(false));
+    if (checked.ok) d({ type: "update", update: checked.data });
+  }
+
+  /** "Check now". Resolves false when the check could not be made. */
+  async function checkUpdateNow() {
+    const r = await settle(c.checkUpdate(true));
+    if (r.ok) d({ type: "update", update: r.data });
+    return r.ok;
+  }
+
+  async function setAutoUpdate(auto: boolean) {
+    if ((await attempt(c.setAutoUpdateCheck(auto))) === undefined) return;
+    const r = await settle(c.updateStatus());
+    if (r.ok) d({ type: "update", update: r.data });
+  }
+
   async function boot() {
     const [wording, language, settings, coldstart] = await Promise.all([
       attempt(c.wording(), "wording"),
@@ -99,6 +125,7 @@ export function createActions(api: Api, store: Store) {
     d({ type: "prefs", pinned: prefs.pinned, theme: prefs.theme });
     await Promise.all([refreshEndpoints(), refreshRoster(), refreshChannels(), refreshQuota(), refreshClock(), refreshUserAvatar()]);
     await refreshStatus();
+    void loadAbout();
   }
 
   async function loadHistory(channel: ChannelId, older = false) {
@@ -270,6 +297,8 @@ export function createActions(api: Api, store: Store) {
   return {
     attempt,
     boot,
+    checkUpdateNow,
+    setAutoUpdate,
     logOut,
     presence,
     refreshStatus,

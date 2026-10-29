@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 pub use error::{Error, Result};
-pub use manifest::Manifest;
+pub use manifest::{Credits, Manifest};
 pub use unit::{Person, PersonForm, Scope, TemplateStats, Unit};
 
 /// The column list every unit query selects, in `row_to_unit` order, over `chunks c`.

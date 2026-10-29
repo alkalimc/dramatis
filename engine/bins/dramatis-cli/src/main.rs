@@ -44,7 +44,14 @@ fn default_folio() -> Result<PathBuf> {
 #[command(
     name = "dramatis-cli",
     version,
-    about = "Inspect, query and measure a .folio corpus"
+    author,
+    about = "Inspect, query and measure a .folio corpus",
+    after_help = concat!(
+        "dramatis ",
+        env!("CARGO_PKG_VERSION"),
+        ", made by alkali, Apache-2.0\n",
+        env!("CARGO_PKG_REPOSITORY")
+    )
 )]
 struct Cli {
     /// Path to the corpus. Defaults to $DRAMATIS_FOLIO.

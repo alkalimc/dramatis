@@ -680,6 +680,20 @@ button.wide {
 .password-dialog {
   padding: 0;
 }
+.about h4 {
+  margin: var(--s-3) 0 0;
+}
+.about p,
+.about ul {
+  margin: 0;
+}
+.about-links {
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
 .privacy-hint,
 .privacy-note {
   padding: var(--s-3) var(--s-4) 0;

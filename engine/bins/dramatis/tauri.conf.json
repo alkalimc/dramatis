@@ -24,6 +24,10 @@
   },
   "bundle": {
     "active": false,
+    "publisher": "alkali",
+    "copyright": "© 2026 alkali",
+    "shortDescription": "Talk to the people of a wiki-built corpus",
+    "longDescription": "A desktop chat app and terminal client where the people of a wiki-built corpus answer from their own material.",
     "icon": ["icons/icon.png"],
     "macOS": {
       "minimumSystemVersion": "13.0"

@@ -81,6 +81,8 @@ pub enum Command {
     Sources(usize, Option<usize>),
     Search(String),
     Stats,
+    /// Name, version, author, repository and the update status.
+    About,
     /// Disk use by kind, or empty some caches.
     Storage(StorageAct),
     Help,
@@ -364,6 +366,7 @@ pub fn parse(line: &str) -> Command {
         "search" | "s" if args.is_empty() => Command::Invalid("cli.usage.search"),
         "search" | "s" => Command::Search(args.to_owned()),
         "stats" => Command::Stats,
+        "about" => Command::About,
         "storage" => parse_storage(args),
         "help" | "?" => Command::Help,
         "quit" | "exit" | "q" => Command::Quit,

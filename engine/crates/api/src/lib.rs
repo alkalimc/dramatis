@@ -30,6 +30,7 @@ pub mod port;
 pub mod saves;
 pub mod tools;
 pub mod types;
+pub mod update;
 pub mod views;
 
 use std::sync::{Arc, RwLock};

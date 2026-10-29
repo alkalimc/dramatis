@@ -93,6 +93,18 @@ commands! {
         home_dir: String::new(),
         saves_dir: String::new(),
     });
+    /// The build's version, author and repository. Needs no window permission, so it
+    /// reads the same in the app, the terminal and tests.
+    fn app_info() -> AppInfo = Ok(AppInfo::current());
+    /// The result of the last update check, from disk; no network.
+    fn update_status() -> UpdateStatus;
+    /// Ask GitHub for the latest release. Without `force` it asks only when automatic
+    /// checks are on and the last result is over a day old, and otherwise answers
+    /// `update_status`. A failed request is an `Endpoint` error and leaves the stored
+    /// result alone. Nothing is downloaded or installed.
+    fn check_update(force: bool) -> UpdateStatus;
+    /// Turn automatic checks on or off for this home.
+    fn set_auto_update_check(auto: bool) -> ();
     /// The corpus's runtime phrasing.
     fn wording() -> Wording = Ok(Wording::default());
     /// The interface language this home uses; `wording` already follows it.

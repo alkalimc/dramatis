@@ -6,6 +6,8 @@
 //! saves/<name>.sqlite  one world per save: everything that changes with play
 //! current_save     the name of the save a process opens when it starts (empty: none)
 //! interface_language  `corpus` or `en`: the words the interface speaks (absent: never chosen)
+//! update_check     `off` when automatic update checks are off (absent: on)
+//! update_cache.json  the last successful update check: time, version, release page
 //! corpus_path      optional: the full path of the corpus the user chose in the app
 //! office/          notes written by people looking into a request
 //! uploads/         pictures the user chose (theirs, a group's), named by content hash
@@ -17,6 +19,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::update::Checked;
 use crate::views::InterfaceLanguage;
 
 /// Overrides the home directory.
@@ -164,6 +167,31 @@ impl Home {
             .join(format!("interface_language.{}.tmp", std::process::id()));
         std::fs::write(&tmp, word)?;
         std::fs::rename(&tmp, self.root.join("interface_language"))
+    }
+
+    /// Whether the app checks for a newer release by itself; on unless turned off.
+    pub fn auto_update_check(&self) -> bool {
+        std::fs::read_to_string(self.root.join("update_check")).map_or(true, |t| t.trim() != "off")
+    }
+
+    pub fn set_auto_update_check(&self, auto: bool) -> io::Result<()> {
+        self.write_whole("update_check", if auto { "on" } else { "off" }.as_bytes())
+    }
+
+    /// The last successful update check, if one was kept and is readable.
+    pub fn update_cache(&self) -> Option<Checked> {
+        serde_json::from_slice(&std::fs::read(self.root.join("update_cache.json")).ok()?).ok()
+    }
+
+    pub fn set_update_cache(&self, checked: &Checked) -> io::Result<()> {
+        self.write_whole("update_cache.json", &serde_json::to_vec(checked)?)
+    }
+
+    /// Write a file whole, then rename it in.
+    fn write_whole(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        let tmp = self.root.join(format!("{name}.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, self.root.join(name))
     }
 
     /// The corpus the user chose in the app, if the file is still there.

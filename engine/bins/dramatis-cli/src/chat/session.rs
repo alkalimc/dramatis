@@ -413,6 +413,7 @@ impl Session {
             Command::Search(query) => self.search(&query).await,
             Command::Stats => self.stats(),
             Command::Storage(act) => self.storage(act).await,
+            Command::About => self.about().await,
         }
         self.mark_seen().await;
         Flow::Continue
@@ -2675,6 +2676,50 @@ impl Session {
             "cli.storage.total",
             &[("size", &format!("{:>10}", size(usage.total_kb)))],
         ));
+    }
+
+    /// `/about`: the build and the update status. Asks GitHub only when automatic checks
+    /// are on and the stored result is over a day old.
+    async fn about(&self) {
+        let said = |key: &str, vars: &[(&str, &dyn std::fmt::Display)]| {
+            self.term.line(&self.names.say(key, vars))
+        };
+        let info = match self.engine.app_info().await {
+            Ok(info) => info,
+            Err(e) => return self.fail(&e),
+        };
+        said("cli.about.title", &[("version", &info.version)]);
+        said("cli.about.author", &[("author", &info.author)]);
+        said("cli.about.license", &[("license", &info.license)]);
+        self.term.line(&info.repository);
+        if let Some(c) = &info.corpus_credits {
+            let none = String::new();
+            said(
+                "cli.about.corpus",
+                &[
+                    ("by", c.by.as_ref().unwrap_or(&none)),
+                    ("licence", c.licence.as_ref().unwrap_or(&none)),
+                ],
+            );
+            if let Some(url) = &c.url {
+                self.term.line(url);
+            }
+        }
+        let status = match self.engine.check_update(false).await {
+            Ok(s) => Some(s),
+            Err(_) => self.engine.update_status().await.ok(),
+        };
+        match status {
+            Some(s) if s.newer => said(
+                "cli.about.newer",
+                &[
+                    ("version", &s.latest.as_deref().unwrap_or_default()),
+                    ("url", &s.url.as_deref().unwrap_or_default()),
+                ],
+            ),
+            Some(s) if s.latest.is_some() => said("cli.about.current", &[]),
+            _ => said("cli.about.unchecked", &[]),
+        }
     }
 
     fn stats(&self) {
