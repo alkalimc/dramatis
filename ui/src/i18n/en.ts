@@ -103,6 +103,7 @@ export const en = {
   "chatlist.mark_read": "Mark as read",
   "chatlist.preview.you": "You: {text}",
   "chatlist.preview.author": "{name}: {text}",
+  "chatlist.preview.draft": "Draft: {text}",
   "channel.group.untitled": "Group",
   "channel.group_info": "Group info",
   "channel.find": "Search in this chat",

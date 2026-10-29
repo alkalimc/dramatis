@@ -230,6 +230,8 @@ export function reduce(s: State, a: Action): State {
     }
     case "restore":
       return { ...s, restore: a.restore };
+    case "draft":
+      return { ...s, drafts: a.text ? { ...s.drafts, [a.channel]: a.text } : omit(s.drafts, a.channel) };
     case "sources":
       return { ...s, sourcesOpen: s.sourcesOpen[a.message] ? omit(s.sourcesOpen, a.message) : { ...s.sourcesOpen, [a.message]: true } };
     case "awaiting":

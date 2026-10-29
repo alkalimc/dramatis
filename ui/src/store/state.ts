@@ -155,6 +155,8 @@ export interface State {
   sourcesOpen: Record<MessageId, true>;
   /** Text a take-back put back for a channel's composer to pick up. */
   restore: { channel: ChannelId; text: string } | null;
+  /** Unsent text per channel, kept while the user is elsewhere; cleared on send. */
+  drafts: Record<ChannelId, string>;
   /** Bumped on each `WorldChanged`: screens holding fetched facts or tasks refetch. */
   worldVersion: number;
   /** Bumped on roster or mode changes: person pages refetch. */
@@ -210,6 +212,7 @@ export function initialState(): State {
     names: {},
     sourcesOpen: {},
     restore: null,
+    drafts: {},
     worldVersion: 0,
     peopleVersion: 0,
     loading: {},
@@ -264,6 +267,7 @@ export type Action =
   | { type: "rosterChanged" }
   | { type: "rewound"; event: Rewound }
   | { type: "restore"; restore: { channel: ChannelId; text: string } | null }
+  | { type: "draft"; channel: ChannelId; text: string }
   | { type: "sources"; message: MessageId }
   | { type: "awaiting"; channel: ChannelId; on: boolean }
   | { type: "loading"; key: LoadKey }

@@ -92,6 +92,7 @@ chatlist.label
 chatlist.mark_read
 chatlist.pinned
 chatlist.preview.author
+chatlist.preview.draft
 chatlist.preview.you
 chatlist.search
 chatlist.search.empty

@@ -244,6 +244,9 @@ button.chat-row.selected:hover {
 .chat-row.unread .chat-preview {
   color: var(--ink);
 }
+.chat-preview.draft {
+  color: var(--danger);
+}
 .chat-preview.typing {
   color: var(--accent);
 }

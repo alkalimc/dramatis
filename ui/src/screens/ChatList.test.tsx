@@ -236,3 +236,26 @@ test("opening an archived conversation from anywhere shows the archived list wit
   });
   expect(within(nav).queryByRole("heading", { name: "Archived chats" })).toBeNull();
 });
+
+test("unsent text stays as a draft: the list shows it, and coming back finds it in the box", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp();
+  const nav = await list();
+  const row = (name: string) => rowsOf(nav).find((r) => r.querySelector(".chat-title")?.textContent === name)!;
+  const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  await user.type(box(), "half a thought");
+  await user.click(row("Mira Vale"));
+  await waitFor(() => expect(store.getState().channel).toBe("dm:mira"));
+  expect(await within(row("Host")).findByText("Draft: half a thought")).toBeDefined();
+  await waitFor(() => expect(box().value).toBe(""));
+  await user.click(row("Host"));
+  await waitFor(() => expect(box().value).toBe("half a thought"));
+  // The open conversation shows its last message, not its own draft; sending clears it.
+  expect(within(row("Host")).queryByText(/^Draft:/)).toBeNull();
+  await user.click(box());
+  await user.keyboard("{Meta>}{Enter}{/Meta}");
+  await waitFor(() => expect(box().value).toBe(""));
+  await user.click(row("Mira Vale"));
+  await waitFor(() => expect(store.getState().channel).toBe("dm:mira"));
+  expect(within(nav).queryByText(/^Draft:/)).toBeNull();
+});

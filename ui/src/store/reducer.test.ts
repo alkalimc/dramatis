@@ -324,3 +324,10 @@ test("opening an archived conversation shows the archived list until the user go
   s = reduce(reduce(s, { type: "open", channel: "a1" }), { type: "listView", view: "chats" });
   expect(reduce(s, { type: "open", channel: "a1" }).listView).toBe("archived");
 });
+
+test("a draft is kept per channel and an empty one is dropped", () => {
+  let s = reduce(initialState(), { type: "draft", channel: "c1", text: "hi" });
+  expect(s.drafts).toEqual({ c1: "hi" });
+  s = reduce(s, { type: "draft", channel: "c1", text: "" });
+  expect(s.drafts).toEqual({});
+});

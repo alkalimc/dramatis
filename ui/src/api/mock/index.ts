@@ -1052,7 +1052,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(null);
     },
     settings: () => ok({ ...settings }),
-    shipEvents: () =>
+    dailyEvents: () =>
       ok(
         settings.events_per_day === 0
           ? []

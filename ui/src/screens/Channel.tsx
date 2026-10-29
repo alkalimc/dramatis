@@ -134,7 +134,7 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
         </button>
       )}
       </div>
-      <Composer channel={channel} />
+      <Composer key={channel} channel={channel} />
     </section>
   );
 }
@@ -174,7 +174,8 @@ export function Composer({ channel }: { channel: ChannelId }) {
   const actions = useActions();
   const dispatch = useDispatch();
   const id = useId();
-  const [text, setText] = useState("");
+  const saved = useStore((s) => s.drafts[channel] ?? "");
+  const [text, setText] = useState(saved);
   const [image, setImage] = useState<ImagePart | null>(null);
   const [busy, setBusy] = useState(false);
   const [attach, setAttach] = useState<{ x: number; y: number } | null>(null);
@@ -189,6 +190,11 @@ export function Composer({ channel }: { channel: ChannelId }) {
     dispatch({ type: "restore", restore: null });
     box.current?.focus();
   }, [restore, dispatch]);
+
+  // What is typed stays with the conversation: leaving and coming back finds it again.
+  useEffect(() => {
+    if (saved !== text) dispatch({ type: "draft", channel, text });
+  }, [saved, channel, text, dispatch]);
 
   // Grow with the text up to the CSS max height, then scroll.
   useLayoutEffect(() => {

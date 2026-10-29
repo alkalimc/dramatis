@@ -242,8 +242,11 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
   const at = lastActivity(channel, list);
   const typing = typingText(who, t, names, user);
 
+  const draft = useStore((s) => (shown ? undefined : s.drafts[channel.id]));
   let preview = "";
-  if (last) {
+  if (draft) {
+    preview = t("chatlist.preview.draft", { text: draft.replace(/\s+/g, " ").trim() });
+  } else if (last) {
     const text = previewOf(last, marker);
     preview =
       last.author.kind === "user"
@@ -282,7 +285,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
             {at && <time className="chat-time" dateTime={at}>{when(at, t)}</time>}
           </span>
           <span className="chat-bottom">
-            <span className={`chat-preview${typing ? " typing" : ""}`} title={typing ?? preview}>{typing ?? preview}</span>
+            <span className={`chat-preview${typing ? " typing" : draft ? " draft" : ""}`} title={typing ?? preview}>{typing ?? preview}</span>
           </span>
         </span>
       </button>
