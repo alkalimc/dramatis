@@ -165,13 +165,6 @@ test("library: always reachable from the rail, filtered search, a unit read with
   await user.click(screen.getByRole("button", { name: "Search" }));
   expect(await screen.findByText("East Ward · Night Notes")).toBeDefined();
   expect(screen.queryByText("Harbor Ledger · Flood Years")).toBeNull();
-  // A person page opens without a way to talk to a model.
-  const rosterRow = screen.getAllByRole("button", { name: "Mira Vale" })[0];
-  await user.click(rosterRow);
-  const page = await screen.findByRole("complementary", { name: "Roster" });
-  expect(within(page).queryByRole("button", { name: "Talk" })).toBeNull();
-  await user.click(within(page).getByRole("button", { name: "Close" }));
-
   const hit = screen.getByText("East Ward · Night Notes").closest("article")!;
   await user.click(within(hit).getByRole("button", { name: "Read in full" }));
   const reader = await screen.findByRole("article", { name: "Passage" });
@@ -184,6 +177,15 @@ test("library: always reachable from the rail, filtered search, a unit read with
   // The chats entry goes back to the conversations.
   await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Chats" }));
   expect(await screen.findByRole("heading", { name: "Who's waiting" })).toBeDefined();
+
+  // With a model, a person page opened from the library talks: the chat opens and the library closes.
+  await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Library" }));
+  await user.click(screen.getAllByRole("button", { name: "Mira Vale" })[0]);
+  const page = await screen.findByRole("complementary", { name: "Roster" });
+  await user.click(within(page).getByRole("button", { name: "Talk" }));
+  expect(await screen.findByRole("textbox", { name: /Message/ })).toBeDefined();
+  expect(screen.queryByRole("searchbox", { name: "Search the archive" })).toBeNull();
+  expect(screen.queryByRole("complementary", { name: "Roster" })).toBeNull();
 });
 
 test("first open: name, then the host introduces itself with the coldstart card", async () => {

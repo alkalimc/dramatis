@@ -3,7 +3,7 @@ import type { Candidate, RosterGroup } from "../api";
 import { pronounOf, useT } from "../i18n";
 import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
-import { inLibrary } from "../lib/library";
+import { canTalk } from "../lib/library";
 import { hasPersona } from "../lib/persona";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
@@ -128,7 +128,7 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
   const t = useT();
   const actions = useActions();
   const dispatch = useDispatch();
-  const library = useStore(inLibrary);
+  const library = !useStore(canTalk);
   const off = row.mode === "disabled";
   const ready = hasPersona(row);
   const note = useId();
@@ -176,7 +176,7 @@ function FindByTopic() {
   const actions = useActions();
   const dispatch = useDispatch();
   const id = useId();
-  const library = useStore(inLibrary);
+  const library = !useStore(canTalk);
   const [topic, setTopic] = useState("");
   const [found, setFound] = useState<Candidate[] | null>(null);
   const run = async () => {

@@ -1646,6 +1646,12 @@ async fn library_mode_can_be_chosen_and_left_when_a_model_is_set_up() {
         .unwrap()
         .push_back(Reply::Say("Hello again."));
     assert!(r.run("hello").await.contains("Hello again."));
+
+    // `/talk` from the library goes back to conversations: the person can answer.
+    r.run("/library").await;
+    let out = r.run("/talk ann").await;
+    assert!(out.contains("back to conversations"), "{out}");
+    assert!(!r.session.prompt().contains("library"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

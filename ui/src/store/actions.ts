@@ -158,7 +158,11 @@ export function createActions(api: Api, store: Store) {
 
   async function openDirect(person: string) {
     const channel = await attempt(c.openDirect(person));
-    if (channel) await open(channel, personRef(person));
+    if (!channel) return;
+    // Talking leaves the library view: the conversation is where the user goes.
+    if (store.getState().library) d({ type: "library", on: false });
+    d({ type: "drawer", drawer: null });
+    await open(channel, personRef(person));
   }
 
   /** Take a person a find suggestion offered: their chat opens with the reason they were found. */

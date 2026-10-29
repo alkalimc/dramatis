@@ -350,7 +350,13 @@ impl Session {
                 .term
                 .line(&self.names.say("cli.unknown_command", &[("name", &name)])),
             Command::List(filter) => self.list(filter.as_deref()).await,
-            Command::Talk(who) => self.talk(&who).await,
+            Command::Talk(who) => {
+                // Talking to someone leaves the library when a model can answer.
+                if self.library && !self.no_model {
+                    self.set_library(false);
+                }
+                self.talk(&who).await
+            }
             Command::Group(who) => self.group(&who).await,
             Command::Host => self.host().await,
             Command::Go(_) if self.library => self.needs_model(),
