@@ -148,7 +148,10 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .scene_marker;
         show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
-        println!("{}", header(&engine, &folio, &home, args.fresh).await);
+        println!(
+            "{}",
+            header(&engine, &names, &folio, &home, args.fresh).await
+        );
         let completions = Completions::default();
         let typing = Typing {
             tip: names.text("cli.typing.more"),
@@ -157,10 +160,20 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
         };
         // Missing endpoints or a missing key are offered before the first prompt, while
         // the keyboard is still plain; declining leaves the library form.
+        if interactive
+            && !args.fresh
+            && args.user.is_none()
+            && setup::needs_first_run(&engine, &home).await
+        {
+            setup::first_run(&engine, &names, &mut setup::Terminal).await;
+        }
         if interactive && !args.fresh {
             let gap = setup::gap(&engine).await;
-            if setup::endpoints(&engine, gap, &mut setup::Terminal).await {
-                println!("{}", header(&engine, &folio, &home, args.fresh).await);
+            if setup::endpoints(&engine, &names, gap, &mut setup::Terminal).await {
+                println!(
+                    "{}",
+                    header(&engine, &names, &folio, &home, args.fresh).await
+                );
             }
         }
         let intro = intro_lines(&names);
@@ -216,31 +229,47 @@ fn start_password(home: &Home) -> Result<Option<String>> {
 }
 
 /// The line printed at start: which corpus, which world, and the models in use.
-async fn header(engine: &api::Engine, folio: &Path, home: &Home, fresh: bool) -> String {
+async fn header(
+    engine: &api::Engine,
+    names: &Names,
+    folio: &Path,
+    home: &Home,
+    fresh: bool,
+) -> String {
     use api::Api;
     let model = |role: Option<&api::endpoints::Role>| {
         role.map_or_else(
-            || "none".to_owned(),
+            || names.text("cli.header.none"),
             |r| format!("{}/{}", r.profile, r.model),
         )
     };
     let roles = engine.endpoints().await.ok().and_then(|e| e.roles);
     let chat = roles.as_ref().map(|r| &r.chat);
     let host = roles.as_ref().and_then(|r| r.host.as_ref()).or(chat);
-    format!(
-        "folio {} | world {} | chat {} | host {}",
-        folio.file_name().map_or_else(
-            || folio.display().to_string(),
-            |n| n.to_string_lossy().into()
-        ),
-        if fresh {
-            "throwaway".to_owned()
-        } else {
-            home.world()
-                .map_or_else(|| "none open".to_owned(), |w| w.display().to_string())
-        },
-        model(chat),
-        model(host),
+    names.say(
+        "cli.header",
+        &[
+            (
+                "folio",
+                &folio.file_name().map_or_else(
+                    || folio.display().to_string(),
+                    |n| n.to_string_lossy().into(),
+                ),
+            ),
+            (
+                "world",
+                &if fresh {
+                    names.text("cli.header.throwaway")
+                } else {
+                    home.world().map_or_else(
+                        || names.text("cli.header.no_world"),
+                        |w| w.display().to_string(),
+                    )
+                },
+            ),
+            ("chat", &model(chat)),
+            ("host_model", &model(host)),
+        ],
     )
 }
 

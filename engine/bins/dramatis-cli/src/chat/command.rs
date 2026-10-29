@@ -61,6 +61,8 @@ pub enum Command {
     Edit(usize, String),
     /// Show or set the intensity tier.
     Tier(Option<String>),
+    /// The interface language: show it, or switch it.
+    Lang(Option<String>),
     /// Show quiet hours, switch them `on`/`off`, or set `HH:MM-HH:MM`.
     Quiet(Option<String>),
     Save(Save),
@@ -77,8 +79,10 @@ pub enum Command {
     Storage(StorageAct),
     Help,
     Quit,
-    /// A known command used wrongly, or an unknown one: the text to show.
-    Invalid(String),
+    /// A known command used wrongly: the wording key of its usage line.
+    Invalid(&'static str),
+    /// A command that does not exist: its name.
+    Unknown(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +100,7 @@ pub enum StorageAct {
     Clear(Vec<StorageKind>),
 }
 
-const STORAGE_USAGE: &str = "usage: /storage [clear avatars|audio|all]";
+const STORAGE_USAGE: &str = "cli.usage.storage";
 
 fn parse_storage(args: &str) -> Command {
     let w: Vec<&str> = args.split_whitespace().collect();
@@ -105,7 +109,7 @@ fn parse_storage(args: &str) -> Command {
         ["clear", "avatars"] => StorageAct::Clear(vec![StorageKind::Avatars]),
         ["clear", "audio"] => StorageAct::Clear(vec![StorageKind::Audio]),
         ["clear", "all"] => StorageAct::Clear(vec![StorageKind::Avatars, StorageKind::Audio]),
-        _ => return Command::Invalid(STORAGE_USAGE.into()),
+        _ => return Command::Invalid(STORAGE_USAGE),
     })
 }
 
@@ -124,8 +128,7 @@ pub enum Save {
     Logout,
 }
 
-const SAVE_USAGE: &str = "usage: /save [new <name> | switch <name> | copy <from> <to> | \
-rename <from> <to> | delete <name> | export <name> <path> | import <path> [name] | logout]";
+const SAVE_USAGE: &str = "cli.usage.save";
 
 /// Split on spaces, keeping "double quoted" text together.
 pub(super) fn words(args: &str) -> Vec<String> {
@@ -169,7 +172,7 @@ fn parse_save(args: &str) -> Command {
         ["logout"] => Save::Logout,
         ["import", p] => Save::Import((*p).into(), None),
         ["import", p, n] => Save::Import((*p).into(), Some((*n).into())),
-        _ => return Command::Invalid(SAVE_USAGE.into()),
+        _ => return Command::Invalid(SAVE_USAGE),
     };
     Command::Save(save)
 }
@@ -195,12 +198,12 @@ pub fn parse(line: &str) -> Command {
     let optional = |a: &str| (!a.is_empty()).then(|| a.to_owned());
     match name {
         "list" | "ls" => Command::List(optional(args)),
-        "talk" | "t" if args.is_empty() => Command::Invalid("usage: /talk <person>".into()),
+        "talk" | "t" if args.is_empty() => Command::Invalid("cli.usage.talk"),
         "talk" | "t" => Command::Talk(args.to_owned()),
         "group" | "g" => {
             let members: Vec<String> = args.split_whitespace().map(str::to_owned).collect();
             if members.len() < 2 {
-                Command::Invalid("usage: /group <p1> <p2> [...]".into())
+                Command::Invalid("cli.usage.group")
             } else {
                 Command::Group(members)
             }
@@ -209,13 +212,13 @@ pub fn parse(line: &str) -> Command {
         "chats" | "c" => match args {
             "" => Command::Chats(false),
             "archived" => Command::Chats(true),
-            _ => Command::Invalid("usage: /chats [archived]".into()),
+            _ => Command::Invalid("cli.usage.chats"),
         },
         "chat" => match args.parse::<usize>() {
             Ok(n) if n > 0 => Command::Chat(n),
-            _ => Command::Invalid("usage: /chat <n>, a number from /chats".into()),
+            _ => Command::Invalid("cli.usage.chat"),
         },
-        "who" if args.is_empty() => Command::Invalid("usage: /who <person>".into()),
+        "who" if args.is_empty() => Command::Invalid("cli.usage.who"),
         "who" => Command::Who(args.to_owned()),
         "mode" if matches!(args, "enabled" | "frozen" | "disabled") => {
             Command::Mode(String::new(), args.to_owned())
@@ -226,7 +229,7 @@ pub fn parse(line: &str) -> Command {
             {
                 Command::Mode(who.trim().to_owned(), mode.to_owned())
             }
-            _ => Command::Invalid("usage: /mode [person] enabled|frozen|disabled".into()),
+            _ => Command::Invalid("cli.usage.mode"),
         },
         "archive" => Command::Archive(true),
         "unarchive" => Command::Archive(false),
@@ -241,28 +244,26 @@ pub fn parse(line: &str) -> Command {
         "library" | "lib" => match args {
             "" | "on" => Command::Library(true),
             "off" => Command::Library(false),
-            _ => Command::Invalid("usage: /library [off]".into()),
+            _ => Command::Invalid("cli.usage.library"),
         },
         "ask" => {
             let w = words(args);
             match w.split_first() {
                 Some((who, rest)) if !rest.is_empty() => Command::Ask(who.clone(), rest.join(" ")),
-                _ => Command::Invalid(
-                    "usage: /ask <person> <question>; \"quotes\" hold a name with spaces".into(),
-                ),
+                _ => Command::Invalid("cli.usage.ask"),
             }
         }
         "requests" | "req" => Command::Requests,
         "clock" | "time" => Command::Clock,
-        "find" if args.is_empty() => Command::Invalid("usage: /find <topic>".into()),
+        "find" if args.is_empty() => Command::Invalid("cli.usage.find"),
         "find" => Command::Find(args.to_owned()),
         "waiting" => Command::Waiting,
         "birthday" => Command::Birthday(optional(args)),
         "go" | "open" => match args.parse::<usize>() {
             Ok(n) if n > 0 => Command::Go(n),
-            _ => Command::Invalid("usage: /go <n>, a number from the host's list".into()),
+            _ => Command::Invalid("cli.usage.go"),
         },
-        "name" if args.is_empty() => Command::Invalid("usage: /name <new name>".into()),
+        "name" if args.is_empty() => Command::Invalid("cli.usage.name"),
         "name" => Command::Name(args.to_owned()),
         "bio" => Command::Bio(match args {
             "" => None,
@@ -274,14 +275,18 @@ pub fn parse(line: &str) -> Command {
             "on" => Command::Password(Some(PasswordAct::On)),
             "change" => Command::Password(Some(PasswordAct::Change)),
             "off" => Command::Password(Some(PasswordAct::Off)),
-            _ => Command::Invalid("usage: /password [on | change | off]".into()),
+            _ => Command::Invalid("cli.usage.password"),
         },
         "wrapup" => Command::Wrapup,
         "memories" | "mem" => Command::Memories(optional(args)),
         "forget" | "restore" => match args.parse::<usize>() {
             Ok(n) if n > 0 && name == "forget" => Command::Forget(n),
             Ok(n) if n > 0 => Command::Restore(n),
-            _ => Command::Invalid(format!("usage: /{name} <n>, a number from /memories")),
+            _ => Command::Invalid(if name == "forget" {
+                "cli.usage.forget"
+            } else {
+                "cli.usage.restore"
+            }),
         },
         "edit" => match args.split_once(char::is_whitespace) {
             Some((n, text))
@@ -289,25 +294,26 @@ pub fn parse(line: &str) -> Command {
             {
                 Command::Edit(n.parse().unwrap_or(1), text.trim().to_owned())
             }
-            _ => Command::Invalid("usage: /edit <n> <new text>, n from /memories".into()),
+            _ => Command::Invalid("cli.usage.edit"),
         },
         "tier" => Command::Tier(optional(args)),
+        "lang" => Command::Lang(optional(args)),
         "quiet" => Command::Quiet(optional(args)),
         "save" => parse_save(args),
         "logout" if args.is_empty() => Command::Save(Save::Logout),
-        "logout" => Command::Invalid("usage: /logout".into()),
+        "logout" => Command::Invalid("cli.usage.logout"),
         "history" | "h" => match args {
             "" => Command::History(HISTORY_DEFAULT),
             n => match n.parse::<usize>() {
                 Ok(n) if n > 0 => Command::History(n),
-                _ => Command::Invalid("usage: /history [n]".into()),
+                _ => Command::Invalid("cli.usage.history"),
             },
         },
         "resend" | "r" => match args {
             "" => Command::Resend(1),
             n => match n.parse::<usize>() {
                 Ok(n) if n > 0 => Command::Resend(n),
-                _ => Command::Invalid("usage: /resend [n]".into()),
+                _ => Command::Invalid("cli.usage.resend"),
             },
         },
         "sources" | "src" => {
@@ -319,20 +325,20 @@ pub fn parse(line: &str) -> Command {
                 [] => Command::Sources(1, None),
                 [Some(n)] => Command::Sources(*n, None),
                 [Some(n), Some(k)] => Command::Sources(*n, Some(*k)),
-                _ => Command::Invalid("usage: /sources [n] [entry]".into()),
+                _ => Command::Invalid("cli.usage.sources"),
             }
         }
         "source" => match args.parse::<usize>() {
             Ok(k) if k > 0 => Command::Sources(1, Some(k)),
-            _ => Command::Invalid("usage: /source <entry>, a number from /sources".into()),
+            _ => Command::Invalid("cli.usage.source"),
         },
-        "search" | "s" if args.is_empty() => Command::Invalid("usage: /search <query>".into()),
+        "search" | "s" if args.is_empty() => Command::Invalid("cli.usage.search"),
         "search" | "s" => Command::Search(args.to_owned()),
         "stats" => Command::Stats,
         "storage" => parse_storage(args),
         "help" | "?" => Command::Help,
         "quit" | "exit" | "q" => Command::Quit,
-        other => Command::Invalid(format!("unknown command /{other}; try /help")),
+        other => Command::Unknown(other.to_owned()),
     }
 }
 
@@ -532,9 +538,10 @@ mod tests {
             "/sources x",
             "/ask Ann",
             "/find",
-            "/nope",
         ] {
             assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");
         }
+        assert!(matches!(parse("/nope"), Command::Unknown(_)));
+        assert_eq!(parse("/lang en"), Command::Lang(Some("en".into())));
     }
 }

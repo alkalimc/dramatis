@@ -11,8 +11,10 @@ use anyhow::Result;
 use api::endpoints::WireApi;
 use api::error::ApiError;
 use api::home::Home;
-use api::views::EndpointSetup;
+use api::views::{EndpointSetup, InterfaceLanguage, MonthDay};
 use api::{Api, Engine};
+
+use super::show::Names;
 
 /// Tries at one answer before the step is given up.
 const TRIES: usize = 3;
@@ -116,62 +118,54 @@ pub async fn gap(engine: &Engine) -> Gap {
     }
 }
 
-fn yes(ask: &mut dyn Ask, prompt: &str) -> bool {
-    !matches!(
-        ask.line(prompt)
-            .as_deref()
-            .map(str::to_lowercase)
-            .as_deref(),
-        None | Some("n" | "no")
-    )
+/// Anything but a no (or the end of input) is a yes.
+fn yes(ask: &mut dyn Ask, names: &Names, prompt: &str) -> bool {
+    let no = names.text("cli.answer.no");
+    ask.line(prompt)
+        .map(|a| a.to_lowercase())
+        .is_some_and(|a| !no.split('|').any(|n| n == a))
 }
 
 /// What the endpoint step says about a refusal.
-fn endpoint_problem(e: &ApiError) -> String {
+fn endpoint_problem(e: &ApiError, names: &Names) -> String {
     match e {
         ApiError::Invalid { field } => match field.as_str() {
-            "name" => "the profile needs a name".into(),
-            "base_url" => {
-                "the address must start with http:// or https:// and have no spaces".into()
-            }
-            "model" => "the model id is a single word (no spaces)".into(),
-            "host_model" => "the host's model id is a single word (no spaces)".into(),
-            other => format!("{other} is not usable"),
+            "name" => names.text("cli.setup.bad.name"),
+            "base_url" => names.text("cli.setup.bad.base_url"),
+            "model" => names.text("cli.setup.bad.model"),
+            "host_model" => names.text("cli.setup.bad.host_model"),
+            other => names.say("cli.setup.bad.other", &[("field", &other)]),
         },
-        ApiError::Keychain { detail } => format!("the keychain refused the key: {detail}"),
-        other => other.to_string(),
+        ApiError::Keychain { detail } => names.say("cli.setup.bad.keychain", &[("detail", detail)]),
+        other => names.api_error(other),
     }
 }
 
 /// Offer to set up the chat endpoint (or its key) and do it. Returns whether the endpoints
 /// changed. Declining is fine: the program then works as a library, searching only.
-pub async fn endpoints(engine: &Engine, gap: Gap, ask: &mut dyn Ask) -> bool {
+pub async fn endpoints(engine: &Engine, names: &Names, gap: Gap, ask: &mut dyn Ask) -> bool {
     match gap {
         Gap::None => return false,
         Gap::Key(profile) => {
-            ask.say(&format!(
-                "The endpoint \"{profile}\" has no API key in the keychain."
-            ));
-            let Some(key) = ask.secret("API key (hidden, empty to skip): ") else {
+            ask.say(&names.say("cli.setup.no_key", &[("profile", &profile)]));
+            let Some(key) = ask.secret(&names.text("cli.setup.key_prompt")) else {
                 return false;
             };
             return match engine.set_key(profile, key).await {
                 Ok(()) => {
-                    ask.say("key stored in the keychain");
+                    ask.say(&names.text("cli.setup.key_stored"));
                     true
                 }
                 Err(e) => {
-                    ask.say(&endpoint_problem(&e));
+                    ask.say(&endpoint_problem(&e, names));
                     false
                 }
             };
         }
         Gap::Endpoint => {}
     }
-    ask.say(
-        "No chat model is set up. Without one you can search the corpus but not talk to anyone.",
-    );
-    if !yes(ask, "Set one up now? [Y/n] ") {
+    ask.say(&names.text("cli.setup.no_model"));
+    if !yes(ask, names, &names.text("cli.setup.offer")) {
         return false;
     }
     let presets = engine
@@ -180,35 +174,39 @@ pub async fn endpoints(engine: &Engine, gap: Gap, ask: &mut dyn Ask) -> bool {
         .map(|v| v.presets)
         .unwrap_or_default();
     if !presets.is_empty() {
-        ask.say("Starting points:");
+        ask.say(&names.text("cli.setup.presets"));
         for (i, p) in presets.iter().enumerate() {
             ask.say(&format!("  {}  {} ({})", i + 1, p.name, p.base_url));
         }
     }
     let start = ask
-        .line("Number of a starting point, or Enter to type everything: ")
+        .line(&names.text("cli.setup.preset_prompt"))
         .and_then(|n| n.parse::<usize>().ok())
         .and_then(|n| presets.get(n.checked_sub(1)?))
         .cloned();
     for _ in 0..TRIES {
-        let Some(setup) = form(&start, ask) else {
+        let Some(setup) = form(&start, names, ask) else {
             return false;
         };
         match engine.setup_endpoint(setup).await {
             Ok(()) => {
-                ask.say("saved; the endpoints file is in your home directory and holds no key");
+                ask.say(&names.text("cli.setup.saved"));
                 return true;
             }
-            Err(e) => ask.say(&format!(
-                "{}; let us go through it again",
-                endpoint_problem(&e)
+            Err(e) => ask.say(&names.say(
+                "cli.setup.again",
+                &[("problem", &endpoint_problem(&e, names))],
             )),
         }
     }
     false
 }
 
-fn form(start: &Option<api::endpoints::Profile>, ask: &mut dyn Ask) -> Option<EndpointSetup> {
+fn form(
+    start: &Option<api::endpoints::Profile>,
+    names: &Names,
+    ask: &mut dyn Ask,
+) -> Option<EndpointSetup> {
     let with_default = |ask: &mut dyn Ask, label: &str, default: Option<&str>| {
         let shown = default.map_or(String::new(), |d| format!(" [{d}]"));
         let typed = ask.line(&format!("{label}{shown}: "))?;
@@ -220,17 +218,17 @@ fn form(start: &Option<api::endpoints::Profile>, ask: &mut dyn Ask) -> Option<En
     };
     let name = with_default(
         ask,
-        "profile name",
+        &names.text("cli.setup.field.name"),
         Some(start.as_ref().map_or("main", |p| &p.name)),
     )?;
     let base_url = with_default(
         ask,
-        "address (e.g. https://api.example.com/v1)",
+        &names.text("cli.setup.field.address"),
         start.as_ref().map(|p| p.base_url.as_str()),
     )?;
     let wire = with_default(
         ask,
-        "wire: chat, responses or messages",
+        &names.text("cli.setup.field.wire"),
         Some(match start.as_ref().map(|p| p.wire_api) {
             Some(WireApi::Messages) => "messages",
             Some(WireApi::Responses) => "responses",
@@ -242,17 +240,13 @@ fn form(start: &Option<api::endpoints::Profile>, ask: &mut dyn Ask) -> Option<En
         "messages" => WireApi::Messages,
         "chat" => WireApi::Chat,
         _ => {
-            ask.say("the wire is chat, responses or messages; using chat");
+            ask.say(&names.text("cli.setup.bad_wire"));
             WireApi::Chat
         }
     };
-    let model = with_default(ask, "model id", None)?;
-    let host_model = with_default(
-        ask,
-        "a different model for the host (Enter: same as above)",
-        None,
-    )?;
-    let key = ask.secret("API key (hidden, empty to add it later): ");
+    let model = with_default(ask, &names.text("cli.setup.field.model"), None)?;
+    let host_model = with_default(ask, &names.text("cli.setup.field.host_model"), None)?;
+    let key = ask.secret(&names.text("cli.setup.field.key"));
     Some(EndpointSetup {
         name,
         base_url,
@@ -261,4 +255,81 @@ fn form(start: &Option<api::endpoints::Profile>, ask: &mut dyn Ask) -> Option<En
         host_model: Some(host_model).filter(|m| !m.is_empty()),
         key,
     })
+}
+
+/// Whether this start should walk a new player through the first-run questions: a terminal,
+/// a save open and unnamed, and a home that has not been asked before (the language answer
+/// is what records that, so skipping the name does not bring the questions back).
+pub async fn needs_first_run(engine: &Engine, home: &Home) -> bool {
+    if home.interface_language().is_some() {
+        return false;
+    }
+    let open = engine.app_status().await.is_ok_and(|s| s.save.is_some());
+    open && engine.settings().await.is_ok_and(|s| s.user_name.is_none())
+}
+
+/// The first-run questions, each optional: the interface language (default: the corpus's),
+/// a name, a birthday and a short bio. Empty answers skip.
+pub async fn first_run(engine: &Engine, names: &Names, ask: &mut dyn Ask) {
+    ask.say(&names.text("cli.first.language"));
+    let chosen = match ask
+        .line(&names.text("cli.first.language_prompt"))
+        .as_deref()
+        .map(str::trim)
+    {
+        Some("2" | "en" | "english") => InterfaceLanguage::English,
+        _ => InterfaceLanguage::Corpus,
+    };
+    // Recorded even when it stays the default: that is what stops the questions coming back.
+    let reloaded = async {
+        engine.set_interface_language(chosen).await?;
+        names.reload(engine).await
+    }
+    .await;
+    if let Err(e) = reloaded {
+        ask.say(&names.api_error(&e));
+        return;
+    }
+    let Ok(mut settings) = engine.settings().await else {
+        return;
+    };
+    if let Some(name) = ask
+        .line(&names.text("cli.first.name"))
+        .filter(|n| !n.is_empty())
+    {
+        settings.user_name = Some(name);
+    }
+    if let Some(typed) = ask
+        .line(&names.text("cli.first.birthday"))
+        .filter(|b| !b.is_empty())
+    {
+        let parsed = typed
+            .split_once('-')
+            .and_then(|(m, d)| Some((m.trim().parse::<u8>().ok()?, d.trim().parse::<u8>().ok()?)))
+            .map(|(month, day)| MonthDay { month, day });
+        match parsed {
+            Some(day) => settings.birthday = Some(day),
+            None => ask.say(&names.text("cli.birthday.invalid")),
+        }
+    }
+    if let Some(bio) = ask
+        .line(&names.say("cli.first.bio", &[("max", &world::settings::BIO_MAX)]))
+        .filter(|b| !b.is_empty())
+    {
+        if bio.chars().count() > world::settings::BIO_MAX {
+            ask.say(&names.say("cli.bio.too_long", &[("max", &world::settings::BIO_MAX)]));
+        } else {
+            settings.bio = Some(bio);
+        }
+    }
+    match engine.update_settings(settings).await {
+        Ok(()) => {
+            if let Err(e) = names.refresh_user(engine).await {
+                ask.say(&names.api_error(&e));
+            }
+        }
+        // A birthday the engine refuses (month 13) is the one thing it can refuse here.
+        Err(ApiError::Invalid { .. }) => ask.say(&names.text("cli.birthday.invalid")),
+        Err(e) => ask.say(&names.api_error(&e)),
+    }
 }

@@ -500,9 +500,7 @@ fn english_entries(all: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     const KEEP: [&str; 4] = ["host.name", "org.name", "user.title", "lang.corpus"];
     const KEEP_PREFIX: [&str; 3] = ["harness.", "tool.", "gender."];
     all.iter()
-        .filter(|(k, _)| {
-            KEEP.contains(&k.as_str()) || KEEP_PREFIX.iter().any(|p| k.starts_with(p))
-        })
+        .filter(|(k, _)| KEEP.contains(&k.as_str()) || KEEP_PREFIX.iter().any(|p| k.starts_with(p)))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
 }
