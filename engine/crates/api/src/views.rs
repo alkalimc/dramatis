@@ -22,6 +22,16 @@ pub struct AppStatus {
     /// The open save is encrypted and not unlocked: only `unlock` (or switching to another
     /// save) works until then.
     pub locked: bool,
+    /// The save this process has open. `None`: none (first run, the last one is gone, or
+    /// the user logged out), so the save picker shows.
+    pub save: Option<String>,
+    /// The save recorded as the last one used when it no longer exists (renamed or deleted
+    /// elsewhere), so the picker can say so.
+    pub missing_save: Option<String>,
+    /// The home directory, where endpoints, parameters and the corpus link live.
+    pub home_dir: String,
+    /// The folder the saves are files in.
+    pub saves_dir: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -597,6 +607,22 @@ pub struct EndpointsView {
     pub roles: Option<Roles>,
     /// Starting points for "add".
     pub presets: Vec<Profile>,
+}
+
+/// The first-run form: one endpoint, the model the people talk with, optionally another for
+/// the host, and the key. Written together or not at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct EndpointSetup {
+    /// The profile's name; one that exists is updated.
+    pub name: String,
+    pub base_url: String,
+    pub wire_api: crate::endpoints::WireApi,
+    /// The model of the chat role.
+    pub model: String,
+    /// A different model for the host; `None`: the host uses the chat role.
+    pub host_model: Option<String>,
+    /// Goes to the keychain and nowhere else. `None`: leave the profile's key as it is.
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

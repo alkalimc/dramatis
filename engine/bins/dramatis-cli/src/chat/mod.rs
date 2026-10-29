@@ -14,6 +14,7 @@ mod interrupt;
 mod render;
 mod secret;
 mod session;
+mod setup;
 mod show;
 #[cfg(test)]
 mod tests;
@@ -70,6 +71,11 @@ impl Throwaway {
                 let _ = std::fs::copy(&from, dir.join(name));
             }
         }
+        // A throwaway world needs no choosing: it starts on a save of its own.
+        let throwaway = Home::new(&dir);
+        throwaway.create()?;
+        world::World::open(throwaway.save_path(api::home::DEFAULT_SAVE))
+            .map_err(|e| anyhow::anyhow!("cannot create the throwaway world: {e}"))?;
         Ok(Self(dir))
     }
 }
@@ -95,7 +101,12 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
     } else {
         start_password(&home)?
     };
-    let folio = folio.or_else(|| home.resolve_folio()).with_context(|| {
+    let interactive = std::io::stdin().is_terminal() && !args.plain;
+    let mut folio = folio.or_else(|| home.resolve_folio());
+    if folio.is_none() && interactive {
+        folio = setup::corpus(&home, &mut setup::Terminal)?;
+    }
+    let folio = folio.with_context(|| {
         format!(
             "no corpus found: pass --folio <path>, set DRAMATIS_FOLIO, or put a .folio file in {}",
             home.root().display()
@@ -140,6 +151,14 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             style: term.style,
             completions: completions.clone(),
         };
+        // Missing endpoints or a missing key are offered before the first prompt, while
+        // the keyboard is still plain; declining leaves the library form.
+        if interactive && !args.fresh {
+            let gap = setup::gap(&engine).await;
+            if setup::endpoints(&engine, gap, &mut setup::Terminal).await {
+                println!("{}", header(&engine, &folio, &home, args.fresh).await);
+            }
+        }
         let intro = intro_lines(&names);
         let mut session = Session::new(
             engine,
@@ -164,12 +183,14 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
 /// The password of the save the process starts on, asked for (hidden, three tries) when
 /// that save is encrypted.
 fn start_password(home: &Home) -> Result<Option<String>> {
-    let path = home.world();
+    let (Some(path), Some(name)) = (home.world(), home.current_save()) else {
+        return Ok(None);
+    };
     if !world::cipher::is_encrypted(&path) {
         return Ok(None);
     }
     for _ in 0..3 {
-        let prompt = format!("password for {}: ", home.current_save());
+        let prompt = format!("password for {name}: ");
         let Some(password) = secret::read(&prompt) else {
             bail!("the save is encrypted and no password was given");
         };
@@ -203,7 +224,8 @@ async fn header(engine: &api::Engine, folio: &Path, home: &Home, fresh: bool) ->
         if fresh {
             "throwaway".to_owned()
         } else {
-            home.world().display().to_string()
+            home.world()
+                .map_or_else(|| "none open".to_owned(), |w| w.display().to_string())
         },
         model(chat),
         model(host),
@@ -394,8 +416,13 @@ async fn repl(
             println!("{line}");
         }
     }
-    // Anyone due to come by does so now, as the app would on opening.
-    session.arrivals(true).await;
+    if session.picking() {
+        // No save to open yet: the list comes first, and the arrivals after one opens.
+        session.show_picker().await;
+    } else {
+        // Anyone due to come by does so now, as the app would on opening.
+        session.arrivals(true).await;
+    }
     loop {
         let prompt = if interactive {
             session.prompt()

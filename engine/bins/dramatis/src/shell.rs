@@ -95,8 +95,35 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .and_then(|(engine, _)| engine.open_password());
+    // Choosing a corpus in the window reopens the home on it, after the command returns.
+    let again = {
+        let (app, home) = (app.clone(), home.clone());
+        Arc::new(move || {
+            let (app, home) = (app.clone(), home.clone());
+            tauri::async_runtime::spawn(async move {
+                let folio = home.resolve_folio();
+                match open(&app, home, folio) {
+                    Ok(()) => reload(&app),
+                    Err(e) => eprintln!("dramatis: could not open the corpus: {e}"),
+                }
+            });
+        })
+    };
+    let dialog = {
+        let app = app.clone();
+        Arc::new(move || {
+            app.dialog()
+                .file()
+                .add_filter("Corpus", &["folio"])
+                .blocking_pick_file()
+                .and_then(|p| p.into_path().ok())
+                .map(|p| p.display().to_string())
+        })
+    };
     let options = Options {
         password,
+        restart: Some(again),
+        choose_file: Some(dialog),
         ..Options::default()
     };
     let Runtime { engine, bridge } = Runtime::open(home, folio, sink.clone(), options)?;
@@ -133,8 +160,8 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
     Ok(())
 }
 
-/// Ask for a `.folio` and open it. The choice is remembered as a link in the home
-/// directory, which is where the next start looks.
+/// Ask for a `.folio` and open it. The choice is remembered in the home directory, which
+/// is where the next start looks.
 pub fn pick_corpus(app: &AppHandle, home: Home) {
     let app = app.clone();
     app.clone()
@@ -145,11 +172,8 @@ pub fn pick_corpus(app: &AppHandle, home: Home) {
             let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
                 return;
             };
-            if let Some(name) = path.file_name() {
-                let link = home.root().join(name);
-                if link != path && !link.exists() {
-                    let _ = std::os::unix::fs::symlink(&path, &link);
-                }
+            if let Err(e) = home.set_chosen_corpus(&path) {
+                eprintln!("dramatis: could not remember the corpus: {e}");
             }
             match open(&app, home, Some(path)) {
                 Ok(()) => reload(&app),
@@ -186,14 +210,11 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = std::fs::create_dir_all(&dir);
         let _ = scope.allow_directory(dir, true);
     }
+    // With no corpus the window asks for one itself (a file dialog or a typed path).
     let folio = home.resolve_folio();
-    let have_corpus = folio.is_some();
     if let Err(e) = open(&handle, home.clone(), folio) {
         // Leave the placeholder engine in place (library form, nothing opened).
         eprintln!("dramatis: could not start the engine: {e}");
-    }
-    if !have_corpus {
-        pick_corpus(&handle, home.clone());
     }
 
     let show_item = MenuItem::with_id(app, "show", "Show dramatis", true, None::<&str>)?;

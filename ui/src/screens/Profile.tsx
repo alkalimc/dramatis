@@ -294,6 +294,7 @@ export function LeftDrawer() {
   const actions = useActions();
   const name = useStore((s) => s.settings?.user_name ?? null);
   const theme = useStore((s) => s.theme);
+  const hasSave = useStore((s) => Boolean(s.status?.save));
   const archivedCount = useStore((s) => s.channels.filter((c) => c.archived).length);
   const ref = useRef<HTMLElement>(null);
   const version = useAppVersion();
@@ -330,6 +331,7 @@ export function LeftDrawer() {
           <Row icon="cases" label={t("nav.cases")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "cases" } }))} />
           <Row icon="bookmark" label={t("system.tab.saves")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "saves" } }))} />
           <Row icon="system" label={t("menu.settings")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "root" } }))} />
+          {hasSave && <Row icon="leave" label={t("logout")} onClick={go(() => void actions.logOut())} />}
           <li>
             <label className="drawer-item switch-row">
               <Icon name="moon" size={24} />

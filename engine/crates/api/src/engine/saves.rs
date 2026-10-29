@@ -23,7 +23,7 @@ use crate::saves;
 use crate::views::SaveInfo;
 
 impl Engine {
-    fn open_save(&self) -> String {
+    pub(crate) fn open_save(&self) -> String {
         self.save.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -68,10 +68,32 @@ impl Engine {
         let key = self.password_of(name);
         let next = World::open_with(&path, key.as_deref()).map_err(world_err)?;
         self.home.set_current_save(name).map_err(io)?;
+        *self.missing_save.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.w() = next;
         self.locked.store(false, Ordering::Relaxed);
         self.ports.agent.switch_world(&path, key.as_deref());
         *open = name.to_owned();
+        Ok(())
+    }
+
+    /// Close the open save and leave none: the world becomes the empty stand-in, the name
+    /// for the next start is cleared (so every client starts at the picker), and an
+    /// encrypted save's password is forgotten with it.
+    pub(crate) fn log_out_impl(&self) -> ApiResult<()> {
+        let mut open = self.save.lock().unwrap_or_else(|e| e.into_inner());
+        if open.is_empty() {
+            return Ok(());
+        }
+        if !self.ports.agent.idle() {
+            return Err(ApiError::Busy);
+        }
+        self.home.clear_current_save().map_err(io)?;
+        // The connection is dropped so the file is settled and free for other processes.
+        *self.w() = World::in_memory().map_err(world_err)?;
+        self.locked.store(false, Ordering::Relaxed);
+        self.ports.agent.switch_world(Path::new(""), None);
+        self.remember(&open, None);
+        open.clear();
         Ok(())
     }
 
@@ -111,6 +133,9 @@ impl Engine {
             return Err(invalid("new"));
         }
         let open = self.save.lock().unwrap_or_else(|e| e.into_inner());
+        if open.is_empty() {
+            return Err(ApiError::NotFound);
+        }
         if self.locked.load(Ordering::Relaxed) {
             return Err(ApiError::Locked);
         }

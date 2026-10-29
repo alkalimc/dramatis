@@ -3,7 +3,7 @@
 
 use super::Engine;
 use crate::convert;
-use crate::corpus::Corpus;
+use crate::corpus::{self, Corpus};
 use crate::display::Namer;
 use crate::error::ApiResult;
 use crate::types::*;
@@ -14,6 +14,15 @@ fn nonempty(s: String) -> Option<String> {
 }
 
 impl Engine {
+    /// Check the file as a corpus, remember it for the next start and ask the front end to
+    /// open the home again on it.
+    pub(crate) fn set_corpus_impl(&self, path: &str) -> ApiResult<()> {
+        let path = corpus::choose(path)?;
+        self.home.set_chosen_corpus(&path).map_err(super::io)?;
+        (self.ports.restart)();
+        Ok(())
+    }
+
     fn passage(&self, c: &Corpus, namer: &Namer, u: &folio::Unit) -> Passage {
         Passage {
             citation: convert::unit_citation(u),

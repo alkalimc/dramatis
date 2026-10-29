@@ -202,6 +202,11 @@ async fn rig_wording(wording: &str) -> Rig {
 }
 
 async fn rig_with(wording: &str, host: bool) -> Rig {
+    rig_full(wording, host, true, None).await
+}
+
+/// `with_save: false` is a home where the user has not picked a save yet.
+async fn rig_full(wording: &str, host: bool, with_save: bool, recorded: Option<&str>) -> Rig {
     let folio = corpus(wording, host);
     let home = TempHome::new();
     std::fs::write(
@@ -211,6 +216,17 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
          [roles]\nchat = { profile = 'p', model = 'model-a' }\n",
     )
     .unwrap();
+    if with_save {
+        // A save to open, as a first run leaves the home after the user picks one.
+        let h = Home::new(&home.0);
+        h.create().unwrap();
+        drop(world::World::open(h.save_path("default")).unwrap());
+    }
+    if let Some(name) = recorded {
+        let h = Home::new(&home.0);
+        h.create().unwrap();
+        h.set_current_save(name).unwrap();
+    }
     let out = Buf::default();
     let term = Arc::new(Term::new(Box::new(out.clone()), Style::PLAIN));
     let show = Arc::new(Show::new(term.clone()));
@@ -228,6 +244,8 @@ async fn rig_with(wording: &str, host: bool) -> Rig {
             quiet: true,
             frontend: runtime::Frontend::Terminal,
             password: None,
+            restart: None,
+            choose_file: None,
         },
     )
     .unwrap();
@@ -980,4 +998,211 @@ async fn bio_shows_sets_clears_and_is_bounded() {
     );
     assert!(r.run("/bio clear").await.contains("bio cleared"));
     assert!(r.run("/bio").await.contains("no bio"));
+}
+
+// ---- first run: the save picker and the setup steps ----
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_save_the_picker_leads_and_a_choice_opens_and_records_one() {
+    let mut r = rig_full(WORDING, false, false, None).await;
+    assert!(r.session.picking());
+    r.session.show_picker().await;
+    let shown = r.out.take();
+    assert!(
+        shown.contains("(none yet)") && shown.contains("\"new <name>\""),
+        "{shown}"
+    );
+
+    // Nothing but a choice makes sense yet.
+    assert!(r.run("hello").await.contains("No save is open"));
+    assert!(r.run("/talk ann").await.contains("No save is open"));
+    assert!(r.run("new a/b").await.contains("not a usable name"));
+    assert!(r.run("3").await.contains("no save with that number"));
+    assert!(r.session.picking());
+
+    let opened = r.run("new first").await;
+    assert!(opened.contains("now playing first"), "{opened}");
+    assert!(!r.session.picking());
+    let home = Home::new(&r._home.0);
+    assert_eq!(home.current_save().as_deref(), Some("first"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logout_clears_the_record_and_returns_to_a_numbered_list_both_clients_read() {
+    let mut r = rig().await;
+    r.run("/save new second").await;
+    let home = Home::new(&r._home.0);
+    assert_eq!(home.current_save().as_deref(), Some("default"));
+
+    let out = r.run("/save logout").await;
+    assert!(
+        out.contains("logged out") && out.contains("Saves in"),
+        "{out}"
+    );
+    assert!(
+        out.contains(" 1  ") && out.contains("default") && out.contains("second"),
+        "{out}"
+    );
+    assert!(r.session.picking());
+    assert_eq!(home.current_save(), None);
+    // The app, starting now, would show its picker too.
+    assert_eq!(home.start_save(), api::home::Start::Pick { missing: None });
+
+    // Pick by number (the list is most recently played first) or by name.
+    let names: Vec<String> = r
+        .engine
+        .saves()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    let n = names.iter().position(|s| s == "second").unwrap() + 1;
+    let out = r.run(&n.to_string()).await;
+    assert!(out.contains("now playing second"), "{out}");
+    assert!(!r.session.picking());
+    assert_eq!(home.current_save().as_deref(), Some("second"));
+    // The shorthand does the same.
+    assert!(r.run("/logout").await.contains("logged out"));
+    assert!(r.run("quit").await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recorded_save_that_is_gone_is_named_in_the_picker() {
+    let mut r = rig_full(WORDING, false, false, Some("vanished")).await;
+    assert!(r.session.picking());
+    r.session.show_picker().await;
+    let shown = r.out.take();
+    assert!(
+        shown.contains("\"vanished\", is not there any more"),
+        "{shown}"
+    );
+}
+
+/// Answers from a list, and keeps what was said.
+struct Script {
+    answers: VecDeque<Option<String>>,
+    secrets: VecDeque<Option<String>>,
+    said: Vec<String>,
+}
+
+impl Script {
+    fn new(answers: &[&str], secrets: &[&str]) -> Self {
+        Self {
+            answers: answers.iter().map(|a| Some((*a).to_owned())).collect(),
+            secrets: secrets.iter().map(|a| Some((*a).to_owned())).collect(),
+            said: Vec::new(),
+        }
+    }
+}
+
+impl super::setup::Ask for Script {
+    fn line(&mut self, prompt: &str) -> Option<String> {
+        self.said.push(prompt.to_owned());
+        self.answers.pop_front().flatten()
+    }
+    fn secret(&mut self, _: &str) -> Option<String> {
+        self.secrets.pop_front().flatten()
+    }
+    fn say(&mut self, text: &str) {
+        self.said.push(text.to_owned());
+    }
+}
+
+#[test]
+fn the_corpus_step_explains_a_bad_path_and_remembers_a_good_one() {
+    let home = TempHome::new();
+    let h = Home::new(&home.0);
+    h.create().unwrap();
+    let junk = home.0.join("junk.folio");
+    std::fs::write(&junk, b"not a database").unwrap();
+    let good = corpus(WORDING, false);
+    let mut ask = Script::new(
+        &[
+            "/no/such.folio",
+            &junk.display().to_string(),
+            &format!("\"{}\"", good.path().display()),
+        ],
+        &[],
+    );
+    let chosen = super::setup::corpus(&h, &mut ask).unwrap();
+    assert_eq!(chosen, Some(good.path().canonicalize().unwrap()));
+    let said = ask.said.join("\n");
+    assert!(said.contains("there is no file there"), "{said}");
+    assert!(
+        said.contains("not a corpus this program can read"),
+        "{said}"
+    );
+    assert_eq!(h.chosen_corpus(), chosen);
+
+    // Empty answer: stop, nothing remembered.
+    let other = TempHome::new();
+    let oh = Home::new(&other.0);
+    oh.create().unwrap();
+    assert_eq!(
+        super::setup::corpus(&oh, &mut Script::new(&[""], &[])).unwrap(),
+        None
+    );
+    assert_eq!(oh.chosen_corpus(), None);
+}
+
+#[tokio::test]
+async fn the_endpoints_wizard_writes_a_valid_file_and_the_key_goes_to_the_fake_keychain() {
+    let home = TempHome::new();
+    let h = Home::new(&home.0);
+    // The library's default ports keep keys in memory: the real keychain is not touched.
+    let engine = Engine::open(h.clone(), None, api::Ports::default()).unwrap();
+    assert_eq!(
+        super::setup::gap(&engine).await,
+        super::setup::Gap::Endpoint
+    );
+
+    let mut ask = Script::new(
+        &[
+            "y",
+            "",
+            "mine",
+            "not a url",
+            "",
+            "model-a",
+            "",
+            "mine",
+            "https://api.example.invalid/v1",
+            "chat",
+            "model-a",
+            "model-h",
+        ],
+        &["sk-secret", "sk-secret"],
+    );
+    // First pass: "not a url" is refused with a plain reason, then the form runs again.
+    assert!(super::setup::endpoints(&engine, super::setup::Gap::Endpoint, &mut ask).await);
+    let said = ask.said.join("\n");
+    assert!(said.contains("must start with http"), "{said}");
+    let text = std::fs::read_to_string(h.endpoints()).unwrap();
+    assert!(!text.contains("sk-secret"));
+    let parsed = api::endpoints::Endpoints::from_toml(&text).unwrap();
+    parsed.validate().unwrap();
+    let roles = parsed.roles.unwrap();
+    assert_eq!(
+        (
+            roles.chat.model.as_str(),
+            roles.host.unwrap().model.as_str()
+        ),
+        ("model-a", "model-h")
+    );
+    assert!(engine.endpoints().await.unwrap().profiles[0].has_key);
+    assert_eq!(super::setup::gap(&engine).await, super::setup::Gap::None);
+
+    // Declining changes nothing.
+    let fresh = TempHome::new();
+    let e2 = Engine::open(Home::new(&fresh.0), None, api::Ports::default()).unwrap();
+    assert!(
+        !super::setup::endpoints(
+            &e2,
+            super::setup::Gap::Endpoint,
+            &mut Script::new(&["n"], &[])
+        )
+        .await
+    );
+    assert!(!Home::new(&fresh.0).endpoints().exists());
 }

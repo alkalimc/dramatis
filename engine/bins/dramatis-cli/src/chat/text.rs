@@ -40,6 +40,7 @@ anything else       send it to the current channel
 /save               list saves; * marks the one in use
 /save new <name>    an empty save
 /save switch <name> close this world and open another
+/save logout        close this world and go back to the list of saves (also /logout)
 /save copy <from> <to>, /save rename <from> <to>
 /save delete <name> asks first; the save in use cannot be deleted
 /save export <name> <path>, /save import <path> [name]

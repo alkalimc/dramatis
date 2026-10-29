@@ -1,12 +1,22 @@
 import type { Failure } from "../api";
-import { useT, type T } from "../i18n";
+import { useT, type Key, type T } from "../i18n";
 import { when, type Names } from "../lib/format";
 import { useDispatch, useStore } from "../store";
+
+/** Fields whose refusal has a sentence of its own. */
+const INVALID: Record<string, Key> = {
+  corpus: "error.invalid.corpus",
+  corpus_version: "error.invalid.corpus_version",
+  corpus_requirement: "error.invalid.corpus_requirement",
+  base_url: "error.invalid.base_url",
+  model: "error.invalid.model",
+  host_model: "error.invalid.host_model",
+};
 
 export function errorText(e: Failure, t: T, names: Names): { text: string; detail?: string } {
   switch (e.code) {
     case "invalid":
-      return { text: t("error.invalid", { field: e.field }) };
+      return { text: e.field in INVALID ? t(INVALID[e.field]) : t("error.invalid", { field: e.field }) };
     case "disabled":
       return { text: t("error.disabled", { name: names[e.person] ?? t("person.unknown") }) };
     case "quota_exhausted":

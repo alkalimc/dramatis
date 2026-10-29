@@ -74,6 +74,11 @@ pub struct Session {
     pending: Option<Pending>,
     /// Asks for a password with nothing echoed; `None` is no answer. Replaced in tests.
     secret: Secret,
+    /// No save is open (first run, the last one is gone, or the user logged out): every
+    /// line answers the save list until one opens.
+    picking: bool,
+    /// The saves of the list on screen, numbered from 1.
+    pickable: Vec<String>,
 }
 
 /// Asks for a password and returns what was typed.
@@ -142,7 +147,7 @@ impl Session {
             .ok()
             .and_then(|c| c.last().map(|c| c.id))
             .unwrap_or(0);
-        let session = Self {
+        let mut session = Self {
             engine,
             bridge,
             term,
@@ -158,7 +163,14 @@ impl Session {
             listed: Vec::new(),
             pending: None,
             secret: Box::new(super::secret::read),
+            picking: false,
+            pickable: Vec::new(),
         };
+        session.picking = session
+            .engine
+            .app_status()
+            .await
+            .is_ok_and(|s| s.save.is_none());
         session.refresh_completions().await;
         session
     }
@@ -167,6 +179,9 @@ impl Session {
     /// line being typed is theirs and not the channel's.
     pub fn prompt(&self) -> String {
         let style = self.term.style;
+        if self.picking {
+            return format!("{} ", self.term.style.bold("save>"));
+        }
         let channel = self.current.as_ref().map_or("-", |c| c.label.as_str());
         format!(
             "{} {}> ",
@@ -209,6 +224,9 @@ impl Session {
 
     /// One line of input: the answer to a question just asked, else a command or message.
     pub async fn input(&mut self, line: &str) -> Flow {
+        if self.picking {
+            return self.pick(line).await;
+        }
         let Some(pending) = self.pending.take() else {
             return self.handle(parse(line)).await;
         };
@@ -1148,6 +1166,7 @@ impl Session {
                 .await
                 .map(|()| format!("created {n}")),
             Save::Switch(n) => return self.switch_save(&n).await,
+            Save::Logout => return self.log_out().await,
             Save::Copy(a, b) => self
                 .engine
                 .copy_save(a.clone(), b.clone())
@@ -1221,6 +1240,122 @@ impl Session {
         self.term.note(&format!(
             "now playing {name}; /talk <person> or /host to begin"
         ));
+    }
+
+    /// Whether no save is open and the lines typed choose one.
+    pub fn picking(&self) -> bool {
+        self.picking
+    }
+
+    /// `/save logout`: close the open save, forget where it was, and show the save list.
+    async fn log_out(&mut self) {
+        if let Err(e) = self.engine.log_out().await {
+            return self.term.print(&format!("{}\n", Self::why(&e)));
+        }
+        self.current = None;
+        self.offers.clear();
+        self.listed.clear();
+        self.calls.clear();
+        self.picking = true;
+        self.term.note("logged out of the save");
+        self.show_picker().await;
+    }
+
+    /// The numbered list of saves and what can be typed. Also the first thing a start
+    /// without a usable last save shows, with the reason.
+    pub async fn show_picker(&mut self) {
+        let status = self.engine.app_status().await.ok();
+        if let Some(gone) = status.as_ref().and_then(|s| s.missing_save.as_ref()) {
+            self.term.print(&format!(
+                "The save you used last, \"{gone}\", is not there any more (renamed or deleted elsewhere).\n"
+            ));
+        }
+        let saves = self.engine.saves().await.unwrap_or_default();
+        let dir = status.map_or_else(String::new, |s| s.saves_dir);
+        self.term.print(&format!("Saves in {dir}\n"));
+        if saves.is_empty() {
+            self.term.print("  (none yet)\n");
+        }
+        for (i, s) in saves.iter().enumerate() {
+            let played = s.played_at.as_ref().map_or_else(
+                || "-".to_owned(),
+                |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
+            );
+            self.term.print(&format!(
+                "  {:>2}  {:<24} {:>8} KB  {played}{}\n",
+                i + 1,
+                s.name,
+                s.size_kb,
+                if s.encrypted { "  encrypted" } else { "" }
+            ));
+        }
+        self.pickable = saves.into_iter().map(|s| s.name).collect();
+        self.term.print(
+            "Type a number to open a save, \"new <name>\" to start one, \"import <path> [name]\" \
+             to add a file, or \"quit\".\n",
+        );
+    }
+
+    /// One line typed while no save is open.
+    async fn pick(&mut self, line: &str) -> Flow {
+        let words: Vec<String> = super::command::words(line.trim().trim_start_matches('/'));
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        let chosen = match words.as_slice() {
+            [] => {
+                self.show_picker().await;
+                return Flow::Continue;
+            }
+            ["quit" | "exit" | "q"] => return Flow::Quit,
+            ["new", name] => match self.engine.new_save((*name).into()).await {
+                Ok(()) => (*name).to_owned(),
+                Err(e) => return self.picker_error(&e),
+            },
+            ["import", path] | ["import", path, _] => {
+                let name = words.get(2).map(|n| (*n).to_owned());
+                match self.import(expand(path), name).await {
+                    Ok(name) => name,
+                    Err(e) => return self.picker_error(&e),
+                }
+            }
+            [n] if n.parse::<usize>().is_ok() => match n
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| self.pickable.get(n.checked_sub(1)?))
+            {
+                Some(name) => name.clone(),
+                None => {
+                    self.term.print("there is no save with that number\n");
+                    return Flow::Continue;
+                }
+            },
+            [name] if self.pickable.iter().any(|s| s == name) => (*name).to_owned(),
+            _ => {
+                self.term.print(
+                    "No save is open. Type a number from the list, \"new <name>\", \
+                     \"import <path> [name]\" or \"quit\".\n",
+                );
+                return Flow::Continue;
+            }
+        };
+        self.switch_save(&chosen).await;
+        let opened = self
+            .engine
+            .app_status()
+            .await
+            .is_ok_and(|s| s.save.is_some());
+        if opened {
+            self.picking = false;
+            self.refresh_completions().await;
+            self.arrivals(true).await;
+        } else {
+            self.show_picker().await;
+        }
+        Flow::Continue
+    }
+
+    fn picker_error(&self, e: &api::ApiError) -> Flow {
+        self.term.print(&format!("{}\n", Self::why(e)));
+        Flow::Continue
     }
 
     /// Ask for the password of save `name` until it opens it or the tries run out.

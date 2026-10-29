@@ -72,6 +72,38 @@ pub fn refusal(e: &folio::Error) -> CorpusState {
     }
 }
 
+/// A path as typed: a leading `~/` is the home directory, surrounding spaces and quotes go.
+fn typed_path(text: &str) -> std::path::PathBuf {
+    let text = text.trim().trim_matches(['"', '\'']);
+    match (text.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => Path::new(&home).join(rest),
+        _ => text.into(),
+    }
+}
+
+/// The file a user named as their corpus, checked: it exists and is a corpus this version
+/// reads. The errors are `NotFound` and `Invalid` with field `corpus` (unreadable),
+/// `corpus_version` (another format) or `corpus_requirement` (needs a reader feature this
+/// build lacks).
+pub fn choose(typed: &str) -> ApiResult<PathBuf> {
+    let invalid = |field: &str| ApiError::Invalid {
+        field: field.into(),
+    };
+    let path = typed_path(typed);
+    if !path.is_file() {
+        return Err(ApiError::NotFound);
+    }
+    let path = path.canonicalize().map_err(|e| ApiError::Io {
+        detail: e.to_string(),
+    })?;
+    match Folio::open(&path) {
+        Ok(_) => Ok(path),
+        Err(folio::Error::UnknownFormat { .. }) => Err(invalid("corpus_version")),
+        Err(folio::Error::UnmetRequirement { .. }) => Err(invalid("corpus_requirement")),
+        Err(_) => Err(invalid("corpus")),
+    }
+}
+
 impl Corpus {
     /// Open and apply the load rules (`Folio::open` refuses an unknown format version and
     /// an unmet requirement). `prompts_dir` holds optional local prompt overrides.

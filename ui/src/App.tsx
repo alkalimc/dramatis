@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api as defaultApi, type Api } from "./api";
 import { useT } from "./i18n";
 import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Store } from "./store";
@@ -20,6 +20,7 @@ import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
 import { UnlockScreen } from "./screens/Unlock";
+import { CorpusSetup, ModelStep, SavePicker } from "./screens/Welcome";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -72,6 +73,13 @@ function Shell() {
   const menuOpen = useStore((s) => s.menuOpen);
   const profile = useStore((s) => s.profile);
   const actions = useActions();
+  const endpoints = useStore((s) => s.endpoints);
+  // Whether this window began on the first-run name form, so the model step can follow it.
+  const firstRun = useRef(false);
+  if (status?.needs_setup) firstRun.current = true;
+  const [modelDone, setModelDone] = useState(false);
+  const chat = endpoints?.roles?.chat;
+  const modelMissing = endpoints !== null && (!chat || endpoints.profiles.some((p) => p.profile.name === chat.profile && !p.has_key));
   usePresence();
   useTheme();
 
@@ -87,21 +95,21 @@ function Shell() {
     );
   }
   if (status.locked) return <UnlockScreen />;
-  const corpus = status.corpus;
-  if (corpus.state === "missing" || corpus.state === "unsupported_version" || corpus.state === "missing_requirement") {
+  if (status.corpus.state !== "loaded") return <CorpusSetup corpus={status.corpus} />;
+  if (status.save === null) return <SavePicker />;
+  // The model step follows the name on a first run, and only then: afterwards the
+  // endpoints page in settings is where this lives.
+  if (status.needs_setup) return <FirstOpen />;
+  if (firstRun.current && !modelDone && modelMissing) {
     return (
-      <main className="refused">
-        <p role="alert">
-          {corpus.state === "missing"
-            ? t("app.corpus.missing")
-            : corpus.state === "unsupported_version"
-              ? t("app.corpus.unsupported", { version: corpus.format_version })
-              : t("app.corpus.requirement", { requirement: corpus.requirement })}
-        </p>
-      </main>
+      <ModelStep
+        onDone={() => {
+          setModelDone(true);
+          void actions.boot();
+        }}
+      />
     );
   }
-  if (status.needs_setup) return <FirstOpen />;
 
   return (
     <div className="app">

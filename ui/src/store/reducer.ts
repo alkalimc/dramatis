@@ -1,6 +1,6 @@
 import type { Message, Mode, PersonRef, Roster, Target } from "../api";
 import { makeT } from "../i18n";
-import { typingKey, type Action, type State } from "./state";
+import { initialState, typingKey, type Action, type State } from "./state";
 
 function withNames(names: State["names"], persons: PersonRef[]): State["names"] {
   let out = names;
@@ -61,6 +61,8 @@ function answered(s: State, channel: string): State["awaiting"] {
 
 export function reduce(s: State, a: Action): State {
   switch (a.type) {
+    case "reset":
+      return { ...initialState(), theme: s.theme, pinned: s.pinned };
     case "status":
       return { ...s, status: a.status };
     case "wording":

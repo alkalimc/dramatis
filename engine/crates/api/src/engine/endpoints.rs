@@ -1,7 +1,7 @@
 //! Endpoint profiles and roles: the file, the keychain and the endpoint-side lookups.
 
 use super::{Engine, io};
-use crate::endpoints::{Profile, Role, Roles, presets};
+use crate::endpoints::{Model, Profile, Role, Roles, presets};
 use crate::error::{ApiError, ApiResult};
 use crate::views::*;
 
@@ -45,10 +45,83 @@ impl Engine {
         if profile.name.trim().is_empty() {
             return Err(invalid("name"));
         }
-        if profile.base_url.trim().is_empty() {
+        let url = profile.base_url.trim();
+        if !(url.starts_with("http://") || url.starts_with("https://")) || url.contains(' ') {
             return Err(invalid("base_url"));
         }
         Ok(())
+    }
+
+    pub(crate) fn setup_endpoint_impl(&self, setup: EndpointSetup) -> ApiResult<()> {
+        let id = |text: &str, field: &str| {
+            let t = text.trim();
+            if t.is_empty() || t.chars().any(char::is_whitespace) {
+                Err(invalid(field))
+            } else {
+                Ok(t.to_owned())
+            }
+        };
+        let model = id(&setup.model, "model")?;
+        let host_model = setup
+            .host_model
+            .as_deref()
+            .filter(|m| !m.trim().is_empty())
+            .map(|m| id(m, "host_model"))
+            .transpose()?;
+        let name = setup.name.trim().to_owned();
+        let key = setup
+            .key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty());
+        let mut e = self.current_endpoints();
+        let mut profile = e.profile(&name).cloned().unwrap_or(Profile {
+            name: name.clone(),
+            base_url: String::new(),
+            wire_api: setup.wire_api,
+            models: Vec::new(),
+        });
+        profile.base_url = setup.base_url.trim().to_owned();
+        profile.wire_api = setup.wire_api;
+        for m in [Some(&model), host_model.as_ref()].into_iter().flatten() {
+            if !profile.models.iter().any(|known| &known.id == m) {
+                profile.models.push(Model {
+                    id: m.clone(),
+                    ..Model::default()
+                });
+            }
+        }
+        Self::check(&profile)?;
+        let role = |m: &String| Role {
+            profile: name.clone(),
+            model: m.clone(),
+            reasoning: None,
+        };
+        match e.profiles.iter().position(|p| p.name == name) {
+            Some(at) => e.profiles[at] = profile,
+            None => e.profiles.push(profile),
+        }
+        let chat = role(&model);
+        let host = host_model.as_ref().map(role);
+        match e.roles.as_mut() {
+            Some(r) => {
+                r.chat = chat;
+                r.host = host;
+            }
+            None => {
+                e.roles = Some(Roles {
+                    chat,
+                    host,
+                    tts: None,
+                    persona: None,
+                })
+            }
+        }
+        // The key first: when the keychain refuses, nothing else has changed.
+        if let Some(key) = key {
+            self.ports.keys.set(&name, key)?;
+        }
+        self.save_endpoints(e)
     }
 
     pub(crate) fn add_profile_impl(&self, profile: Profile) -> ApiResult<()> {
