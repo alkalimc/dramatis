@@ -52,6 +52,10 @@ pub struct Args {
     /// Read plain lines even on a terminal: no line editing, no prompt.
     #[arg(long)]
     plain: bool,
+    /// Start in library mode: the corpus without a language model (also the default when no
+    /// endpoint or key is set up).
+    #[arg(long)]
+    library: bool,
     /// The user's name in the conversation. Defaults to the corpus's own.
     #[arg(long)]
     user: Option<String>,
@@ -160,6 +164,7 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             }
         }
         let intro = intro_lines(&names);
+        let missing = setup::gap(&engine).await != setup::Gap::None;
         let mut session = Session::new(
             engine,
             bridge,
@@ -170,6 +175,13 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             interrupt.clone(),
         )
         .await;
+        session.set_no_model(missing);
+        if args.library {
+            session.force_library();
+        }
+        if let Some(line) = session.library_notice(args.library) {
+            println!("{line}");
+        }
         if let Some(name) = args.user.as_deref() {
             session.set_user(name).await;
         }

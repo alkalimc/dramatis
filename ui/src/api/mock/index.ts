@@ -886,13 +886,24 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     },
     deleteFact: (id) => toggleFact(id, true),
     restoreFact: (id) => toggleFact(id, false),
-    searchCorpus: (query, only) => {
+    corpusTemplates: () => ok([...new Set(PASSAGES.map((p) => p.template))].sort()),
+    readUnit: (unit, around) => {
+      const at = PASSAGES.findIndex((p) => p.citation.chunk_id === unit);
+      if (at < 0) return fail({ code: "not_found" });
+      return ok({
+        unit: PASSAGES[at],
+        before: PASSAGES.slice(Math.max(0, at - around), at),
+        after: PASSAGES.slice(at + 1, at + 1 + around),
+      });
+    },
+    searchCorpus: (query, only, kinds) => {
       const words = query.toLowerCase().split(/\s+/).filter(Boolean);
       const hits = PASSAGES.filter(
         (p) =>
           words.length > 0 &&
           words.some((w) => `${p.header} ${p.text}`.toLowerCase().includes(w)) &&
-          (only.length === 0 || p.persons.some((q) => only.includes(q.id))),
+          (only.length === 0 || p.persons.some((q) => only.includes(q.id))) &&
+          (kinds.length === 0 || kinds.includes(p.template)),
       );
       const named = [...persons.values()].find((p) => words.some((w) => p.name.toLowerCase().split(" ").includes(w)));
       const confidence: Confidence = hits.length >= 2 ? "high" : hits.length === 1 ? "medium" : "low";

@@ -3,6 +3,7 @@ import type { Candidate, RosterGroup } from "../api";
 import { pronounOf, useT } from "../i18n";
 import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
+import { inLibrary } from "../lib/library";
 import { hasPersona } from "../lib/persona";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
@@ -127,6 +128,7 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
   const t = useT();
   const actions = useActions();
   const dispatch = useDispatch();
+  const library = useStore(inLibrary);
   const off = row.mode === "disabled";
   const ready = hasPersona(row);
   const note = useId();
@@ -152,7 +154,7 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
           <span className="muted small">{t("roster.companions", { names: row.companions.map((c) => c.name).join(" · ") })}</span>
         )}
       </div>
-      {!off && (
+      {!off && !library && (
         <button type="button" className="ghost" disabled={!ready} aria-describedby={ready ? undefined : note} onClick={() => actions.openDirect(row.person.id)}>
           {t("person.talk")}
         </button>
@@ -174,6 +176,7 @@ function FindByTopic() {
   const actions = useActions();
   const dispatch = useDispatch();
   const id = useId();
+  const library = useStore(inLibrary);
   const [topic, setTopic] = useState("");
   const [found, setFound] = useState<Candidate[] | null>(null);
   const run = async () => {
@@ -203,13 +206,19 @@ function FindByTopic() {
           <ul className="candidates">
             {found.map((c) => (
               <li key={c.person.id}>
-                <button type="button" className="link name" onClick={() => actions.openDirect(c.person.id)}>
+                <button
+                  type="button"
+                  className="link name"
+                  onClick={() => (library ? dispatch({ type: "drawer", drawer: { kind: "person", id: c.person.id } }) : actions.openDirect(c.person.id))}
+                >
                   {c.person.name}
                 </button>
                 <span className="reason">{c.reason}</span>
-                <button type="button" className="link" onClick={() => dispatch({ type: "ask", draft: { question: topic, person: c.person.id } })}>
-                  {t("person.ask", pronounOf(t, c.person))}
-                </button>
+                {!library && (
+                  <button type="button" className="link" onClick={() => dispatch({ type: "ask", draft: { question: topic, person: c.person.id } })}>
+                    {t("person.ask", pronounOf(t, c.person))}
+                  </button>
+                )}
               </li>
             ))}
           </ul>

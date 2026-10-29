@@ -49,13 +49,17 @@ test("case file: what was found and from whom, with sources, and who is still lo
   expect(trail.length).toBe(2);
   // Each line carries the person it came from; scene lines are not part of the finding.
   const answered = trail[0] as HTMLElement;
-  expect(within(answered).getByText(/sealed in the first month/)).toBeDefined();
+  expect(within(answered).getByText(/sealed in the \*\*first month\*\* after the gates failed/)).toBeDefined();
   expect(within(answered).getByText("← Mira Vale")).toBeDefined();
   expect(within(answered).queryByText(/runs a finger down the index/)).toBeNull();
   expect(answered.textContent).not.toMatch(/\[#/);
   const sources = answered.querySelector("details")!;
   expect(sources.open).toBe(false);
   expect(within(sources).getByText(/Sources \(2\)/)).toBeDefined();
+  // Entries are one line each; the original text shows only after a click on an entry.
+  expect(within(sources).queryByText(/sealed in the first month/)).toBeNull();
+  await user.click(within(sources).getAllByRole("button", { expanded: false })[0]);
+  expect(await within(sources).findByText(/sealed in the first month/)).toBeDefined();
   expect(within(trail[1] as HTMLElement).getByText("Oren Lark is still looking")).toBeDefined();
 });
 

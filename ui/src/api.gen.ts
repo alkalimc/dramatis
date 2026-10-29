@@ -103,8 +103,18 @@ export const commands = {
 	editFact: (fact: FactId, text: string) => typedError<FactId, ApiError>(__TAURI_INVOKE("edit_fact", { fact, text })),
 	deleteFact: (fact: FactId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_fact", { fact })),
 	restoreFact: (fact: FactId) => typedError<null, ApiError>(__TAURI_INVOKE("restore_fact", { fact })),
-	/**  Library-mode search: the whole corpus, no memories. */
-	searchCorpus: (query: string, persons: PersonId[]) => typedError<SearchResults, ApiError>(__TAURI_INVOKE("search_corpus", { query, persons })),
+	/**
+	 *  Library-mode search: the whole corpus, no memories. Empty `persons` or `templates`
+	 *  mean no restriction on that side.
+	 */
+	searchCorpus: (query: string, persons: PersonId[], templates: string[]) => typedError<SearchResults, ApiError>(__TAURI_INVOKE("search_corpus", { query, persons, templates })),
+	/**
+	 *  One unit in full with up to `around` neighbours on each side, for reading the
+	 *  source in place. `NotFound` when the id is not in the corpus.
+	 */
+	readUnit: (unit: string, around: number) => typedError<UnitView, ApiError>(__TAURI_INVOKE("read_unit", { unit, around })),
+	/**  The unit templates of the corpus, for the search filter. */
+	corpusTemplates: () => typedError<string[], ApiError>(__TAURI_INVOKE("corpus_templates")),
 	resolveCitation: (citation: Citation) => typedError<CitationView, ApiError>(__TAURI_INVOKE("resolve_citation", { citation })),
 	avatar: (person: PersonId) => typedError<{
 	path: string,
@@ -964,6 +974,13 @@ export type TurnActivity = {
 	channel: ChannelId,
 	author: Author,
 	state: ActivityState,
+};
+
+/**  A unit read in place: the unit and the units next to it in the same source, in order. */
+export type UnitView = {
+	unit: Passage,
+	before: Passage[],
+	after: Passage[],
 };
 
 export type Waiting = {

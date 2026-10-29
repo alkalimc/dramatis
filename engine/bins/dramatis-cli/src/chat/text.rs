@@ -7,6 +7,29 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("cli.typing.more", "Option/Alt-Enter: send"),
     ("cli.start", "/help for commands, /quit or Ctrl-D to leave"),
     (
+        "cli.library.start",
+        "No language model is set up, so this is library mode: the roster, search, reading \
+         and saves work without one. /help lists the commands.",
+    ),
+    (
+        "cli.library.on",
+        "library mode: nothing here calls a language model; /library off goes back",
+    ),
+    ("cli.library.off", "back to conversations"),
+    (
+        "cli.library.stays",
+        "no language model is set up, so library mode stays on",
+    ),
+    (
+        "cli.library.needs_model",
+        "that needs a language model, and none is set up; restart this program to be \
+         asked for one, or use the app's settings",
+    ),
+    (
+        "cli.library.needs_model_off",
+        "that needs a language model; library mode is on, and /library off leaves it",
+    ),
+    (
         "cli.help.conversation",
         "Conversation
 anything else       send it to the current channel
@@ -14,7 +37,8 @@ anything else       send it to the current channel
 /history [n]        reprint the last n messages of this channel (default 10)
 /resend [n]         take back your n-th last message (default 1) and everything after it,
                     and put its text back in the input line to edit and send again
-/sources [n]        list in full the sources of the n-th last reply that has any (default 1)
+/sources [n]        list the sources of the n-th last reply that has any (default 1), numbered
+/sources [n] <k>    print the text of entry k of that list (/source <k> for the last reply)
 /wrapup             end the current conversation and show the memories it wrote
 /read [all]         mark this conversation (or every one) read; what is printed here counts
                     as read, in the app too",
@@ -84,7 +108,13 @@ anything else       send it to the current channel
     (
         "cli.help.other",
         "Other
-/search <query>     retrieval only, as the current speaker would see it
+/library [off]      library mode: the corpus without a language model (/list, /who, /search,
+                    /read, /sources, /history, /memories and saves work; talking does not).
+                    It starts by itself when no endpoint or key is set up
+/search <query>     retrieval only, as the current speaker would see it (the whole corpus
+                    when no conversation is open); results are numbered
+/read <n|unit id>   a unit of the corpus with its neighbours and its source link; n is a
+                    number from /search
 /stats              model calls made in this session
 /storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)

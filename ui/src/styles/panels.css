@@ -508,6 +508,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .passage-card h3 {
   margin-bottom: var(--s-1);
 }
+.reader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.neighbours {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--fs-sm);
+}
+.neighbour p {
+  margin: 0;
+}
+.unit-text {
+  white-space: pre-wrap;
+}
 
 /* ---- the user's own card (modal) ---- */
 .dialog.profile-card {

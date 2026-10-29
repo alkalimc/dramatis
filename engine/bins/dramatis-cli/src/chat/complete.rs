@@ -43,6 +43,8 @@ const COMMANDS: &[&str] = &[
     "history",
     "resend",
     "sources",
+    "source",
+    "library",
     "search",
     "stats",
     "storage",
@@ -269,7 +271,7 @@ mod tests {
         assert_eq!(found.1.len(), COMMANDS.len());
         assert_eq!(
             shown(&at("/s")),
-            ["save", "sources", "search", "stats", "storage"]
+            ["save", "sources", "source", "search", "stats", "storage"]
         );
         assert_eq!(shown(&at("/tal")), ["talk"]);
         assert!(at("/zzz").1.is_empty());

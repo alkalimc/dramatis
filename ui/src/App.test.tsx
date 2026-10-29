@@ -40,9 +40,16 @@ test("a direct channel renders scene lines apart from speech, with sources and r
   await user.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   const sources = screen.getByRole("complementary", { name: "Sources" });
-  expect(within(sources).getByText("Harbor Ledger · Flood Years")).toBeDefined();
+  // Second fold: entries first, the original text only after a click on an entry.
+  const entries = await within(sources).findAllByRole("button", { expanded: false });
+  expect(within(sources).queryByText(/The east corridor was sealed in the first month after the tide gates failed/)).toBeNull();
+  const entry = entries.find((b) => /Harbor Ledger/.test(b.textContent ?? ""))!;
+  await user.click(entry);
+  expect(entry.getAttribute("aria-expanded")).toBe("true");
   expect(await within(sources).findByText(/The east corridor was sealed in the first month after the tide gates failed/)).toBeDefined();
   expect(within(sources).getAllByRole("link", { name: "View original" })[0].getAttribute("href")).toMatch(/^https?:/);
+  await user.click(entry);
+  expect(within(sources).queryByText(/The east corridor was sealed/)).toBeNull();
   await user.click(within(sources).getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("complementary", { name: "Sources" })).toBeNull();
   expect(screen.getAllByRole("button", { name: "Read aloud" }).length).toBeGreaterThan(0);
@@ -142,6 +149,41 @@ test("library form: not-connected notice, search, roster", async () => {
   expect(await screen.findByText("Dock Routes · Upper Town")).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Set up now" }));
   expect(await screen.findByRole("heading", { name: "Endpoints" })).toBeDefined();
+});
+
+test("library: always reachable from the rail, filtered search, a unit read with its neighbours", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  await screen.findByRole("heading", { name: "Who's waiting" });
+  // With a model set up, the library is a choice: the rail opens it and the chats come back.
+  await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Library" }));
+  expect(screen.queryByRole("heading", { name: "Who's waiting" })).toBeNull();
+  expect(screen.queryByText(/Not connected\./)).toBeNull();
+  const search = screen.getByRole("searchbox", { name: "Search the archive" });
+  await user.type(search, "the");
+  await user.selectOptions(screen.getByLabelText("Only this kind of text"), "story");
+  await user.click(screen.getByRole("button", { name: "Search" }));
+  expect(await screen.findByText("East Ward · Night Notes")).toBeDefined();
+  expect(screen.queryByText("Harbor Ledger · Flood Years")).toBeNull();
+  // A person page opens without a way to talk to a model.
+  const rosterRow = screen.getAllByRole("button", { name: "Mira Vale" })[0];
+  await user.click(rosterRow);
+  const page = await screen.findByRole("complementary", { name: "Roster" });
+  expect(within(page).queryByRole("button", { name: "Talk" })).toBeNull();
+  await user.click(within(page).getByRole("button", { name: "Close" }));
+
+  const hit = screen.getByText("East Ward · Night Notes").closest("article")!;
+  await user.click(within(hit).getByRole("button", { name: "Read in full" }));
+  const reader = await screen.findByRole("article", { name: "Passage" });
+  expect(await within(reader).findByText("Harbor Ledger · Flood Years")).toBeDefined();
+  expect(within(reader).getByText(/It was high summer when the corridor closed/)).toBeDefined();
+  expect(within(reader).getByRole("link", { name: "View original" }).getAttribute("href")).toMatch(/^https?:/);
+  await user.click(within(reader).getByRole("button", { name: "Back to results" }));
+  expect(screen.getByText("East Ward · Night Notes")).toBeDefined();
+
+  // The chats entry goes back to the conversations.
+  await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Chats" }));
+  expect(await screen.findByRole("heading", { name: "Who's waiting" })).toBeDefined();
 });
 
 test("first open: name, then the host introduces itself with the coldstart card", async () => {

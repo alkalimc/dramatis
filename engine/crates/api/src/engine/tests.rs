@@ -78,6 +78,14 @@ fn fixture() -> TempFolio {
         span: Some(("Story 1", 10, 12)),
     });
     b.unit(UnitSpec {
+        id: "u-story1-next",
+        template: "talk",
+        page: "Story 1",
+        text: "Evening fell over camp",
+        span: Some(("Story 1", 13, 13)),
+        ..UnitSpec::default()
+    });
+    b.unit(UnitSpec {
         id: "u-kal-talk",
         template: "talk",
         page: "Story 2",
@@ -292,7 +300,7 @@ async fn missing_and_refused_corpora_are_states_not_failures() {
     assert_eq!(e.app_status().await.unwrap().corpus, CorpusState::Missing);
     assert_eq!(e.roster().await.unwrap(), Roster::default());
     assert_eq!(
-        e.search_corpus("x".into(), vec![]).await,
+        e.search_corpus("x".into(), vec![], vec![]).await,
         Err(ApiError::NotFound)
     );
 
@@ -330,14 +338,20 @@ async fn the_user_name_replaces_the_placeholder_everywhere_corpus_text_shows() {
     };
 
     // No name yet: the pack's word for "you".
-    let found = e.search_corpus("lantern".into(), vec![]).await.unwrap();
+    let found = e
+        .search_corpus("lantern".into(), vec![], vec![])
+        .await
+        .unwrap();
     let p = hit(&found);
     assert_eq!(p.text, "Hello Doc, welcome to the lantern base");
     assert_eq!(p.header, "Amy speaks to Doc");
     assert_eq!(e.coldstart().await.unwrap()[0].reason, "Knows Doc well");
 
     name_user(e, "Ada").await;
-    let p = hit(&e.search_corpus("lantern".into(), vec![]).await.unwrap());
+    let p = hit(&e
+        .search_corpus("lantern".into(), vec![], vec![])
+        .await
+        .unwrap());
     assert_eq!(p.text, "Hello Ada, welcome to the lantern base");
     let cited = e.resolve_citation(p.citation.clone()).await.unwrap();
     assert_eq!(cited.passage.unwrap().header, "Amy speaks to Ada");
@@ -949,10 +963,10 @@ async fn avatars_are_fetched_once_and_degrade_offline() {
 async fn search_in_library_form_filters_by_person() {
     let r = rig();
     let e = &r.engine;
-    let all = e.search_corpus("the".into(), vec![]).await.unwrap();
+    let all = e.search_corpus("the".into(), vec![], vec![]).await.unwrap();
     assert!(all.hits.len() >= 2);
     let kal = e
-        .search_corpus("the".into(), vec![id("kal")])
+        .search_corpus("the".into(), vec![id("kal")], vec![])
         .await
         .unwrap();
     assert!(
@@ -960,8 +974,33 @@ async fn search_in_library_form_filters_by_person() {
             .iter()
             .all(|h| h.persons.iter().any(|p| p.id.0 == "kal"))
     );
-    let empty = e.search_corpus("  ".into(), vec![]).await.unwrap();
+    let empty = e.search_corpus("  ".into(), vec![], vec![]).await.unwrap();
     assert!(empty.hits.is_empty());
+}
+
+#[tokio::test]
+async fn library_search_filters_by_template_and_units_read_with_neighbours() {
+    let r = rig();
+    let e = &r.engine;
+    assert_eq!(e.corpus_templates().await.unwrap(), ["card", "talk"]);
+    let cards = e
+        .search_corpus("the".into(), vec![], vec!["card".into()])
+        .await
+        .unwrap();
+    assert!(!cards.hits.is_empty());
+    assert!(cards.hits.iter().all(|h| h.template == "card"));
+
+    let read = e.read_unit("u-amy-talk".into(), 1).await.unwrap();
+    assert_eq!(read.unit.citation.chunk_id, "u-amy-talk");
+    assert!(read.before.is_empty());
+    assert_eq!(read.after.len(), 1);
+    assert_eq!(read.after[0].text, "Evening fell over camp");
+    // Corpus text reads with the user's name in it, here and everywhere else.
+    assert!(read.unit.text.contains("Doc"));
+    assert_eq!(e.read_unit("nope".into(), 1).await, Err(ApiError::NotFound));
+    let back = e.read_unit("u-story1-next".into(), 1).await.unwrap();
+    assert_eq!(back.before.len(), 1);
+    assert!(back.after.is_empty());
 }
 
 #[tokio::test]

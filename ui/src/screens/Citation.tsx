@@ -83,12 +83,65 @@ export function CitationDetail({ citation, view }: { citation: Citation; view: C
 }
 
 /**
+ * The second fold of a reply's sources: one line per entry (title and page); an entry opens
+ * to its original text and page link, and closes again on a second click.
+ */
+export function SourceEntries({ cites }: { cites: Citation[] }) {
+  const t = useT();
+  const views = useCitations(cites);
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <ol className="sources-list">
+      {cites.map((c, i) => {
+        const v = views ? views[i] : null;
+        const title = v?.passage?.header || c.page;
+        const here = open === i;
+        return (
+          <li key={`${c.chunk_id}-${i}`} className="source">
+            <button type="button" className="source-line" aria-expanded={here} aria-controls={`source-${c.chunk_id}-${i}`} onClick={() => setOpen(here ? null : i)}>
+              <span className="source-title">{title}</span>
+              {title !== c.page && <span className="muted small">{c.page}</span>}
+            </button>
+            {here && (
+              <div id={`source-${c.chunk_id}-${i}`} className="source-body">
+                {views === null ? (
+                  <p className="muted small">{t("citation.loading")}</p>
+                ) : v === null ? (
+                  <p className="muted small">{t("citation.unavailable")}</p>
+                ) : (
+                  <>
+                    {v.status === "updated" && <p className="muted small">{t("citation.stale")}</p>}
+                    {v.status === "gone" && <p className="muted small">{t("citation.gone")}</p>}
+                    {v.passage && <blockquote className="passage">{v.passage.text}</blockquote>}
+                    <p className="citation-links">
+                      {v.source_url && (
+                        <a href={v.source_url} target="_blank" rel="noopener noreferrer">
+                          {t("citation.open")}
+                        </a>
+                      )}
+                      {v.revision_url && (
+                        <a href={v.revision_url} target="_blank" rel="noopener noreferrer">
+                          {t("citation.open_revision")}
+                        </a>
+                      )}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
  * What a message cites, in a panel under it: for each source the page title, the original
  * wording of the cited passage and a link to the page.
  */
 export function SourcesPanel({ cites, onClose }: { cites: Citation[]; onClose: () => void }) {
   const t = useT();
-  const views = useCitations(cites);
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -105,53 +158,11 @@ export function SourcesPanel({ cites, onClose }: { cites: Citation[]; onClose: (
           <Icon name="close" size={16} />
         </button>
       </header>
-      <ol className="sources-list">
-        {cites.map((c, i) => {
-          const v = views ? views[i] : null;
-          return (
-            <li key={`${c.chunk_id}-${i}`} className="source">
-              <h5>{v?.passage?.header || c.page}</h5>
-              {v?.passage?.header && v.passage.header !== c.page && <p className="muted small">{c.page}</p>}
-              {views === null ? (
-                <p className="muted small">{t("citation.loading")}</p>
-              ) : v === null ? (
-                <p className="muted small">{t("citation.unavailable")}</p>
-              ) : (
-                <>
-                  {v.status === "updated" && <p className="muted small">{t("citation.stale")}</p>}
-                  {v.status === "gone" && <p className="muted small">{t("citation.gone")}</p>}
-                  {v.passage && <blockquote className="passage">{v.passage.text}</blockquote>}
-                  <p className="citation-links">
-                    {v.source_url && (
-                      <a href={v.source_url} target="_blank" rel="noopener noreferrer">
-                        {t("citation.open")}
-                      </a>
-                    )}
-                    {v.revision_url && (
-                      <a href={v.revision_url} target="_blank" rel="noopener noreferrer">
-                        {t("citation.open_revision")}
-                      </a>
-                    )}
-                  </p>
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+      <SourceEntries cites={cites} />
     </aside>
   );
 }
 
 export function CitationList({ cites }: { cites: Citation[] }) {
-  const views = useCitations(cites);
-  return (
-    <ol className="citation-list">
-      {cites.map((c, i) => (
-        <li key={`${c.chunk_id}-${i}`}>
-          <CitationDetail citation={c} view={views ? views[i] : null} />
-        </li>
-      ))}
-    </ol>
-  );
+  return <SourceEntries cites={cites} />;
 }

@@ -9,8 +9,8 @@ use std::time::Instant;
 use api::error::ApiResult;
 use api::types::{Author, ChannelId, FactId, Mode, PersonId, Target, Tier, Timestamp};
 use api::views::{
-    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, QuietHours, RosterRow,
-    Settings, StorageKind, StorageUsage, TaskStatus,
+    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, Passage, QuietHours,
+    RosterRow, Settings, StorageKind, StorageUsage, TaskStatus,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -84,6 +84,14 @@ pub struct Session {
     picking: bool,
     /// The saves of the list on screen, numbered from 1.
     pickable: Vec<String>,
+    /// Library mode: the corpus without a language model. On when no chat endpoint or key
+    /// is set up, or when the user asked for it; nothing in it calls a model.
+    library: bool,
+    /// No model can be reached at all (no endpoint or no key), so `/library off` has
+    /// nowhere to go.
+    no_model: bool,
+    /// The passages of the last `/search`, which `/read` numbers into.
+    found: Vec<Passage>,
 }
 
 /// Asks for a password and returns what was typed.
@@ -137,6 +145,15 @@ fn expand(path: &str) -> String {
     }
 }
 
+/// A passage's heading: its header, else its page.
+fn unit_label(p: &Passage) -> &str {
+    if p.header.is_empty() {
+        &p.citation.page
+    } else {
+        &p.header
+    }
+}
+
 fn excerpt(text: &str, max: usize) -> String {
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= max {
@@ -182,7 +199,11 @@ impl Session {
             secret: Box::new(super::secret::read),
             picking: false,
             pickable: Vec::new(),
+            library: false,
+            no_model: false,
+            found: Vec::new(),
         };
+
         session.picking = session
             .engine
             .app_status()
@@ -199,7 +220,8 @@ impl Session {
         if self.picking {
             return format!("{} ", self.term.style.bold("save>"));
         }
-        let channel = self.current.as_ref().map_or("-", |c| c.label.as_str());
+        let idle = if self.library { "library" } else { "-" };
+        let channel = self.current.as_ref().map_or(idle, |c| c.label.as_str());
         format!(
             "{} {}> ",
             style.dim(&format!("[{channel}]")),
@@ -234,7 +256,9 @@ impl Session {
             return false;
         }
         // The rollover may ask the model for a summary.
-        self.interruptible(self.bridge.idle()).await;
+        if !self.library {
+            self.interruptible(self.bridge.idle()).await;
+        }
         self.report_failures();
         true
     }
@@ -266,6 +290,7 @@ impl Session {
             Command::Talk(who) => self.talk(&who).await,
             Command::Group(who) => self.group(&who).await,
             Command::Host => self.host().await,
+            Command::Go(_) if self.library => self.needs_model(),
             Command::Go(n) => self.go(n).await,
             Command::Chats(archived) => self.list_chats(archived).await,
             Command::Chat(n) => self.chat(n).await,
@@ -276,6 +301,13 @@ impl Session {
             Command::Members => self.members(),
             Command::Leave => self.leave(),
             Command::Read(all) => self.read(all).await,
+            Command::ReadUnit(unit) => self.read_unit(&unit).await,
+            Command::Library(on) => self.set_library(on),
+            Command::Ask(..) | Command::Say(_) | Command::Wrapup if self.library => {
+                self.needs_model()
+            }
+            // Without any endpoint a rollover has no model to ask; with one it would.
+            Command::Name(_) if self.library && !self.no_model => self.needs_model(),
             Command::Ask(who, question) => self.ask(&who, question).await,
             Command::Requests => self.requests().await,
             Command::Clock => self.clock().await,
@@ -303,7 +335,7 @@ impl Session {
             }
             Command::History(n) => self.history(n).await,
             Command::Resend(n) => self.resend(n).await,
-            Command::Sources(n) => self.sources(n).await,
+            Command::Sources(n, entry) => self.sources(n, entry).await,
             Command::Search(query) => self.search(&query).await,
             Command::Stats => self.stats(),
             Command::Storage(act) => self.storage(act).await,
@@ -416,7 +448,7 @@ impl Session {
             Err(e) => return self.term.error(&e.to_string()),
         };
         let needle = filter.map(str::to_lowercase);
-        let host = if self.names.has_host() {
+        let host = if self.names.has_host() && !self.library {
             "available"
         } else {
             "not available"
@@ -424,7 +456,7 @@ impl Session {
         self.term
             .print(&format!("host: {} ({host})\n", self.names.host()));
         let mut shown = 0;
-        for e in roster.iter().filter(|e| e.persona) {
+        for e in roster.iter().filter(|e| e.persona || self.library) {
             let hit = needle.as_deref().is_none_or(|n| {
                 e.id.to_lowercase().contains(n)
                     || e.display.to_lowercase().contains(n)
@@ -436,7 +468,11 @@ impl Session {
                 shown += 1;
             }
         }
-        self.term.note(&format!("{shown} persons with a persona"));
+        if self.library {
+            self.term.note(&format!("{shown} persons"));
+        } else {
+            self.term.note(&format!("{shown} persons with a persona"));
+        }
     }
 
     /// Resolve what the user typed to one person with a persona: id, display name, another
@@ -1352,8 +1388,9 @@ impl Session {
         }
     }
 
-    /// Print in full the sources of the n-th last reply that cites any.
-    async fn sources(&self, n: usize) {
+    /// The sources of the n-th last reply that cites any, as a numbered list; with `entry`,
+    /// the text of that entry and where it comes from.
+    async fn sources(&self, n: usize, entry: Option<usize>) {
         let Some(channel) = self.current_channel().await else {
             return;
         };
@@ -1361,15 +1398,56 @@ impl Session {
             Ok(m) => m,
             Err(e) => return self.term.error(&e.to_string()),
         };
-        let found = messages
+        let Some(reply) = messages
             .iter()
             .rev()
             .filter(|m| m.author != Author::User && !m.cites.is_empty())
             .nth(n - 1)
-            .and_then(|m| self.show.sources_in_full(m));
-        match found {
-            Some(text) => self.term.print(&text),
-            None => self.term.note("no reply with sources there"),
+        else {
+            return self.term.note("no reply with sources there");
+        };
+        let mut cites: Vec<&api::types::Citation> = Vec::new();
+        for c in &reply.cites {
+            if !cites.iter().any(|d| d.chunk_id == c.chunk_id) {
+                cites.push(c);
+            }
+        }
+        let Some(k) = entry else {
+            let mut out = format!("sources ({}):\n", cites.len());
+            for (i, c) in cites.iter().enumerate() {
+                let label = match self.engine.resolve_citation((*c).clone()).await {
+                    Ok(v) => v.passage.map(|p| unit_label(&p).to_owned()),
+                    Err(_) => None,
+                };
+                out.push_str(&format!(
+                    "  {}. {}\n",
+                    i + 1,
+                    label.unwrap_or_else(|| c.page.clone())
+                ));
+            }
+            out.push_str("  /sources [n] <k> shows the text of entry k\n");
+            return self.term.print(&out);
+        };
+        let Some(cite) = cites.get(k - 1) else {
+            return self
+                .term
+                .note(&format!("no entry {k}; the reply has {}", cites.len()));
+        };
+        match self.engine.resolve_citation((*cite).clone()).await {
+            Ok(v) => {
+                let Some(p) = v.passage else {
+                    return self.term.note("that source is no longer in the corpus");
+                };
+                self.term.print(&format!(
+                    "{}\n{}\n",
+                    self.term.style.bold(unit_label(&p)),
+                    p.text
+                ));
+                if let Some(url) = v.source_url.or(v.revision_url) {
+                    self.term.print(&format!("source: {url}\n"));
+                }
+            }
+            Err(e) => self.term.error(&e.to_string()),
         }
     }
 
@@ -1396,16 +1474,19 @@ impl Session {
         }
     }
 
-    async fn search(&self, query: &str) {
-        let Some(c) = &self.current else {
-            return self
-                .term
-                .print("no channel yet: /talk <person> or /host first\n");
+    async fn search(&mut self, query: &str) {
+        // Without a channel (the library form) the whole corpus is searched.
+        let as_person = match &self.current {
+            Some(c) => self.speaker(c).await,
+            None => None,
         };
-        let as_person = self.speaker(c).await;
         let found = self
             .engine
-            .search_corpus(query.to_owned(), as_person.iter().cloned().collect())
+            .search_corpus(
+                query.to_owned(),
+                as_person.iter().cloned().collect(),
+                Vec::new(),
+            )
             .await;
         let found = match found {
             Ok(r) => r,
@@ -1418,15 +1499,10 @@ impl Session {
         self.term
             .note(&format!("confidence: {:?}", found.confidence).to_lowercase());
         for (i, hit) in found.hits.iter().enumerate() {
-            let head = if hit.header.is_empty() {
-                &hit.citation.page
-            } else {
-                &hit.header
-            };
             self.term.print(&format!(
                 "{}. {} {}\n",
                 i + 1,
-                head,
+                unit_label(hit),
                 self.term.style.dim(&format!("({})", hit.citation.chunk_id)),
             ));
             self.term
@@ -1434,7 +1510,102 @@ impl Session {
         }
         if found.hits.is_empty() {
             self.term.note("no hits");
+        } else {
+            self.term
+                .note("/read <n> opens a result with its neighbours");
         }
+        self.found = found.hits;
+    }
+
+    /// Show a unit of the corpus with the units next to it and the link to its source:
+    /// `what` is a number from the last `/search`, or a unit id.
+    async fn read_unit(&self, what: &str) {
+        let id = match what.parse::<usize>() {
+            Ok(n) => match self.found.get(n.wrapping_sub(1)) {
+                Some(p) => p.citation.chunk_id.clone(),
+                None => {
+                    return self.term.note(if self.found.is_empty() {
+                        "no results to number yet; /search first, or give a unit id"
+                    } else {
+                        "no such result; the list from /search is above"
+                    });
+                }
+            },
+            Err(_) => what.to_owned(),
+        };
+        let view = match self.engine.read_unit(id, 2).await {
+            Ok(v) => v,
+            Err(api::ApiError::NotFound) => {
+                return self.term.note(&format!("no unit \"{what}\" in the corpus"));
+            }
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        let style = self.term.style;
+        for p in &view.before {
+            self.term
+                .print(&format!("{}\n", style.dim(&excerpt(&p.text, 160))));
+        }
+        self.term.print(&format!(
+            "{} {}\n{}\n",
+            style.bold(unit_label(&view.unit)),
+            style.dim(&format!("({})", view.unit.citation.chunk_id)),
+            view.unit.text
+        ));
+        for p in &view.after {
+            self.term
+                .print(&format!("{}\n", style.dim(&excerpt(&p.text, 160))));
+        }
+        if let Some(url) = &view.unit.source_url {
+            self.term.print(&format!("source: {url}\n"));
+        }
+    }
+
+    /// Say plainly that a command needs a language model.
+    fn needs_model(&self) {
+        self.term.print(&format!(
+            "{}\n",
+            self.names.text(if self.no_model {
+                "cli.library.needs_model"
+            } else {
+                "cli.library.needs_model_off"
+            })
+        ));
+    }
+
+    /// `/library`: the corpus without a language model; `/library off` goes back to the
+    /// conversations when a model is set up.
+    fn set_library(&mut self, on: bool) {
+        if on {
+            self.library = true;
+            return self.term.note(&self.names.text("cli.library.on"));
+        }
+        if self.no_model {
+            return self.term.note(&self.names.text("cli.library.stays"));
+        }
+        self.library = false;
+        self.term.note(&self.names.text("cli.library.off"));
+    }
+
+    /// The one line said at start when it opens in library mode.
+    pub fn library_notice(&self, chosen: bool) -> Option<String> {
+        self.library.then(|| {
+            self.names.text(if chosen {
+                "cli.library.on"
+            } else {
+                "cli.library.start"
+            })
+        })
+    }
+
+    /// Say whether a chat endpoint with a key is missing; if so the session is a library.
+    pub fn set_no_model(&mut self, missing: bool) {
+        self.no_model = missing;
+        self.library = missing;
+    }
+
+    /// Start in library mode on purpose (`--library`).
+    pub fn force_library(&mut self) {
+        self.library = true;
     }
 
     // ---- encryption ----
@@ -1993,6 +2164,10 @@ impl Session {
     /// opening) and after each message. Idle conversations are wrapped up and due
     /// openings written; anything that arrives is printed by the event sink.
     pub async fn arrivals(&mut self, opened: bool) {
+        // Presence and ticks write with a model; the library form never calls one.
+        if self.library {
+            return;
+        }
         let (started, at) = (Instant::now(), now_ms());
         let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
         let ran = self

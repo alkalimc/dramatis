@@ -627,8 +627,15 @@ impl Api for Engine {
         &self,
         query: String,
         persons: Vec<PersonId>,
+        templates: Vec<String>,
     ) -> ApiResult<SearchResults> {
-        self.search_impl(&query, &persons)
+        self.search_impl(&query, &persons, &templates)
+    }
+    async fn read_unit(&self, unit: String, around: u32) -> ApiResult<UnitView> {
+        self.read_unit_impl(&unit, around)
+    }
+    async fn corpus_templates(&self) -> ApiResult<Vec<String>> {
+        self.templates_impl()
     }
     async fn resolve_citation(&self, citation: Citation) -> ApiResult<CitationView> {
         self.resolve_impl(&citation)
