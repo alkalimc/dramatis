@@ -35,6 +35,9 @@ use crate::view;
 use crate::wrapup_json;
 use llm::ToolChoice;
 
+/// Most characters of the user's earlier message that join the automatic search's query.
+const EARLIER_QUERY_CHARS: usize = 300;
+
 /// A user message stored and waiting for its replies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Posted {
@@ -428,7 +431,8 @@ impl Agent {
                     .fill("harness.speaker", &names, &[("name", &name)]),
             );
         }
-        lines.extend(self.attachment(seg, &mut turn, &posted.text, Vec::new())?);
+        let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
+        lines.extend(self.attachment(seg, &mut turn, &query, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, std::slice::from_ref(person))?);
         self.user_entry(seg, posted, &lines, None)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
@@ -444,6 +448,30 @@ impl Agent {
             Actor::Person(p) => Some(p),
             _ => None,
         }))
+    }
+
+    /// What the automatic search looks for: the user's latest message with the user's one
+    /// before it in this channel (`before` is the latest one's id), so a follow-up such as
+    /// "and him?" still finds what the thread is about. The earlier message is cut short so
+    /// it cannot outweigh the latest.
+    pub(crate) fn retrieval_query(
+        &self,
+        ch: ChannelId,
+        latest: &str,
+        before: Option<MessageId>,
+    ) -> Result<String> {
+        let earlier = message::history(&self.db(), ch, before, 16)?
+            .into_iter()
+            .rev()
+            .find(|m| {
+                m.author == Actor::User
+                    && !api::meta::MessageMeta::of(m.attachment.as_ref()).service
+            })
+            .map(|m| m.text.chars().take(EARLIER_QUERY_CHARS).collect::<String>());
+        Ok(match earlier.as_deref().map(str::trim) {
+            Some(e) if !e.is_empty() => format!("{e}\n{latest}"),
+            _ => latest.to_owned(),
+        })
     }
 
     /// The retrieval attachment of a turn for its speaker.
@@ -772,7 +800,8 @@ impl Agent {
                     .wording
                     .fill("harness.speaker", &names, &[("name", &name)]),
             ];
-        lines.extend(self.attachment(seg, &mut turn, &posted.text, Vec::new())?);
+        let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
+        lines.extend(self.attachment(seg, &mut turn, &query, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, &members)?);
         self.user_entry(seg, posted, &lines, None)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
@@ -974,9 +1003,11 @@ impl Agent {
         let last_user = message::history(&self.db(), ch, None, 8)?
             .into_iter()
             .rev()
-            .find(|m| m.author == Actor::User)
-            .map(|m| m.text)
-            .unwrap_or_default();
+            .find(|m| m.author == Actor::User);
+        let last_user = match last_user {
+            Some(m) => self.retrieval_query(ch, &m.text, Some(m.id))?,
+            None => String::new(),
+        };
         let mut lines = vec![self.corpus.wording.fill(key, &names, &[("name", &name)])];
         lines.extend(self.attachment(seg, &mut turn, &last_user, vec![person.0.clone()])?);
         lines.push(self.context_line(seg, None, None)?);

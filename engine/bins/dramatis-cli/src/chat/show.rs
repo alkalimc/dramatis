@@ -288,7 +288,12 @@ impl Names {
                     &[("target", &target), ("mode", &self.mode_word(*mode))],
                 )
             }
-            ToolAction::Forget { fact } => self.say("cli.action.forget", &[("n", &fact.0)]),
+            ToolAction::Promise { person, text, .. } => with(
+                "action.promise",
+                "set a reminder for {name}: {text}",
+                &[("name", &person.name), ("text", text)],
+            ),
+            ToolAction::Recent => self.word("action.recent", "read a conversation's latest lines"),
             ToolAction::ListChannels { channels } => {
                 self.say("cli.action.list_channels", &[("n", &channels.len())])
             }

@@ -77,7 +77,9 @@ pub struct AskHost {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub find: Option<Vec<String>>,
-    /// Roster ids of colleagues for the host to propose a group with; you are included.
+    /// Roster ids of colleagues for the host to propose a group with, at most four besides
+    /// you; you are included. To continue a group you already have with them, give its name
+    /// as the purpose; any other purpose makes a new group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub group: Option<Vec<String>>,
@@ -87,15 +89,8 @@ pub struct AskHost {
     pub purpose: Option<String>,
 }
 
-/// Remember one thing from this conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Remember {
-    /// The thing to remember, as one short sentence.
-    pub text: String,
-}
-
-/// Answer the request you were asked to look into. Ends the request.
+/// Answer a request the user delegated to you with ask. Never for an ordinary reply: a
+/// reply to the user is just written. Ends the request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Report {
@@ -185,13 +180,15 @@ pub struct Ask {
     pub turns: Option<u32>,
 }
 
-/// Start a group conversation among two or more people. One person is never a group: the
+/// Start a group conversation among two to six people. One person is never a group: the
 /// user is then only shown a way to talk to them. The result gives the group id when one
 /// was made, and the user is shown a way to open it; you cannot move the user yourself.
+/// To continue a group you already have with the same people, give its name as the
+/// purpose; any other purpose makes a new group.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateGroup {
-    /// Roster ids, two or more.
+    /// Roster ids, two to six.
     #[schemars(length(min = 1))]
     pub members: Vec<String>,
     /// Why the group exists, in one short line (about sixty characters), for example
@@ -236,18 +233,34 @@ pub struct HostRemember {
     pub text: String,
 }
 
-/// List the user's conversations, most recent first. The user is shown a way to open each;
-/// you cannot move the user yourself.
+/// List the user's conversations, most recent first, each with its id (for set_mode and
+/// recent). The user is shown a way to open each; you cannot move the user yourself.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListChannels {}
 
-/// Delete one remembered thing for the user. Only when the user asks. Can be restored.
+/// Set a reminder for the user: a promise with a due date. When it falls due the person
+/// named brings it up as their opening, so a person is required. Only when the user asks.
+/// At most twenty are pending at once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Forget {
-    /// The id of the remembered thing.
-    pub fact_id: String,
+pub struct Promise {
+    /// What is promised, as one short sentence.
+    pub text: String,
+    /// When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or
+    /// 2026-12-24T18:00.
+    pub due: String,
+    /// Roster id of the person who brings it up when it is due.
+    pub person: String,
+}
+
+/// Read the last few lines of one conversation, by the id `list_channels` shows. No
+/// memories are included.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Recent {
+    /// The conversation id, as listed.
+    pub channel: String,
 }
 
 // ---- dispatch ----
@@ -259,7 +272,6 @@ pub enum SharedCall {
     GetChunk(GetChunk),
     RequestJoin(RequestJoin),
     AskHost(AskHost),
-    Remember(Remember),
     Report(Report),
     Wrapup(Wrapup),
 }
@@ -274,8 +286,9 @@ pub enum HostCall {
     SetMode(SetMode),
     Search(HostSearch),
     Remember(HostRemember),
-    Forget(Forget),
     ListChannels(ListChannels),
+    Promise(Promise),
+    Recent(Recent),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -306,7 +319,6 @@ impl SharedCall {
             "get_chunk" => Self::GetChunk(args(name, raw)?),
             "request_join" => Self::RequestJoin(args(name, raw)?),
             "ask_host" => Self::AskHost(args(name, raw)?),
-            "remember" => Self::Remember(args(name, raw)?),
             "report" => Self::Report(args(name, raw)?),
             "wrapup" => Self::Wrapup(args(name, raw)?),
             _ => return Err(CallError::Unknown(name.to_owned())),
@@ -324,8 +336,9 @@ impl HostCall {
             "set_mode" => Self::SetMode(args(name, raw)?),
             "search" => Self::Search(args(name, raw)?),
             "remember" => Self::Remember(args(name, raw)?),
-            "forget" => Self::Forget(args(name, raw)?),
             "list_channels" => Self::ListChannels(args(name, raw)?),
+            "promise" => Self::Promise(args(name, raw)?),
+            "recent" => Self::Recent(args(name, raw)?),
             _ => return Err(CallError::Unknown(name.to_owned())),
         })
     }
@@ -389,7 +402,6 @@ pub fn shared_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<Search>("tool", "search", overrides),
         spec::<GetChunk>("tool", "get_chunk", overrides),
         spec::<RequestJoin>("tool", "request_join", overrides),
-        spec::<Remember>("tool", "remember", overrides),
         spec::<Report>("tool", "report", overrides),
         spec::<Wrapup>("tool", "wrapup", overrides),
         spec::<AskHost>("tool", "ask_host", overrides),
@@ -406,8 +418,9 @@ pub fn host_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<SetMode>("tool.host", "set_mode", overrides),
         spec::<HostSearch>("tool.host", "search", overrides),
         spec::<HostRemember>("tool.host", "remember", overrides),
-        spec::<Forget>("tool.host", "forget", overrides),
         spec::<ListChannels>("tool.host", "list_channels", overrides),
+        spec::<Promise>("tool.host", "promise", overrides),
+        spec::<Recent>("tool.host", "recent", overrides),
     ]
 }
 
@@ -531,7 +544,7 @@ mod tests {
         let chat = to_wire(&tools, WireApi::Chat);
         assert_eq!(chat[0]["function"]["name"], "search");
         let resp = to_wire(&tools, WireApi::Responses);
-        assert_eq!(resp[5]["name"], "wrapup");
+        assert_eq!(resp[4]["name"], "wrapup");
         // Same bytes every time: part of a cached prefix.
         assert_eq!(chat.to_string(), to_wire(&tools, WireApi::Chat).to_string());
     }

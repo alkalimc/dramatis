@@ -22,13 +22,12 @@ async fn a_failed_tool_does_not_break_the_next_turn() {
     let ch = direct(&e, "ann");
     e.agent.with_world(|w| {
         w.execute_batch(
-            "CREATE TRIGGER no_facts BEFORE INSERT ON fact
+            "CREATE TRIGGER no_facts BEFORE INSERT ON channel_participant
              BEGIN SELECT RAISE(ABORT, 'disk'); END",
         )
         .unwrap();
     });
-    e.fake
-        .push([call("remember", json!({"text": "likes green tea"}))]);
+    e.fake.push([call("request_join", json!({"person": "bo"}))]);
     e.agent.send(ch, "note this", None).await.unwrap_err();
     e.agent
         .with_world(|w| w.execute_batch("DROP TRIGGER no_facts").unwrap());

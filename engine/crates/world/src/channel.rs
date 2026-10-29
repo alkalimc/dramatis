@@ -212,6 +212,22 @@ pub fn create_group(
     })
 }
 
+/// A group made from a proposal: the purpose is its topic and also its name, so the title
+/// stays what the group was made for however its members change. Without a purpose the
+/// name stays empty and the title is derived from the members.
+pub fn create_proposed_group(
+    conn: &Connection,
+    members: &[PersonId],
+    purpose: Option<&str>,
+    origin: Origin,
+) -> Result<ChannelId> {
+    crate::atomic(conn, |conn| {
+        let id = create_group(conn, members, purpose, origin)?;
+        set_name(conn, id, purpose)?;
+        Ok(id)
+    })
+}
+
 /// Bring someone into a channel (a colleague pulled in, or the host appearing in a
 /// group). Idempotent. Being a participant is what makes the channel's memories visible.
 pub fn add_participant(conn: &Connection, channel: ChannelId, who: &Actor) -> Result<()> {
@@ -289,8 +305,25 @@ fn live_group(conn: &Connection, channel: ChannelId) -> Result<Channel> {
 }
 
 /// The live, unarchived group whose people are exactly `persons` (the host aside), if
-/// any; the one with the newest message when several.
-pub fn find_group_with(conn: &Connection, persons: &[PersonId]) -> Result<Option<Channel>> {
+/// any; the one with the newest message when several. With a `purpose`, only a group
+/// whose name or topic is that purpose (same letters and digits, case and punctuation
+/// aside) counts: the same people for another purpose are another group.
+pub fn find_group_with(
+    conn: &Connection,
+    persons: &[PersonId],
+    purpose: Option<&str>,
+) -> Result<Option<Channel>> {
+    let key = purpose.map(crate::fact::normalize);
+    let same_purpose = |ch: &Channel| match &key {
+        None => true,
+        Some(k) => {
+            !k.is_empty()
+                && [ch.name.as_deref(), ch.topic.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|t| crate::fact::normalize(t) == *k)
+        }
+    };
     let mut want = persons.to_vec();
     want.sort();
     want.dedup();
@@ -300,7 +333,7 @@ pub fn find_group_with(conn: &Connection, persons: &[PersonId]) -> Result<Option
         }
         let mut have = ch.persons();
         have.sort();
-        if have == want {
+        if have == want && same_purpose(&ch) {
             return Ok(Some(ch));
         }
     }
@@ -595,7 +628,7 @@ mod tests {
         add_participant(&w, g, &Actor::Host).unwrap();
         let found = |who: &[&str]| {
             let who: Vec<PersonId> = who.iter().map(|x| p(x)).collect();
-            find_group_with(&w, &who).unwrap().map(|c| c.id)
+            find_group_with(&w, &who, None).unwrap().map(|c| c.id)
         };
         assert_eq!(found(&["b", "a"]), Some(g));
         assert_eq!(found(&["a"]), None);
@@ -609,6 +642,46 @@ mod tests {
         delete_group(&w, g2, 1).unwrap();
         assert_eq!(found(&["a", "c"]), None);
         assert!(groups_of(&w, &p("a")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_proposed_group_is_named_by_its_purpose_and_reused_only_for_it() {
+        let w = world();
+        let who = [p("a"), p("b")];
+        let named = create_proposed_group(&w, &who, Some("Plan a party"), Origin::User).unwrap();
+        let plain = create_proposed_group(&w, &[p("a"), p("c")], None, Origin::User).unwrap();
+        assert_eq!(
+            get(&w, named).unwrap().name.as_deref(),
+            Some("Plan a party")
+        );
+        assert_eq!(
+            get(&w, named).unwrap().topic.as_deref(),
+            Some("Plan a party")
+        );
+        assert_eq!(get(&w, plain).unwrap().name, None);
+        let found = |who: &[PersonId], purpose: Option<&str>| {
+            find_group_with(&w, who, purpose).unwrap().map(|c| c.id)
+        };
+        // No purpose: the people alone decide. Case and punctuation do not matter.
+        assert_eq!(found(&who, None), Some(named));
+        assert_eq!(found(&who, Some("  plan a PARTY! ")), Some(named));
+        assert_eq!(found(&who, Some("plan-a-party")), Some(named));
+        // Another purpose for the same people is another group.
+        assert_eq!(found(&who, Some("Plan a trip")), None);
+        assert_eq!(found(&who, Some("!!")), None);
+        // The name the user gave counts as well as the topic made with it.
+        set_name(&w, named, Some("Party crew")).unwrap();
+        assert_eq!(found(&who, Some("party crew")), Some(named));
+        assert_eq!(found(&who, Some("plan a party")), Some(named));
+        // A group with no purpose of its own is found only without one.
+        assert_eq!(found(&[p("a"), p("c")], Some("anything")), None);
+        assert_eq!(found(&[p("a"), p("c")], None), Some(plain));
+        // Archived and deleted groups are never reused.
+        set_archived(&w, named, true).unwrap();
+        assert_eq!(found(&who, Some("Plan a party")), None);
+        set_archived(&w, named, false).unwrap();
+        delete_group(&w, named, 1).unwrap();
+        assert_eq!(found(&who, None), None);
     }
 
     #[test]

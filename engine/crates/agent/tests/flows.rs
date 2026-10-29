@@ -184,17 +184,18 @@ async fn material_is_deduplicated_and_nothing_found_is_said_plainly() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
     e.fake.push([say("a"), say("b"), say("c")]);
-    e.agent.send(ch, "jasmine tea", None).await.unwrap();
-    e.agent.send(ch, "jasmine tea again", None).await.unwrap();
-    let last = body_text(&e.fake.bodies()[1]);
-    assert_eq!(last.matches("poured the jasmine tea").count(), 1, "{last}");
-    assert!(last.matches("[#u1]").count() >= 2, "repeat shown by id");
-
+    // Nothing earlier in the channel, so the query is this message alone.
     e.agent.send(ch, "zebra quantum", None).await.unwrap();
-    let v = &e.fake.json()[2];
+    let v = &e.fake.json()[0];
     let entry = list(v).last().unwrap().to_string();
     assert!(entry.contains("Nothing came back for this."));
     assert!(!entry.contains("request_join") && !entry.contains("[#"));
+
+    e.agent.send(ch, "jasmine tea", None).await.unwrap();
+    e.agent.send(ch, "jasmine tea again", None).await.unwrap();
+    let last = body_text(&e.fake.bodies()[2]);
+    assert_eq!(last.matches("poured the jasmine tea").count(), 1, "{last}");
+    assert!(last.matches("[#u1]").count() >= 2, "repeat shown by id");
 }
 
 #[tokio::test]
@@ -346,18 +347,20 @@ async fn wrapup_is_refused_in_an_ordinary_turn() {
 }
 
 #[tokio::test]
-async fn report_with_nothing_asked_is_the_reply_without_another_call() {
+async fn report_with_nothing_asked_is_refused_and_says_why() {
     // The tool list is part of the cached prefix and fixed per segment, so `report` stays
-    // offered; a call with no request open ends the turn with its text instead of costing
-    // the refusal round trip.
+    // offered; with no request open the refusal says it is for a delegated request only,
+    // and the reply is then plain speech.
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
     e.fake.push([
         call("report", json!({"text": "Cooler water."})),
-        say("never asked"),
+        say("Cooler water."),
     ]);
     e.agent.send(ch, "hi", None).await.unwrap();
-    assert_eq!(e.fake.bodies().len(), 1);
+    assert_eq!(e.fake.bodies().len(), 2);
+    let log = log_bytes(&e.agent, ch);
+    assert!(log.contains("delegated with ask"), "{log}");
     let msgs = e.agent.history(ch, None, 10).unwrap();
     assert_eq!(msgs.last().unwrap().text, "Cooler water.");
 }
@@ -1669,7 +1672,7 @@ async fn nobody_without_a_persona_is_ever_given_a_session() {
         .unwrap();
     let log = log_bytes(&e.agent, host);
     assert!(!log.contains("(cy)"), "find_people never offers him");
-    assert!(log.contains("Nobody suitable is available."));
+    assert!(log.contains("That colleague is not available."), "{log}");
 }
 
 #[tokio::test]
@@ -2806,7 +2809,38 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
         tool_actions(&e).is_empty(),
         "no persona and disabled are never offered"
     );
-    assert!(log_bytes(&e.agent, ch).contains("Nobody suitable is available."));
+    let log = log_bytes(&e.agent, ch);
+    assert!(log.contains("That colleague is not available."), "{log}");
+    assert!(!log.contains("Nobody suitable is available."), "{log}");
+
+    // Each refusal has its own reason, so the model can correct itself.
+    e.fake.push([
+        call(
+            "ask_host",
+            json!({"group": ["bo", "dee", "x1", "x2", "x3"]}),
+        ),
+        say("1."),
+    ]);
+    e.agent.send(ch, "many", None).await.unwrap();
+    let log = log_bytes(&e.agent, ch);
+    assert!(log.contains("At most 4 people can be named here."), "{log}");
+    e.fake
+        .push([call("ask_host", json!({"group": ["ann"]})), say("2.")]);
+    e.agent.send(ch, "alone", None).await.unwrap();
+    let log = log_bytes(&e.agent, ch);
+    assert!(
+        log.contains("Name colleagues other than yourself."),
+        "{log}"
+    );
+    e.fake
+        .push([call("ask_host", json!({"find": ["zzz"]})), say("3.")]);
+    e.agent.send(ch, "stranger", None).await.unwrap();
+    let log = log_bytes(&e.agent, ch);
+    assert!(
+        log.contains("Nobody on the roster answers to zzz."),
+        "{log}"
+    );
+    assert!(tool_actions(&e).is_empty());
 
     // Neither or both of the arguments is no suggestion.
     e.fake.push([
@@ -2817,17 +2851,37 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
     e.agent.send(ch, "third", None).await.unwrap();
     assert!(tool_actions(&e).is_empty());
 
-    // The quiet band closes unprompted offers like unprompted speech.
+    // The quiet band closes unprompted offers like unprompted speech; a suggestion in the
+    // reply to the user's own message is not unprompted and gets through.
     let q = env_with(endpoints(WireApi::Chat, true, None), |c| {
         c.world.quota.quiet_at = 0.0;
     });
     let ch = direct(&q, "ann");
-    q.fake.push([
-        call("ask_host", json!({"group": ["bo"]})),
-        say("Never mind."),
-    ]);
+    q.fake
+        .push([call("ask_host", json!({"group": ["bo"]})), say("Offered.")]);
     q.agent.send(ch, "hello", None).await.unwrap();
-    assert!(tool_actions(&q).is_empty());
+    assert_eq!(
+        tool_actions(&q).len(),
+        1,
+        "the user's own turn is never quiet"
+    );
+    // The same call in a request the host started is the person's own initiative.
+    let host = q.agent.with_world(|w| channel::host(w).unwrap());
+    q.fake.push([
+        host_ask("ann", "Who forges blades?"),
+        say("Ann is looking into it."),
+        call("ask_host", json!({"find": ["bo"]})),
+        call("report", json!({"text": "Bo does.", "cites": []})),
+        call("wrapup", json!({"facts": []})),
+    ]);
+    q.agent.send(host, "ask ann", None).await.unwrap();
+    let log = log_bytes(&q.agent, direct(&q, "ann"));
+    assert!(log.contains("Suggestions are held back for now"), "{log}");
+    assert!(
+        tool_actions(&q)
+            .iter()
+            .all(|(_, a)| !matches!(a, api::views::ToolAction::FindPeople { .. }))
+    );
 }
 
 // ---- emulated tools: a person proposes through a closing line of the reply ----
@@ -3093,14 +3147,14 @@ async fn an_emulated_proposal_keeps_the_same_limits_as_the_tool() {
     }
     let stored = e.agent.history(ch, None, 9).unwrap();
     assert!(stored.last().unwrap().text == "No.");
-    // The quiet band closes unprompted offers.
+    // The quiet band does not close the offer in the reply to the user's own message.
     let mut ep = endpoints(WireApi::Chat, true, None);
     ep.profiles[0].models[0].native_tools = Some(false);
     let q = env_with(ep, |c| c.world.quota.quiet_at = 0.0);
     let qch = direct(&q, "ann");
-    q.fake.push([say(&format!("Never mind.\n{GROUP} Bo"))]);
+    q.fake.push([say(&format!("Offered.\n{GROUP} Bo"))]);
     q.agent.send(qch, "hello", None).await.unwrap();
-    assert!(turn_events(&q).1.is_empty());
+    assert_eq!(turn_events(&q).1.len(), 1);
 }
 
 #[tokio::test]
@@ -3323,4 +3377,279 @@ async fn one_named_person_is_a_talk_offer_never_a_group() {
     assert_eq!(groups, 0);
     let said = log_bytes(&e.agent, host);
     assert!(said.contains("No group exists"), "{said}");
+}
+
+// ---- the tool set: retrieval over two messages, ids, reading, reminders, group limits ----
+
+#[tokio::test]
+async fn a_follow_up_is_searched_with_the_message_before_it() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.agent.post(ch, "forge blade steel", None).unwrap();
+    e.fake.push([say("a")]);
+    e.agent.send(ch, "and him?", None).await.unwrap();
+    let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
+    assert!(entry.contains("hammered the blade at the forge"), "{entry}");
+
+    // The follow-up alone finds nothing: the earlier message is what carried it.
+    let alone = env(WireApi::Responses);
+    let ch = direct(&alone, "ann");
+    alone.fake.push([say("a")]);
+    alone.agent.send(ch, "and him?", None).await.unwrap();
+    let entry = list(&alone.fake.json()[0]).last().unwrap().to_string();
+    assert!(entry.contains("Nothing came back for this."), "{entry}");
+}
+
+/// A host that may make many tool calls in one turn.
+fn long_host() -> Env {
+    env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.turn_loop.max_steps = 12;
+    })
+}
+
+fn say_in(e: &Env, ch: ChannelId, who: Actor, text: &str, at: i64) {
+    e.agent.with_world(|w| {
+        world::message::append(w, ch, &who, text, None, None, at).unwrap();
+    });
+}
+
+#[tokio::test]
+async fn list_channels_gives_ids_and_recent_reads_one_conversation() {
+    let e = long_host();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let ann = direct(&e, "ann");
+    say_in(&e, ann, Actor::User, "hello there", T0);
+    e.agent.with_world(|w| {
+        let service = json!({"service": true});
+        world::message::append(
+            w,
+            ann,
+            &Actor::User,
+            "service words",
+            None,
+            Some(&service),
+            T0,
+        )
+        .unwrap();
+    });
+    say_in(&e, ann, Actor::Person(p("ann")), "good evening", T0 + 1000);
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("dee")], Some("tea"))
+        .unwrap();
+    e.agent
+        .with_world(|w| channel::set_name(w, g, Some("Tea club")).unwrap());
+    say_in(&e, g, Actor::Person(p("dee")), "secret from dee", T0 + 2000);
+    say_in(
+        &e,
+        g,
+        Actor::Person(p("ann")),
+        "from ann in group",
+        T0 + 3000,
+    );
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("dee"), Mode::Disabled).unwrap());
+    e.fake.push([
+        call("list_channels", json!({})),
+        call("recent", json!({"channel": ann.0.to_string()})),
+        call("recent", json!({"channel": g.0.to_string()})),
+        call("recent", json!({"channel": "9999"})),
+        call("recent", json!({"channel": host.0.to_string()})),
+        say("ok"),
+    ]);
+    e.agent.send(host, "what is going on?", None).await.unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains(&format!("- {}: with", ann.0)), "{log}");
+    assert!(
+        log.contains(&format!("- {}: Tea club, group of", g.0)),
+        "{log}"
+    );
+    assert!(
+        log.contains("hello there") && log.contains("good evening"),
+        "{log}"
+    );
+    assert!(log.contains(": from ann in group"), "{log}");
+    assert!(!log.contains("service words"), "{log}");
+    assert!(!log.contains("secret from dee"), "{log}");
+    assert!(log.contains("Not found: 9999"), "{log}");
+    assert!(log.contains("recent lines are for the others"), "{log}");
+}
+
+#[tokio::test]
+async fn recent_returns_the_last_eight_lines_within_the_cap() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let ann = direct(&e, "ann");
+    for i in 0..10 {
+        let text = format!("msg{i} {}", "x".repeat(400));
+        say_in(&e, ann, Actor::Person(p("ann")), &text, T0 + i * 1000);
+    }
+    e.fake.push([
+        call("recent", json!({"channel": ann.0.to_string()})),
+        say("ok"),
+    ]);
+    e.agent.send(host, "read it", None).await.unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("msg9 "), "the newest line stays");
+    assert!(
+        !log.contains("msg0 ") && !log.contains("msg1 "),
+        "only eight"
+    );
+    assert!(
+        !log.contains("msg2 "),
+        "the cap drops the oldest of the eight"
+    );
+}
+
+#[tokio::test]
+async fn a_promise_is_a_due_commitment_for_a_named_person_with_limits() {
+    let e = long_host();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        call(
+            "promise",
+            json!({"text": "call home", "due": "2099-01-01", "person": "ann"}),
+        ),
+        call(
+            "promise",
+            json!({"text": "x", "due": "next week", "person": "ann"}),
+        ),
+        call(
+            "promise",
+            json!({"text": "x", "due": "2001-01-01", "person": "ann"}),
+        ),
+        call(
+            "promise",
+            json!({"text": "x", "due": "2099-01-01", "person": "zzz"}),
+        ),
+        call(
+            "promise",
+            json!({"text": "x", "due": "2099-01-01", "person": "cy"}),
+        ),
+        say("ok"),
+    ]);
+    e.agent
+        .send(host, "remind ann to call home", None)
+        .await
+        .unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("Reminder set: ann will bring it up"), "{log}");
+    assert!(
+        log.contains("Could not read the due time next week"),
+        "{log}"
+    );
+    assert!(log.contains("has already passed"), "{log}");
+    assert!(
+        log.contains("Nobody on the roster answers to zzz."),
+        "{log}"
+    );
+    assert!(log.contains("That colleague is not available."), "{log}");
+    let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    let [f] = facts.as_slice() else {
+        panic!("{facts:?}")
+    };
+    assert_eq!(
+        (f.kind, f.text.as_str()),
+        (FactKind::Commitment, "call home")
+    );
+    assert!(f.due.is_some());
+    assert_eq!(f.audience, Audience::Own(p("ann")));
+
+    // It comes due as that person's opening.
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
+    e.clock.advance(80 * 365 * 24 * 3_600_000);
+    e.fake.push([say("About calling home.")]);
+    let opened = e.agent.on_event().await.unwrap();
+    assert_eq!(opened.map(|o| o.0), Some(p("ann")));
+    let entry = last_entry(&e);
+    assert!(entry.contains("A promise is due: call home"), "{entry}");
+
+    // At most twenty wait at once.
+    let full = env(WireApi::Chat);
+    let host = full.agent.with_world(|w| channel::host(w).unwrap());
+    full.agent.with_world(|w| {
+        for i in 0..20 {
+            let new = NewFact::new(
+                Actor::User,
+                Audience::Own(p("ann")),
+                FactKind::Commitment,
+                format!("promise number {i}"),
+            )
+            .due(i64::MAX / 2);
+            fact::write(w, &new, 0).unwrap();
+        }
+    });
+    full.fake.push([
+        call(
+            "promise",
+            json!({"text": "one more", "due": "2099-01-01", "person": "ann"}),
+        ),
+        say("ok"),
+    ]);
+    full.agent.send(host, "remind ann", None).await.unwrap();
+    let log = log_bytes(&full.agent, host);
+    assert!(log.contains("20 reminders are already waiting"), "{log}");
+}
+
+#[tokio::test]
+async fn the_hosts_groups_are_capped_named_by_purpose_and_reused_only_for_it() {
+    let e = long_host();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let names = |e: &Env| -> Vec<Option<String>> {
+        e.agent.with_world(|w| {
+            let mut all: Vec<_> = channel::list(w)
+                .unwrap()
+                .into_iter()
+                .filter(|c| c.kind == world::ChannelKind::Group)
+                .map(|c| (c.id, c.name))
+                .collect();
+            all.sort();
+            all.into_iter().map(|(_, n)| n).collect()
+        })
+    };
+    e.fake.push([
+        call(
+            "create_group",
+            json!({"members": ["ann", "bo", "dee", "a", "b", "c", "d"]}),
+        ),
+        call(
+            "create_group",
+            json!({"members": ["ann", "bo"], "purpose": "Plan a party"}),
+        ),
+        call(
+            "create_group",
+            json!({"members": ["bo", "ann"], "purpose": "plan a PARTY!"}),
+        ),
+        call("create_group", json!({"members": ["ann", "bo"]})),
+        call(
+            "create_group",
+            json!({"members": ["ann", "bo"], "purpose": "Plan a trip"}),
+        ),
+        say("ok"),
+    ]);
+    e.agent.send(host, "groups", None).await.unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("At most 6 people can be named here."), "{log}");
+    assert_eq!(
+        log.matches("already has exactly these people").count(),
+        2,
+        "{log}"
+    );
+    assert_eq!(
+        names(&e),
+        [
+            Some("Plan a party".to_owned()),
+            Some("Plan a trip".to_owned())
+        ],
+        "{}",
+        log.rsplit("At most 6").next().unwrap()
+    );
+    // A group the user made by hand has no name: its title follows its members.
+    let by_hand = e.agent.create_group(&[p("ann"), p("dee")], None).unwrap();
+    assert_eq!(
+        e.agent
+            .with_world(|w| channel::get(w, by_hand).unwrap().name),
+        None
+    );
 }

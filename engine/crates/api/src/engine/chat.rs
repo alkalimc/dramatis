@@ -321,7 +321,9 @@ impl Engine {
         }
         let ids: Vec<world::PersonId> = people.iter().map(world_person).collect();
         // The same people already have a group: that one, recorded on the line like a new one.
-        if let Some(same) = channel::find_group_with(&w, &ids).map_err(world_err)? {
+        if let Some(same) =
+            channel::find_group_with(&w, &ids, purpose.as_deref()).map_err(world_err)?
+        {
             let same = convert::channel_id(same.id);
             actions[action as usize] = ToolAction::CreateGroup {
                 members,
@@ -332,8 +334,9 @@ impl Engine {
             message::set_tool_calls(&w, mid, &value).map_err(world_err)?;
             return Ok((same, None));
         }
-        let created = channel::create_group(&w, &ids, purpose.as_deref(), world::Origin::User)
-            .map_err(world_err)?;
+        let created =
+            channel::create_proposed_group(&w, &ids, purpose.as_deref(), world::Origin::User)
+                .map_err(world_err)?;
         let created = convert::channel_id(created);
         actions[action as usize] = ToolAction::CreateGroup {
             members,

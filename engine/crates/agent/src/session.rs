@@ -34,6 +34,9 @@ use crate::persona;
 use crate::request::{self, Call, Image};
 use crate::text::Names;
 
+/// Most citations a reply keeps, as the model is told.
+const CITES_MAX: usize = 3;
+
 /// Whose session a channel's log is: which prefix and which tool list it gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogKind {
@@ -98,6 +101,12 @@ impl Turn {
             hand_off: Vec::new(),
             proposing: false,
         }
+    }
+
+    /// Whether the user started this turn: a reply to their own message. Openings,
+    /// interjections and the work of a request are the harness's own initiative.
+    pub fn prompted(&self) -> bool {
+        matches!(self.shape, Shape::Direct | Shape::Group)
     }
 
     /// Whether this turn is a reply in a group, where the closing hand-off line applies.
@@ -315,7 +324,11 @@ impl Agent {
                 briefs.push(assemble::GroupBrief {
                     title: g.name.clone(),
                     others: others.join(self.corpus.wording.get("list.separator")),
-                    purpose: g.topic.clone(),
+                    // A group named after its purpose says it once.
+                    purpose: g
+                        .topic
+                        .clone()
+                        .filter(|t| g.name.as_deref().map(str::trim) != Some(t.trim())),
                 });
             }
         }
@@ -1185,6 +1198,10 @@ impl Agent {
         let mut out: Vec<world::Citation> = Vec::new();
         let ix = self.ix();
         for id in api::cites::ids(text) {
+            // The model is told at most three; the rest are not kept.
+            if out.len() >= CITES_MAX {
+                break;
+            }
             let Some(id) = assemble::resolve_id(&id, shown.iter().chain(seen.iter())) else {
                 continue;
             };

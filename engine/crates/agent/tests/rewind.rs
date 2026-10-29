@@ -136,13 +136,13 @@ async fn rewinding_around_a_failed_tool_turn_keeps_calls_and_outputs_paired() {
 
     e.agent.with_world(|w| {
         w.execute_batch(
-            "CREATE TRIGGER no_facts BEFORE INSERT ON fact
+            "CREATE TRIGGER no_facts BEFORE INSERT ON channel_participant
              BEGIN SELECT RAISE(ABORT, 'disk'); END",
         )
         .unwrap();
     });
     e.fake
-        .push([call("remember", serde_json::json!({"text": "likes tea"}))]);
+        .push([call("request_join", serde_json::json!({"person": "bo"}))]);
     let posted = e.agent.post(ch, "note this", None).unwrap();
     let failed = posted.message;
     e.agent.respond(posted).await.unwrap_err();

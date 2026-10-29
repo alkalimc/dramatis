@@ -64,7 +64,6 @@ fn every_parsed_name_is_offered() {
             "search",
             "get_chunk",
             "request_join",
-            "remember",
             "report",
             "wrapup",
             "ask_host"
@@ -80,8 +79,9 @@ fn every_parsed_name_is_offered() {
             "set_mode",
             "search",
             "remember",
-            "forget",
-            "list_channels"
+            "list_channels",
+            "promise",
+            "recent"
         ]
     );
     for name in &shared {

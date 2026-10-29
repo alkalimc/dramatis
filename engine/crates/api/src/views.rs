@@ -348,9 +348,15 @@ pub enum ToolAction {
         target: Target,
         mode: Mode,
     },
-    Forget {
-        fact: FactId,
+    /// The host set a reminder: the person brings it up when it falls due.
+    Promise {
+        person: PersonRef,
+        text: String,
+        /// The due time as the host wrote it.
+        due: String,
     },
+    /// The host read the last lines of a conversation.
+    Recent,
     ListChannels {
         /// The conversations listed, so a front end can offer to open each.
         #[serde(default)]

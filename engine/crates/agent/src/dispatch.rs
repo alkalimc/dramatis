@@ -9,7 +9,7 @@ use api::views::{ChannelKind, ChannelRef, ToolAction};
 use index::{Filters, SearchRequest};
 use world::fact::{self, About, Audience, NewFact};
 use world::wrapup::{Args, Hurt, Memory, MemoryKind};
-use world::{Actor, ChannelId, FactId, FactKind, Origin, PersonId, bond, channel};
+use world::{Actor, ChannelId, FactKind, Origin, PersonId, bond, channel};
 
 use crate::agent::{Agent, Event};
 use crate::assemble;
@@ -25,6 +25,16 @@ const LISTED_CHANNELS_MAX: usize = 12;
 
 /// Most colleagues a person's group suggestion may name, apart from the person.
 const SUGGESTED_GROUP_MAX: usize = 4;
+
+/// Most people the host's `create_group` takes.
+const HOST_GROUP_MAX: usize = 6;
+
+/// Most reminders the host may have waiting at once.
+const PROMISES_MAX: usize = 20;
+
+/// Most messages `recent` returns, and the most characters of them together.
+const RECENT_MESSAGES: u32 = 8;
+const RECENT_CHARS: usize = 1500;
 
 /// Most colleagues a person may point the user to in one suggestion.
 const SUGGESTED_FIND_MAX: usize = 3;
@@ -73,6 +83,10 @@ impl Agent {
         Ok(match out {
             Ok(s) | Err(Refusal(s)) => s,
         })
+    }
+
+    fn refuse_with(&self, names: &Names, key: &str, fields: &[(&str, &str)]) -> Refusal {
+        Refusal(self.corpus.wording.fill(key, names, fields))
     }
 
     fn refuse(&self, names: &Names, key: &str, detail: &str) -> Refusal {
@@ -236,30 +250,6 @@ impl Agent {
             }
             SharedCall::RequestJoin(r) => self.request_join(turn, &me, r, names),
             SharedCall::AskHost(a) => self.ask_host(turn, &me, a, names),
-            SharedCall::Remember(r) => {
-                self.show_action(
-                    turn,
-                    ToolAction::Remember {
-                        text: r.text.clone(),
-                    },
-                )?;
-                let new = NewFact::new(
-                    Actor::Person(me),
-                    fact::channel_audience(turn.channel),
-                    FactKind::Fact,
-                    r.text.trim(),
-                );
-                if fact::normalize(&new.text).is_empty() {
-                    return Ok(Err(self.refuse(names, "harness.error.refused", "empty")));
-                }
-                let written = fact::write(&self.db(), &new, self.now().ms)?;
-                if let fact::Written::New(id) = written {
-                    self.changed(vec![api::events::WorldChange::Fact {
-                        id: view::fact_id(id),
-                    }]);
-                }
-                Ok(Ok(self.say(names, "harness.remembered", &[])))
-            }
             SharedCall::Report(r) => {
                 // The request this turn runs on, or one he is on in this channel.
                 let task = {
@@ -273,17 +263,9 @@ impl Agent {
                     })
                 };
                 let Some(task) = task else {
-                    // Nothing was asked of him: the text is what he meant to say. Refusing
-                    // would cost the model another call to say it again.
-                    if !turn.text.is_empty() {
-                        turn.text.push('\n');
-                    }
-                    turn.text.push_str(&crate::assemble::visible_text(
-                        &r.text,
-                        (&self.corpus.scene.0, &self.corpus.scene.1),
-                    ));
-                    turn.closed = true;
-                    return Ok(Ok(self.say(names, "harness.done", &[])));
+                    // Only a delegated request is answered this way; an ordinary reply is
+                    // plain speech, and the refusal says so.
+                    return Ok(Err(self.refuse(names, "harness.error.no_request", "")));
                 };
                 self.show_action(turn, ToolAction::Report)?;
                 let mut shown = turn.shown.clone();
@@ -406,7 +388,6 @@ impl Agent {
         a: tools::AskHost,
         names: &Names,
     ) -> Result<Outcome> {
-        let unavailable = || self.refuse(names, "harness.error.unavailable", "");
         let spoken = turn.actions.iter().any(|x| {
             matches!(
                 x,
@@ -418,9 +399,10 @@ impl Agent {
         if spoken {
             return Ok(Err(self.refuse(names, "harness.error.once", "")));
         }
-        // Unprompted offers stop in the quiet band, like unprompted speech.
-        if !self.decide(CallKind::Opening)?.allowed() {
-            return Ok(Err(unavailable()));
+        // Unprompted offers stop in the quiet band, like unprompted speech. A suggestion in
+        // the reply to the user's own message is not unprompted.
+        if !turn.prompted() && !self.decide(CallKind::Opening)?.allowed() {
+            return Ok(Err(self.refuse(names, "harness.error.quiet", "")));
         }
         let offer = self.offerable(&self.db())?;
         // In a group, the people already there are never offered again: a find becomes an
@@ -432,12 +414,13 @@ impl Agent {
         match (a.find, a.group) {
             (Some(listed), None) => {
                 let scope: Vec<String> = offer
-                    .into_iter()
-                    .filter(|p| p != me.as_str())
+                    .iter()
+                    .filter(|p| p.as_str() != me.as_str())
                     .filter(|p| {
                         here.as_ref()
-                            .is_none_or(|h| !h.iter().any(|m| m.as_str() == p))
+                            .is_none_or(|h| !h.iter().any(|m| m.as_str() == p.as_str()))
                     })
+                    .cloned()
                     .collect();
                 // A name nobody on the roster answers to is left out; the rest stay offered.
                 let mut found: Vec<PersonId> = Vec::new();
@@ -450,7 +433,13 @@ impl Agent {
                 }
                 found.truncate(SUGGESTED_FIND_MAX);
                 if found.is_empty() {
-                    return Ok(Err(unavailable()));
+                    return Ok(Err(self.no_find(
+                        names,
+                        &listed,
+                        me,
+                        &offer,
+                        here.as_deref(),
+                    )?));
                 }
                 let persons = found
                     .iter()
@@ -480,14 +469,25 @@ impl Agent {
                 let nothing_new = here
                     .as_ref()
                     .is_some_and(|h| members.iter().all(|m| h.contains(m)));
-                let ok = members.len() >= 2
-                    && !nothing_new
-                    && members.len() <= SUGGESTED_GROUP_MAX + 1
-                    && members
-                        .iter()
-                        .all(|m| offer.iter().any(|o| o == m.as_str()));
-                if !ok {
-                    return Ok(Err(unavailable()));
+                if members.len() > SUGGESTED_GROUP_MAX + 1 {
+                    let max = SUGGESTED_GROUP_MAX.to_string();
+                    return Ok(Err(self.refuse_with(
+                        names,
+                        "harness.error.too_many",
+                        &[("max", &max)],
+                    )));
+                }
+                if members.len() < 2 {
+                    return Ok(Err(self.refuse(names, "harness.error.self", "")));
+                }
+                if let Some(m) = members
+                    .iter()
+                    .find(|m| !offer.iter().any(|o| o == m.as_str()))
+                {
+                    return Ok(Err(self.not_offered(names, m.as_str())));
+                }
+                if nothing_new {
+                    return Ok(Err(self.refuse(names, "harness.error.nobody_new", "")));
                 }
                 let refs = members
                     .iter()
@@ -511,6 +511,59 @@ impl Agent {
             }
         }
         Ok(Ok(self.say(names, "harness.suggested", &[])))
+    }
+
+    /// Why a find named nobody who can be offered: yourself, people already in this group,
+    /// people who cannot be reached, or names that match nobody.
+    fn no_find(
+        &self,
+        names: &Names,
+        listed: &[String],
+        me: &PersonId,
+        offer: &[String],
+        here: Option<&[PersonId]>,
+    ) -> Result<Refusal> {
+        let everyone = self.roster()?;
+        let (mut itself, mut present, mut away) = (false, false, false);
+        for n in listed {
+            if let Some(p) = self.person_named(n.trim(), &everyone)? {
+                itself |= &p == me;
+                present |= here.is_some_and(|h| h.contains(&p));
+                away |= !offer.iter().any(|o| o == p.as_str());
+            }
+        }
+        let key = if itself {
+            "harness.error.self"
+        } else if present {
+            "harness.error.nobody_new"
+        } else if away {
+            "harness.error.disabled"
+        } else {
+            return Ok(self.refuse(names, "harness.error.no_match", &listed.join(", ")));
+        };
+        Ok(self.refuse(names, key, ""))
+    }
+
+    /// Everyone on the roster, with or without a persona, switched off or not.
+    fn roster(&self) -> Result<Vec<String>> {
+        Ok(self
+            .ix()
+            .folio()
+            .persons()?
+            .into_iter()
+            .map(|p| p.person_id)
+            .collect())
+    }
+
+    /// Why a roster id cannot be offered: on the roster but without a persona or switched
+    /// off, or nobody on the roster.
+    fn not_offered(&self, names: &Names, id: &str) -> Refusal {
+        let known = self.ix().folio().person(id).ok().flatten().is_some();
+        if known || self.has_persona(id) {
+            self.refuse(names, "harness.error.disabled", id)
+        } else {
+            self.refuse(names, "harness.error.no_match", id)
+        }
     }
 
     /// A person's closing proposal line (where tools are emulated) takes the path of the
@@ -662,7 +715,7 @@ impl Agent {
                 if let Err(e) = self.available(&self.db(), &p) {
                     return match e {
                         Error::NoPersona(_) | Error::World(_) => {
-                            Ok(Err(self.refuse(names, "harness.error.unavailable", "")))
+                            Ok(Err(self.not_offered(names, &a.person)))
                         }
                         e => Err(e),
                     };
@@ -709,13 +762,21 @@ impl Agent {
                 // One person is a conversation, not a group: offer to talk instead.
                 if let [only] = &members[..] {
                     if self.available(&self.db(), only).is_err() {
-                        return Ok(Err(self.refuse(names, "harness.error.unavailable", "")));
+                        return Ok(Err(self.not_offered(names, only.as_str())));
                     }
                     return self.talk_offer(turn, only.as_str(), names);
                 }
+                if members.len() > HOST_GROUP_MAX {
+                    let max = HOST_GROUP_MAX.to_string();
+                    return Ok(Err(self.refuse_with(
+                        names,
+                        "harness.error.too_many",
+                        &[("max", &max)],
+                    )));
+                }
                 for m in &members {
                     if self.available(&self.db(), m).is_err() {
-                        return Ok(Err(self.refuse(names, "harness.error.unavailable", "")));
+                        return Ok(Err(self.not_offered(names, m.as_str())));
                     }
                 }
                 let refs = members
@@ -723,8 +784,9 @@ impl Agent {
                     .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
                     .collect::<Result<Vec<_>>>()?;
                 let purpose = clean_purpose(g.purpose.as_deref());
-                // A live group with exactly these people is the group: no second one.
-                let existing = channel::find_group_with(&self.db(), &members)?;
+                // A live group with exactly these people, for this purpose or for none, is
+                // the group: no second one.
+                let existing = channel::find_group_with(&self.db(), &members, purpose.as_deref())?;
                 if let Some(found) = existing {
                     self.show_action(
                         turn,
@@ -740,8 +802,12 @@ impl Agent {
                         &[("id", &found.id.to_string())],
                     )));
                 }
-                let created =
-                    channel::create_group(&self.db(), &members, purpose.as_deref(), Origin::User);
+                let created = channel::create_proposed_group(
+                    &self.db(),
+                    &members,
+                    purpose.as_deref(),
+                    Origin::User,
+                );
                 match created {
                     Ok(id) => {
                         if let Some(p) = &purpose {
@@ -858,35 +924,8 @@ impl Agent {
                     assemble::memory_id(&fact::get(&self.db(), id)?)
                 )))
             }
-            HostCall::Forget(f) => {
-                if !turn.authorized {
-                    return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
-                }
-                let raw = api::cites::ids(&f.fact_id)
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| f.fact_id.trim().to_owned());
-                let Ok(id) = raw.trim_start_matches('m').parse::<i64>().map(FactId) else {
-                    return Ok(Err(self.refuse(
-                        names,
-                        "harness.error.not_found",
-                        &f.fact_id,
-                    )));
-                };
-                if let Err(e) = fact::retract(&self.db(), id) {
-                    return Ok(Err(self.world_refusal(names, e)?));
-                }
-                self.show_action(
-                    turn,
-                    ToolAction::Forget {
-                        fact: view::fact_id(id),
-                    },
-                )?;
-                self.changed(vec![api::events::WorldChange::Fact {
-                    id: view::fact_id(id),
-                }]);
-                Ok(Ok(self.say(names, "harness.done", &[])))
-            }
+            HostCall::Promise(p) => self.promise(turn, p, names),
+            HostCall::Recent(r) => self.read_recent(turn, r, names),
             HostCall::ListChannels(_) => {
                 let (refs, lines) = self.channel_lines(names)?;
                 self.show_action(turn, ToolAction::ListChannels { channels: refs })?;
@@ -905,7 +944,6 @@ impl Agent {
     /// The user's conversations with something in them, newest first (the host's own
     /// channel left out): what the front ends offer and the lines the host reads.
     fn channel_lines(&self, names: &Names) -> Result<(Vec<ChannelRef>, Vec<String>)> {
-        let now = self.now();
         let mut refs = Vec::new();
         let mut lines = Vec::new();
         // The connection lock is released before the loop takes it again.
@@ -925,25 +963,31 @@ impl Agent {
                 .iter()
                 .map(|p| view::person_ref(self.ix().folio(), p.as_str()))
                 .collect::<Result<Vec<_>>>()?;
+            let title = ch.name.as_deref().map(str::trim).unwrap_or("");
             let (kind, key) = match ch.kind {
                 world::ChannelKind::Direct => (ChannelKind::Direct, "harness.channels.direct"),
+                // A group with a title of its own is told by it, so it can be named again.
+                world::ChannelKind::Group if !title.is_empty() => {
+                    (ChannelKind::Group, "harness.channels.group_named")
+                }
                 world::ChannelKind::Group => (ChannelKind::Group, "harness.channels.group"),
             };
-            let at = now.at(last.at);
-            let d = world::clock::in_world_date(at, self.corpus.year_offset);
-            let when = format!(
-                "{:04}-{:02}-{:02} {}",
-                d.year,
-                d.month,
-                d.day,
-                world::clock::local_time(at)
-            );
+            let when = self.when(last.at);
             let who = members
                 .iter()
                 .map(|m| m.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            lines.push(self.say(names, key, &[("names", &who), ("when", &when)]));
+            lines.push(self.say(
+                names,
+                key,
+                &[
+                    ("id", &ch.id.to_string()),
+                    ("title", title),
+                    ("names", &who),
+                    ("when", &when),
+                ],
+            ));
             refs.push(ChannelRef {
                 id: view::channel_id(ch.id),
                 kind,
@@ -951,6 +995,154 @@ impl Agent {
             });
         }
         Ok((refs, lines))
+    }
+
+    /// An instant as the model reads it: the in-world date and the local time.
+    fn when(&self, ms: i64) -> String {
+        let at = self.now().at(ms);
+        let d = world::clock::in_world_date(at, self.corpus.year_offset);
+        format!(
+            "{:04}-{:02}-{:02} {}",
+            d.year,
+            d.month,
+            d.day,
+            world::clock::local_time(at)
+        )
+    }
+
+    /// Set a reminder: a commitment the person brings up as their opening when it falls
+    /// due, the same kind a wrap-up writes. Nothing else in the harness surfaces a
+    /// reminder to the host, so a person is required.
+    fn promise(&self, turn: &mut Turn, p: tools::Promise, names: &Names) -> Result<Outcome> {
+        if !turn.authorized {
+            return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
+        }
+        let who = p.person.trim();
+        if who.is_empty() {
+            return Ok(Err(self.refuse(names, "harness.error.promise_person", "")));
+        }
+        let offer = self.offerable(&self.db())?;
+        let everyone = self.roster()?;
+        let Some(person) = self.person_named(who, &everyone)? else {
+            return Ok(Err(self.refuse(names, "harness.error.no_match", who)));
+        };
+        if !offer.iter().any(|o| o == person.as_str()) {
+            return Ok(Err(self.refuse(names, "harness.error.disabled", who)));
+        }
+        let now = self.now();
+        let due = p.due.trim();
+        let Some(at) = world::clock::parse_due(due, now) else {
+            return Ok(Err(self.refuse(names, "harness.error.due", due)));
+        };
+        if at <= now.ms {
+            return Ok(Err(self.refuse(names, "harness.error.due_past", due)));
+        }
+        if fact::pending_promises(&self.db())? >= PROMISES_MAX {
+            let max = PROMISES_MAX.to_string();
+            return Ok(Err(self.refuse_with(
+                names,
+                "harness.error.promises_full",
+                &[("max", &max)],
+            )));
+        }
+        let new = NewFact::new(
+            Actor::User,
+            Audience::Own(person.clone()),
+            FactKind::Commitment,
+            p.text.trim(),
+        )
+        .about(About::Person(person.clone()))
+        .due(at);
+        if fact::normalize(&new.text).is_empty() {
+            return Ok(Err(self.refuse(names, "harness.error.refused", "empty")));
+        }
+        let written = fact::write(&self.db(), &new, now.ms)?;
+        let person_ref = view::person_ref(self.ix().folio(), person.as_str())?;
+        let name = person_ref.name.clone();
+        self.show_action(
+            turn,
+            ToolAction::Promise {
+                person: person_ref,
+                text: new.text.clone(),
+                due: due.to_owned(),
+            },
+        )?;
+        if let fact::Written::New(id) = written {
+            self.changed(vec![api::events::WorldChange::Fact {
+                id: view::fact_id(id),
+            }]);
+        }
+        Ok(Ok(self.say(
+            names,
+            "harness.promised",
+            &[("name", &name), ("due", due)],
+        )))
+    }
+
+    /// The last lines of one conversation the user has, for the host to read: authors by
+    /// display name, no service lines, nothing from memory, and a disabled person's
+    /// lines left out as the other reads leave them out.
+    fn read_recent(&self, turn: &mut Turn, r: tools::Recent, names: &Names) -> Result<Outcome> {
+        let id = r.channel.trim();
+        let Some(ch) = id
+            .parse::<i64>()
+            .ok()
+            .and_then(|n| channel::get(&self.db(), ChannelId(n)).ok())
+            .filter(|c| c.deleted_at.is_none())
+        else {
+            return Ok(Err(self.refuse(names, "harness.error.not_found", id)));
+        };
+        if ch.is_host_channel() {
+            return Ok(Err(self.refuse(names, "harness.error.own_channel", "")));
+        }
+        self.show_action(turn, ToolAction::Recent)?;
+        let (stored, off) = {
+            let conn = self.db();
+            (
+                world::message::history(&conn, ch.id, None, RECENT_MESSAGES * 3)?,
+                bond::disabled(&conn)?,
+            )
+        };
+        let mut lines = Vec::new();
+        for m in stored {
+            if api::meta::MessageMeta::of(m.attachment.as_ref()).service {
+                continue;
+            }
+            let who = match &m.author {
+                Actor::User => names.user().to_owned(),
+                Actor::Host => self.corpus.wording.get("host.name").to_owned(),
+                Actor::Person(p) if off.contains(p) => continue,
+                Actor::Person(p) => self.display(p.as_str())?,
+            };
+            let text = names.sub(m.text.trim());
+            lines.push(self.say(
+                names,
+                "harness.read_recent.line",
+                &[("when", &self.when(m.at)), ("name", &who), ("text", &text)],
+            ));
+        }
+        let skip = lines.len().saturating_sub(RECENT_MESSAGES as usize);
+        let mut kept: Vec<String> = lines.split_off(skip);
+        // The newest lines matter most: shorten from the oldest end, and cut a single
+        // line that alone is too long.
+        while kept.len() > 1
+            && kept.iter().map(|l| l.chars().count() + 1).sum::<usize>() > RECENT_CHARS
+        {
+            kept.remove(0);
+        }
+        if let Some(only) = kept.first_mut()
+            && only.chars().count() > RECENT_CHARS
+        {
+            *only = only.chars().take(RECENT_CHARS).collect();
+        }
+        if kept.is_empty() {
+            return Ok(Ok(self.say(names, "harness.read_recent.none", &[])));
+        }
+        Ok(Ok(format!(
+            "{}\n{}",
+            self.say(names, "harness.read_recent", &[]),
+            kept.join("\n")
+        )))
     }
 
     /// Change a person's mode. Enabling someone without a persona is refused: he could

@@ -426,6 +426,17 @@ pub fn due_commitments(conn: &Connection, now: i64) -> Result<Vec<Fact>> {
     )
 }
 
+/// Promises the user has had set that are not yet brought up: commitments authored as the
+/// user (a person's own come from a wrap-up and are not counted).
+pub fn pending_promises(conn: &Connection) -> Result<usize> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM fact
+         WHERE kind = 'commitment' AND author = 'user' AND retracted = 0 AND delivered = 0",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
 /// Remove the facts that ended by `now`. A fact written with an end is kept only as long
 /// as it is true (a happening of one day), so it is deleted outright and not retracted:
 /// it would otherwise sit in the drawer as something the user deleted.
@@ -686,5 +697,20 @@ mod tests {
         assert_eq!(due_commitments(&w, 10).unwrap()[0].id, f);
         mark_delivered(&w, f).unwrap();
         assert!(due_commitments(&w, 99).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pending_promises_count_the_users_undelivered_commitments() {
+        let w = world();
+        let a = p("a");
+        let promise = |text: &str, author: Actor| {
+            NewFact::new(author, Audience::Own(a.clone()), FactKind::Commitment, text).due(10)
+        };
+        let first = write(&w, &promise("call", Actor::User), 0).unwrap().id();
+        write(&w, &promise("write", Actor::User), 0).unwrap();
+        write(&w, &promise("own", Actor::Person(a.clone())), 0).unwrap();
+        assert_eq!(pending_promises(&w).unwrap(), 2);
+        mark_delivered(&w, first).unwrap();
+        assert_eq!(pending_promises(&w).unwrap(), 1);
     }
 }

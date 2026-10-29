@@ -68,13 +68,13 @@
       },
       {
         "function": {
-          "description": "Start a group conversation among two or more people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.",
+          "description": "Start a group conversation among two to six people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
           "name": "create_group",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "members": {
-                "description": "Roster ids, two or more.",
+                "description": "Roster ids, two to six.",
                 "items": {
                   "type": "string"
                 },
@@ -198,18 +198,40 @@
       },
       {
         "function": {
-          "description": "Delete one remembered thing for the user. Only when the user asks. Can be restored.",
-          "name": "forget",
+          "description": "List the user's conversations, most recent first, each with its id (for set_mode and\nrecent). The user is shown a way to open each; you cannot move the user yourself.",
+          "name": "list_channels",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Set a reminder for the user: a promise with a due date. When it falls due the person\nnamed brings it up as their opening, so a person is required. Only when the user asks.\nAt most twenty are pending at once.",
+          "name": "promise",
           "parameters": {
             "additionalProperties": false,
             "properties": {
-              "fact_id": {
-                "description": "The id of the remembered thing.",
+              "due": {
+                "description": "When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or\n2026-12-24T18:00.",
+                "type": "string"
+              },
+              "person": {
+                "description": "Roster id of the person who brings it up when it is due.",
+                "type": "string"
+              },
+              "text": {
+                "description": "What is promised, as one short sentence.",
                 "type": "string"
               }
             },
             "required": [
-              "fact_id"
+              "text",
+              "due",
+              "person"
             ],
             "type": "object"
           }
@@ -218,11 +240,19 @@
       },
       {
         "function": {
-          "description": "List the user's conversations, most recent first. The user is shown a way to open each;\nyou cannot move the user yourself.",
-          "name": "list_channels",
+          "description": "Read the last few lines of one conversation, by the id `list_channels` shows. No\nmemories are included.",
+          "name": "recent",
           "parameters": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "channel": {
+                "description": "The conversation id, as listed.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "channel"
+            ],
             "type": "object"
           }
         },
@@ -287,12 +317,12 @@
         "name": "ask"
       },
       {
-        "description": "Start a group conversation among two or more people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.",
+        "description": "Start a group conversation among two to six people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
             "members": {
-              "description": "Roster ids, two or more.",
+              "description": "Roster ids, two to six.",
               "items": {
                 "type": "string"
               },
@@ -405,30 +435,57 @@
         "name": "remember"
       },
       {
-        "description": "Delete one remembered thing for the user. Only when the user asks. Can be restored.",
-        "input_schema": {
-          "additionalProperties": false,
-          "properties": {
-            "fact_id": {
-              "description": "The id of the remembered thing.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "fact_id"
-          ],
-          "type": "object"
-        },
-        "name": "forget"
-      },
-      {
-        "description": "List the user's conversations, most recent first. The user is shown a way to open each;\nyou cannot move the user yourself.",
+        "description": "List the user's conversations, most recent first, each with its id (for set_mode and\nrecent). The user is shown a way to open each; you cannot move the user yourself.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {},
           "type": "object"
         },
         "name": "list_channels"
+      },
+      {
+        "description": "Set a reminder for the user: a promise with a due date. When it falls due the person\nnamed brings it up as their opening, so a person is required. Only when the user asks.\nAt most twenty are pending at once.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "due": {
+              "description": "When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or\n2026-12-24T18:00.",
+              "type": "string"
+            },
+            "person": {
+              "description": "Roster id of the person who brings it up when it is due.",
+              "type": "string"
+            },
+            "text": {
+              "description": "What is promised, as one short sentence.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "due",
+            "person"
+          ],
+          "type": "object"
+        },
+        "name": "promise"
+      },
+      {
+        "description": "Read the last few lines of one conversation, by the id `list_channels` shows. No\nmemories are included.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "description": "The conversation id, as listed.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel"
+          ],
+          "type": "object"
+        },
+        "name": "recent"
       }
     ],
     "responses": [
@@ -492,13 +549,13 @@
         "type": "function"
       },
       {
-        "description": "Start a group conversation among two or more people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.",
+        "description": "Start a group conversation among two to six people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
         "name": "create_group",
         "parameters": {
           "additionalProperties": false,
           "properties": {
             "members": {
-              "description": "Roster ids, two or more.",
+              "description": "Roster ids, two to six.",
               "items": {
                 "type": "string"
               },
@@ -614,29 +671,57 @@
         "type": "function"
       },
       {
-        "description": "Delete one remembered thing for the user. Only when the user asks. Can be restored.",
-        "name": "forget",
+        "description": "List the user's conversations, most recent first, each with its id (for set_mode and\nrecent). The user is shown a way to open each; you cannot move the user yourself.",
+        "name": "list_channels",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Set a reminder for the user: a promise with a due date. When it falls due the person\nnamed brings it up as their opening, so a person is required. Only when the user asks.\nAt most twenty are pending at once.",
+        "name": "promise",
         "parameters": {
           "additionalProperties": false,
           "properties": {
-            "fact_id": {
-              "description": "The id of the remembered thing.",
+            "due": {
+              "description": "When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or\n2026-12-24T18:00.",
+              "type": "string"
+            },
+            "person": {
+              "description": "Roster id of the person who brings it up when it is due.",
+              "type": "string"
+            },
+            "text": {
+              "description": "What is promised, as one short sentence.",
               "type": "string"
             }
           },
           "required": [
-            "fact_id"
+            "text",
+            "due",
+            "person"
           ],
           "type": "object"
         },
         "type": "function"
       },
       {
-        "description": "List the user's conversations, most recent first. The user is shown a way to open each;\nyou cannot move the user yourself.",
-        "name": "list_channels",
+        "description": "Read the last few lines of one conversation, by the id `list_channels` shows. No\nmemories are included.",
+        "name": "recent",
         "parameters": {
           "additionalProperties": false,
-          "properties": {},
+          "properties": {
+            "channel": {
+              "description": "The conversation id, as listed.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel"
+          ],
           "type": "object"
         },
         "type": "function"
@@ -741,27 +826,7 @@
       },
       {
         "function": {
-          "description": "Remember one thing from this conversation.",
-          "name": "remember",
-          "parameters": {
-            "additionalProperties": false,
-            "properties": {
-              "text": {
-                "description": "The thing to remember, as one short sentence.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "text"
-            ],
-            "type": "object"
-          }
-        },
-        "type": "function"
-      },
-      {
-        "function": {
-          "description": "Answer the request you were asked to look into. Ends the request.",
+          "description": "Answer a request the user delegated to you with ask. Never for an ordinary reply: a\nreply to the user is just written. Ends the request.",
           "name": "report",
           "parameters": {
             "additionalProperties": false,
@@ -897,7 +962,7 @@
                 ]
               },
               "group": {
-                "description": "Roster ids of colleagues for the host to propose a group with; you are included.",
+                "description": "Roster ids of colleagues for the host to propose a group with, at most four besides\nyou; you are included. To continue a group you already have with them, give its name\nas the purpose; any other purpose makes a new group.",
                 "items": {
                   "type": "string"
                 },
@@ -1008,24 +1073,7 @@
         "name": "request_join"
       },
       {
-        "description": "Remember one thing from this conversation.",
-        "input_schema": {
-          "additionalProperties": false,
-          "properties": {
-            "text": {
-              "description": "The thing to remember, as one short sentence.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "text"
-          ],
-          "type": "object"
-        },
-        "name": "remember"
-      },
-      {
-        "description": "Answer the request you were asked to look into. Ends the request.",
+        "description": "Answer a request the user delegated to you with ask. Never for an ordinary reply: a\nreply to the user is just written. Ends the request.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -1154,7 +1202,7 @@
               ]
             },
             "group": {
-              "description": "Roster ids of colleagues for the host to propose a group with; you are included.",
+              "description": "Roster ids of colleagues for the host to propose a group with, at most four besides\nyou; you are included. To continue a group you already have with them, give its name\nas the purpose; any other purpose makes a new group.",
               "items": {
                 "type": "string"
               },
@@ -1267,25 +1315,7 @@
         "type": "function"
       },
       {
-        "description": "Remember one thing from this conversation.",
-        "name": "remember",
-        "parameters": {
-          "additionalProperties": false,
-          "properties": {
-            "text": {
-              "description": "The thing to remember, as one short sentence.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "text"
-          ],
-          "type": "object"
-        },
-        "type": "function"
-      },
-      {
-        "description": "Answer the request you were asked to look into. Ends the request.",
+        "description": "Answer a request the user delegated to you with ask. Never for an ordinary reply: a\nreply to the user is just written. Ends the request.",
         "name": "report",
         "parameters": {
           "additionalProperties": false,
@@ -1417,7 +1447,7 @@
               ]
             },
             "group": {
-              "description": "Roster ids of colleagues for the host to propose a group with; you are included.",
+              "description": "Roster ids of colleagues for the host to propose a group with, at most four besides\nyou; you are included. To continue a group you already have with them, give its name\nas the purpose; any other purpose makes a new group.",
               "items": {
                 "type": "string"
               },

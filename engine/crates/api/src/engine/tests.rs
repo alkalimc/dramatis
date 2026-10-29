@@ -1233,10 +1233,10 @@ async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
     assert_eq!(groups(e), 1);
     // The purpose is the group's topic, and the group's first line is asked for once,
     // naming the person who suggested it.
-    let topic = world::channel::get(&e.w(), convert::world_channel(&first).unwrap())
-        .unwrap()
-        .topic;
-    assert_eq!(topic.as_deref(), Some("plan a party"));
+    let made = world::channel::get(&e.w(), convert::world_channel(&first).unwrap()).unwrap();
+    assert_eq!(made.topic.as_deref(), Some("plan a party"));
+    // And its name too, so the title stays what the group was made for.
+    assert_eq!(made.name.as_deref(), Some("plan a party"));
     assert_eq!(
         r.spy.calls.lock().unwrap().as_slice(),
         [format!("group {} amy plan a party", first.0)]
@@ -1362,20 +1362,19 @@ async fn an_invitation_adds_the_person_it_names_and_only_them() {
 }
 
 #[tokio::test]
-async fn a_suggested_group_reuses_a_live_one_with_the_same_people() {
+async fn a_suggested_group_reuses_a_live_one_with_the_same_people_and_purpose() {
     let r = rig();
     let e = &r.engine;
     let existing = e
-        .create_group(vec![id("kal"), id("amy")], None)
+        .create_group(vec![id("kal"), id("amy")], Some("plan a party".into()))
         .await
         .unwrap();
     let direct = e.open_direct(id("amy")).await.unwrap();
-    let offer = ToolAction::CreateGroup {
+    let offer = |purpose: Option<&str>| ToolAction::CreateGroup {
         members: vec![person_ref("amy"), person_ref("kal")],
         channel: None,
-        purpose: Some("plan a party".into()),
+        purpose: purpose.map(str::to_owned),
     };
-    let mid = offer_message(e, &direct, &[offer]);
     let groups = |e: &Engine| {
         world::channel::list(&e.w())
             .unwrap()
@@ -1383,12 +1382,44 @@ async fn a_suggested_group_reuses_a_live_one_with_the_same_people() {
             .filter(|c| c.kind == world::ChannelKind::Group)
             .count()
     };
-    assert_eq!(e.open_offer(mid.clone(), 0).await.unwrap(), existing);
+    let name_of = |e: &Engine, c: &ChannelId| {
+        world::channel::get(&e.w(), convert::world_channel(c).unwrap())
+            .unwrap()
+            .name
+    };
+    // The same purpose, in other case and punctuation: the same group, left as it was.
+    let mid = offer_message(e, &direct, &[offer(Some("Plan a Party!"))]);
+    assert_eq!(e.open_offer(mid, 0).await.unwrap(), existing);
     assert_eq!(groups(e), 1);
+    assert_eq!(name_of(e, &existing), None);
     // The group already exists, so it gets no opening line.
     assert!(r.spy.calls.lock().unwrap().is_empty());
 
+    // The same people for another purpose are another group, named by it.
+    let mid = offer_message(e, &direct, &[offer(Some("plan a trip"))]);
+    let trip = e.open_offer(mid, 0).await.unwrap();
+    assert_ne!(trip, existing);
+    assert_eq!(groups(e), 2);
+    assert_eq!(name_of(e, &trip).as_deref(), Some("plan a trip"));
+
     // An archived group is not reused: the offer makes a new one.
+    e.archive_channel(existing.clone(), true).await.unwrap();
+    let mid = offer_message(e, &direct, &[offer(Some("plan a party"))]);
+    let fresh = e.open_offer(mid, 0).await.unwrap();
+    assert_ne!(fresh, existing);
+    assert_eq!(groups(e), 3);
+    assert!(
+        world::channel::get(&e.w(), convert::world_channel(&existing).unwrap())
+            .unwrap()
+            .archived
+    );
+}
+
+#[tokio::test]
+async fn a_suggested_group_without_a_purpose_stays_unnamed() {
+    let r = rig();
+    let e = &r.engine;
+    let direct = e.open_direct(id("amy")).await.unwrap();
     let mid = offer_message(
         e,
         &direct,
@@ -1398,15 +1429,20 @@ async fn a_suggested_group_reuses_a_live_one_with_the_same_people() {
             purpose: None,
         }],
     );
-    e.archive_channel(existing.clone(), true).await.unwrap();
-    let fresh = e.open_offer(mid, 0).await.unwrap();
-    assert_ne!(fresh, existing);
-    assert_eq!(groups(e), 2);
-    assert!(
-        world::channel::get(&e.w(), convert::world_channel(&existing).unwrap())
-            .unwrap()
-            .archived
+    let made = e.open_offer(mid.clone(), 0).await.unwrap();
+    let ch = world::channel::get(&e.w(), convert::world_channel(&made).unwrap()).unwrap();
+    assert_eq!((ch.name, ch.topic), (None, None));
+    // The same people with no purpose are that group.
+    let again = offer_message(
+        e,
+        &direct,
+        &[ToolAction::CreateGroup {
+            members: vec![person_ref("kal"), person_ref("amy")],
+            channel: None,
+            purpose: None,
+        }],
     );
+    assert_eq!(e.open_offer(again, 0).await.unwrap(), made);
 }
 
 #[tokio::test]

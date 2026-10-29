@@ -169,9 +169,9 @@ const DEFAULTS: &[(&str, &str)] = &[
          colleague merely mentioned needs no line. To offer a group with colleagues from the roster, \
          end it with one final line that starts with {group} followed by their names, \
          separated by commas, and at most four, then a bar and the purpose of the group in a \
-         few words (at most sixty characters), which every member is told. A group that \
-         already has exactly those people is opened instead of a new one. Such a line comes \
-         at most once per reply. If a citation line is also written, these lines come last.",
+         few words (at most sixty characters), which every member is told. To continue a group you \
+         already have with those people, write its name as the purpose; any other purpose \
+         makes a new group. Such a line comes at most once per reply. If a citation line is also written, these lines come last.",
     ),
     (
         "harness.next",
@@ -300,14 +300,76 @@ const DEFAULTS: &[(&str, &str)] = &[
         "One suggestion is enough for a reply.",
     ),
     (
+        "harness.error.too_many",
+        "At most {max} people can be named here.",
+    ),
+    ("harness.error.self", "Name colleagues other than yourself."),
+    (
+        "harness.error.quiet",
+        "Suggestions are held back for now; try again later.",
+    ),
+    (
+        "harness.error.no_match",
+        "Nobody on the roster answers to {detail}.",
+    ),
+    (
+        "harness.error.nobody_new",
+        "Everyone named is already in this group.",
+    ),
+    ("harness.error.disabled", "That colleague is not available."),
+    (
+        "harness.error.no_request",
+        "report answers a request {user} delegated with ask, and there is none now. Write the reply as ordinary speech.",
+    ),
+    (
+        "harness.error.promise_person",
+        "A reminder needs a person from the roster to bring it up.",
+    ),
+    (
+        "harness.error.due",
+        "Could not read the due time {detail}. Use a date such as 2027-01-31 or a date and time such as 2027-01-31T18:00.",
+    ),
+    (
+        "harness.error.due_past",
+        "The due time {detail} has already passed.",
+    ),
+    (
+        "harness.error.promises_full",
+        "{max} reminders are already waiting; no more can be set until one has been brought up.",
+    ),
+    (
+        "harness.error.own_channel",
+        "That is this conversation; recent lines are for the others.",
+    ),
+    (
         "harness.channels",
         "The conversations {user} has, most recent first:",
     ),
     ("harness.channels.none", "No conversation yet."),
-    ("harness.channels.direct", "- with {names}, last at {when}"),
+    (
+        "harness.channels.direct",
+        "- {id}: with {names}, last at {when}",
+    ),
     (
         "harness.channels.group",
-        "- group of {names}, last at {when}",
+        "- {id}: group of {names}, last at {when}",
+    ),
+    (
+        "harness.channels.group_named",
+        "- {id}: {title}, group of {names}, last at {when}",
+    ),
+    (
+        "harness.read_recent",
+        "The latest lines of that conversation:",
+    ),
+    (
+        "harness.read_recent.none",
+        "Nothing has been said there yet.",
+    ),
+    ("harness.read_recent.line", "- {when} {name}: {text}"),
+    (
+        "harness.promised",
+        "Reminder set: {name} will bring it up when it is due ({due}).",
     ),
     (
         "harness.guide.terminal",
@@ -346,6 +408,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Memories: /memories [person] lists them, /forget <n> deletes one, /restore <n> brings it back, /edit <n> <text> rewrites it, /wrapup closes the conversation and writes them.",
     ),
     (
+        "harness.guide.terminal.forget",
+        "Forgetting: you cannot delete memories. When {user} asks to forget something, point to /forget <n> after /memories.",
+    ),
+    (
         "harness.guide.app",
         "How {user} operates this place from the app, for explaining it. Name the buttons and places as they read on screen.",
     ),
@@ -375,12 +441,24 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.guide.app.saves", "Saves: System."),
     (
+        "harness.guide.app.forget",
+        "Forgetting: you cannot delete memories. When {user} asks to forget something, point to World, where each memory can be deleted.",
+    ),
+    (
         "harness.guide.app.memories",
         "Memories: World lists what was remembered.",
     ),
     (
         "harness.guide.limits",
-        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, scheduled, chased or followed up; that is {user}'s to do.",
+        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due.",
+    ),
+    (
+        "harness.guide.promise",
+        "When {user} asks to be reminded of something, you can set a reminder with promise: give the text, the due date and the person who brings it up.",
+    ),
+    (
+        "harness.guide.recent",
+        "When {user} asks about a conversation, you can read its recent lines with recent, by the id list_channels shows.",
     ),
     ("harness.done", "Done."),
     (

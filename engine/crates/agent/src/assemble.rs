@@ -56,7 +56,7 @@ pub fn block_a(ctx: &Ctx<'_>, group: bool, proposing: bool) -> String {
 }
 
 /// What the host's usage guide covers, in the order it is written.
-const GUIDE_TOPICS: [&str; 8] = [
+const GUIDE_TOPICS: [&str; 9] = [
     "channels",
     "group",
     "resend",
@@ -65,6 +65,7 @@ const GUIDE_TOPICS: [&str; 8] = [
     "intensity",
     "saves",
     "memories",
+    "forget",
 ];
 
 /// How the host explains the front end the user is on: one line per operation, worded by
@@ -78,6 +79,8 @@ pub fn guide(ctx: &Ctx<'_>, frontend: Frontend) -> String {
             .map(|t| ctx.fill(&format!("harness.guide.{which}.{t}"), &[])),
     );
     lines.push(ctx.fill("harness.guide.limits", &[]));
+    lines.push(ctx.fill("harness.guide.promise", &[]));
+    lines.push(ctx.fill("harness.guide.recent", &[]));
     // What the user was told at the first meeting, so the host can tell it again.
     let intro = ctx.fill(&format!("host.intro.{which}"), &[]);
     lines.push(ctx.fill("harness.guide.intro", &[("intro", &intro)]));
