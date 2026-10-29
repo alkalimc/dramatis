@@ -73,7 +73,8 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
     case "ask":
       return t("action.ask", { name: a.person.name, question: a.question });
     case "create_group":
-      return t("action.create_group", { names: list(a.members) });
+      // No channel: a suggestion that waits for the user, nothing made yet.
+      return t(a.channel ? "action.create_group" : "action.suggest_group", { names: list(a.members) });
     case "set_mode":
       return t("action.set_mode", {
         target: a.target.kind === "person" ? (names[a.target.id] ?? t("person.unknown")) : t("action.target.group"),
@@ -86,8 +87,14 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
   }
 }
 
-/** Where the user can go from a host message: people it found, groups it made or listed. */
-export type Choice = { kind: "person"; id: string; name: string } | { kind: "group"; channel: string; names: string[] };
+/**
+ * What the user can take from a message: go to people found, groups made or listed, or make
+ * a group someone suggested (`new_group`; nothing exists until the user takes it).
+ */
+export type Choice =
+  | { kind: "person"; id: string; name: string }
+  | { kind: "group"; channel: string; names: string[] }
+  | { kind: "new_group"; members: string[]; names: string[] };
 
 export function choicesOf(actions: ToolAction[]): Choice[] {
   const out: Choice[] = [];
@@ -98,17 +105,19 @@ export function choicesOf(actions: ToolAction[]): Choice[] {
         ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name }))
         : a.tool === "create_group" && a.channel
           ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name) }]
-          : a.tool === "list_channels"
-            ? (a.channels ?? []).flatMap((c): Choice[] =>
-                c.kind === "group"
-                  ? [{ kind: "group", channel: c.id, names: c.members.map((m) => m.name) }]
-                  : c.kind === "direct" && c.members[0]
-                    ? [{ kind: "person", id: c.members[0].id, name: c.members[0].name }]
-                    : [],
-              )
-            : [];
+          : a.tool === "create_group" && a.members.length >= 2
+            ? [{ kind: "new_group", members: a.members.map((m) => m.id), names: a.members.map((m) => m.name) }]
+            : a.tool === "list_channels"
+              ? (a.channels ?? []).flatMap((c): Choice[] =>
+                  c.kind === "group"
+                    ? [{ kind: "group", channel: c.id, names: c.members.map((m) => m.name) }]
+                    : c.kind === "direct" && c.members[0]
+                      ? [{ kind: "person", id: c.members[0].id, name: c.members[0].name }]
+                      : [],
+                )
+              : [];
     for (const c of found) {
-      const key = c.kind === "person" ? `p:${c.id}` : `g:${c.channel}`;
+      const key = c.kind === "person" ? `p:${c.id}` : c.kind === "group" ? `g:${c.channel}` : `n:${c.members.join(",")}`;
       if (!seen.has(key)) {
         seen.add(key);
         out.push(c);

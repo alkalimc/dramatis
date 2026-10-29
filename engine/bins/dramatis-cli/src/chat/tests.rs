@@ -458,6 +458,40 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_group() {
+    use api::port::Sink;
+    use api::types::PersonId;
+    use api::views::ToolAction;
+    let mut r = rig().await;
+    let person = |id: &str| api::types::PersonRef {
+        id: PersonId(id.into()),
+        name: id.into(),
+        pronoun: None,
+    };
+    let called = |action| {
+        api::port::Event::ToolCalled(api::events::ToolCalled {
+            channel: api::types::ChannelId("2".into()),
+            message: api::types::MessageId("2".into()),
+            author: api::types::Author::Person {
+                id: PersonId("ann".into()),
+            },
+            action,
+        })
+    };
+    r.show.emit(called(ToolAction::CreateGroup {
+        members: vec![person("ann"), person("cy")],
+        channel: None,
+    }));
+    r.session.offers_for_test();
+    let listed = r.out.take();
+    assert!(listed.contains("1 start a group: ann, cy"), "{listed}");
+    // Nothing was made or entered by the suggestion itself.
+    assert!(!r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.run("/go 1").await.contains("group with ann, cy"));
+    assert!(r.session.prompt().starts_with("[ann, cy]"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_hosts_channel_list_becomes_choices_that_switch_to_existing_conversations() {
     let mut r = rig_with(WORDING, true).await;
     r.script.0.lock().unwrap().extend([

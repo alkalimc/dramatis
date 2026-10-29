@@ -193,8 +193,14 @@ pub fn action_line(action: &ToolAction) -> String {
         ToolAction::Digest => "looked at the digest".into(),
         ToolAction::FindPeople { topic, .. } => format!("looked for people on: {topic}"),
         ToolAction::Ask { person, question } => format!("asked {}: {question}", person.name),
-        ToolAction::CreateGroup { members, .. } => format!(
-            "created a group: {}",
+        ToolAction::CreateGroup { members, channel } => format!(
+            "{} a group: {}",
+            // No channel yet: a person's suggestion, which waits for the user.
+            if channel.is_some() {
+                "created"
+            } else {
+                "suggested"
+            },
             members
                 .iter()
                 .map(|m| m.name.as_str())
@@ -209,7 +215,8 @@ pub fn action_line(action: &ToolAction) -> String {
     }
 }
 
-/// What a host tool call lets the user click or pick: a found person, a created or listed group.
+/// What a tool call lets the user click or pick: a found person, a created or listed group,
+/// or a group someone suggested and the user has not made yet.
 fn offers_of(action: &ToolAction) -> Vec<Offer> {
     match action {
         ToolAction::FindPeople { persons, .. } => persons
@@ -224,6 +231,12 @@ fn offers_of(action: &ToolAction) -> Vec<Offer> {
             channel: Some(channel),
         } => vec![Offer::Group {
             channel: channel.clone(),
+            members: members.clone(),
+        }],
+        ToolAction::CreateGroup {
+            members,
+            channel: None,
+        } if members.len() >= 2 => vec![Offer::NewGroup {
             members: members.clone(),
         }],
         // An existing conversation opens by the same two offers a new one does: a direct
@@ -252,7 +265,7 @@ struct Live {
     streamer: Streamer,
 }
 
-/// A place the host offered to take the user to.
+/// A place the host offered to take the user to, or a group someone suggested.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Offer {
     Person {
@@ -261,6 +274,10 @@ pub enum Offer {
     },
     Group {
         channel: ChannelId,
+        members: Vec<PersonRef>,
+    },
+    /// Nothing exists yet; taking it creates the group.
+    NewGroup {
         members: Vec<PersonRef>,
     },
 }
@@ -273,13 +290,19 @@ impl Offer {
                 "open group: {}",
                 names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
             ),
+            Offer::NewGroup { members } => format!(
+                "start a group: {}",
+                names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
+            ),
         }
     }
 
     pub fn members(&self) -> Vec<PersonId> {
         match self {
             Offer::Person { id, .. } => vec![PersonId(id.clone())],
-            Offer::Group { members, .. } => members.iter().map(|m| m.id.clone()).collect(),
+            Offer::Group { members, .. } | Offer::NewGroup { members } => {
+                members.iter().map(|m| m.id.clone()).collect()
+            }
         }
     }
 }
@@ -454,11 +477,10 @@ impl Sink for Show {
             }
             Event::ToolCalled(t) => {
                 self.close(&mut st);
-                if t.author == Author::Host {
-                    for offer in offers_of(&t.action) {
-                        if !st.offers.contains(&offer) {
-                            st.offers.push(offer);
-                        }
+                // The host's finds and lists, and a person's suggestion: the same pick list.
+                for offer in offers_of(&t.action) {
+                    if !st.offers.contains(&offer) {
+                        st.offers.push(offer);
                     }
                 }
                 self.term.note(&format!("· {}", action_line(&t.action)));

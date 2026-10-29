@@ -63,10 +63,7 @@ const GUIDE_TOPICS: [&str; 8] = [
 /// How the host explains the front end the user is on: one line per operation, worded by
 /// the corpus, for that front end only.
 pub fn guide(ctx: &Ctx<'_>, frontend: Frontend) -> String {
-    let which = match frontend {
-        Frontend::App => "app",
-        Frontend::Terminal => "terminal",
-    };
+    let which = frontend.key();
     let mut lines = vec![ctx.fill(&format!("harness.guide.{which}"), &[])];
     lines.extend(
         GUIDE_TOPICS
@@ -74,11 +71,15 @@ pub fn guide(ctx: &Ctx<'_>, frontend: Frontend) -> String {
             .map(|t| ctx.fill(&format!("harness.guide.{which}.{t}"), &[])),
     );
     lines.push(ctx.fill("harness.guide.limits", &[]));
+    // What the user was told at the first meeting, so the host can tell it again.
+    let intro = ctx.fill(&format!("host.intro.{which}"), &[]);
+    lines.push(ctx.fill("harness.guide.intro", &[("intro", &intro)]));
     lines.join("\n")
 }
 
 /// Block A of the host's own session: the same, then both of its layers and the usage
-/// guide. Only this block ever carries the meta layer or the guide.
+/// manner and usage guide. Only this block ever carries the meta layer, the manner or
+/// the guide.
 pub fn block_a_host(
     ctx: &Ctx<'_>,
     host_name: &str,
@@ -91,6 +92,7 @@ pub fn block_a_host(
             parts.push(ctx.names.sub(layer.trim()).into_owned());
         }
     }
+    parts.push(ctx.fill("harness.host.manner", &[]));
     parts.push(guide(ctx, frontend));
     parts.join("\n\n")
 }

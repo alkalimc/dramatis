@@ -1258,18 +1258,28 @@ async fn the_host_has_its_own_log_tools_and_authorised_actions() {
 
 async fn host_log(wire: WireApi) {
     let e = env(wire);
-    // First open: the host introduces itself; a tool call it attempts is refused.
+    // First open: the host's welcome is pre-written, so no model call is made.
+    let out = e.agent.presence(true).await.unwrap();
+    assert!(out.host_spoke && e.fake.bodies().is_empty());
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    assert!(
+        e.agent.history(host, None, 5).unwrap()[0]
+            .text
+            .contains("Welcome")
+    );
+
+    // A harness turn of the host's: a tool call it attempts is refused.
+    e.clock.advance(31 * 60_000);
     e.fake.push([call(
         "set_mode",
         json!({"target_kind": "person", "target": "ann", "mode": "enabled"}),
     )]);
-    let out = e.agent.presence(true).await.unwrap();
+    let out = e.agent.presence(false).await.unwrap();
     assert!(!out.host_spoke);
     assert_eq!(
         e.agent.with_world(|w| bond::mode(w, &p("ann")).unwrap()),
         Mode::Frozen
     );
-    let host = e.agent.with_world(|w| channel::host(w).unwrap());
     assert!(log_bytes(&e.agent, host).contains("Only when Doc asks for it."));
     // The last step offers no tool where the protocol lets the choice vary.
     match wire {
@@ -1669,8 +1679,12 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
         bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap();
         settings::set(w, settings::USER_BIRTHDAY, "03-10").unwrap();
     });
+    // The first open is the welcome alone.
+    let first = e.agent.presence(true).await.unwrap();
+    assert!(first.host_spoke && first.opened.is_none() && e.fake.bodies().is_empty());
+    e.clock.advance(31 * 60_000);
     e.fake
-        .push([say("Welcome."), say("Happy birthday, Dr.Doc.")]);
+        .push([say("Ann's birthday."), say("Happy birthday, Dr.Doc.")]);
     let out = e.agent.presence(true).await.unwrap();
     assert!(out.host_spoke);
     let (who, ch) = out.opened.unwrap();
@@ -1689,10 +1703,8 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
     // Used once: the next presence has no seed. His opening session idled out while
     // the user was away, so it is wrapped up first, then the host speaks.
     e.clock.advance(31 * 60_000);
-    e.fake.push([
-        call("wrapup", json!({"facts": []})),
-        say("Still a birthday."),
-    ]);
+    e.fake
+        .push([call("wrapup", json!({"facts": []})), say("Ann wrote.")]);
     let again = e.agent.presence(false).await.unwrap();
     assert!(again.opened.is_none() && again.host_spoke);
     assert_eq!(e.fake.left(), 0);
@@ -1716,9 +1728,9 @@ async fn the_host_announces_each_waiting_item_once_even_across_a_restart() {
         e
     };
     let e = open();
-    // The first open introduces the host; the birthday is then news on the next return.
-    e.fake.push([say("Welcome.")]);
+    // The first open is the pre-written welcome; the birthday is then news on the next return.
     assert!(e.agent.presence(true).await.unwrap().host_spoke);
+    assert_eq!(e.fake.bodies().len(), 0);
     e.clock.advance(31 * 60_000);
     e.fake.push([say("It is ann's birthday.")]);
     assert!(e.agent.presence(false).await.unwrap().host_spoke);
@@ -2678,5 +2690,182 @@ async fn a_reply_may_open_with_a_short_quote_and_a_new_round_never_trims_against
     assert!(
         said.contains(&"Bo: and the hold is locked. I agree.".to_owned()),
         "{said:?}"
+    );
+}
+
+/// Every tool action the sink saw, with who made it.
+fn tool_actions(e: &Env) -> Vec<(api::types::Author, api::views::ToolAction)> {
+    e.sink
+        .take()
+        .into_iter()
+        .filter_map(|ev| match ev {
+            agent::Event::ToolCalled(t) => Some((t.author, t.action)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn group_count(e: &Env) -> i64 {
+    e.agent.with_world(|w| {
+        w.query_row(
+            "SELECT count(*) FROM channel WHERE kind = 'group'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    })
+}
+
+#[tokio::test]
+async fn a_persons_suggestion_is_an_offer_and_changes_nothing() {
+    use api::views::ToolAction;
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        call("ask_host", json!({"find": "forge blade steel"})),
+        say("Bo knows more about that than I do."),
+    ]);
+    e.agent.send(ch, "who forges blades?", None).await.unwrap();
+    let seen = tool_actions(&e);
+    assert!(
+        seen.iter()
+            .any(|(who, a)| matches!(who, api::types::Author::Person { .. })
+                && matches!(a, ToolAction::FindPeople { persons, .. }
+                if persons.iter().any(|x| x.id.0 == "bo"))),
+        "{seen:?}"
+    );
+    // The offer is stored with the person's message; nothing was opened or joined.
+    let stored = e.agent.history(ch, None, 5).unwrap();
+    assert!(stored.last().unwrap().actions.len() == 1);
+    assert_eq!(group_count(&e), 0);
+    let here = e.agent.with_world(|w| channel::get(w, ch).unwrap());
+    assert!(!here.has(&Actor::Person(p("bo"))));
+    assert!(log_bytes(&e.agent, ch).contains("nothing has happened yet"));
+
+    // A group: the offer names the person too and no group exists until it is accepted.
+    e.fake.push([
+        call("ask_host", json!({"group": ["bo", "dee"]})),
+        say("A group would help."),
+    ]);
+    e.agent
+        .send(ch, "can we get everyone?", None)
+        .await
+        .unwrap();
+    let seen = tool_actions(&e);
+    let members = seen.iter().find_map(|(_, a)| match a {
+        ToolAction::CreateGroup {
+            members,
+            channel: None,
+        } => Some(members.iter().map(|m| m.id.0.clone()).collect::<Vec<_>>()),
+        _ => None,
+    });
+    assert_eq!(members.unwrap(), ["ann", "bo", "dee"]);
+    assert_eq!(group_count(&e), 0);
+    // Accepting is the user's own create_group, which makes it and opens nothing else.
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo"), p("dee")], None)
+        .unwrap();
+    assert_eq!(group_count(&e), 1);
+    assert!(
+        e.agent
+            .with_world(|w| channel::get(w, g).unwrap())
+            .has(&Actor::Person(p("dee")))
+    );
+}
+
+#[tokio::test]
+async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    // Once per reply; a stranger, a person without a persona and a disabled person are refused.
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("dee"), Mode::Disabled).unwrap());
+    e.fake.push([
+        call("ask_host", json!({"group": ["bo"]})),
+        call("ask_host", json!({"find": "forge blade steel"})),
+        call("ask_host", json!({"group": ["nobody"]})),
+        say("Done."),
+    ]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    let log = log_bytes(&e.agent, ch);
+    assert!(
+        log.contains("One suggestion is enough for a reply."),
+        "{log}"
+    );
+    assert_eq!(tool_actions(&e).len(), 1);
+
+    e.fake.push([
+        call("ask_host", json!({"group": ["cy"]})),
+        call("ask_host", json!({"group": ["dee"]})),
+        say("No."),
+    ]);
+    e.agent.send(ch, "again", None).await.unwrap();
+    assert!(
+        tool_actions(&e).is_empty(),
+        "no persona and disabled are never offered"
+    );
+    assert!(log_bytes(&e.agent, ch).contains("Nobody suitable is available."));
+
+    // Neither or both of the arguments is no suggestion.
+    e.fake.push([
+        call("ask_host", json!({})),
+        call("ask_host", json!({"find": "x", "group": ["bo"]})),
+        say("Hm."),
+    ]);
+    e.agent.send(ch, "third", None).await.unwrap();
+    assert!(tool_actions(&e).is_empty());
+
+    // The quiet band closes unprompted offers like unprompted speech.
+    let q = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.world.quota.quiet_at = 0.0;
+    });
+    let ch = direct(&q, "ann");
+    q.fake.push([
+        call("ask_host", json!({"group": ["bo"]})),
+        say("Never mind."),
+    ]);
+    q.agent.send(ch, "hello", None).await.unwrap();
+    assert!(tool_actions(&q).is_empty());
+}
+
+#[tokio::test]
+async fn a_new_save_opens_with_the_hosts_welcome_once_and_without_a_model_call() {
+    for (frontend, marker) in [
+        (agent::Frontend::Terminal, "/talk"),
+        (agent::Frontend::App, "Roster"),
+    ] {
+        // No endpoint at all: the welcome is the same.
+        let e = env_with(api::endpoints::Endpoints::default(), |c| {
+            c.frontend = frontend
+        });
+        let host = e.agent.with_world(|w| channel::host(w).unwrap());
+        assert!(e.agent.presence(true).await.unwrap().host_spoke);
+        let said = e.agent.history(host, None, 5).unwrap();
+        assert_eq!(said.len(), 1);
+        assert!(said[0].text.contains(marker), "{}", said[0].text);
+        assert!(e.fake.bodies().is_empty());
+        // Opening again says nothing more, and the host's own session can tell it again.
+        assert!(!e.agent.presence(true).await.unwrap().host_spoke);
+        assert_eq!(e.agent.history(host, None, 5).unwrap().len(), 1);
+    }
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.frontend = agent::Frontend::Terminal
+    });
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.agent.presence(true).await.unwrap();
+    e.fake.push([say("It works like this.")]);
+    e.agent
+        .send(host, "how does this work?", None)
+        .await
+        .unwrap();
+    let first = body_text(&e.fake.bodies()[0]);
+    assert!(
+        first.contains("You can talk to anyone here with /talk"),
+        "{first}"
+    );
+    assert!(
+        first.contains("You assist Doc."),
+        "the host's manner is in its own session"
     );
 }
