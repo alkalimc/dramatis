@@ -772,13 +772,16 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!m || !line) return fail({ code: "not_found" });
       if (line.tool !== "create_group") return fail({ code: "invalid", field: "action" });
       if (line.channel && channels.has(line.channel)) return ok(line.channel);
-      // The same people already have a live group that is not archived: that one.
+      // The same people already have a live group that is not archived, and the purpose is
+      // none or is that group's name or topic (letters and digits only, case aside): that one.
+      const key = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
       const same = [...channels.values()].find(
         (c) =>
           c.kind === "group" &&
           !c.archived &&
           c.participants.length === line.members.length &&
-          line.members.every((p) => c.participants.some((x) => x.id === p.id)),
+          line.members.every((p) => c.participants.some((x) => x.id === p.id)) &&
+          (!line.purpose || (key(line.purpose) !== "" && [c.name, c.topic].some((t) => key(t) === key(line.purpose)))),
       );
       if (same) {
         m.actions[action] = { ...line, channel: same.id };
@@ -786,8 +789,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       }
       const id = nextId("g");
       const purpose = line.purpose ?? null;
-      addChannel({ id, kind: "group", origin: "user", participants: line.members, topic: purpose, mode: "frozen" });
+      const made = addChannel({ id, kind: "group", origin: "user", participants: line.members, topic: purpose, mode: "frozen" });
       if (purpose) {
+        // A group made for a purpose is named by it; one without stays unnamed.
+        made.name = purpose;
         const by = m.author.kind === "person" ? (persons.get(m.author.id)?.name ?? "Someone") : "Host";
         msg(id, HOST, `${by} suggested this group: ${purpose}`, 0);
       }

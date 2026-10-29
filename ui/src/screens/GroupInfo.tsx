@@ -114,7 +114,8 @@ export function GroupInfo({ id }: { id: string }) {
         <ModeSwitch kind="group" mode={group.mode} hints="all" label={t("mode.label.group")} onChange={(m) => actions.setMode({ kind: "channel", id }, m)} />
       </section>
 
-      {group.topic && (
+      {/* The topic a group was named after is the title already. */}
+      {group.topic && group.topic.trim() !== group.name?.trim() && (
         <section className="info-section">
           <h3>{t("group.description")}</h3>
           <p>{group.topic}</p>

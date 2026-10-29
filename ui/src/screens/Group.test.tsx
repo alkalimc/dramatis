@@ -78,6 +78,20 @@ test("a group can be renamed in the info panel, and goes back to its members' na
   await waitFor(() => expect(screen.getAllByRole("heading", { name: TITLE }).length).toBeGreaterThan(0));
 });
 
+test("the info panel shows what a group is about unless that is already its name", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  // Named after its members: the topic is the description.
+  expect(within(panel).getByText("About")).toBeDefined();
+  await user.click(within(panel).getByRole("button", { name: "Rename" }));
+  await user.type(within(panel).getByRole("textbox", { name: "Rename" }), "Ward rota");
+  await user.click(within(panel).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Ward rota" }).length).toBeGreaterThan(0));
+  // Named by its topic: said once, as the title.
+  expect(within(panel).queryByText("About")).toBeNull();
+});
+
 test("enabled group: one person answers and at most one more adds a line like a normal message", async () => {
   const user = userEvent.setup();
   await openGroup(user);

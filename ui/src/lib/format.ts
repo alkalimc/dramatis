@@ -84,8 +84,10 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
         target: a.target.kind === "person" ? (names[a.target.id] ?? t("person.unknown")) : t("action.target.group"),
         mode: t(`mode.${a.mode}`),
       });
-    case "forget":
-      return t("action.forget");
+    case "promise":
+      return t("action.promise", { name: a.person.name, text: a.text });
+    case "recent":
+      return t("action.recent");
     case "list_channels":
       return t("action.list_channels");
   }

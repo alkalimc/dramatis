@@ -1048,7 +1048,13 @@ purpose?: string | null } |
  *  A person's suggestion, made inside a group, to bring colleagues into that group.
  *  Nothing changes until the user takes one of them.
  */
-{ tool: "invite_to_group"; channel: ChannelId; persons: PersonRef[] } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId } | { tool: "list_channels"; 
+{ tool: "invite_to_group"; channel: ChannelId; persons: PersonRef[] } | { tool: "set_mode"; target: Target; mode: Mode } | 
+/**  The host set a reminder: the person brings it up when it falls due. */
+{ tool: "promise"; person: PersonRef; text: string; 
+/**  The due time as the host wrote it. */
+due: string } | 
+/**  The host read the last lines of a conversation. */
+{ tool: "recent" } | { tool: "list_channels"; 
 /**  The conversations listed, so a front end can offer to open each. */
 channels?: ChannelRef[] };
 
