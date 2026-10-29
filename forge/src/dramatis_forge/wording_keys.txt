@@ -120,6 +120,7 @@ cli.answer.yes
 cli.archive.host
 cli.archive.off
 cli.archive.on
+cli.archived.open
 cli.ask.sent
 cli.audience.channel
 cli.audience.own
@@ -540,8 +541,10 @@ harness.error.refused
 harness.error.unavailable
 harness.error.wrapup_only
 harness.find_mark
+harness.found_for
 harness.group_created
 harness.group_mark
+harness.group_purpose
 harness.guide.app
 harness.guide.app.channels
 harness.guide.app.group
