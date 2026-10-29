@@ -93,6 +93,7 @@ impl Engine {
                 archived: ch.archived,
                 mode: convert::mode(mode),
                 last_at: last.map(|m| convert::ts(m.at, offset)),
+                unread: message::unread_count(&w, ch.id, ch.read_up_to).map_err(world_err)?,
             });
         }
         Ok(out)

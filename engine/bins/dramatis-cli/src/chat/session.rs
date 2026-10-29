@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use api::error::ApiResult;
-use api::types::{Author, ChannelId, FactId, PersonId, Tier};
+use api::types::{Author, ChannelId, FactId, Mode, PersonId, Target, Tier, Timestamp};
 use api::views::{
-    Audience, FactFilter, FactScope, FactView, QuietHours, RosterRow, Settings, StorageKind,
-    StorageUsage,
+    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, QuietHours, RosterRow,
+    Settings, StorageKind, StorageUsage, TaskStatus,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -73,6 +73,8 @@ pub struct Session {
     /// The memories of the last `/memories` list, which `/forget`, `/restore` and `/edit`
     /// number into. Dropped when one of them changes the list.
     listed: Vec<FactView>,
+    /// The channels of the last `/chats` list, which `/chat` numbers into.
+    chats: Vec<ChannelSummary>,
     /// What the next line answers (y/n), when a command asked.
     pending: Option<Pending>,
     /// Asks for a password with nothing echoed; `None` is no answer. Replaced in tests.
@@ -97,6 +99,7 @@ enum Change {
 /// A destructive step waiting for a yes.
 enum Pending {
     DeleteSave(String),
+    DeleteGroup(ChannelId),
     Overwrite { name: String, path: String },
     PasswordOn,
     PasswordOff,
@@ -174,6 +177,7 @@ impl Session {
             metered,
             prefill: None,
             listed: Vec::new(),
+            chats: Vec::new(),
             pending: None,
             secret: Box::new(super::secret::read),
             picking: false,
@@ -263,6 +267,21 @@ impl Session {
             Command::Group(who) => self.group(&who).await,
             Command::Host => self.host().await,
             Command::Go(n) => self.go(n).await,
+            Command::Chats(archived) => self.list_chats(archived).await,
+            Command::Chat(n) => self.chat(n).await,
+            Command::Who(who) => self.who(&who).await,
+            Command::Mode(who, mode) => self.mode(&who, &mode).await,
+            Command::Archive(on) => self.archive(on).await,
+            Command::Rename(name) => self.rename(&name).await,
+            Command::Members => self.members(),
+            Command::Leave => self.leave(),
+            Command::Read(all) => self.read(all).await,
+            Command::Ask(who, question) => self.ask(&who, question).await,
+            Command::Requests => self.requests().await,
+            Command::Clock => self.clock().await,
+            Command::Find(topic) => self.find(&topic).await,
+            Command::Waiting => self.waiting().await,
+            Command::Birthday(day) => self.birthday(day.as_deref()).await,
             Command::Name(name) => {
                 if self.set_user(&name).await {
                     self.term.note(&format!("you are called {name} now"));
@@ -289,7 +308,46 @@ impl Session {
             Command::Stats => self.stats(),
             Command::Storage(act) => self.storage(act).await,
         }
+        self.mark_seen().await;
         Flow::Continue
+    }
+
+    /// What was printed counts as read, here and in the app: the cursor moves up to the
+    /// newest message shown in each channel.
+    async fn mark_seen(&self) {
+        for (channel, up_to) in self.show.take_shown() {
+            if let Err(e) = self.engine.mark_read(channel, up_to).await {
+                self.term.error(&e.to_string());
+            }
+        }
+    }
+
+    /// Print what arrived in `channel` since it was last read, then it is read.
+    async fn catch_up(&self, channel: &ChannelId) {
+        let Ok(list) = self.engine.channels().await else {
+            return;
+        };
+        let unread = list
+            .iter()
+            .find(|c| &c.id == channel)
+            .map_or(0, |c| c.unread as usize);
+        if unread == 0 {
+            return;
+        }
+        let Ok(messages) = self.engine.history(channel.clone(), None, 200).await else {
+            return;
+        };
+        let from = messages
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, m)| m.author != Author::User)
+            .nth(unread - 1)
+            .map_or(0, |(i, _)| i);
+        self.term.note(&format!("{unread} unread:"));
+        for m in &messages[from..] {
+            self.term.print(&self.show.whole(m));
+        }
     }
 
     // ---- who ----
@@ -384,6 +442,12 @@ impl Session {
     /// Resolve what the user typed to one person with a persona: id, display name, another
     /// form's name, an alias the corpus records, then a unique fragment.
     async fn resolve(&self, query: &str) -> Result<PersonId, String> {
+        self.resolve_as(query, true).await
+    }
+
+    /// Like [`Self::resolve`]; with `talkable` false a person without a persona is found
+    /// too (for a profile or a mode).
+    async fn resolve_as(&self, query: &str, talkable: bool) -> Result<PersonId, String> {
         let roster = self.roster().await.map_err(|e| e.to_string())?;
         let q = query.trim();
         let lower = q.to_lowercase();
@@ -416,7 +480,11 @@ impl Session {
                     .collect()
             }
         };
-        let with_persona: Vec<&Entry> = found.iter().copied().filter(|e| e.persona).collect();
+        let with_persona: Vec<&Entry> = found
+            .iter()
+            .copied()
+            .filter(|e| e.persona || !talkable)
+            .collect();
         match (found.len(), with_persona.as_slice()) {
             (0, _) => Err(format!(
                 "nobody matches \"{q}\"; /list shows who can be talked to"
@@ -452,6 +520,7 @@ impl Session {
                     "talking to {name} ({}); /history shows earlier lines",
                     person.0
                 ));
+                self.catch_up(&channel).await;
                 self.current = Some(Current {
                     channel,
                     kind: Kind::Person(person),
@@ -477,15 +546,16 @@ impl Session {
                 .print("a group needs at least two different persons\n");
         }
         match self.engine.create_group(members.clone(), None).await {
-            Ok(channel) => self.enter_group(channel, members),
+            Ok(channel) => self.enter_group(channel, members).await,
             Err(e) => self.term.error(&e.to_string()),
         }
     }
 
-    fn enter_group(&mut self, channel: ChannelId, members: Vec<PersonId>) {
+    async fn enter_group(&mut self, channel: ChannelId, members: Vec<PersonId>) {
         let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
         let label = self.names.group_label(&names);
         self.term.note(&format!("group with {label}"));
+        self.catch_up(&channel).await;
         self.current = Some(Current {
             channel,
             kind: Kind::Group(members),
@@ -508,13 +578,13 @@ impl Session {
                 let Offer::Group { channel, .. } = &group else {
                     return;
                 };
-                self.enter_group(channel.clone(), group.members());
+                self.enter_group(channel.clone(), group.members()).await;
             }
             // Accepting is what creates it.
             group @ Offer::NewGroup { .. } => {
                 let members = group.members();
                 match self.engine.create_group(members.clone(), None).await {
-                    Ok(channel) => self.enter_group(channel, members),
+                    Ok(channel) => self.enter_group(channel, members).await,
                     Err(e) => self.term.error(&e.to_string()),
                 }
             }
@@ -548,11 +618,425 @@ impl Session {
             Ok(channel) => {
                 let name = self.names.host();
                 self.term.note(&format!("talking to the host, {name}"));
+                self.catch_up(&channel).await;
                 self.current = Some(Current {
                     channel,
                     kind: Kind::Host,
                     label: name,
                 });
+            }
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    // ---- conversations, people and requests ----
+
+    fn stamp(at: &Timestamp) -> String {
+        at.0.chars().take(16).collect::<String>().replace('T', " ")
+    }
+
+    /// The title a channel has in the list.
+    fn title_of(&self, c: &ChannelSummary) -> String {
+        if let Some(name) = c.name.as_deref().filter(|n| !n.trim().is_empty()) {
+            return name.to_owned();
+        }
+        match c.kind {
+            ChannelKind::Host => self.names.host(),
+            _ => {
+                let names: Vec<String> = c.participants.iter().map(|p| p.name.clone()).collect();
+                self.names.group_label(&names)
+            }
+        }
+    }
+
+    async fn list_chats(&mut self, archived: bool) {
+        let mut list: Vec<ChannelSummary> = match self.engine.channels().await {
+            Ok(l) => l.into_iter().filter(|c| c.archived == archived).collect(),
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        // Newest first; the host's channel leads when nothing was said anywhere.
+        list.sort_by(|a, b| b.last_at.cmp(&a.last_at));
+        if list.is_empty() {
+            return self.term.note(if archived {
+                "no archived conversations"
+            } else {
+                "no conversations yet; /talk <person> starts one"
+            });
+        }
+        for (i, c) in list.iter().enumerate() {
+            let kind = match c.kind {
+                ChannelKind::Host => "host",
+                ChannelKind::Direct => "direct",
+                ChannelKind::Group => "group",
+            };
+            let when = c.last_at.as_ref().map_or(String::new(), Self::stamp);
+            let unread = if c.unread > 0 {
+                format!("  {} unread", c.unread)
+            } else {
+                String::new()
+            };
+            self.term.print(&format!(
+                "{:>3}  {}  {}{}\n",
+                i + 1,
+                self.title_of(c),
+                self.term.style.dim(&format!("{kind} {when}")),
+                unread
+            ));
+        }
+        self.chats = list;
+        self.term.note("/chat <n> opens one");
+    }
+
+    async fn chat(&mut self, n: usize) {
+        let Some(c) = self.chats.get(n - 1).cloned() else {
+            return self.term.print(if self.chats.is_empty() {
+                "no list yet; /chats shows the conversations\n"
+            } else {
+                "no such conversation; /chats shows the list\n"
+            });
+        };
+        match (c.kind, c.participants.first()) {
+            (ChannelKind::Host, _) => self.host().await,
+            (ChannelKind::Direct, Some(p)) => self.open_person(p.id.clone()).await,
+            _ => {
+                let members = c.participants.iter().map(|p| p.id.clone()).collect();
+                self.enter_group(c.id, members).await;
+            }
+        }
+    }
+
+    async fn who(&self, who: &str) {
+        let person = match self.resolve_as(who, false).await {
+            Ok(p) => p,
+            Err(e) => return self.term.print(&format!("{e}\n")),
+        };
+        let page = match self.engine.person_page(person).await {
+            Ok(p) => p,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        self.term.print(&format!(
+            "{}  {}\n",
+            self.term.style.bold(&page.person.name),
+            self.term.style.dim(&page.person.id.0)
+        ));
+        if let Some(s) = &page.summary {
+            self.term.print(&format!("{s}\n"));
+        }
+        let mode = match page.mode {
+            Mode::Enabled => "enabled",
+            Mode::Frozen => "frozen",
+            Mode::Disabled => "disabled",
+        };
+        self.term
+            .print(&format!("mode: {mode}  trust: {}\n", page.trust));
+        if !page.has_persona {
+            self.term.print("no persona, so cannot be talked to\n");
+        }
+        let seen = page.last_seen.as_ref().map_or("never".into(), Self::stamp);
+        self.term.print(&format!(
+            "last seen: {seen}  requests done: {}\n",
+            page.tasks_done
+        ));
+        if !page.companions.is_empty() {
+            let names: Vec<&str> = page.companions.iter().map(|p| p.name.as_str()).collect();
+            self.term
+                .print(&format!("close to: {}\n", names.join(", ")));
+        }
+    }
+
+    async fn mode(&self, who: &str, mode: &str) {
+        let mode = match mode {
+            "enabled" => Mode::Enabled,
+            "frozen" => Mode::Frozen,
+            _ => Mode::Disabled,
+        };
+        // Named, or the conversation we are in: a group has a mode of its own.
+        let (target, name) = if who.is_empty() {
+            match self.current.as_ref() {
+                Some(Current {
+                    kind: Kind::Person(p),
+                    ..
+                }) => (Target::Person { id: p.clone() }, self.names.person(&p.0)),
+                Some(Current {
+                    channel,
+                    kind: Kind::Group(_),
+                    label,
+                }) => (
+                    Target::Channel {
+                        id: channel.clone(),
+                    },
+                    label.clone(),
+                ),
+                Some(_) => return self.term.print("the host has no mode\n"),
+                None => {
+                    return self
+                        .term
+                        .print("no channel yet: /talk <person> or /host first\n");
+                }
+            }
+        } else {
+            match self.resolve_as(who, false).await {
+                Ok(p) => {
+                    let name = self.names.person(&p.0);
+                    (Target::Person { id: p }, name)
+                }
+                Err(e) => return self.term.print(&format!("{e}\n")),
+            }
+        };
+        match self.engine.set_mode(target, mode).await {
+            Ok(()) => self.term.note(&format!(
+                "{name} is {} now",
+                match mode {
+                    Mode::Enabled => "enabled",
+                    Mode::Frozen => "frozen",
+                    Mode::Disabled => "disabled",
+                }
+            )),
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    async fn archive(&self, archived: bool) {
+        let Some(channel) = self.current_channel().await else {
+            return;
+        };
+        match self.engine.archive_channel(channel, archived).await {
+            Ok(()) => self.term.note(if archived {
+                "archived; a new message from a person brings it back"
+            } else {
+                "back in the main list"
+            }),
+            Err(api::ApiError::Invalid { .. }) => {
+                self.term.print("the host's channel cannot be archived\n")
+            }
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    async fn rename(&mut self, name: &str) {
+        let Some(channel) = self.current_channel().await else {
+            return;
+        };
+        let title = (!name.is_empty()).then(|| name.to_owned());
+        match self.engine.rename_channel(channel, title).await {
+            Ok(()) => self.term.note(if name.is_empty() {
+                "the title is derived from the members again"
+            } else {
+                "renamed"
+            }),
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    fn members(&self) {
+        match self.current.as_ref().map(|c| &c.kind) {
+            Some(Kind::Group(members)) => {
+                let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
+                self.term.print(&format!("{}\n", names.join(", ")));
+            }
+            Some(_) => self.term.print("this is not a group\n"),
+            None => self
+                .term
+                .print("no channel yet: /talk <person> or /host first\n"),
+        }
+    }
+
+    fn leave(&mut self) {
+        match self.current.as_ref() {
+            Some(Current {
+                channel,
+                kind: Kind::Group(_),
+                ..
+            }) => {
+                self.term
+                    .print("delete this group and everything said in it? (y/n) ");
+                self.pending = Some(Pending::DeleteGroup(channel.clone()));
+            }
+            Some(_) => self.term.print("only a group can be deleted\n"),
+            None => self
+                .term
+                .print("no channel yet: /talk <person> or /host first\n"),
+        }
+    }
+
+    /// Mark the current channel, or every one, read up to its newest message.
+    async fn read(&self, all: bool) {
+        let channels: Vec<ChannelId> = if all {
+            match self.engine.channels().await {
+                Ok(l) => l
+                    .into_iter()
+                    .filter(|c| c.unread > 0)
+                    .map(|c| c.id)
+                    .collect(),
+                Err(e) => return self.term.error(&e.to_string()),
+            }
+        } else {
+            match self.current_channel().await {
+                Some(c) => vec![c],
+                None => return,
+            }
+        };
+        for channel in &channels {
+            let last = match self.engine.history(channel.clone(), None, 1).await {
+                Ok(mut m) => m.pop(),
+                Err(e) => return self.term.error(&e.to_string()),
+            };
+            if let Some(m) = last
+                && let Err(e) = self.engine.mark_read(channel.clone(), m.id).await
+            {
+                return self.term.error(&e.to_string());
+            }
+        }
+        self.term.note(&format!(
+            "marked read: {} conversation{}",
+            channels.len(),
+            if channels.len() == 1 { "" } else { "s" }
+        ));
+    }
+
+    async fn ask(&mut self, who: &str, question: String) {
+        let person = match self.resolve(who).await {
+            Ok(p) => p,
+            Err(e) => return self.term.print(&format!("{e}\n")),
+        };
+        let name = self.names.person(&person.0);
+        let (started, at) = (Instant::now(), now_ms());
+        let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
+        let result = self
+            .interruptible(async move {
+                engine.ask(person, question, None, None).await?;
+                bridge.idle().await;
+                Ok::<(), api::ApiError>(())
+            })
+            .await;
+        match result {
+            Some(Err(e)) => self.term.error(&e.to_string()),
+            Some(Ok(())) => self
+                .term
+                .note(&format!("{name} answers in their own channel")),
+            None => {}
+        }
+        self.report_failures();
+        self.footer(at, started).await;
+    }
+
+    async fn requests(&self) {
+        let tasks = match self.engine.tasks().await {
+            Ok(t) => t,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        if tasks.is_empty() {
+            return self
+                .term
+                .note("no requests yet; /ask <person> <question> makes one");
+        }
+        for t in &tasks {
+            let state = match t.status {
+                TaskStatus::Active => "active",
+                TaskStatus::Done => "done",
+            };
+            let who = t
+                .assignee
+                .as_ref()
+                .map_or("nobody yet", |p| p.name.as_str());
+            let pin = if t.pinned { " (pinned)" } else { "" };
+            self.term.print(&format!(
+                "{:<7} {}  {}: {}{}\n",
+                state,
+                Self::stamp(&t.created_at),
+                who,
+                excerpt(&t.question, 60),
+                pin
+            ));
+        }
+    }
+
+    async fn clock(&self) {
+        match self.engine.clock().await {
+            Ok(c) => self.term.print(&format!(
+                "{:04}-{:02}-{:02} {}\n",
+                c.in_world.year, c.in_world.month, c.in_world.day, c.local_time
+            )),
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    async fn find(&self, topic: &str) {
+        match self.engine.find_people(topic.to_owned()).await {
+            Ok(found) if found.is_empty() => self.term.note("nobody on the roster matches"),
+            Ok(found) => {
+                for c in found {
+                    self.term.print(&format!(
+                        "{}  {}\n    {}\n",
+                        c.person.name,
+                        self.term.style.dim(&c.person.id.0),
+                        excerpt(&c.reason, 100)
+                    ));
+                }
+            }
+            Err(e) => self.term.error(&e.to_string()),
+        }
+    }
+
+    async fn waiting(&self) {
+        use api::views::Activity;
+        let digest = match self.engine.digest().await {
+            Ok(d) => d,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        if digest.items.is_empty() {
+            return self.term.note("nobody is waiting on you");
+        }
+        for w in &digest.items {
+            let what = match &w.activity {
+                Activity::Messaged { .. } => "wrote to you".to_owned(),
+                Activity::Replied { question, .. } => {
+                    format!("answered: {}", excerpt(question, 50))
+                }
+                Activity::CommitmentDue { text, .. } => format!("due: {}", excerpt(text, 50)),
+                Activity::CameBy { .. } => "came by".to_owned(),
+                Activity::Birthday => "has a birthday today".to_owned(),
+            };
+            self.term.print(&format!("{}  {what}\n", w.person.name));
+        }
+    }
+
+    async fn birthday(&self, day: Option<&str>) {
+        let settings = match self.engine.settings().await {
+            Ok(s) => s,
+            Err(e) => return self.term.error(&e.to_string()),
+        };
+        let Some(day) = day else {
+            return self.term.note(&match settings.birthday {
+                Some(d) => format!("birthday: {:02}-{:02}", d.month, d.day),
+                None => "no birthday; /birthday MM-DD sets one".to_owned(),
+            });
+        };
+        let parsed = if day == "clear" {
+            Some(None)
+        } else {
+            day.split_once('-')
+                .and_then(|(m, d)| Some((m.parse::<u8>().ok()?, d.parse::<u8>().ok()?)))
+                .map(|(month, day)| Some(api::views::MonthDay { month, day }))
+        };
+        let Some(birthday) = parsed else {
+            return self.term.print("usage: /birthday [MM-DD | clear]\n");
+        };
+        match self
+            .engine
+            .update_settings(Settings {
+                birthday,
+                ..settings
+            })
+            .await
+        {
+            Ok(()) => self.term.note(if birthday.is_some() {
+                "birthday saved"
+            } else {
+                "birthday cleared"
+            }),
+            Err(api::ApiError::Invalid { .. }) => {
+                self.term.print("that is not a date; use MM-DD\n")
             }
             Err(e) => self.term.error(&e.to_string()),
         }
@@ -1067,6 +1551,7 @@ impl Session {
         let mut groups: Vec<String> = [
             "conversation",
             "channels",
+            "people",
             "memories",
             "saves",
             "settings",
@@ -1465,6 +1950,17 @@ impl Session {
                 Ok(()) => self.term.note(&format!("deleted {name}")),
                 Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
             },
+            Pending::DeleteGroup(channel) => {
+                match self.engine.delete_group(channel.clone()).await {
+                    Ok(()) => {
+                        if self.current.as_ref().is_some_and(|c| c.channel == channel) {
+                            self.current = None;
+                        }
+                        self.term.note("group deleted");
+                    }
+                    Err(e) => self.term.error(&e.to_string()),
+                }
+            }
             Pending::Overwrite { name, path } => self.export_now(&name, path).await,
             Pending::ClearStorage(kinds) => match self.engine.clear_storage(kinds).await {
                 Ok(usage) => {

@@ -17,7 +17,6 @@ export function useChatMenu() {
   const dispatch = useDispatch();
   const pinned = useStore((s) => s.pinned);
   const unread = useStore((s) => s.unread);
-  const digest = useStore((s) => s.digest);
   const [open, setOpen] = useState<{ channel: ChannelSummary; x: number; y: number } | null>(null);
 
   const items = useCallback(
@@ -25,7 +24,7 @@ export function useChatMenu() {
       const out: MenuItem[] = [];
       const isPinned = pinned.includes(c.id);
       out.push({ label: t(isPinned ? "chatmenu.unpin" : "chatmenu.pin"), icon: "pin", onSelect: () => actions.pin(c.id, !isPinned) });
-      if (unreadOf(c.id, unread, digest) > 0) out.push({ label: t("chatmenu.read"), icon: "check", onSelect: () => void actions.clearUnread(c.id) });
+      if (unreadOf(c, unread) > 0) out.push({ label: t("chatmenu.read"), icon: "check", onSelect: () => void actions.clearUnread(c.id) });
       else out.push({ label: t("chatmenu.unread"), icon: "unread", onSelect: () => actions.markUnread(c.id) });
       if (c.kind !== "host") {
         const archived = c.archived;
@@ -53,7 +52,7 @@ export function useChatMenu() {
       }
       return out;
     },
-    [t, api, actions, dispatch, pinned, unread, digest],
+    [t, api, actions, dispatch, pinned, unread],
   );
 
   const close = useCallback(() => setOpen(null), []);

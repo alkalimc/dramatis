@@ -1300,6 +1300,51 @@ fn added(events: Vec<Event>) -> Vec<String> {
         .collect()
 }
 
+fn person_says(e: &Engine, ch: &ChannelId, text: &str) -> world::MessageId {
+    let other = world::World::open(e.home.world().unwrap()).unwrap();
+    let wc = convert::world_channel(ch).unwrap();
+    let who = world::Actor::Person("amy".into());
+    world::message::append(&other, wc, &who, text, None, None, 7).unwrap()
+}
+
+#[tokio::test]
+async fn the_badge_is_the_messages_after_the_saved_read_cursor() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    let unread = |e: &Engine| {
+        e.channels_impl()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == ch)
+            .map_or(0, |c| c.unread)
+    };
+    terminal_says(e, &ch, "mine");
+    assert_eq!(unread(e), 0, "the user's own words are never unread");
+    person_says(e, &ch, "one");
+    let last = person_says(e, &ch, "two");
+    assert_eq!(unread(e), 2);
+    e.mark_read(ch.clone(), convert::message_id(last))
+        .await
+        .unwrap();
+    assert_eq!(unread(e), 0);
+    // Written while the app was closed: exactly one.
+    person_says(e, &ch, "three");
+    assert_eq!(unread(e), 1);
+}
+
+#[tokio::test]
+async fn messages_written_before_the_first_look_are_not_announced() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    person_says(e, &ch, "while closed");
+    r.events.take();
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert_eq!(e.poll_external().unwrap(), 0);
+    assert!(added(r.events.take()).is_empty());
+}
+
 #[tokio::test]
 async fn this_processs_own_writes_are_never_announced_by_the_poll() {
     let r = rig();

@@ -1283,3 +1283,115 @@ async fn history_marks_pictures_and_storage_clears_only_caches() {
     assert!(home.world().unwrap().is_file());
     assert!(r.run("/storage clear saves").await.contains("usage:"));
 }
+
+async fn unread_of(r: &Rig, who: &str) -> u32 {
+    let list = r.engine.channels().await.unwrap();
+    list.iter()
+        .find(|c| c.participants.iter().any(|p| p.id.0 == who))
+        .map_or(0, |c| c.unread)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn what_the_terminal_prints_counts_as_read_in_the_app() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("Hello, Doc."));
+    assert!(r.run("hi").await.contains("Hello, Doc."));
+    assert_eq!(unread_of(&r, "ann").await, 0);
+
+    // A message written while nobody was looking is unread until the channel is entered,
+    // and entering it prints the message.
+    let ch = r
+        .engine
+        .open_direct(api::types::PersonId("ann".into()))
+        .await
+        .unwrap();
+    {
+        // Another connection to the open save, as the app would be.
+        let home = Home::new(&r._home.0);
+        let w = world::World::open(home.world().unwrap()).unwrap();
+        let who = world::Actor::Person("ann".into());
+        let ch = world::ChannelId(ch.0.parse().unwrap());
+        world::message::append(&w, ch, &who, "You were away.", None, None, 9_000).unwrap();
+    }
+    assert_eq!(unread_of(&r, "ann").await, 1);
+    r.run("/host").await;
+    let out = r.run("/talk ann").await;
+    assert!(
+        out.contains("1 unread:") && out.contains("You were away."),
+        "{out}"
+    );
+    assert_eq!(unread_of(&r, "ann").await, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conversations_are_listed_opened_archived_and_titled() {
+    let mut r = rig().await;
+    assert!(r.run("/chats").await.contains("no conversations yet"));
+    r.run("/talk ann").await;
+    r.script.0.lock().unwrap().push_back(Reply::Say("Hi."));
+    r.run("hello").await;
+    let listed = r.run("/chats").await;
+    assert!(
+        listed.contains("  1  ann") && listed.contains("direct"),
+        "{listed}"
+    );
+    assert!(r.run("/chat 9").await.contains("no such conversation"));
+    r.run("/talk cy").await;
+    assert!(r.run("/chat 1").await.contains("talking to ann"));
+
+    assert!(r.run("/rename Tea hour").await.contains("renamed"));
+    assert!(r.run("/chats").await.contains("Tea hour"));
+    assert!(r.run("/rename").await.contains("derived"));
+    assert!(r.run("/archive").await.contains("archived"));
+    assert!(!r.run("/chats").await.contains("ann"));
+    assert!(r.run("/chats archived").await.contains("ann"));
+    assert!(r.run("/unarchive").await.contains("main list"));
+    assert!(r.run("/read").await.contains("marked read: 1 conversation"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_can_be_listed_and_deleted_after_asking() {
+    let mut r = rig().await;
+    r.run("/group ann cy").await;
+    assert!(r.run("/members").await.contains("ann, cy"));
+    assert!(r.run("/leave").await.contains("(y/n)"));
+    assert!(r.run("n").await.contains("cancelled"));
+    r.run("/leave").await;
+    assert!(r.run("y").await.contains("group deleted"));
+    assert!(r.session.prompt().starts_with("[-]"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn people_have_a_profile_a_mode_and_requests_are_listed() {
+    let mut r = rig().await;
+    let who = r.run("/who bo").await;
+    assert!(who.contains("bo") && who.contains("no persona"), "{who}");
+    assert!(
+        r.run("/mode ann enabled")
+            .await
+            .contains("ann is enabled now")
+    );
+    assert!(r.run("/who ann").await.contains("mode: enabled"));
+    assert!(r.run("/mode ann frozen").await.contains("frozen now"));
+    r.run("/group ann cy").await;
+    assert!(r.run("/mode disabled").await.contains("disabled now"));
+    assert!(
+        r.run("/mode nobody frozen")
+            .await
+            .contains("nobody matches")
+    );
+    assert!(r.run("/requests").await.contains("no requests yet"));
+    assert!(r.run("/waiting").await.contains("nobody is waiting"));
+    assert!(r.run("/birthday").await.contains("no birthday"));
+    assert!(r.run("/birthday 03-14").await.contains("saved"));
+    assert!(r.run("/birthday").await.contains("03-14"));
+    assert!(r.run("/birthday 13-40").await.contains("not a date"));
+    assert!(r.run("/birthday clear").await.contains("cleared"));
+    let clock = r.run("/clock").await;
+    assert!(clock.trim().len() >= 16, "{clock:?}");
+}

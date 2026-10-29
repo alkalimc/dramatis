@@ -8,10 +8,49 @@ use rustyline::completion::Pair;
 
 /// Every command's primary name, in the order `/help` lists them.
 const COMMANDS: &[&str] = &[
-    "list", "talk", "group", "host", "go", "name", "bio", "wrapup", "memories", "forget",
-    "restore", "edit", "tier", "quiet", "password", "save", "history", "resend", "sources",
-    "search", "stats", "storage", "help", "quit",
+    "list",
+    "talk",
+    "group",
+    "host",
+    "go",
+    "chats",
+    "chat",
+    "rename",
+    "members",
+    "archive",
+    "unarchive",
+    "leave",
+    "read",
+    "who",
+    "mode",
+    "ask",
+    "requests",
+    "clock",
+    "find",
+    "waiting",
+    "birthday",
+    "name",
+    "bio",
+    "wrapup",
+    "memories",
+    "forget",
+    "restore",
+    "edit",
+    "tier",
+    "quiet",
+    "password",
+    "save",
+    "history",
+    "resend",
+    "sources",
+    "search",
+    "stats",
+    "storage",
+    "help",
+    "quit",
 ];
+
+const MODES: &[&str] = &["enabled", "frozen", "disabled"];
 
 const SAVE_VERBS: &[&str] = &[
     "list", "new", "switch", "copy", "rename", "delete", "export", "import",
@@ -88,6 +127,23 @@ pub fn complete(line: &str, pos: usize, data: &Snapshot) -> (usize, Vec<Pair>) {
     let args = &head[args_at..];
     match command {
         "talk" | "t" => (args_at, persons(args, data, true)),
+        "who" => (args_at, persons(args, data, true)),
+        "mode" => {
+            // The person, then the mode after it.
+            let words: Vec<&str> = args.split_whitespace().collect();
+            let after_person = words.len() > 1 || (words.len() == 1 && args.ends_with(' '));
+            if after_person {
+                let at = args.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+                let partial = &args[at..];
+                let found = MODES
+                    .iter()
+                    .filter(|m| m.starts_with(partial))
+                    .map(|m| pair(m, (*m).to_owned()))
+                    .collect();
+                return (args_at + at, found);
+            }
+            (args_at, persons(args, data, true))
+        }
         "group" | "g" => {
             // Each member is one whitespace-free word.
             let at = args.rfind(char::is_whitespace).map_or(0, |i| i + 1);
@@ -268,6 +324,16 @@ mod tests {
         assert!(at("/save rename main m").1.is_empty());
         assert!(at("/save copy main ").1.is_empty());
         assert!(at("/save import m").1.is_empty());
+    }
+
+    #[test]
+    fn who_and_mode_complete_a_person_and_mode_then_the_mode() {
+        assert_eq!(shown(&at("/who Ann")), ["Ann Lee", "Annie"]);
+        assert_eq!(shown(&at("/mode Bo ")), ["enabled", "frozen", "disabled"]);
+        let found = at("/mode Bo fr");
+        assert_eq!(found.0, 9);
+        assert_eq!(shown(&found), ["frozen"]);
+        assert_eq!(shown(&at("/mode An")), ["Anchor", "Ann Lee", "Annie"]);
     }
 
     #[test]

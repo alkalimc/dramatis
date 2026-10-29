@@ -140,7 +140,9 @@ function usePresence() {
   useEffect(() => {
     if (!full) return;
     const onVisible = () => {
-      if (!document.hidden) void actions.presence();
+      if (document.hidden) return;
+      void actions.markShownRead();
+      void actions.presence();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -183,9 +185,8 @@ function Rail() {
   const dispatch = useDispatch();
   const drawer = useStore((s) => s.drawer);
   const unreadChats = useStore((s) => {
-    const ids = new Set([...s.channels.map((c) => c.id), ...(s.hostChannel ? [s.hostChannel] : [])]);
     let n = 0;
-    for (const id of ids) if (unreadOf(id, s.unread, s.digest) > 0) n += 1;
+    for (const c of s.channels) if (unreadOf(c, s.unread) > 0) n += 1;
     return n;
   });
   const key = drawerKey(drawer);

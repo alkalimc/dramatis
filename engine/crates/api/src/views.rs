@@ -241,6 +241,9 @@ pub struct ChannelSummary {
     pub archived: bool,
     pub mode: Mode,
     pub last_at: Option<Timestamp>,
+    /// Messages from the host or a person after the read cursor, which is saved with the
+    /// world: the badge is this number.
+    pub unread: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

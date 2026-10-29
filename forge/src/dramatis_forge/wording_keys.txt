@@ -115,6 +115,7 @@ cli.help.channels
 cli.help.conversation
 cli.help.memories
 cli.help.other
+cli.help.people
 cli.help.saves
 cli.help.settings
 cli.start

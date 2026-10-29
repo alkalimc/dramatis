@@ -181,6 +181,21 @@ pub fn since(
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// How many messages from someone other than the user lie after `after` (all when
+/// `None`): what the channel's unread badge counts.
+pub fn unread_count(
+    conn: &Connection,
+    channel: ChannelId,
+    after: Option<MessageId>,
+) -> Result<u32> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM message
+         WHERE channel = ?1 AND author <> 'user' AND (?2 IS NULL OR id > ?2)",
+        (channel, after),
+        |r| r.get(0),
+    )?)
+}
+
 /// Messages of any channel with an id above `after`, oldest first, at most `limit`.
 pub fn all_since(conn: &Connection, after: i64, limit: u32) -> Result<Vec<Message>> {
     let mut stmt = conn.prepare(&format!(

@@ -12,6 +12,34 @@ pub enum Command {
     Talk(String),
     Group(Vec<String>),
     Host,
+    /// The conversations, newest first (or the archived ones): `/chat <n>` opens one.
+    Chats(bool),
+    Chat(usize),
+    /// A person's profile.
+    Who(String),
+    /// Set a person's mode (enabled, frozen, disabled); with no person, the current
+    /// conversation's (a group's own mode, or the person it is with).
+    Mode(String, String),
+    /// Move the current channel out of, or back into, the main list.
+    Archive(bool),
+    /// Title the current channel; empty text returns to the derived title.
+    Rename(String),
+    Members,
+    /// Delete the current group, after asking.
+    Leave,
+    /// Mark the current channel (or every one) read.
+    Read(bool),
+    /// Ask a person to look into a question.
+    Ask(String, String),
+    /// The requests and their state.
+    Requests,
+    Clock,
+    /// Who knows about a topic.
+    Find(String),
+    /// Who has something waiting for the user.
+    Waiting,
+    /// Show the user's birthday, set it as `MM-DD`, or clear it.
+    Birthday(Option<String>),
     /// Take one of the choices the host last offered (1-based).
     Go(usize),
     /// Set the user's display name.
@@ -173,6 +201,53 @@ pub fn parse(line: &str) -> Command {
             }
         }
         "host" => Command::Host,
+        "chats" | "c" => match args {
+            "" => Command::Chats(false),
+            "archived" => Command::Chats(true),
+            _ => Command::Invalid("usage: /chats [archived]".into()),
+        },
+        "chat" => match args.parse::<usize>() {
+            Ok(n) if n > 0 => Command::Chat(n),
+            _ => Command::Invalid("usage: /chat <n>, a number from /chats".into()),
+        },
+        "who" if args.is_empty() => Command::Invalid("usage: /who <person>".into()),
+        "who" => Command::Who(args.to_owned()),
+        "mode" if matches!(args, "enabled" | "frozen" | "disabled") => {
+            Command::Mode(String::new(), args.to_owned())
+        }
+        "mode" => match args.rsplit_once(char::is_whitespace) {
+            Some((who, mode))
+                if !who.trim().is_empty() && matches!(mode, "enabled" | "frozen" | "disabled") =>
+            {
+                Command::Mode(who.trim().to_owned(), mode.to_owned())
+            }
+            _ => Command::Invalid("usage: /mode [person] enabled|frozen|disabled".into()),
+        },
+        "archive" => Command::Archive(true),
+        "unarchive" => Command::Archive(false),
+        "rename" => Command::Rename(args.to_owned()),
+        "members" => Command::Members,
+        "leave" => Command::Leave,
+        "read" => match args {
+            "" => Command::Read(false),
+            "all" => Command::Read(true),
+            _ => Command::Invalid("usage: /read [all]".into()),
+        },
+        "ask" => {
+            let w = words(args);
+            match w.split_first() {
+                Some((who, rest)) if !rest.is_empty() => Command::Ask(who.clone(), rest.join(" ")),
+                _ => Command::Invalid(
+                    "usage: /ask <person> <question>; \"quotes\" hold a name with spaces".into(),
+                ),
+            }
+        }
+        "requests" | "req" => Command::Requests,
+        "clock" | "time" => Command::Clock,
+        "find" if args.is_empty() => Command::Invalid("usage: /find <topic>".into()),
+        "find" => Command::Find(args.to_owned()),
+        "waiting" => Command::Waiting,
+        "birthday" => Command::Birthday(optional(args)),
         "go" | "open" => match args.parse::<usize>() {
             Ok(n) if n > 0 => Command::Go(n),
             _ => Command::Invalid("usage: /go <n>, a number from the host's list".into()),
@@ -308,6 +383,44 @@ mod tests {
         );
         assert_eq!(parse("/tier"), Command::Tier(None));
         assert_eq!(parse("/quiet off"), Command::Quiet(Some("off".into())));
+        assert_eq!(parse("/chats"), Command::Chats(false));
+        assert_eq!(parse("/chats archived"), Command::Chats(true));
+        assert_eq!(parse("/chat 2"), Command::Chat(2));
+        assert_eq!(parse("/who Ann Lee"), Command::Who("Ann Lee".into()));
+        assert_eq!(
+            parse("/mode Ann Lee frozen"),
+            Command::Mode("Ann Lee".into(), "frozen".into())
+        );
+        assert_eq!(
+            parse("/mode disabled"),
+            Command::Mode(String::new(), "disabled".into())
+        );
+        assert_eq!(parse("/archive"), Command::Archive(true));
+        assert_eq!(parse("/unarchive"), Command::Archive(false));
+        assert_eq!(
+            parse("/rename Night shift"),
+            Command::Rename("Night shift".into())
+        );
+        assert_eq!(parse("/rename"), Command::Rename(String::new()));
+        assert_eq!(parse("/members"), Command::Members);
+        assert_eq!(parse("/leave"), Command::Leave);
+        assert_eq!(parse("/read"), Command::Read(false));
+        assert_eq!(parse("/read all"), Command::Read(true));
+        assert_eq!(
+            parse("/ask \"Ann Lee\" what is in the east wing"),
+            Command::Ask("Ann Lee".into(), "what is in the east wing".into())
+        );
+        assert_eq!(parse("/requests"), Command::Requests);
+        assert_eq!(parse("/clock"), Command::Clock);
+        assert_eq!(
+            parse("/find tea brewing"),
+            Command::Find("tea brewing".into())
+        );
+        assert_eq!(parse("/waiting"), Command::Waiting);
+        assert_eq!(
+            parse("/birthday 03-14"),
+            Command::Birthday(Some("03-14".into()))
+        );
     }
 
     #[test]
@@ -383,6 +496,14 @@ mod tests {
             "/save copy a",
             "/save frobnicate",
             "/password secret",
+            "/chats x",
+            "/chat 0",
+            "/who",
+            "/mode Ann",
+            "/mode Ann loud",
+            "/read some",
+            "/ask Ann",
+            "/find",
             "/nope",
         ] {
             assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");
