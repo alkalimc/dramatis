@@ -71,6 +71,7 @@ export function createActions(api: Api, store: Store) {
     if (!host) return;
     d({ type: "hostChannel", id: host });
     await loadHistory(host);
+    await markShownRead();
     if (!presenceSent) {
       presenceSent = true;
       await presence();
@@ -116,14 +117,24 @@ export function createActions(api: Api, store: Store) {
   async function markRead(channel: ChannelId) {
     const list = store.getState().messages[channel];
     const last = list?.[list.length - 1];
-    if (last) await attempt(c.markRead(channel, last.id));
+    if (last && (await attempt(c.markRead(channel, last.id))) !== undefined) d({ type: "unread", channel, count: 0 });
+  }
+
+  /** The conversation on screen has been seen: at start, and when the window comes back. */
+  async function markShownRead() {
+    const s = store.getState();
+    const shown = s.channel ?? s.hostChannel;
+    if (shown && !document.hidden) {
+      await markRead(shown);
+      await refreshDigest();
+    }
   }
 
   /** `who` is the one the conversation is with, so a not yet spoken-in channel can show a row. */
   async function open(channel: ChannelId | null, who?: PersonRef) {
     const s = store.getState();
     if (channel && who && !s.channels.some((ch) => ch.id === channel)) {
-      d({ type: "temp", row: { id: channel, kind: "direct", origin: "system", participants: [who], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary });
+      d({ type: "temp", row: { id: channel, kind: "direct", origin: "system", participants: [who], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary });
     }
     d({ type: "open", channel });
     const target = channel ?? store.getState().hostChannel;
@@ -221,6 +232,7 @@ export function createActions(api: Api, store: Store) {
     loadHistory,
     reloadHistory,
     markRead,
+    markShownRead,
     clearUnread,
     markUnread,
     pin,

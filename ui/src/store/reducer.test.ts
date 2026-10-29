@@ -88,7 +88,7 @@ test("mode changes update the roster row, the enabled count, channels and bump p
   let s = reduce(initialState(), { type: "roster", roster });
   s = reduce(s, {
     type: "channels",
-    channels: [{ id: "g1", kind: "group", origin: "user", participants: [], topic: null, mode: "frozen", last_at: null, name: null, avatar: null, archived: false }],
+    channels: [{ id: "g1", kind: "group", origin: "user", participants: [], topic: null, mode: "frozen", last_at: null, name: null, avatar: null, archived: false, unread: 0 }],
   });
   const v = s.peopleVersion;
   s = reduce(s, { type: "modeChanged", event: { target: { kind: "person", id: "p2" }, mode: "enabled" } });
@@ -259,9 +259,16 @@ test("pinning, marking unread and the temporary row", () => {
   s = reduce(s, { type: "unread", channel: "c1", count: 0 });
   expect(s.unread.c1).toBeUndefined();
 
-  const row = { id: "t1", kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } as const;
+  const row = { id: "t1", kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } as const;
   s = reduce(s, { type: "temp", row: { ...row, participants: [] } });
   // Opening it keeps the row; opening anything else drops it.
   expect(reduce(s, { type: "open", channel: "t1" }).temp?.id).toBe("t1");
   expect(reduce(s, { type: "open", channel: "c9" }).temp).toBeNull();
+});
+
+test("marking read clears the saved count in the list with the local one", () => {
+  const row = { id: "c1", kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 3 } as const;
+  let s = reduce(initialState(), { type: "channels", channels: [row, { ...row, id: "c2" }] });
+  s = reduce(s, { type: "unread", channel: "c1", count: 0 });
+  expect(s.channels.map((c) => c.unread)).toEqual([0, 3]);
 });

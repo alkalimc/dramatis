@@ -354,6 +354,11 @@ export type ChannelSummary = {
 	archived: boolean,
 	mode: Mode,
 	last_at: Timestamp | null,
+	/**
+	 *  Messages from the host or a person after the read cursor, which is saved with the
+	 *  world: the badge is this number.
+	 */
+	unread: number,
 };
 
 /**

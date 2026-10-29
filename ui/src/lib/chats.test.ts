@@ -3,7 +3,7 @@ import { makeT } from "../i18n";
 import { byActivity, channelTitle, groupTitle, previewOf, unreadOf } from "./chats";
 
 function channel(id: string, kind: ChannelSummary["kind"], last_at: string | null): ChannelSummary {
-  return { id, kind, origin: "user", participants: [], topic: null, mode: "enabled", last_at, name: null, avatar: null, archived: false };
+  return { id, kind, origin: "user", participants: [], topic: null, mode: "enabled", last_at, name: null, avatar: null, archived: false, unread: 0 };
 }
 
 function message(id: string, channel: string, at: string, text = "hi"): Message {
@@ -35,31 +35,12 @@ test("chats are ordered by last activity, newest first, and a loaded message can
   expect(byActivity(list, loaded).map((c) => c.id)).toEqual(["stale", "new", "old", "host", "quiet"]);
 });
 
-test("the badge counts unseen messages or waiting people, whichever is more", () => {
-  const person = { id: "p1", name: "Ann" };
-  const digest = {
-    items: [
-      { person, channel: "c1", activity: { kind: "birthday" } as const },
-      { person, channel: "c1", activity: { kind: "came_by", at: "2026-01-01T10:00:00Z" } as const },
-    ],
-  };
-  expect(unreadOf("c1", {}, digest)).toBe(1);
-  expect(unreadOf("c1", { c1: 5 }, digest)).toBe(5);
-  expect(unreadOf("c2", { c2: 1 }, digest)).toBe(1);
-  expect(unreadOf("c3", {}, digest)).toBe(0);
-});
-
-test("reminders (a birthday, a due commitment) never make a chat unread", () => {
-  const person = { id: "p1", name: "Ann" };
-  const digest = {
-    items: [
-      { person, channel: "c1", activity: { kind: "birthday" } as const },
-      { person, channel: "c1", activity: { kind: "commitment_due", fact: "f1", text: "rest", due: "2026-01-01T10:00:00Z" } as const },
-    ],
-  };
-  expect(unreadOf("c1", {}, digest)).toBe(0);
-  // A manual mark still counts, and opening the chat clears it.
-  expect(unreadOf("c1", { c1: 1 }, digest)).toBe(1);
+test("the badge is the saved count, or the one kept here since, whichever is more", () => {
+  const saved = { id: "c1", unread: 2 };
+  expect(unreadOf(saved, {})).toBe(2);
+  expect(unreadOf(saved, { c1: 5 })).toBe(5);
+  expect(unreadOf({ id: "c2", unread: 0 }, { c2: 1 })).toBe(1);
+  expect(unreadOf({ id: "c3", unread: 0 }, {})).toBe(0);
 });
 
 test("the preview is the speech on one line, without citation marks; a scene-only reply shows the scene", () => {

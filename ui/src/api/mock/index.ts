@@ -150,8 +150,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     log: Message[];
   }
   const channels = new Map<ChannelId, Chan>();
-  const addChannel = (c: Omit<Chan, "log" | "last_at" | "name" | "avatar" | "archived">) => {
-    const ch: Chan = { ...c, name: null, avatar: null, archived: false, last_at: null, log: [] };
+  const addChannel = (c: Omit<Chan, "log" | "unread" | "last_at" | "name" | "avatar" | "archived">) => {
+    const ch: Chan = { ...c, unread: 0, name: null, avatar: null, archived: false, last_at: null, log: [] };
     channels.set(c.id, ch);
     return ch;
   };
@@ -498,7 +498,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
 
   function summaryOf(ch: Chan): ChannelSummary {
     const { log: _log, ...rest } = ch;
-    return rest;
+    const unread = digestItems.filter((w) => w.channel === ch.id && w.activity.kind !== "commitment_due" && w.activity.kind !== "birthday").length;
+    return { ...rest, unread };
   }
 
   const commands: Commands = {

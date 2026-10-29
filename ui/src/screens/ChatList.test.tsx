@@ -107,7 +107,7 @@ test("right click archives a chat; the archived entry opens them and unarchives"
 test("a conversation opened before anyone spoke gets a row while it is open, and loses it after", async () => {
   const { store } = renderApp();
   const nav = await list();
-  const row: ChannelSummary = { id: "dm:new", kind: "direct", origin: "system", participants: [{ id: "kael", name: "Kael Moor" }], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false };
+  const row: ChannelSummary = { id: "dm:new", kind: "direct", origin: "system", participants: [{ id: "kael", name: "Kael Moor" }], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 };
   await act(async () => {
     store.dispatch({ type: "temp", row });
     store.dispatch({ type: "open", channel: row.id });

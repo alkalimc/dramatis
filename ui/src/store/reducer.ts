@@ -258,7 +258,10 @@ export function reduce(s: State, a: Action): State {
     case "profile":
       return { ...s, profile: a.mode, menuOpen: false };
     case "unread":
-      return { ...s, unread: a.count > 0 ? { ...s.unread, [a.channel]: a.count } : omit(s.unread, a.channel) };
+      // Read: the saved count goes too, or the badge would come back with the list.
+      return a.count > 0
+        ? { ...s, unread: { ...s.unread, [a.channel]: a.count } }
+        : { ...s, unread: omit(s.unread, a.channel), channels: s.channels.map((c) => (c.id === a.channel && c.unread > 0 ? { ...c, unread: 0 } : c)) };
     case "drawer":
       return { ...s, drawer: a.drawer };
     case "ask":

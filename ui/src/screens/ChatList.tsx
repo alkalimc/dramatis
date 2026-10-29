@@ -59,7 +59,7 @@ function SearchPanel({ query }: { query: string }) {
   const user = useStore((s) => s.settings?.user_name ?? null);
   const needle = query.trim().toLowerCase();
   const results = needle ? messages.filter((m) => m.text.toLowerCase().includes(needle)) : [];
-  const stand = summary ?? ({ id: channel ?? "", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary);
+  const stand = summary ?? ({ id: channel ?? "", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary);
   const close = () => dispatch({ type: "find", query: null });
 
   const jump = (mid: string) => {
@@ -138,7 +138,7 @@ export function ChatList() {
   const find = useStore((s) => s.find);
 
   const all = useMemo(() => {
-    const list: ChannelSummary[] = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false } satisfies ChannelSummary, ...channels] : channels;
+    const list: ChannelSummary[] = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary, ...channels] : channels;
     // A conversation opened before anyone spoke has no row yet; it gets one while it is open.
     return temp && temp.id === open && !list.some((c) => c.id === temp.id) ? [...list, temp] : list;
   }, [channels, host, temp, open]);
@@ -231,7 +231,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
   const marker = useStore((s) => s.wording.scene_marker);
   const list = useStore((s) => s.messages[channel.id]);
   const shown = useStore((s) => (s.channel ?? s.hostChannel) === channel.id);
-  const unread = useStore((s) => unreadOf(channel.id, s.unread, s.digest));
+  const unread = useStore((s) => unreadOf(channel, s.unread));
   const waiting = useStore((s) => s.digest.items.find((w) => w.channel === channel.id));
   const who = useStore((s) => s.typing[channel.id]);
 

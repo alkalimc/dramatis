@@ -1,4 +1,4 @@
-import type { ChannelId, ChannelSummary, Digest, Message, SceneMarker } from "../api";
+import type { ChannelId, ChannelSummary, Message, SceneMarker } from "../api";
 import type { T } from "../i18n";
 import { splitScene, withoutCites } from "./scene";
 
@@ -43,13 +43,13 @@ export function byActivity(channels: ChannelSummary[], messages: Record<ChannelI
 }
 
 /**
- * What the badge counts: messages that arrived unseen, or people with something unread
- * here, whichever is more. A birthday or a due commitment is a reminder rather than an
- * unread message and nothing the user does in the chat settles it, so it never counts.
+ * What the badge counts: the host's and people's messages after the read cursor the engine
+ * saved (so a restart shows only what really arrived unseen), or the count kept here since
+ * the list was fetched or by hand, whichever is more. Reminders (a birthday, a due
+ * commitment) are not messages and never count.
  */
-export function unreadOf(channel: ChannelId, unread: Record<ChannelId, number>, digest: Digest): number {
-  const waiting = digest.items.filter((w) => w.channel === channel && w.activity.kind !== "birthday" && w.activity.kind !== "commitment_due").length;
-  return Math.max(unread[channel] ?? 0, waiting);
+export function unreadOf(channel: Pick<ChannelSummary, "id" | "unread">, unread: Record<ChannelId, number>): number {
+  return Math.max(channel.unread, unread[channel.id] ?? 0);
 }
 
 /** One line for the list: the speech, else the scene, with citation marks stripped. */
