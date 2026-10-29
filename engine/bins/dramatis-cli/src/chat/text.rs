@@ -71,9 +71,7 @@ anything else       send it to the current channel
 /requests           the requests made so far and whether they are done
 /clock              the date in the world and the local time
 /find <topic>       who knows about it, with a line from their material
-/waiting            who has something waiting for you
-/birthday [MM-DD|clear]
-                    show, set or clear your birthday",
+/waiting            who has something waiting for you",
     ),
     (
         "cli.help.memories",
@@ -100,6 +98,8 @@ anything else       send it to the current channel
         "Settings
 /name <new name>    change the name you are called by
 /bio [text|clear]   show, set or clear what the people are told about you (200 characters)
+/birthday [MM-DD|clear]
+                    show, set or clear your birthday
 /password [on|change|off]
                     encrypt this save with a password, change it, or remove it; asked for
                     at start when a save is encrypted

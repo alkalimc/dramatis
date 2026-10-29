@@ -257,38 +257,38 @@ fn form(
     })
 }
 
-/// Whether this start should walk a new player through the first-run questions: a terminal,
-/// a save open and unnamed, and a home that has not been asked before (the language answer
-/// is what records that, so skipping the name does not bring the questions back).
-pub async fn needs_first_run(engine: &Engine, home: &Home) -> bool {
-    if home.interface_language().is_some() {
-        return false;
-    }
-    let open = engine.app_status().await.is_ok_and(|s| s.save.is_some());
-    open && engine.settings().await.is_ok_and(|s| s.user_name.is_none())
+/// Whether this start should walk the player through the first-run questions: a save is
+/// open and has not seen them yet (the same flag the app reads, so answering or skipping
+/// in either front end is enough).
+pub async fn needs_first_run(engine: &Engine, _home: &Home) -> bool {
+    engine
+        .app_status()
+        .await
+        .is_ok_and(|s| s.save.is_some() && s.needs_setup)
 }
 
-/// The first-run questions, each optional: the interface language (default: the corpus's),
-/// a name, a birthday and a short bio. Empty answers skip.
+/// The first-run questions, each optional: the interface language (only while the home has
+/// none: it is shared with the app), a name, a birthday and a short bio. Empty answers skip.
 pub async fn first_run(engine: &Engine, names: &Names, ask: &mut dyn Ask) {
-    ask.say(&names.text("cli.first.language"));
-    let chosen = match ask
-        .line(&names.text("cli.first.language_prompt"))
-        .as_deref()
-        .map(str::trim)
-    {
-        Some("2" | "en" | "english") => InterfaceLanguage::English,
-        _ => InterfaceLanguage::Corpus,
-    };
-    // Recorded even when it stays the default: that is what stops the questions coming back.
-    let reloaded = async {
-        engine.set_interface_language(chosen).await?;
-        names.reload(engine).await
-    }
-    .await;
-    if let Err(e) = reloaded {
-        ask.say(&names.api_error(&e));
-        return;
+    if engine.home().interface_language().is_none() {
+        ask.say(&names.text("cli.first.language"));
+        let chosen = match ask
+            .line(&names.text("cli.first.language_prompt"))
+            .as_deref()
+            .map(str::trim)
+        {
+            Some("2" | "en" | "english") => InterfaceLanguage::English,
+            _ => InterfaceLanguage::Corpus,
+        };
+        let reloaded = async {
+            engine.set_interface_language(chosen).await?;
+            names.reload(engine).await
+        }
+        .await;
+        if let Err(e) = reloaded {
+            ask.say(&names.api_error(&e));
+            return;
+        }
     }
     let Ok(mut settings) = engine.settings().await else {
         return;

@@ -164,3 +164,15 @@ test("a picture chosen on first run is stored with the usual command", async () 
   await waitFor(() => expect(set.length).toBe(1));
   expect(await screen.findByRole("button", { name: "Continue" })).toBeDefined();
 });
+
+test("first run: every question is optional, and skipping them does not bring them back", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp("first=1&form=library");
+  await screen.findByLabelText("What should they call you?");
+  // Nothing filled in: Continue still works.
+  const go = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+  expect(go.disabled).toBe(false);
+  await user.click(go);
+  await waitFor(() => expect(store.getState().status?.needs_setup).toBe(false));
+  expect(store.getState().settings?.user_name).toBeNull();
+});

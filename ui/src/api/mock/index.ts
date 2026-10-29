@@ -128,6 +128,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let library = params.get("form") === "library";
   let language: InterfaceLanguage = "corpus";
   let tts = params.get("tts") !== "0";
+  // The first-run questions were seen (answered or skipped) on this save.
+  let introduced = false;
   let settings: Settings = {
     user_name: params.get("first") === "1" ? null : "Rowan",
     birthday: null,
@@ -566,7 +568,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       ok<AppStatus>({
         form: library ? "library" : "full",
         corpus: corpusLoaded ? { state: "loaded", name: "demo" } : { state: "missing" },
-        needs_setup: settings.user_name === null,
+        needs_setup: settings.user_name === null && !introduced,
         locked,
         changed_elsewhere: changedElsewhere,
         save: openSave,
@@ -1101,6 +1103,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
       if (next.events_per_day > 2) return fail({ code: "invalid", field: "events_per_day" });
       settings = { ...next, bio: next.bio?.trim() || null };
+      introduced = true;
       return ok(null);
     },
     storageUsage: () => ok(storageUsage()),

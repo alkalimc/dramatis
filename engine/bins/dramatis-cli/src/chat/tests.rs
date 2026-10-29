@@ -830,6 +830,19 @@ async fn the_first_run_questions_are_optional_and_asked_once_per_home() {
         Some(api::views::InterfaceLanguage::Corpus)
     );
     assert!(!super::setup::needs_first_run(&e2, &oh).await);
+
+    // A language chosen elsewhere (the app shares it) does not skip the questions on a new
+    // save: only the save's own flag does, and then the language is not asked again.
+    e2.new_save("second".into()).await.unwrap();
+    e2.switch_save("second".into()).await.unwrap();
+    assert!(super::setup::needs_first_run(&e2, &oh).await);
+    let mut again = Script::new(&["Ash", "", ""], &[]);
+    super::setup::first_run(&e2, &n2, &mut again).await;
+    assert_eq!(
+        e2.settings().await.unwrap().user_name.as_deref(),
+        Some("Ash")
+    );
+    assert!(!super::setup::needs_first_run(&e2, &oh).await);
 }
 
 /// Two memories in the world, written the way a wrap-up would.

@@ -359,10 +359,16 @@ impl Engine {
                 AppForm::Library
             },
             corpus: self.state.clone(),
-            needs_setup: world::settings::user_name(&self.w())
-                .ok()
-                .flatten()
-                .is_none(),
+            // Every first-run answer is optional: once the questions were seen, a save
+            // with no name is not asked again.
+            needs_setup: {
+                let w = self.w();
+                world::settings::user_name(&w).ok().flatten().is_none()
+                    && !world::settings::get::<bool>(&w, world::settings::USER_INTRODUCED)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(false)
+            },
             locked: self.locked.load(Ordering::Relaxed),
             changed_elsewhere: self.elsewhere.load(Ordering::Relaxed),
             save: Some(self.open_save()).filter(|s| !s.is_empty()),
@@ -496,6 +502,7 @@ impl Engine {
                 .map_err(world_err)?;
             world::settings::set(&w, world::settings::EVENTS_PER_DAY, &events)
                 .map_err(world_err)?;
+            world::settings::set(&w, world::settings::USER_INTRODUCED, &true).map_err(world_err)?;
             renamed || rebio
         };
         if renamed {

@@ -185,12 +185,14 @@ export function NameAndBirthday(p: {
   setDay: (v: string) => void;
   nameLabel?: string;
   birthdayLabel?: string;
+  /** The first run leaves the name optional; the profile keeps one. */
+  nameOptional?: boolean;
 }) {
   const t = useT();
   return (
     <>
       <label htmlFor={`${p.id}-name`}>{p.nameLabel ?? t("you.name")}</label>
-      <input id={`${p.id}-name`} value={p.name} required autoComplete="nickname" onChange={(e) => p.setName(e.target.value)} />
+      <input id={`${p.id}-name`} value={p.name} required={!p.nameOptional} autoComplete="nickname" onChange={(e) => p.setName(e.target.value)} />
       <fieldset className="birthday">
         <legend>{p.birthdayLabel ?? t("you.birthday")}</legend>
         <label className="field">

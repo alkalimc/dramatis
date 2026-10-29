@@ -17,7 +17,8 @@ use crate::types::{
 pub struct AppStatus {
     pub form: AppForm,
     pub corpus: CorpusState,
-    /// No user name yet: show the first-run form.
+    /// The first-run questions (name, birthday, bio, all optional) have not been seen on
+    /// this save: show them.
     pub needs_setup: bool,
     /// The open save is encrypted and not unlocked: only `unlock` (or switching to another
     /// save) works until then.

@@ -5,7 +5,7 @@ import { LanguageChoice } from "./Language";
 import { BIO_MAX } from "./Profile";
 import { birthday, NameAndBirthday } from "./Quota";
 
-/** First open: the language, a name, an optional birthday and bio, and straight into the app. */
+/** First open: the language, then a name, a birthday and a bio, each optional, and straight into the app. */
 export function FirstOpen() {
   const t = useT();
   const actions = useActions();
@@ -23,9 +23,9 @@ export function FirstOpen() {
         className="card"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!name.trim() || !settings || Array.from(bio.trim()).length > BIO_MAX) return;
+          if (!settings || Array.from(bio.trim()).length > BIO_MAX) return;
           setBusy(true);
-          await actions.saveSettings({ ...settings, user_name: name.trim(), birthday: birthday(month, day), bio: bio.trim() || null });
+          await actions.saveSettings({ ...settings, user_name: name.trim() || null, birthday: birthday(month, day), bio: bio.trim() || null });
           setBusy(false);
         }}
       >
@@ -41,6 +41,7 @@ export function FirstOpen() {
           setDay={setDay}
           nameLabel={t("first.name")}
           birthdayLabel={t("first.birthday")}
+          nameOptional
         />
         <label htmlFor={`${id}-bio`}>{t("first.bio")}</label>
         <textarea id={`${id}-bio`} rows={3} value={bio} onChange={(e) => setBio(e.target.value)} aria-describedby={`${id}-bio-hint`} />
@@ -48,7 +49,7 @@ export function FirstOpen() {
           {t("profile.bio.hint")}
         </p>
         <p className="row end">
-          <button type="submit" disabled={busy || !name.trim() || Array.from(bio.trim()).length > BIO_MAX}>
+          <button type="submit" disabled={busy || Array.from(bio.trim()).length > BIO_MAX}>
             {t("first.submit")}
           </button>
         </p>

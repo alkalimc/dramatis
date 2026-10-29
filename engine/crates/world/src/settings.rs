@@ -11,6 +11,8 @@ use crate::{Error, Result};
 pub const USER_NAME: &str = "user.name";
 pub const USER_BIRTHDAY: &str = "user.birthday";
 pub const USER_BIO: &str = "user.bio";
+/// The user has been through the first-run questions on this save (answered or skipped).
+pub const USER_INTRODUCED: &str = "user.introduced";
 /// Longest personal bio, in characters.
 pub const BIO_MAX: usize = 200;
 pub const INTENSITY: &str = "intensity";
