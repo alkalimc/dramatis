@@ -244,9 +244,17 @@ export function reduce(s: State, a: Action): State {
         loading: omit(s.loading, a.key),
         loadErrors: a.error ? { ...s.loadErrors, [a.key]: a.error } : omit(s.loadErrors, a.key),
       };
-    case "open":
+    case "open": {
+      // An archived conversation stays archived when opened; the list shows where it is,
+      // and goes back to the main view once the user is somewhere else.
+      const target = a.channel ?? s.hostChannel;
+      const row = s.channels.find((c) => c.id === target) ?? (s.temp && s.temp.id === target ? s.temp : null);
+      const toArchived = Boolean(row?.archived);
+      const view = toArchived ? "archived" : s.listAuto ? "chats" : s.listView;
       return {
         ...s,
+        listView: view,
+        listAuto: toArchived ? s.listAuto || s.listView !== "archived" : false,
         channel: a.channel,
         library: false,
         drawer: null,
@@ -255,6 +263,7 @@ export function reduce(s: State, a: Action): State {
         temp: s.temp && s.temp.id === a.channel ? s.temp : null,
         unread: omit(s.unread, a.channel ?? s.hostChannel ?? ""),
       };
+    }
     case "userAvatar":
       return { ...s, userAvatar: a.avatar };
     case "temp":
@@ -266,7 +275,7 @@ export function reduce(s: State, a: Action): State {
     case "theme":
       return { ...s, theme: a.theme };
     case "listView":
-      return { ...s, listView: a.view, menuOpen: false };
+      return { ...s, listView: a.view, listAuto: false, menuOpen: false };
     case "menu":
       return { ...s, menuOpen: a.open };
     case "find":

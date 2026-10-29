@@ -297,3 +297,27 @@ test("the library is a choice that opening a conversation ends", () => {
   s = reduce(reduce(s, { type: "library", on: true }), { type: "library", on: false });
   expect(s.library).toBe(false);
 });
+
+test("opening an archived conversation shows the archived list until the user goes elsewhere", () => {
+  const row = (id: string, archived: boolean): ChannelSummary => ({ id, kind: "direct", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived, unread: 0 });
+  let s = reduce(initialState(), { type: "channels", channels: [row("a1", true), row("c1", false)] });
+  s = reduce(s, { type: "open", channel: "a1" });
+  expect(s.listView).toBe("archived");
+  // Still archived: opening does not bring it back.
+  expect(s.channels.find((c) => c.id === "a1")?.archived).toBe(true);
+  // Another archived one keeps the view; a main one returns to it.
+  s = reduce(s, { type: "channels", channels: [row("a1", true), row("a2", true), row("c1", false)] });
+  expect(reduce(s, { type: "open", channel: "a2" }).listView).toBe("archived");
+  s = reduce(s, { type: "open", channel: "c1" });
+  expect(s.listView).toBe("chats");
+
+  // A list the user switched to by hand stays where they put it.
+  let manual = reduce(initialState(), { type: "channels", channels: [row("a1", true), row("c1", false)] });
+  manual = reduce(manual, { type: "listView", view: "archived" });
+  manual = reduce(manual, { type: "open", channel: "a1" });
+  manual = reduce(manual, { type: "open", channel: "c1" });
+  expect(manual.listView).toBe("archived");
+  // Backing out by hand ends the automatic switch.
+  s = reduce(reduce(s, { type: "open", channel: "a1" }), { type: "listView", view: "chats" });
+  expect(reduce(s, { type: "open", channel: "a1" }).listView).toBe("archived");
+});

@@ -766,10 +766,30 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (line.tool !== "create_group") return fail({ code: "invalid", field: "action" });
       if (line.channel && channels.has(line.channel)) return ok(line.channel);
       const id = nextId("g");
-      addChannel({ id, kind: "group", origin: "user", participants: line.members, topic: null, mode: "frozen" });
+      const purpose = line.purpose ?? null;
+      addChannel({ id, kind: "group", origin: "user", participants: line.members, topic: purpose, mode: "frozen" });
+      if (purpose) {
+        const by = m.author.kind === "person" ? (persons.get(m.author.id)?.name ?? "Someone") : "Host";
+        msg(id, HOST, `${by} suggested this group: ${purpose}`, 0);
+      }
       m.actions[action] = { ...line, channel: id };
       setTimeout(() => announceWorld({ kind: "channel", id }));
       return ok(id);
+    },
+    openFound: (message, action, person) => {
+      const m = [...channels.values()].flatMap((c) => c.log).find((x) => x.id === message);
+      const line = m?.actions[action];
+      if (!m || !line) return fail({ code: "not_found" });
+      if (line.tool !== "find_people" || !(line.persons ?? []).some((p) => p.id === person)) return fail({ code: "invalid", field: "action" });
+      const p = persons.get(person);
+      if (!p) return fail({ code: "not_found" });
+      if (p.mode === "disabled") return fail({ code: "disabled", person });
+      const cid = direct(person);
+      const home = channels.get(cid);
+      const by = m.author.kind === "person" ? (persons.get(m.author.id)?.name ?? "Someone") : "Host";
+      const text = `${by} suggested you could help the user with: ${line.topic}`;
+      if (home && !home.log.some((x) => x.service && x.text === text)) msg(cid, USER, text, 0, { service: true });
+      return ok(cid);
     },
     deleteGroup: (channel) => {
       if (channels.get(channel)?.kind !== "group") return fail({ code: "not_found" });
