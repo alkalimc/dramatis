@@ -110,6 +110,28 @@ test("a host message that found people or made a group offers them, and a click 
   expect(store.getState().channel).toBe("dm:mira");
 });
 
+test("a person's group suggestion is a button that makes the group only when pressed", async () => {
+  const { store } = renderWith(
+    <MessageView
+      showPlay={false}
+      message={{
+        ...base,
+        channel: "dm:mira",
+        author: { kind: "person", id: "mira" },
+        text: "Oren knows this better than I do.",
+        actions: [{ tool: "create_group", members: [{ id: "mira", name: "Mira" }, { id: "oren", name: "Oren" }], channel: null }],
+      }}
+    />,
+  );
+  expect(screen.getByText(/suggesting a group with Mira, Oren/)).toBeDefined();
+  expect(store.getState().channel).toBeNull();
+  await act(async () => {
+    screen.getByRole("button", { name: "Start a group with Mira, Oren" }).click();
+  });
+  const open = store.getState().channel;
+  expect(store.getState().channels.find((c) => c.id === open)?.kind).toBe("group");
+});
+
 test("a host message that listed conversations offers each one", async () => {
   const { store } = renderWith(
     <MessageView

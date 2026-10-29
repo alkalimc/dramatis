@@ -17,10 +17,14 @@ use crate::error::{Error, Result};
 use crate::session::{LogKind, Turn};
 use crate::text::Names;
 use crate::view;
+use world::quota::CallKind;
 
 /// Most conversations `list_channels` returns: enough to find one, few enough to offer
 /// as buttons.
 const LISTED_CHANNELS_MAX: usize = 12;
+
+/// Most colleagues a person's group suggestion may name, apart from the person.
+const SUGGESTED_GROUP_MAX: usize = 4;
 
 /// A refused call: its text goes back to the model as the tool's output.
 struct Refusal(String);
@@ -212,6 +216,7 @@ impl Agent {
                 Ok(Ok(m.text))
             }
             SharedCall::RequestJoin(r) => self.request_join(turn, &me, r, names),
+            SharedCall::AskHost(a) => self.ask_host(turn, &me, a, names),
             SharedCall::Remember(r) => {
                 self.show_action(
                     turn,
@@ -369,6 +374,99 @@ impl Agent {
             }
             Err(e) => Ok(Err(self.world_refusal(names, e)?)),
         }
+    }
+
+    /// A person asks the host to arrange something. Only a suggestion: it becomes an action
+    /// line the front end offers as a choice, and nothing is created or opened until the
+    /// user takes it. One per reply; colleagues from the roster only; the topic is the
+    /// person's own wording, never the user's memories.
+    fn ask_host(
+        &self,
+        turn: &mut Turn,
+        me: &PersonId,
+        a: tools::AskHost,
+        names: &Names,
+    ) -> Result<Outcome> {
+        let unavailable = || self.refuse(names, "harness.error.unavailable", "");
+        let spoken = turn.actions.iter().any(|x| {
+            matches!(
+                x,
+                ToolAction::FindPeople { .. } | ToolAction::CreateGroup { .. }
+            )
+        });
+        if spoken {
+            return Ok(Err(self.refuse(names, "harness.error.once", "")));
+        }
+        // Unprompted offers stop in the quiet band, like unprompted speech.
+        if !self.decide(CallKind::Opening)?.allowed() {
+            return Ok(Err(unavailable()));
+        }
+        let offer = self.offerable(&self.db())?;
+        match (a.find, a.group) {
+            (Some(topic), None) => {
+                let topic = topic.trim().to_owned();
+                if topic.is_empty() {
+                    return Ok(Err(unavailable()));
+                }
+                let scope: Vec<String> = offer.into_iter().filter(|p| p != me.as_str()).collect();
+                let people =
+                    self.ix()
+                        .find_people(&topic, Some(&scope), self.config.find_people.k, &[])?;
+                let found = people
+                    .persons
+                    .iter()
+                    // Weak evidence is no reason to point the user at someone.
+                    .filter(|m| m.level != index::Level::Low)
+                    .map(|m| view::person_ref(self.ix().folio(), &m.person))
+                    .collect::<Result<Vec<_>>>()?;
+                if found.is_empty() {
+                    return Ok(Err(unavailable()));
+                }
+                self.show_action(
+                    turn,
+                    ToolAction::FindPeople {
+                        topic,
+                        persons: found,
+                    },
+                )?;
+            }
+            (None, Some(group)) => {
+                let mut members = vec![me.clone()];
+                for id in group {
+                    let id = PersonId::from(id.trim());
+                    if !members.contains(&id) {
+                        members.push(id);
+                    }
+                }
+                let ok = members.len() >= 2
+                    && members.len() <= SUGGESTED_GROUP_MAX + 1
+                    && members
+                        .iter()
+                        .all(|m| offer.iter().any(|o| o == m.as_str()));
+                if !ok {
+                    return Ok(Err(unavailable()));
+                }
+                let refs = members
+                    .iter()
+                    .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
+                    .collect::<Result<Vec<_>>>()?;
+                self.show_action(
+                    turn,
+                    ToolAction::CreateGroup {
+                        members: refs,
+                        channel: None,
+                    },
+                )?;
+            }
+            _ => {
+                return Ok(Err(self.refuse(
+                    names,
+                    "harness.error.arguments",
+                    "find or group",
+                )));
+            }
+        }
+        Ok(Ok(self.say(names, "harness.suggested", &[])))
     }
 
     fn host(

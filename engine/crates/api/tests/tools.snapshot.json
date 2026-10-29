@@ -877,6 +877,37 @@
           }
         },
         "type": "function"
+      },
+      {
+        "function": {
+          "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. The user is only shown the suggestion and decides; nothing happens\nbefore. Give exactly one of `find` and `group`, at most once per reply.",
+          "name": "ask_host",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "find": {
+                "description": "A subject, in plain words, for the host to find colleagues who know it.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "group": {
+                "description": "Roster ids of colleagues for the host to propose a group with; you are included.",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "function"
       }
     ],
     "messages": [
@@ -1094,6 +1125,34 @@
           "type": "object"
         },
         "name": "wrapup"
+      },
+      {
+        "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. The user is only shown the suggestion and decides; nothing happens\nbefore. Give exactly one of `find` and `group`, at most once per reply.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "find": {
+              "description": "A subject, in plain words, for the host to find colleagues who know it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "group": {
+              "description": "Roster ids of colleagues for the host to propose a group with; you are included.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "name": "ask_host"
       }
     ],
     "responses": [
@@ -1310,6 +1369,35 @@
               "description": "A summary of the conversation so far, when asked for one.",
               "type": [
                 "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Ask the host to arrange something for the user: someone who knows a subject, or a group\nwith some colleagues. The user is only shown the suggestion and decides; nothing happens\nbefore. Give exactly one of `find` and `group`, at most once per reply.",
+        "name": "ask_host",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "find": {
+              "description": "A subject, in plain words, for the host to find colleagues who know it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "group": {
+              "description": "Roster ids of colleagues for the host to propose a group with; you are included.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": [
+                "array",
                 "null"
               ]
             }

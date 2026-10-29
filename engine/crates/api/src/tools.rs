@@ -62,6 +62,21 @@ pub struct RequestJoin {
     pub turns: Option<u32>,
 }
 
+/// Ask the host to arrange something for the user: someone who knows a subject, or a group
+/// with some colleagues. The user is only shown the suggestion and decides; nothing happens
+/// before. Give exactly one of `find` and `group`, at most once per reply.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AskHost {
+    /// A subject, in plain words, for the host to find colleagues who know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<String>,
+    /// Roster ids of colleagues for the host to propose a group with; you are included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1))]
+    pub group: Option<Vec<String>>,
+}
+
 /// Remember one thing from this conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -230,6 +245,7 @@ pub enum SharedCall {
     Search(Search),
     GetChunk(GetChunk),
     RequestJoin(RequestJoin),
+    AskHost(AskHost),
     Remember(Remember),
     Report(Report),
     Wrapup(Wrapup),
@@ -276,6 +292,7 @@ impl SharedCall {
             "search" => Self::Search(args(name, raw)?),
             "get_chunk" => Self::GetChunk(args(name, raw)?),
             "request_join" => Self::RequestJoin(args(name, raw)?),
+            "ask_host" => Self::AskHost(args(name, raw)?),
             "remember" => Self::Remember(args(name, raw)?),
             "report" => Self::Report(args(name, raw)?),
             "wrapup" => Self::Wrapup(args(name, raw)?),
@@ -362,6 +379,7 @@ pub fn shared_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<Remember>("tool", "remember", overrides),
         spec::<Report>("tool", "report", overrides),
         spec::<Wrapup>("tool", "wrapup", overrides),
+        spec::<AskHost>("tool", "ask_host", overrides),
     ]
 }
 

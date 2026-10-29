@@ -80,6 +80,16 @@ pub enum Frontend {
     Terminal,
 }
 
+impl Frontend {
+    /// The word wording keys use for this front end (`harness.guide.<key>`).
+    pub fn key(self) -> &'static str {
+        match self {
+            Frontend::App => "app",
+            Frontend::Terminal => "terminal",
+        }
+    }
+}
+
 /// The parameter groups the agent reads, and where request notes go.
 #[derive(Debug, Clone, Default)]
 pub struct Config {

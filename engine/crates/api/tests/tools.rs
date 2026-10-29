@@ -66,7 +66,8 @@ fn every_parsed_name_is_offered() {
             "request_join",
             "remember",
             "report",
-            "wrapup"
+            "wrapup",
+            "ask_host"
         ]
     );
     assert_eq!(

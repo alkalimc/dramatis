@@ -1153,6 +1153,16 @@ impl Agent {
     /// moment is not a presence occasion.
     pub async fn presence(&self, opened: bool) -> Result<PresenceOutcome> {
         let now = self.now();
+        // The very first open: the host's pre-written welcome, no model call, so it is
+        // instant, free and the same with or without an endpoint.
+        if opened && self.host_never_spoke()? {
+            self.host_line(&format!("host.intro.{}", self.config.frontend.key()), &[])?;
+            return Ok(PresenceOutcome {
+                digest: self.world_digest(now)?,
+                host_spoke: true,
+                opened: None,
+            });
+        }
         let not_a_return = |me: &Self| -> Result<Option<PresenceOutcome>> {
             if world::presence::is_return(&me.db(), now.ms, opened, &me.config.world)? {
                 return Ok(None);
@@ -1196,19 +1206,15 @@ impl Agent {
         if !has_endpoint {
             return Ok(out);
         }
-        let introduce = opened && self.host_never_spoke()?;
-        if introduce && self.decide(CallKind::HostLine)?.allowed() {
-            out.host_spoke = self.host_harness(None).await?;
-        }
         for call in planned.calls {
             match call {
                 Call::Wrapup { channel } => {
                     self.wrapup_ended(channel).await?;
                 }
-                Call::HostLine(d) if !introduce => {
+                Call::HostLine(d) => {
                     let d = self.persona_digest(d);
                     if !d.is_empty() {
-                        out.host_spoke = self.host_harness(Some(&d)).await?;
+                        out.host_spoke = self.host_harness(&d).await?;
                         if out.host_spoke {
                             let conn = self.db();
                             world::presence::mark_announced(
@@ -1220,7 +1226,6 @@ impl Agent {
                         }
                     }
                 }
-                Call::HostLine(_) => {}
                 Call::Opening(o) => {
                     if self.opening(&o).await? {
                         out.opened = Some((o.person.clone(), o.channel));
@@ -1371,17 +1376,14 @@ impl Agent {
         Ok(out)
     }
 
-    /// A harness turn in the host's own log: the digest line, or the introduction on the
-    /// very first open. One call, no tools, nothing the user asked for.
-    async fn host_harness(&self, digest: Option<&Digest>) -> Result<bool> {
+    /// A harness turn in the host's own log: the digest line. One call, no tools, nothing
+    /// the user asked for.
+    async fn host_harness(&self, digest: &Digest) -> Result<bool> {
         let ch = channel::host(&self.db())?;
         let _turn = self.lock_channel(ch).await;
         let seg = self.ensure_segment(ch, None).await?;
         let names = self.segment_names(seg)?;
-        let mut lines = vec![match digest {
-            Some(d) => self.digest_text(d, &names)?,
-            None => self.corpus.wording.fill("harness.introduce", &names, &[]),
-        }];
+        let mut lines = vec![self.digest_text(digest, &names)?];
         lines.push(self.context_line(seg, None, None)?);
         self.append_user(
             seg,
@@ -1397,7 +1399,7 @@ impl Agent {
     pub(crate) fn digest_text(&self, d: &Digest, names: &Names) -> Result<String> {
         let w = &self.corpus.wording;
         if d.is_empty() {
-            return Ok(w.fill("harness.nothing_found", names, &[]));
+            return Ok(w.fill("harness.digest.none", names, &[]));
         }
         let mut lines = vec![w.fill("harness.digest", names, &[])];
         for item in &d.items {

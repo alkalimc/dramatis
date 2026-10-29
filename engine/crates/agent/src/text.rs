@@ -24,13 +24,35 @@ const DEFAULTS: &[(&str, &str)] = &[
          send it again later.",
     ),
     (
+        "host.intro.terminal",
+        "Welcome. You can talk to anyone here with /talk <name>, start a group with /group, \
+         and ask me for anything: finding someone who knows a subject, or a summary of what \
+         changed. Requests, memories, saves and settings all have commands; /help lists them, \
+         and I can explain any of them.",
+    ),
+    (
+        "host.intro.app",
+        "Welcome. You can talk to anyone on the Roster, start a group, and ask me for anything: \
+         finding someone who knows a subject, or a summary of what changed. Requests, memories, \
+         saves and settings each have a page; ask me and I will explain any of them.",
+    ),
+    (
+        "harness.host.manner",
+        "You assist {user}. Your voice is warm, calm and brief. You lay out options and \
+         {user} picks; whether {user} acts, and when, is {user}'s alone and neither is better. \
+         You set no deadlines, count no time down, say nothing about how often {user} looks, \
+         and suspect no one: when records differ you describe what you see without guessing \
+         why. When nothing is new you say so in a line, or stay quiet.",
+    ),
+    (
+        "harness.guide.intro",
+        "{user} was welcomed with these words; tell it again, or expand on it, when asked how \
+         things work: {intro}",
+    ),
+    (
         "harness.picture_unseen",
         "{user} attached a picture here, but this channel cannot show pictures, so it \
          could not be seen.",
-    ),
-    (
-        "harness.introduce",
-        "{user} opens the app for the first time. Introduce yourself in a few lines.",
     ),
     (
         "harness.rules",
@@ -180,6 +202,10 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.opening.words", "{user} said recently: {text}"),
     ("harness.digest", "Since {user} last looked:"),
+    (
+        "harness.digest.none",
+        "Nothing has changed since {user} last looked.",
+    ),
     ("harness.digest.messaged", "- {name} sent messages."),
     (
         "harness.digest.replied",
@@ -203,6 +229,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Could not read the arguments: {detail}",
     ),
     ("harness.error.refused", "Refused: {detail}"),
+    (
+        "harness.error.once",
+        "One suggestion is enough for a reply.",
+    ),
     (
         "harness.channels",
         "The conversations {user} has, most recent first:",
@@ -287,6 +317,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, scheduled, chased or followed up; that is {user}'s to do.",
     ),
     ("harness.done", "Done."),
+    (
+        "harness.suggested",
+        "The host has the suggestion; {user} decides, and nothing has happened yet.",
+    ),
     ("harness.asked", "{name} is looking into it."),
     ("harness.group_created", "Group {id} created."),
     ("harness.remembered", "Noted."),

@@ -26,10 +26,11 @@ export function ActionLines({ author, actions }: { author: Author; actions: Tool
   );
 }
 
-/** What the host offered the user: each button takes them to that conversation. */
+/** What the host or a person offered the user: each button takes them to a conversation, or makes the suggested group. */
 function Choices({ actions }: { actions: ToolAction[] }) {
   const t = useT();
   const acts = useActions();
+  const api = useApi();
   const choices = useMemo(() => choicesOf(actions), [actions]);
   if (choices.length === 0) return null;
   return (
@@ -38,6 +39,18 @@ function Choices({ actions }: { actions: ToolAction[] }) {
         c.kind === "person" ? (
           <button key={`p:${c.id}`} type="button" className="ghost" onClick={() => acts.openDirect(c.id)}>
             {t("choice.person", { name: c.name })}
+          </button>
+        ) : c.kind === "new_group" ? (
+          <button
+            key={`n:${c.members.join(",")}`}
+            type="button"
+            className="ghost"
+            onClick={async () => {
+              const channel = await acts.attempt(api.commands.createGroup(c.members, null));
+              if (channel) await acts.openChannel(channel);
+            }}
+          >
+            {t("choice.new_group", { names: nameList(c.names, t) })}
           </button>
         ) : (
           <button key={`g:${c.channel}`} type="button" className="ghost" onClick={() => acts.openChannel(c.channel)}>
@@ -267,7 +280,7 @@ export const MessageView = memo(function MessageView({
       </div>
       {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}
     </article>
-    {message.author.kind === "host" && <Choices actions={message.actions} />}
+    {message.author.kind !== "user" && <Choices actions={message.actions} />}
     </>
   );
 });

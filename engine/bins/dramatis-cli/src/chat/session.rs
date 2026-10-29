@@ -478,6 +478,14 @@ impl Session {
                 };
                 self.enter_group(channel.clone(), group.members());
             }
+            // Accepting is what creates it.
+            group @ Offer::NewGroup { .. } => {
+                let members = group.members();
+                match self.engine.create_group(members.clone(), None).await {
+                    Ok(channel) => self.enter_group(channel, members),
+                    Err(e) => self.term.error(&e.to_string()),
+                }
+            }
         }
     }
 

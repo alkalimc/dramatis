@@ -12,6 +12,7 @@ action.request_join.person
 action.request_join.topic
 action.search
 action.set_mode
+action.suggest_group
 action.target.group
 activity.birthday
 activity.came_by
@@ -99,6 +100,7 @@ chatmenu.unarchive
 chatmenu.unpin
 chatmenu.unread
 choice.group
+choice.new_group
 choice.person
 citation.gone
 citation.label
@@ -272,11 +274,13 @@ harness.digest.birthday
 harness.digest.came_by
 harness.digest.commitment_due
 harness.digest.messaged
+harness.digest.none
 harness.digest.replied
 harness.done
 harness.error.arguments
 harness.error.not_asked
 harness.error.not_found
+harness.error.once
 harness.error.refused
 harness.error.unavailable
 harness.error.wrapup_only
@@ -290,6 +294,7 @@ harness.guide.app.name
 harness.guide.app.resend
 harness.guide.app.saves
 harness.guide.app.sources
+harness.guide.intro
 harness.guide.limits
 harness.guide.terminal
 harness.guide.terminal.channels
@@ -300,9 +305,9 @@ harness.guide.terminal.name
 harness.guide.terminal.resend
 harness.guide.terminal.saves
 harness.guide.terminal.sources
+harness.host.manner
 harness.host_offline
 harness.interject
-harness.introduce
 harness.joined
 harness.lines
 harness.low_match
@@ -326,6 +331,7 @@ harness.recent
 harness.remembered
 harness.rules
 harness.speaker
+harness.suggested
 harness.summary
 harness.task
 harness.task.active
@@ -339,6 +345,8 @@ harness.topic
 harness.wrapup
 harness.wrapup.shape
 harness.wrapup.summary
+host.intro.app
+host.intro.terminal
 host.name
 host.quota_exhausted
 host.rate_limited
@@ -553,6 +561,7 @@ system.tab.endpoints
 system.tab.quota
 system.tab.saves
 system.title
+tool.ask_host
 tool.get_chunk
 tool.host.ask
 tool.host.create_group
