@@ -49,6 +49,8 @@ pub struct Options {
     pub restart: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The system's file dialog for a corpus, where the front end has one.
     pub choose_file: Option<api::engine::ChooseFile>,
+    /// Opens a web address in the system browser, where the front end can.
+    pub open_url: Option<api::engine::OpenUrl>,
 }
 
 /// Hands the agent's events to the engine's sink, as the seam's own event type.
@@ -102,6 +104,7 @@ impl Runtime {
             seen,
             restart: options.restart.unwrap_or_else(|| Arc::new(|| {})),
             choose_file: options.choose_file,
+            open_url: options.open_url,
             ..Ports::default()
         };
         let bridge = folio

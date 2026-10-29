@@ -554,6 +554,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         home_dir: "/Users/demo/.dramatis",
         saves_dir: "/Users/demo/.dramatis/saves",
       }),
+    // The preview opens links itself; the call exists so the app's path can be tested.
+    openExternal: (url) => (/^https?:\/\//.test(url) ? ok(null) : fail({ code: "invalid", field: "url" })),
     setCorpus: (path) => {
       const p = path.trim().replace(/^["']|["']$/g, "");
       if (!p || p.includes("missing")) return fail({ code: "not_found" });

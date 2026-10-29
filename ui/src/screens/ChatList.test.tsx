@@ -57,7 +57,11 @@ test("rows are ordered by last activity, and a new message moves its chat to the
   });
   expect(names()[0]).toBe(last);
   const top = rowsOf(nav)[0];
-  expect(within(top.parentElement!).getByRole("button", { name: "1 unread" })).toBeDefined();
+  const badge = within(top.parentElement!).getByRole("button", { name: "1 unread" });
+  // The shared pill, beside the row rather than inside its time line.
+  expect(badge.className).toBe("badge");
+  expect(badge.parentElement).toBe(top.parentElement);
+  expect(top.contains(badge)).toBe(false);
   // Opening it clears the count.
   expect(store.getState().unread[target.id]).toBe(1);
   await userEvent.setup().click(top);

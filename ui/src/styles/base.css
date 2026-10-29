@@ -383,11 +383,15 @@ legend {
   padding: var(--s-2) var(--s-3);
   margin: var(--s-1) 0;
 }
+/* A circle for one or two digits; only a third character widens it. */
 .badge {
   flex: none;
+  box-sizing: border-box;
+  display: inline-block;
   min-width: var(--badge);
   height: var(--badge);
-  padding: 0 var(--s-2);
+  min-height: 0;
+  padding: 0;
   border-radius: var(--r-pill);
   border: none;
   background: var(--accent-fill);
@@ -396,6 +400,14 @@ legend {
   font-weight: var(--fw-strong);
   line-height: var(--badge);
   text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.badge.wide {
+  padding: 0 var(--s-2);
+}
+.badge.quiet {
+  background: var(--pill);
+  color: var(--ink);
 }
 
 /* ---- scrollbars: thin, quiet, the same everywhere ---- */

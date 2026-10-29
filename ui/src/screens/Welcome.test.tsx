@@ -93,6 +93,7 @@ test("first run ends with the model step, then the host speaks first", async () 
   renderApp("first=1&form=library");
   await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(await screen.findByRole("button", { name: "Keep the default" }));
   expect(await screen.findByRole("heading", { name: "Connect a language model" })).toBeDefined();
 
   await user.type(screen.getByLabelText("Address (base URL)"), "api.example.com");
@@ -113,8 +114,53 @@ test("the model step can be skipped, and picking a starting point fills the form
   renderApp("first=1&form=library");
   await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(await screen.findByRole("button", { name: "Keep the default" }));
   await user.selectOptions(await screen.findByLabelText("Start from"), "local");
   expect((screen.getByLabelText("Address (base URL)") as HTMLInputElement).value).toBe("http://127.0.0.1:8080/v1");
   await user.click(screen.getByRole("button", { name: "Skip for now" }));
   expect(await screen.findByText(/Not connected\./)).toBeDefined();
+});
+
+test("first run asks for a picture after the name and before the model, and it can be skipped", async () => {
+  const user = userEvent.setup();
+  const set: unknown[] = [];
+  renderApp("first=1&form=library", (api) => ({
+    ...api,
+    commands: {
+      ...api.commands,
+      setUserAvatar: (image) => {
+        set.push(image);
+        return api.commands.setUserAvatar(image);
+      },
+    },
+  }));
+  await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("heading", { name: "Your picture" })).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Connect a language model" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Keep the default" }));
+  expect(await screen.findByRole("heading", { name: "Connect a language model" })).toBeDefined();
+  expect(set).toEqual([]);
+});
+
+test("a picture chosen on first run is stored with the usual command", async () => {
+  const user = userEvent.setup();
+  const set: unknown[] = [];
+  const { container } = renderApp("first=1&form=library", (api) => ({
+    ...api,
+    commands: {
+      ...api.commands,
+      setUserAvatar: (image) => {
+        set.push(image);
+        return api.commands.setUserAvatar(image);
+      },
+    },
+  }));
+  await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("heading", { name: "Your picture" });
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  await user.upload(input, new File(["x"], "me.png", { type: "image/png" }));
+  await waitFor(() => expect(set.length).toBe(1));
+  expect(await screen.findByRole("button", { name: "Continue" })).toBeDefined();
 });

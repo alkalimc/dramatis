@@ -868,6 +868,7 @@ button.wide {
   align-items: flex-start;
 }
 .lock-badge {
+  padding: 0 var(--s-2);
   display: inline-flex;
   align-items: center;
   gap: var(--s-1);

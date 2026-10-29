@@ -273,6 +273,7 @@ export function createActions(api: Api, store: Store) {
     refreshChannels,
     refreshQuota,
     refreshEndpoints,
+    refreshUserAvatar,
     refreshClock,
     loadHistory,
     reloadHistory,

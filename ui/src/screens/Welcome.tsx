@@ -4,8 +4,11 @@ import { useT } from "../i18n";
 import type { Key } from "../i18n";
 import { when } from "../lib/format";
 import { useActions, useApi, useStore } from "../store";
+import { readAvatar } from "../lib/image";
+import { UserAvatar } from "../ui/Avatar";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
+import { PictureButtons } from "./Profile";
 import { FolderNote, useOpenSave } from "./Saves";
 import { PasswordDialog } from "./Unlock";
 
@@ -198,6 +201,42 @@ export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void })
 }
 
 const WIRES: WireApi[] = ["chat", "responses", "messages"];
+
+/** After the name on a first run: a picture to upload, or the default portrait. Skippable. */
+export function AvatarStep({ onDone }: { onDone: () => void }) {
+  const t = useT();
+  const actions = useActions();
+  const avatar = useStore((s) => s.userAvatar);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void actions.refreshUserAvatar();
+  }, [actions]);
+  return (
+    <main className="first-open setup">
+      <div className="card">
+        <h1>{t("first.avatar.title")}</h1>
+        <p>{t("first.avatar.hint")}</p>
+        <p className="avatar-pick">
+          <UserAvatar size="xl" />
+        </p>
+        <PictureButtons
+          clearable={false}
+          onClear={() => {}}
+          onPick={async (f) => {
+            setBusy(true);
+            await actions.setUserAvatar(await readAvatar(f));
+            setBusy(false);
+          }}
+        />
+        <p className="row end">
+          <button type="button" disabled={busy} onClick={onDone}>
+            {t(avatar && !busy ? "first.avatar.next" : "first.avatar.skip")}
+          </button>
+        </p>
+      </div>
+    </main>
+  );
+}
 
 /** The last first-run step: one endpoint form (or just the key), skippable. */
 export function ModelStep({ onDone }: { onDone: () => void }) {

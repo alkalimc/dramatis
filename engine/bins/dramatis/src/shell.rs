@@ -223,6 +223,7 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
         password,
         restart: Some(again),
         choose_file: Some(dialog),
+        open_url: Some(Arc::new(open_in_browser)),
         ..Options::default()
     };
     let Runtime { engine, bridge } = Runtime::open(home, folio, sink.clone(), options)?;
@@ -374,4 +375,22 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     Ok(())
+}
+
+/// Hand an http(s) address to the system's default browser; the engine has already checked
+/// the address, and it goes as one argument, never through a shell.
+fn open_in_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut command = std::process::Command::new("xdg-open");
+    if let Err(e) = command.arg(url).spawn() {
+        eprintln!("dramatis: could not open the browser: {e}");
+    }
 }

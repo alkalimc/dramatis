@@ -60,7 +60,12 @@ pub struct Ports {
     /// Shows the system's file dialog for a corpus and answers the path chosen (`None`:
     /// cancelled). Absent where there is no dialog; the user types the path instead.
     pub choose_file: Option<ChooseFile>,
+    /// Opens a web address in the system browser. Absent where there is none.
+    pub open_url: Option<OpenUrl>,
 }
+
+/// See [`Ports::open_url`].
+pub type OpenUrl = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// See [`Ports::choose_file`].
 pub type ChooseFile = Arc<dyn Fn() -> Option<String> + Send + Sync>;
@@ -78,6 +83,7 @@ impl Default for Ports {
             seen: Arc::default(),
             restart: Arc::new(|| {}),
             choose_file: None,
+            open_url: None,
         }
     }
 }
@@ -749,6 +755,9 @@ impl Api for Engine {
             .ok_or(ApiError::NotImplemented)?;
         // The dialog blocks until the user answers.
         tokio::task::spawn_blocking(move || ask()).await.map_err(io)
+    }
+    async fn open_external(&self, url: String) -> ApiResult<()> {
+        self.open_external_impl(&url)
     }
     async fn set_corpus(&self, path: String) -> ApiResult<()> {
         self.set_corpus_impl(&path)

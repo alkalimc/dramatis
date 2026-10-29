@@ -191,6 +191,7 @@ test("first open: name, then the host introduces itself with the coldstart card"
   renderApp("first=1");
   await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(await screen.findByRole("button", { name: "Keep the default" }));
   expect(await screen.findByRole("heading", { name: "You could start with them" })).toBeDefined();
   expect(await within(await screen.findByRole("log")).findByText(/Hello, Rowan\./)).toBeDefined();
   expect(screen.getByText("They are all frozen now: they answer when you reach out.")).toBeDefined();
