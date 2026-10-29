@@ -77,7 +77,7 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Reference passages arrive marked [#id]. A passage already shown appears again only as \
          its [#id]. Write the reply as ordinary speech with no marks inside it. Only if the \
          reply really drew on specific passages, end it with one final line listing their \
-         [#id] marks, at most two, and nothing else on that line. A line is never added or \
+         [#id] marks, at most three, and nothing else on that line. A line is never added or \
          shaped to have something to cite; most replies cite nothing, and tone and common \
          knowledge are never cited.",
     ),
