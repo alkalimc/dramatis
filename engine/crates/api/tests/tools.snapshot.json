@@ -178,6 +178,35 @@
       },
       {
         "function": {
+          "description": "Read one passage in full, optionally with its neighbours.",
+          "name": "get_chunk",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "The passage id, as shown in `[#id]`.",
+                "type": "string"
+              },
+              "neighbours": {
+                "description": "How many adjacent passages to include on each side.",
+                "maximum": 3,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
           "description": "Write down one thing for the user. Only when the user asks.",
           "name": "remember",
           "parameters": {
@@ -418,6 +447,32 @@
         "name": "search"
       },
       {
+        "description": "Read one passage in full, optionally with its neighbours.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "The passage id, as shown in `[#id]`.",
+              "type": "string"
+            },
+            "neighbours": {
+              "description": "How many adjacent passages to include on each side.",
+              "maximum": 3,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "name": "get_chunk"
+      },
+      {
         "description": "Write down one thing for the user. Only when the user asks.",
         "input_schema": {
           "additionalProperties": false,
@@ -653,6 +708,33 @@
         "type": "function"
       },
       {
+        "description": "Read one passage in full, optionally with its neighbours.",
+        "name": "get_chunk",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "The passage id, as shown in `[#id]`.",
+              "type": "string"
+            },
+            "neighbours": {
+              "description": "How many adjacent passages to include on each side.",
+              "maximum": 3,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
         "description": "Write down one thing for the user. Only when the user asks.",
         "name": "remember",
         "parameters": {
@@ -811,7 +893,7 @@
                 ]
               },
               "turns": {
-                "description": "Turns to hand over from your own, while looking into a request. Default 1.",
+                "description": "Turns to hand over from your own, while looking into a request: at least 1 (the\ndefault), and at most what you have left after this one. Ignored outside a request.",
                 "minimum": 1,
                 "type": [
                   "integer",
@@ -1060,7 +1142,7 @@
               ]
             },
             "turns": {
-              "description": "Turns to hand over from your own, while looking into a request. Default 1.",
+              "description": "Turns to hand over from your own, while looking into a request: at least 1 (the\ndefault), and at most what you have left after this one. Ignored outside a request.",
               "minimum": 1,
               "type": [
                 "integer",
@@ -1302,7 +1384,7 @@
               ]
             },
             "turns": {
-              "description": "Turns to hand over from your own, while looking into a request. Default 1.",
+              "description": "Turns to hand over from your own, while looking into a request: at least 1 (the\ndefault), and at most what you have left after this one. Ignored outside a request.",
               "minimum": 1,
               "type": [
                 "integer",

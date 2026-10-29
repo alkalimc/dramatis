@@ -58,7 +58,8 @@ pub struct RequestJoin {
     /// What they should know about, when you do not know who.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
-    /// Turns to hand over from your own, while looking into a request. Default 1.
+    /// Turns to hand over from your own, while looking into a request: at least 1 (the
+    /// default), and at most what you have left after this one. Ignored outside a request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
     pub turns: Option<u32>,
@@ -285,6 +286,7 @@ pub enum HostCall {
     CreateGroup(CreateGroup),
     SetMode(SetMode),
     Search(HostSearch),
+    GetChunk(GetChunk),
     Remember(HostRemember),
     ListChannels(ListChannels),
     Promise(Promise),
@@ -335,6 +337,7 @@ impl HostCall {
             "create_group" => Self::CreateGroup(args(name, raw)?),
             "set_mode" => Self::SetMode(args(name, raw)?),
             "search" => Self::Search(args(name, raw)?),
+            "get_chunk" => Self::GetChunk(args(name, raw)?),
             "remember" => Self::Remember(args(name, raw)?),
             "list_channels" => Self::ListChannels(args(name, raw)?),
             "promise" => Self::Promise(args(name, raw)?),
@@ -355,9 +358,10 @@ pub struct ToolSpec {
 }
 
 /// Replacement tool descriptions keyed `tool.<name>` for the shared list and
-/// `tool.host.<name>` for the host list (the two share names but not meaning). Parameter
-/// descriptions are part of the schema and are not overridable. Missing keys keep the
-/// neutral English default, which is the struct's doc comment.
+/// `tool.host.<name>` for the host list (the two share names but not meaning). A parameter's
+/// description is keyed `<tool key>.<param>`, and a parameter inside an object or a list of
+/// objects `<tool key>.<param>.<inner>`. Missing keys keep the neutral English default,
+/// which is the doc comment.
 pub type Descriptions = BTreeMap<String, String>;
 
 fn spec<T: JsonSchema>(key: &str, name: &'static str, overrides: &Descriptions) -> ToolSpec {
@@ -383,6 +387,7 @@ fn spec<T: JsonSchema>(key: &str, name: &'static str, overrides: &Descriptions) 
     obj.remove("title");
     // An argument-less tool still needs an explicit empty object for some endpoints.
     obj.entry("properties").or_insert_with(|| json!({}));
+    describe_params(&mut parameters, &format!("{key}.{name}"), overrides);
     parameters.sort_all_objects();
     let description = overrides
         .get(&format!("{key}.{name}"))
@@ -393,6 +398,24 @@ fn spec<T: JsonSchema>(key: &str, name: &'static str, overrides: &Descriptions) 
         name,
         description,
         parameters,
+    }
+}
+
+/// Replace the description of each property of `schema` that has an override under `prefix`,
+/// then look inside objects and lists of objects.
+fn describe_params(schema: &mut Value, prefix: &str, overrides: &Descriptions) {
+    let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for (param, prop) in props {
+        let key = format!("{prefix}.{param}");
+        if let (Some(text), Some(obj)) = (overrides.get(&key), prop.as_object_mut()) {
+            obj.insert("description".into(), Value::String(text.clone()));
+        }
+        match prop.get_mut("items") {
+            Some(items) => describe_params(items, &key, overrides),
+            None => describe_params(prop, &key, overrides),
+        }
     }
 }
 
@@ -417,6 +440,7 @@ pub fn host_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<CreateGroup>("tool.host", "create_group", overrides),
         spec::<SetMode>("tool.host", "set_mode", overrides),
         spec::<HostSearch>("tool.host", "search", overrides),
+        spec::<GetChunk>("tool.host", "get_chunk", overrides),
         spec::<HostRemember>("tool.host", "remember", overrides),
         spec::<ListChannels>("tool.host", "list_channels", overrides),
         spec::<Promise>("tool.host", "promise", overrides),
@@ -536,6 +560,42 @@ mod tests {
         assert_ne!(host_tools(&o)[5].description, "override");
         o.insert("tool.host.search".into(), "host override".into());
         assert_eq!(host_tools(&o)[5].description, "host override");
+    }
+
+    #[test]
+    fn parameter_description_seam() {
+        let plain = shared_tools(&Descriptions::new());
+        let mut o = Descriptions::new();
+        o.insert("tool.search.query".into(), "param override".into());
+        o.insert("tool.wrapup.facts.due".into(), "nested override".into());
+        o.insert("tool.host.search.persons".into(), "host param".into());
+        let shared = shared_tools(&o);
+        assert_eq!(
+            shared[0].parameters["properties"]["query"]["description"],
+            "param override"
+        );
+        assert_ne!(
+            plain[0].parameters["properties"]["query"]["description"],
+            "param override"
+        );
+        assert_eq!(
+            shared[4].parameters["properties"]["facts"]["items"]["properties"]["due"]["description"],
+            "nested override"
+        );
+        // The same parameter name in the other list is untouched.
+        assert_ne!(
+            shared[0].parameters["properties"]["persons"]["description"],
+            "host param"
+        );
+        let host = host_tools(&o);
+        assert_eq!(
+            host[5].parameters["properties"]["persons"]["description"],
+            "host param"
+        );
+        assert_ne!(
+            host[5].parameters["properties"]["query"]["description"],
+            "param override"
+        );
     }
 
     #[test]

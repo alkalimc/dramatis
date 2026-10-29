@@ -78,6 +78,7 @@ fn every_parsed_name_is_offered() {
             "create_group",
             "set_mode",
             "search",
+            "get_chunk",
             "remember",
             "list_channels",
             "promise",

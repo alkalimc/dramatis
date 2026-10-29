@@ -3524,6 +3524,33 @@ async fn list_channels_gives_ids_and_recent_reads_one_conversation() {
 }
 
 #[tokio::test]
+async fn the_host_reads_a_passage_with_neighbours_and_not_a_disabled_persons() {
+    let e = env(WireApi::Chat);
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("bo"), Mode::Disabled).unwrap());
+    e.fake.push([
+        call("get_chunk", json!({"id": "u1", "neighbours": 1})),
+        call("get_chunk", json!({"id": "u3"})),
+        say("ok"),
+    ]);
+    e.agent
+        .send(host, "what happened at tea?", None)
+        .await
+        .unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("poured the jasmine tea"), "{log}");
+    assert!(
+        log.contains("needs cooler water"),
+        "the neighbour comes too: {log}"
+    );
+    assert!(!log.contains("hammered the blade"), "{log}");
+    assert!(log.contains("Not found: u3"), "{log}");
+    let tools = e.fake.json()[0]["tools"].to_string();
+    assert!(tools.contains("get_chunk") && tools.contains("find_people"));
+}
+
+#[tokio::test]
 async fn recent_returns_the_last_eight_lines_within_the_cap() {
     let e = env(WireApi::Chat);
     let host = e.agent.with_world(|w| channel::host(w).unwrap());

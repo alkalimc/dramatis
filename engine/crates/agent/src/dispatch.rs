@@ -216,38 +216,7 @@ impl Agent {
                 turn.shown.extend(m.shown);
                 Ok(Ok(m.text))
             }
-            SharedCall::GetChunk(g) => {
-                self.show_action(
-                    turn,
-                    ToolAction::GetChunk {
-                        chunk_id: g.id.clone(),
-                    },
-                )?;
-                let n = i64::from(g.neighbours.unwrap_or(0).min(3));
-                let Some((unit, around)) = self.ix().get(&g.id, n)? else {
-                    return Ok(Err(self.refuse(names, "harness.error.not_found", &g.id)));
-                };
-                let off = bond::disabled(&self.db())?;
-                let gone = |u: &folio::Unit| {
-                    !u.persons.is_empty()
-                        && u.persons
-                            .iter()
-                            .all(|p| off.iter().any(|d| d.as_str() == p))
-                };
-                if gone(&unit) {
-                    return Ok(Err(self.refuse(names, "harness.error.not_found", &g.id)));
-                }
-                let mut seen = self.seen(seg)?;
-                let mut all: Vec<folio::Unit> = around.into_iter().filter(|u| !gone(u)).collect();
-                let at = all
-                    .iter()
-                    .position(|u| u.span_from > unit.span_from)
-                    .unwrap_or(all.len());
-                all.insert(at, unit);
-                let m = assemble::units(&self.ctx(names), &all, &mut seen);
-                turn.shown.extend(m.shown);
-                Ok(Ok(m.text))
-            }
+            SharedCall::GetChunk(g) => self.get_chunk(turn, g, names, seg),
             SharedCall::RequestJoin(r) => self.request_join(turn, &me, r, names),
             SharedCall::AskHost(a) => self.ask_host(turn, &me, a, names),
             SharedCall::Report(r) => {
@@ -310,6 +279,47 @@ impl Agent {
                 Ok(Ok(self.say(names, "harness.done", &[])))
             }
         }
+    }
+
+    /// One passage in full, with neighbours; the same for a person and for the host, and
+    /// never a memory.
+    fn get_chunk(
+        &self,
+        turn: &mut Turn,
+        g: tools::GetChunk,
+        names: &Names,
+        seg: world::SegmentId,
+    ) -> Result<Outcome> {
+        self.show_action(
+            turn,
+            ToolAction::GetChunk {
+                chunk_id: g.id.clone(),
+            },
+        )?;
+        let n = i64::from(g.neighbours.unwrap_or(0).min(3));
+        let Some((unit, around)) = self.ix().get(&g.id, n)? else {
+            return Ok(Err(self.refuse(names, "harness.error.not_found", &g.id)));
+        };
+        let off = bond::disabled(&self.db())?;
+        let gone = |u: &folio::Unit| {
+            !u.persons.is_empty()
+                && u.persons
+                    .iter()
+                    .all(|p| off.iter().any(|d| d.as_str() == p))
+        };
+        if gone(&unit) {
+            return Ok(Err(self.refuse(names, "harness.error.not_found", &g.id)));
+        }
+        let mut seen = self.seen(seg)?;
+        let mut all: Vec<folio::Unit> = around.into_iter().filter(|u| !gone(u)).collect();
+        let at = all
+            .iter()
+            .position(|u| u.span_from > unit.span_from)
+            .unwrap_or(all.len());
+        all.insert(at, unit);
+        let m = assemble::units(&self.ctx(names), &all, &mut seen);
+        turn.shown.extend(m.shown);
+        Ok(Ok(m.text))
     }
 
     fn request_join(
@@ -955,6 +965,7 @@ impl Agent {
                 turn.shown.extend(m.shown);
                 Ok(Ok(m.text))
             }
+            HostCall::GetChunk(g) => self.get_chunk(turn, g, names, seg),
             HostCall::Remember(r) => {
                 if !turn.authorized {
                     return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
