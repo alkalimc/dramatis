@@ -106,7 +106,7 @@ anything else       send it to the current channel
 /tier [level]       how much the people may do on their own: low, middle, high,
                     extra_high, max, ultra
 /quiet [on|off|HH:MM-HH:MM]  hours when nobody comes to you unprompted
-/events [on|off|n]  the small happenings on board the host tells of: list them, switch
+/events [on|off|n]  the small happenings of the day the host tells of: list them, switch
                     them, or set how many a day (0 to 2)
 /lang [corpus|en]   the words of the interface: the corpus's language or English; the
                     people keep speaking the corpus's language",
@@ -124,7 +124,10 @@ anything else       send it to the current channel
 /stats              model calls made in this session
 /storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)
-Tab completes command names, person names (/talk, /group) and save names (/save).
+Short forms: /ls /t /g /c /lib /req /time /mem /h /r /src /s /? /open /exit /q
+Tab completes command names, their fixed words (/tier, /quiet, /events, /lang, /library,
+/read, /chats, /storage, /password), person names (/talk, /group, /invite, /remove, /who,
+/mode, /ask, /memories) and save names (/save).
 A line that starts with a slash is a command and Enter runs it. With --plain each input
 line is one message.",
     ),
@@ -362,9 +365,9 @@ line is one message.",
     ("cli.quiet.on", "quiet hours on, {from} to {to}"),
     ("cli.quiet.off", "quiet hours off"),
     ("cli.usage.events", "usage: /events [on|off|0|1|2]"),
-    ("cli.events.on", "ship events on, {n} a day"),
-    ("cli.events.off", "ship events off"),
-    ("cli.events.none", "nothing has happened on board yet"),
+    ("cli.events.on", "daily events on, {n} a day"),
+    ("cli.events.off", "daily events off"),
+    ("cli.events.none", "nothing has happened yet"),
     (
         "cli.save.busy",
         "a reply is still being written; try again when it ends",

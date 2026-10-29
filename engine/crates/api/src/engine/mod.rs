@@ -743,8 +743,8 @@ impl Api for Engine {
     async fn set_tier(&self, tier: Tier) -> ApiResult<()> {
         self.set_tier_impl(tier)
     }
-    async fn ship_events(&self) -> ApiResult<Vec<ShipEvent>> {
-        self.ship_events_impl()
+    async fn daily_events(&self) -> ApiResult<Vec<DailyEvent>> {
+        self.daily_events_impl()
     }
     async fn settings(&self) -> ApiResult<Settings> {
         self.settings_impl()

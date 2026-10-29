@@ -3,11 +3,11 @@
 -- A fact may end: past `expires` (unix ms) it is swept away. NULL: it stays.
 ALTER TABLE fact ADD COLUMN expires INTEGER;
 
--- A happening on the ship, made up for one local day. `persons` are the operators it
+-- A happening of the day, made up for one local day. `persons` are the people it
 -- involves (JSON array of ids), `material` the corpus units it was drawn from, `fact` the
 -- world-audience fact that tells everyone about it until the day ends, `message` the
 -- host's post.
-CREATE TABLE ship_event (
+CREATE TABLE daily_event (
     id       INTEGER PRIMARY KEY,
     day      TEXT    NOT NULL,                                    -- local date, YYYY-MM-DD
     at       INTEGER NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE ship_event (
     fact     INTEGER REFERENCES fact(id) ON DELETE SET NULL,
     message  INTEGER REFERENCES message(id) ON DELETE SET NULL
 ) STRICT;
-CREATE INDEX idx_ship_event_day ON ship_event(day);
+CREATE INDEX idx_daily_event_day ON daily_event(day);
 
 -- Seeds gain the kind `event`. A CHECK cannot be altered, so the table is rebuilt.
 CREATE TABLE seed_new (

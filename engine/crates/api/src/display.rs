@@ -51,10 +51,10 @@ mod tests {
 
     #[test]
     fn name_then_you_then_neutral() {
-        let named = Namer::new("<U>", Some(" Ada "), Some("Doctor"));
+        let named = Namer::new("<U>", Some(" Ada "), Some("Reader"));
         assert_eq!(named.show("Dr.<U>, <U>!"), "Dr.Ada, Ada!");
-        let unnamed = Namer::new("<U>", None, Some("Doctor"));
-        assert_eq!(unnamed.show("Dr.<U>"), "Dr.Doctor");
+        let unnamed = Namer::new("<U>", None, Some("Reader"));
+        assert_eq!(unnamed.show("Dr.<U>"), "Dr.Reader");
         assert_eq!(Namer::new("<U>", Some("  "), None).show("<U>"), "you");
         // No placeholder declared: text passes through, even text that looks like one.
         assert_eq!(

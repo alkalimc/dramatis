@@ -23,23 +23,24 @@ from . import __version__
 ENV_HOME = "DRAMATIS_FORGE_HOME"
 BASELINES_FILE = "BASELINES.json"
 ARTIFACTS_DIR = "dramatis-artifacts"
-_MARKERS = (ARTIFACTS_DIR, ".git", "pyproject.toml")
 
 
 def workspace_root(start: Path | None = None) -> Path:
-    """Nearest ancestor that looks like a workspace, else the current directory.
+    """The directory whose `dramatis-artifacts/` child is the artifact store.
 
-    An existing `dramatis-artifacts/` wins over a `.git/`, so that a repo checked out
-    inside a configured workspace still writes to the workspace's artifact store
-    rather than starting a second one.
+    An existing `dramatis-artifacts/` in an ancestor wins, so that a repo checked out
+    inside a configured workspace still writes to the workspace's artifact store rather
+    than starting a second one. Otherwise it is the parent of the repository root (the
+    nearest ancestor holding `.git`), so a fresh clone never writes inside itself. With
+    no repository at all, it is the starting directory.
     """
     here = (start or Path.cwd()).resolve()
     for candidate in (here, *here.parents):
         if (candidate / ARTIFACTS_DIR).is_dir():
             return candidate
     for candidate in (here, *here.parents):
-        if any((candidate / m).exists() for m in _MARKERS[1:]):
-            return candidate
+        if (candidate / ".git").exists():
+            return candidate.parent
     return here
 
 

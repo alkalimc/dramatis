@@ -1,5 +1,5 @@
-//! Tab completion for the line editor: command names, the names persons answer to, and
-//! save names. The editor runs on a blocking thread and cannot ask the engine, so the
+//! Tab completion for the line editor: command names, the fixed words some commands take,
+//! the names persons answer to, and save names. The editor runs on a blocking thread and cannot ask the engine, so the
 //! session fills a shared snapshot and the completer only reads it.
 
 use std::sync::{Arc, RwLock};
@@ -13,6 +13,7 @@ const COMMANDS: &[&str] = &[
     "group",
     "host",
     "go",
+    "open",
     "chats",
     "chat",
     "rename",
@@ -44,6 +45,7 @@ const COMMANDS: &[&str] = &[
     "lang",
     "password",
     "save",
+    "logout",
     "history",
     "resend",
     "sources",
@@ -54,7 +56,26 @@ const COMMANDS: &[&str] = &[
     "storage",
     "help",
     "quit",
+    "exit",
 ];
+
+/// The one fixed word that follows each of these commands (and their short forms).
+const FIXED: &[(&[&str], &[&str])] = &[
+    (
+        &["tier"],
+        &["low", "middle", "high", "extra_high", "max", "ultra"],
+    ),
+    (&["quiet"], &["on", "off"]),
+    (&["events"], &["on", "off"]),
+    (&["lang"], &["corpus", "en"]),
+    (&["library", "lib"], &["off"]),
+    (&["read"], &["all"]),
+    (&["chats", "c"], &["archived"]),
+    (&["password"], &["on", "off", "change"]),
+];
+
+/// What `/storage clear` takes.
+const STORAGE_KINDS: &[&str] = &["avatars", "audio", "all"];
 
 const MODES: &[&str] = &["enabled", "frozen", "disabled"];
 
@@ -161,8 +182,45 @@ pub fn complete(line: &str, pos: usize, data: &Snapshot) -> (usize, Vec<Pair>) {
             (args_at + at, persons(args[at..].trim_start(), data, false))
         }
         "remove" => (args_at, persons(args, data, true)),
+        "memories" | "mem" => (args_at, persons(args, data, true)),
+        "ask" => {
+            // The person is the first word; the question follows.
+            if args.contains(char::is_whitespace) {
+                none
+            } else {
+                (args_at, persons(args, data, false))
+            }
+        }
         "save" => save(args, args_at, data),
-        _ => none,
+        "storage" => storage(args, args_at),
+        _ => match FIXED.iter().find(|(names, _)| names.contains(&command)) {
+            Some((_, words)) => (args_at, fixed(args, words)),
+            None => none,
+        },
+    }
+}
+
+/// The fixed words that start with what is typed, while it is still the first word.
+fn fixed(args: &str, words: &[&str]) -> Vec<Pair> {
+    if args.contains(char::is_whitespace) {
+        return Vec::new();
+    }
+    words
+        .iter()
+        .filter(|w| starts_with_fold(w, args))
+        .map(|w| pair(w, (*w).to_owned()))
+        .collect()
+}
+
+/// `/storage clear <kind>`.
+fn storage(args: &str, args_at: usize) -> (usize, Vec<Pair>) {
+    let (done, start, partial, _) = last_word(args);
+    let at = args_at + start;
+    let pick = |words: &[&str]| fixed(&partial, words);
+    match (done, args.split_whitespace().next()) {
+        (0, _) => (at, pick(&["clear"])),
+        (1, Some("clear")) => (at, pick(STORAGE_KINDS)),
+        _ => (at, Vec::new()),
     }
 }
 
@@ -378,5 +436,55 @@ mod tests {
         let found = complete(line, line.len(), &wide);
         assert_eq!(found.0, 6);
         assert_eq!(found.1.len(), 2);
+    }
+
+    #[test]
+    fn every_command_the_parser_accepts_completes_by_name() {
+        for name in ["logout", "open", "exit", "save", "quit"] {
+            assert!(COMMANDS.contains(&name), "{name}");
+        }
+        assert_eq!(shown(&at("/lo")), ["logout"]);
+        assert_eq!(shown(&at("/ex")), ["exit"]);
+    }
+
+    #[test]
+    fn fixed_words_follow_the_commands_that_take_them() {
+        assert_eq!(shown(&at("/tier ")).len(), 6);
+        assert_eq!(shown(&at("/tier ex")), ["extra_high"]);
+        assert_eq!(shown(&at("/quiet o")), ["on", "off"]);
+        assert_eq!(shown(&at("/events of")), ["off"]);
+        assert_eq!(shown(&at("/lang ")), ["corpus", "en"]);
+        assert_eq!(shown(&at("/library ")), ["off"]);
+        assert_eq!(shown(&at("/lib o")), ["off"]);
+        assert_eq!(shown(&at("/read a")), ["all"]);
+        assert_eq!(shown(&at("/chats ar")), ["archived"]);
+        assert_eq!(shown(&at("/password ")), ["on", "off", "change"]);
+        assert_eq!(at("/password c").0, 10);
+        // Only the first word is a fixed word.
+        assert!(at("/quiet on ").1.is_empty());
+        assert!(at("/tier zzz").1.is_empty());
+    }
+
+    #[test]
+    fn storage_completes_clear_then_the_kind() {
+        assert_eq!(shown(&at("/storage ")), ["clear"]);
+        assert_eq!(shown(&at("/storage cl")), ["clear"]);
+        let found = at("/storage clear a");
+        assert_eq!(found.0, 15);
+        assert_eq!(shown(&found), ["avatars", "audio", "all"]);
+        assert_eq!(shown(&at("/storage clear au")), ["audio"]);
+        assert!(at("/storage clear all ").1.is_empty());
+        assert!(at("/storage other ").1.is_empty());
+    }
+
+    #[test]
+    fn ask_and_memories_complete_a_person() {
+        let found = at("/ask An");
+        assert_eq!(found.0, 5);
+        assert_eq!(shown(&found), ["Anchor", "Annie"]);
+        // The question is free text.
+        assert!(at("/ask Bo wh").1.is_empty());
+        assert_eq!(shown(&at("/memories Ann L")), ["Ann Lee"]);
+        assert_eq!(shown(&at("/mem BO")), ["Bo"]);
     }
 }

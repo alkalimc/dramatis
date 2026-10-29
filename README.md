@@ -10,10 +10,19 @@ wording, language rules) lives in a **pack** that you supply. This repository sh
 ```
 forge/    Python 3.13   sync · build · wording · baseline · report · persona
 engine/   Rust 2024     crates/folio · crates/index · crates/eval · crates/world
-                        crates/agent · crates/api · crates/runtime
+                        crates/llm · crates/agent · crates/api · crates/runtime
                         bins/dramatis-cli · bins/dramatis (desktop app, Tauri 2)
 ui/       TypeScript    React 19 + Vite, talks only to the engine's `api` commands
 ```
+
+## Requirements
+
+- Rust 1.85 or newer (`engine/`).
+- Node 24.15 or newer and pnpm 12.3.4, the version in `ui/package.json` (`ui/`, the desktop app only).
+- Python 3.13 with [uv](https://docs.astral.sh/uv/) (`forge/`). `make install` installs the `.[zh,tokens]` extras; `.[zh]` adds jieba word segmentation for CJK text.
+- Perl and make, to build the vendored OpenSSL under the SQLCipher dependency.
+- A pack and a built `.folio` corpus. This repository ships neither; see [Writing a pack](#writing-a-pack).
+- The desktop app and the signing steps below are macOS-only for now. The forge and the terminal client do not depend on the platform.
 
 ## Install
 
@@ -26,7 +35,8 @@ export DRAMATIS_PACK=<name>                # or pass --pack <name> to every comm
 make test lint                             # pytest + ruff on a synthetic toy pack
 ```
 
-Artifacts are written outside this repository, to `<workspace>/dramatis-artifacts/<pack>/`
+Artifacts are written outside this repository, to `dramatis-artifacts/<pack>/` next to the
+repository folder, or inside an existing `dramatis-artifacts/` further up the tree
 (override with `DRAMATIS_FORGE_HOME` or `--home`). That folder can be its own repository,
 for example a dataset repository with large files in Git LFS.
 
@@ -72,7 +82,7 @@ written three ways: as fetched, as records, as archived text. Read it, then:
 Generation uses the `persona` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another
 file); there is no fallback to `chat`, a missing role is an error. Models billed per request run 3 calls at once by default (`--jobs`); on HTTP 429 every
 worker waits together. A persona that fails a gate is not written. Reports go to
-`<workspace>/dramatis-artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
+`dramatis-artifacts/<pack>/persona/` (`REPORT.md`, `report.json`, `STALE.md`). Each reply is
 cached under `persona/raw/`; rebuilding the folio drops the personas, and running
 `./forge persona` again restores them from that cache with no model calls.
 
@@ -103,11 +113,13 @@ All generated; do not edit them.
 
 ```sh
 cd engine && cargo build --release
-export DRAMATIS_FOLIO=/path/to/dramatis-artifacts/<pack>/<pack>.folio
+export DRAMATIS_FORGE_HOME=/path/to/dramatis-artifacts
+export DRAMATIS_FOLIO=$DRAMATIS_FORGE_HOME/<pack>/<pack>.folio
 ./target/release/dramatis-cli inspect
 ./target/release/dramatis-cli search "<query>" --top-k 6
-./target/release/dramatis-cli evaluate --suite ../dramatis-artifacts/<pack>/evals/structural.queries.jsonl \
-    --markdown ../dramatis-artifacts/<pack>/reports/RESULTS.md
+./target/release/dramatis-cli evaluate \
+    --suite $DRAMATIS_FORGE_HOME/<pack>/evals/structural.queries.jsonl \
+    --markdown $DRAMATIS_FORGE_HOME/<pack>/reports/RESULTS.md
 ./target/release/dramatis-cli bench
 ```
 
@@ -168,8 +180,7 @@ with a stable identity, see [Keychain prompts](#keychain-prompts).
 
 The world (channels, memories, usage, and your profile: name, birthday, bio, avatar) is a save,
 one file: `$DRAMATIS_HOME/saves/<name>.sqlite`, and `current_save` in the home directory names the
-one a process opens when it starts (an older `world.sqlite` is moved there as `default` on first
-start). A save can be encrypted with a password (`/password on` here, Settings in the app). The
+one a process opens when it starts. A save can be encrypted with a password (`/password on` here, Settings in the app). The
 password lives only in memory: it is not written anywhere and cannot be recovered, so a forgotten
 one means the save cannot be opened. Only the save is encrypted; `endpoints.toml`, the folio, the
 media cache and group avatars are not, and API keys stay in the keychain. Turn encryption on, change
@@ -192,24 +203,18 @@ A turn that ends without a reply leaves one line in `$DRAMATIS_HOME/logs/dramati
 | `/talk <person>` | open the direct channel; an id, display name, other form or alias |
 | `/group <p1> <p2> ...` | start a group channel |
 | `/host` | switch to the host's channel |
-| `/go <n>` (`/open`) | after the host found people or made a group, a numbered list follows its reply; this switches to choice n |
-| `/name <new name>` | set the name you are called by (`--user` sets it at start) |
-| `/bio [text\|clear]` | show, set or clear what the people are told about you (200 characters) |
-| `/password [on\|change\|off]` | encrypt the open save, change the password, or remove it |
-| `/wrapup` | end the conversation and show the memories it wrote |
-| `/memories [person]` | numbered memories and who can see them, or those about or recalled by a person; deleted ones follow |
-| `/forget <n>`, `/restore <n>`, `/edit <n> <text>` | delete, bring back or rewrite memory n of the last list |
-| `/tier [level]` | show or set the intensity tier (`low` to `ultra`) |
-| `/quiet [on\|off\|HH:MM-HH:MM]` | show or set the hours when nobody comes to you unprompted |
-| `/save` | list saves; `new <name>`, `switch <name>`, `copy <from> <to>`, `rename <from> <to>`, `delete <name>` (asks first), `export <name> <path>`, `import <path> [name]` |
+| `/go <n>` | take choice n from the list the host just offered |
 | `/history [n]` | reprint the last n messages (default 10) |
-| `/resend [n]` | take back your n-th last message and everything after it, and put its text in the input line |
 | `/sources [n]` | list in full the sources of the n-th last reply that has any |
 | `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
-| `/stats` | one row per model call of this session: shape, model, tokens, seconds (read from the meter, not part of the app's interface) |
-| `/help`, `/quit` | Ctrl-D also leaves |
+| `/memories [person]` | numbered memories; `/forget <n>`, `/restore <n>` and `/edit <n> <text>` change them |
+| `/save` | list saves; `new`, `switch`, `copy`, `rename`, `delete`, `export`, `import` |
 
-Tab completes command names, person names (`/talk`, `/group`) and save names (`/save`).
+`/help` lists all commands, including their short forms. `/quit` or Ctrl-D leaves.
+
+Tab completes command names, the fixed words some commands take (`/tier`, `/quiet`, `/events`,
+`/lang`, `/library`, `/read`, `/chats`, `/storage`, `/password`), person names (`/talk`, `/group`,
+`/invite`, `/remove`, `/who`, `/mode`, `/ask`, `/memories`) and save names (`/save`).
 
 Anything else is sent to the current channel (`//text` sends a message that starts with a slash).
 Enter starts a new line and Alt-Enter (Option set as Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
@@ -245,7 +250,7 @@ needed to honour them.
 
 ## Desktop app
 
-macOS 13+ on Apple Silicon. Node 24+ and pnpm (the version in `ui/package.json`).
+macOS 13+ on Apple Silicon only, for now. Node and pnpm as in [Requirements](#requirements).
 
 ```sh
 cd ui && pnpm i                              # once

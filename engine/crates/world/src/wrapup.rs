@@ -139,18 +139,15 @@ pub fn apply(
         if let Some(h) = &args.hurt {
             let quote = h.quote.trim();
             let target = h.person.clone().or_else(|| ch.person().cloned());
-            let valid = match &target {
-                Some(p) => ch.has(&Actor::Person(p.clone())) && !bond::is_disabled(conn, p)?,
-                None => false,
+            let valid = match target {
+                Some(p) if ch.has(&Actor::Person(p.clone())) && !bond::is_disabled(conn, &p)? => {
+                    Some(p)
+                }
+                _ => None,
             };
             if fact::normalize(quote).is_empty() {
                 out.skipped.push(Skipped::Empty);
-            } else if !valid {
-                out.skipped.push(Skipped::NoTarget {
-                    quote: quote.into(),
-                });
-            } else {
-                let person = target.expect("valid");
+            } else if let Some(person) = valid {
                 let new = NewFact::new(Actor::User, audience.clone(), FactKind::Hurt, quote)
                     .about(About::Person(person));
                 match fact::write(conn, &new, now.ms)? {
@@ -163,6 +160,10 @@ pub fn apply(
                         existing,
                     }),
                 }
+            } else {
+                out.skipped.push(Skipped::NoTarget {
+                    quote: quote.into(),
+                });
             }
         }
 

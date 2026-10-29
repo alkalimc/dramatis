@@ -1,4 +1,4 @@
-//! Ship events: the host posts a small happening of the day in its own channel, with
+//! Daily events: the host posts a small happening of the day in its own channel, with
 //! offers to join a gathering or talk to someone it involves. One structured request on
 //! the host role per event, drawn from a corpus unit so it fits the world; a reply that
 //! cannot be read costs the call and nothing else.
@@ -10,7 +10,7 @@
 use llm::{Message, Request};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use world::event::{self, Event as ShipEvent};
+use world::event::{self, Event as DailyEvent};
 use world::fact::{self, Audience, NewFact};
 use world::quota::{self, CallKind};
 use world::{Actor, FactKind, PersonId, channel, message, settings};
@@ -110,7 +110,7 @@ impl Agent {
     /// Make today's event if one is due. The caller holds the planner lock. Anything that
     /// goes wrong, a refused call or a reply that cannot be read, ends in `false` and no
     /// message; the next try waits `events.retry_min`.
-    pub(crate) async fn ship_event(&self) -> Result<bool> {
+    pub(crate) async fn daily_event(&self) -> Result<bool> {
         self.sweep();
         let now = self.now();
         let events = &self.config.world.events;
@@ -440,7 +440,7 @@ impl Agent {
     }
 
     /// Today's and the last few events, newest first.
-    pub fn ship_events(&self) -> Result<Vec<ShipEvent>> {
+    pub fn daily_events(&self) -> Result<Vec<DailyEvent>> {
         Ok(event::recent(&self.db(), self.config.world.events.list)?)
     }
 }

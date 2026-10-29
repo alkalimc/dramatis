@@ -1,4 +1,4 @@
-//! Ship events: made once a day while the user is about, posted by the host with offers,
+//! Daily events: made once a day while the user is about, posted by the host with offers,
 //! known to the people they involve for that day only.
 
 mod common;
@@ -96,13 +96,13 @@ async fn an_event_is_made_once_a_day_and_posted_with_offers() {
             .unwrap()
         });
         assert_eq!(metered, 1);
-        assert_eq!(e.agent.ship_events().unwrap().len(), 1);
+        assert_eq!(e.agent.daily_events().unwrap().len(), 1);
         // The next day brings another; the one missed in between is not made up.
         e.clock.advance(DAY_MS);
         e.fake.push([say(&reply().replace(TEA, "Another"))]);
         e.agent.tick(true).await.unwrap();
         assert_eq!(requests(&e), 2);
-        assert_eq!(e.agent.ship_events().unwrap().len(), 2);
+        assert_eq!(e.agent.daily_events().unwrap().len(), 2);
     }
 }
 
@@ -223,7 +223,7 @@ async fn a_reply_that_is_not_an_event_is_skipped_quietly() {
         e.agent.tick(true).await.unwrap();
         assert_eq!(requests(&e), 1);
         assert!(posts(&e).is_empty(), "{bad}");
-        assert!(e.agent.ship_events().unwrap().is_empty());
+        assert!(e.agent.daily_events().unwrap().is_empty());
         // The failed try is not repeated at once.
         e.agent.tick(true).await.unwrap();
         assert_eq!(requests(&e), 1);
@@ -255,7 +255,7 @@ async fn offers_for_people_the_host_may_not_name_are_dropped() {
     assert_eq!(posted.actions.len(), 1);
     assert!(matches!(&posted.actions[0],
         ToolAction::FindPeople { persons, .. } if persons.len() == 1 && persons[0].id.0 == "dee"));
-    let involved = e.agent.ship_events().unwrap()[0].persons.clone();
+    let involved = e.agent.daily_events().unwrap()[0].persons.clone();
     assert_eq!(involved, vec![p("ann")]);
 }
 
@@ -300,7 +300,7 @@ async fn the_people_it_involves_know_of_it_that_day_and_not_the_next() {
     e.agent.send(dee, "hi", None).await.unwrap();
     assert!(!body_text(e.fake.bodies().last().unwrap()).contains("jasmine tea for whoever"));
     // The log keeps the event itself.
-    assert_eq!(e.agent.ship_events().unwrap().len(), 1);
+    assert_eq!(e.agent.daily_events().unwrap().len(), 1);
 }
 
 #[tokio::test]

@@ -21,7 +21,7 @@ use crate::views::InterfaceLanguage;
 
 /// Overrides the home directory.
 pub const HOME_ENV: &str = "DRAMATIS_HOME";
-/// The save a fresh home starts with (and the old single `world.sqlite` becomes).
+/// The save a fresh home starts with.
 pub const DEFAULT_SAVE: &str = "default";
 /// Overrides which corpus is opened.
 pub const FOLIO_ENV: &str = "DRAMATIS_FOLIO";
@@ -55,8 +55,7 @@ impl Home {
         Self::new(Path::new(&user).join(".dramatis"))
     }
 
-    /// Create the directory layout (idempotent) and move a pre-saves `world.sqlite` into
-    /// it as the default save.
+    /// Create the directory layout (idempotent).
     pub fn create(&self) -> io::Result<()> {
         for dir in [
             self.office(),
@@ -68,33 +67,6 @@ impl Home {
             self.saves(),
         ] {
             std::fs::create_dir_all(dir)?;
-        }
-        self.adopt_legacy_world()
-    }
-
-    /// Before saves, the one world was `world.sqlite` in the root. It is moved (never
-    /// copied or deleted) to become the default save, once: after that the root file is
-    /// not looked at again.
-    fn adopt_legacy_world(&self) -> io::Result<()> {
-        let old = self.root.join("world.sqlite");
-        let new = self.save_path(DEFAULT_SAVE);
-        if !old.is_file() || new.exists() {
-            return Ok(());
-        }
-        // Fold the write-ahead log into the file so the three files need not move
-        // together; when another process holds the file this fails and they all move.
-        if let Ok(conn) = rusqlite::Connection::open(&old) {
-            let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
-        }
-        std::fs::rename(&old, &new)?;
-        for suffix in ["-wal", "-shm"] {
-            let side = self.root.join(format!("world.sqlite{suffix}"));
-            if side.exists() {
-                std::fs::rename(
-                    &side,
-                    self.root.join(format!("saves/default.sqlite{suffix}")),
-                )?;
-            }
         }
         Ok(())
     }
@@ -328,35 +300,6 @@ mod tests {
         }
         std::fs::remove_file(&elsewhere).unwrap();
         assert_eq!(home.chosen_corpus(), None);
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn the_old_world_file_becomes_the_default_save_once() {
-        let root = std::env::temp_dir().join(format!("dramatis-legacy-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let conn = world::open(root.join("world.sqlite")).unwrap();
-        conn.execute("INSERT INTO settings VALUES ('user.name', '\"Doc\"')", [])
-            .unwrap();
-        drop(conn);
-        let home = Home::new(&root);
-        home.create().unwrap();
-        assert!(!root.join("world.sqlite").exists());
-        let moved = world::open(home.world().unwrap()).unwrap();
-        let n: i64 = moved
-            .query_row(
-                "SELECT count(*) FROM settings WHERE key = 'user.name'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(n, 1);
-        drop(moved);
-        // A stray root file later is left alone.
-        std::fs::write(root.join("world.sqlite"), b"x").unwrap();
-        home.create().unwrap();
-        assert!(root.join("world.sqlite").exists());
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

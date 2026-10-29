@@ -16,7 +16,8 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Corpus artifacts and reports belong in the workspace's artifacts/ directory, never here
+# Corpus artifacts and reports belong in the sibling dramatis-artifacts/ directory, never here
+dramatis-artifacts/
 *.archive
 *.rawcache
 *.folio

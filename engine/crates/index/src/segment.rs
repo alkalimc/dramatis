@@ -276,6 +276,29 @@ fn bigrams(text: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// Ideographs for a test, built at run time: each capital letter becomes the CJK
+    /// ideograph at the same offset from U+4E00. Everything else is kept. Real CJK text with
+    /// the same expectations is in the private repo's vectors, which `check_vectors` reads.
+    fn han(s: &str) -> String {
+        s.chars()
+            .map(|c| match c {
+                'A'..='Z' => char::from_u32(0x4e00 + (c as u32 - 'A' as u32)).unwrap(),
+                c => c,
+            })
+            .collect()
+    }
+
+    /// Full-width forms of ASCII punctuation, and the ideographic full stop.
+    fn wide(s: &str) -> String {
+        s.chars()
+            .map(|c| match c {
+                '.' => '\u{3002}',
+                '!'..='~' => char::from_u32(0xff00 + (c as u32 - 0x20)).unwrap(),
+                c => c,
+            })
+            .collect()
+    }
+
     fn bigram() -> Segmenter {
         Segmenter::new(Kind::CharBigram, Vec::new())
     }
@@ -288,14 +311,13 @@ mod tests {
     fn bigrams_overlap() {
         // Overlap is what lets a four-character query match text that was tokenised as
         // two separate words: without the middle bigram, the boundary between them
-        // hides any term that straddles it. The characters are the ideographic
-        // placeholders 甲乙丙丁 ("A B C D"), not corpus text.
-        assert_eq!(bigrams("甲乙丙丁"), vec!["甲乙", "乙丙", "丙丁"]);
+        // hides any term that straddles it.
+        assert_eq!(bigrams(&han("ABCD")), vec![han("AB"), han("BC"), han("CD")]);
     }
 
     #[test]
     fn bigrams_keep_latin_words_whole() {
-        assert_eq!(bigrams("ABC 甲乙"), vec!["ABC", "甲乙"]);
+        assert_eq!(bigrams(&han("abc AB")), vec![han("abc"), han("AB")]);
     }
 
     #[test]
@@ -305,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_single_cjk_character_survives() {
-        assert_eq!(bigrams("甲"), vec!["甲"]);
+        assert_eq!(bigrams(&han("A")), vec![han("A")]);
     }
 
     #[test]
@@ -355,10 +377,10 @@ mod tests {
 
     #[test]
     fn stopwords_apply_to_single_character_cjk_tokens() {
-        let seg = bigram_with(&["乙"]);
+        let seg = bigram_with(&[han("B").as_str()]);
         // A lone character between delimiters is emitted as its own token, so it can match.
-        let tokens = seg.segment_for_query("甲丙 乙 丁戊");
-        assert!(!tokens.iter().any(|t| t == "乙"), "got {tokens:?}");
+        let tokens = seg.segment_for_query(&han("AC B DE"));
+        assert!(!tokens.iter().any(|t| *t == han("B")), "got {tokens:?}");
     }
 
     #[test]
@@ -398,6 +420,17 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         let vectors = file["vectors"].as_array().unwrap();
         assert!(!vectors.is_empty());
+        // The character-bigram splitter's cases, where a file has them.
+        for v in file["bigram_vectors"].as_array().into_iter().flatten() {
+            let want: Vec<&str> = v["tokens"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t.as_str().unwrap())
+                .collect();
+            let text = v["in"].as_str().unwrap();
+            assert_eq!(bigrams(text), want, "bigram input {text:?}");
+        }
         for v in vectors {
             let want: Vec<String> = v["tokens"]
                 .as_array()
@@ -440,6 +473,6 @@ mod tests {
     #[test]
     fn punctuation_only_input_yields_no_expression() {
         assert!(bigram().match_expression("!?.").is_none());
-        assert!(bigram().match_expression("！？。").is_none());
+        assert!(bigram().match_expression(&wide("!?.")).is_none());
     }
 }

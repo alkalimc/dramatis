@@ -211,10 +211,8 @@ impl Agent {
         let mut stop = skip;
         let mut first: Result<()> = Ok(());
         // Dropped mid-way (the work was cancelled), the requests not yet ended are marked.
-        let mut guards: Vec<_> = asks.iter().map(|a| self.guard(a.task)).collect();
-        guards.reverse();
-        for asked in asks {
-            let mut guard = guards.pop().expect("one guard per request");
+        let guards: Vec<_> = asks.iter().map(|a| self.guard(a.task)).collect();
+        for (asked, mut guard) in asks.into_iter().zip(guards) {
             if stop {
                 self.fail_request(asked.task, world::task::Failure::Failed);
                 guard.disarm();
@@ -1566,8 +1564,8 @@ impl Agent {
                 }
             }
         }
-        // The user is here: today's happening on the ship, if one is due.
-        if self.ship_event().await? {
+        // The user is here: today's happening, if one is due.
+        if self.daily_event().await? {
             out.host_spoke = true;
         }
         Ok(out)
@@ -1622,7 +1620,7 @@ impl Agent {
     /// The periodic step while the app runs: conversations idle past
     /// `session.idle_timeout` are wrapped up, then due event seeds (a commitment) may
     /// open. With the user `present` (the window shown, the terminal in use) the day's
-    /// ship event may be made. Call it every minute or so; it makes no call when nothing
+    /// daily event may be made. Call it every minute or so; it makes no call when nothing
     /// is due.
     pub async fn tick(&self, present: bool) -> Result<Option<(PersonId, ChannelId)>> {
         let ended = {
@@ -1654,7 +1652,7 @@ impl Agent {
         let opened = self.on_event().await?;
         if present && self.chat().is_ok() {
             let _plan = self.planner.lock().await;
-            self.ship_event().await?;
+            self.daily_event().await?;
         }
         if !ended.is_empty() {
             self.changed(vec![WorldChange::Digest]);

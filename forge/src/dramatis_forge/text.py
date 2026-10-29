@@ -162,11 +162,16 @@ TEXT: Mapping[str, str] = {
 }
 
 
+def escape_pipe(text: str) -> str:
+    """`|` escaped for a Markdown table cell."""
+    return text.replace("|", "\\|")
+
+
 def cell(value: object) -> str:
     """Text for one Markdown table cell: a line break becomes ` / ` and `|` is escaped, so a
     row never spans lines and never gains a column."""
     text = re.sub(r"\s*\n\s*", " / ", str(value).strip())
-    return text.replace("|", "\\|")
+    return escape_pipe(text)
 
 
 def table_head(columns: str) -> list[str]:

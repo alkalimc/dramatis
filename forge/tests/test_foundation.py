@@ -229,12 +229,12 @@ def test_every_rendering_of_a_term_is_an_alias_for_it():
     from dramatis_forge.normalize import TERM_ALIAS, term_aliases
     from dramatis_forge.records import Term
     got = term_aliases([
-        Term(page="g", term="Home", translations={"en": "Homeland/Home Town", "jp": "ホーム\nHome"}),
+        Term(page="g", term="Home", translations={"en": "Homeland/Home Town", "de": "Heim\nHome"}),
         Term(page="g", term="Ann", translations={"en": "Annie"}),
     ], {"Ann": "Ann (person)"})
     assert sorted((a.alias, a.target, a.kind) for a in got) == [
-        ("Annie", "Ann (person)", TERM_ALIAS), ("Home Town", "Home", TERM_ALIAS),
-        ("Homeland", "Home", TERM_ALIAS), ("ホーム", "Home", TERM_ALIAS)]
+        ("Annie", "Ann (person)", TERM_ALIAS), ("Heim", "Home", TERM_ALIAS),
+        ("Home Town", "Home", TERM_ALIAS), ("Homeland", "Home", TERM_ALIAS)]
 
 
 def test_an_archived_kind_nothing_reads_is_a_high_finding(tmp_path, pack):

@@ -979,11 +979,11 @@ mod tests {
         // Full-width marks, a cut-off sentence, then the scene line again.
         let raw = "\u{ff08}takes the report\u{2026}\u{ff09}\n\nThe small drift in this figure \
                    suggests you did not come at night only to check numbers and hear me\
-                   \u{ff08}takes the report from the doctor and leafs through it\u{ff09}\n\n\
-                   Sit down, Doctor.";
+                   \u{ff08}takes the report from the visitor and leafs through it\u{ff09}\n\n\
+                   Sit down, friend.";
         assert_eq!(
             visible_text(raw, FW),
-            "\u{ff08}takes the report from the doctor and leafs through it\u{ff09}\n\nSit down, Doctor."
+            "\u{ff08}takes the report from the visitor and leafs through it\u{ff09}\n\nSit down, friend."
         );
         assert_eq!(
             visible("(waves)\n\nWell, I was about to say(waves again)\n\nHello."),
@@ -1026,7 +1026,7 @@ mod tests {
         }
         // Short replies and names stay replies, though more text could still change that.
         assert_eq!(refusal("OK.", true), Refusal::Maybe);
-        assert_eq!(refusal("Doctor Amiya", true), Refusal::Maybe);
+        assert_eq!(refusal("Alice Smith", true), Refusal::Maybe);
         assert_eq!(refusal("", true), Refusal::Maybe);
         // Any CJK character, anywhere, makes it a reply.
         assert_eq!(

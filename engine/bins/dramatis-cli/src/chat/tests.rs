@@ -229,7 +229,7 @@ async fn rig_setup(
         )
         .unwrap();
     }
-    // The scripted endpoint streams only: no ship event, which is a whole reply.
+    // The scripted endpoint streams only: no daily event, which is a whole reply.
     std::fs::write(home.0.join("params.toml"), "[events]\nper_day = 0\n").unwrap();
     if with_save {
         // A save to open, as a first run leaves the home after the user picks one.
@@ -963,6 +963,91 @@ async fn saves_export_and_import_through_a_file() {
         r._home.0.join("junk.sqlite").display()
     );
     assert!(r.run(&junk).await.contains("not a world database"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn help_lists_every_name_the_parser_accepts() {
+    let mut r = rig().await;
+    let help = r.run("/help").await;
+    let words: Vec<&str> = help
+        .split(|c: char| c.is_whitespace() || c == ',' || matches!(c, ')' | '('))
+        .collect();
+    let names = [
+        "list",
+        "ls",
+        "talk",
+        "t",
+        "group",
+        "g",
+        "host",
+        "chats",
+        "c",
+        "chat",
+        "who",
+        "mode",
+        "archive",
+        "unarchive",
+        "rename",
+        "members",
+        "invite",
+        "remove",
+        "leave",
+        "read",
+        "library",
+        "lib",
+        "ask",
+        "requests",
+        "req",
+        "clock",
+        "time",
+        "find",
+        "waiting",
+        "birthday",
+        "go",
+        "open",
+        "name",
+        "bio",
+        "password",
+        "wrapup",
+        "memories",
+        "mem",
+        "forget",
+        "restore",
+        "edit",
+        "tier",
+        "lang",
+        "quiet",
+        "events",
+        "save",
+        "logout",
+        "history",
+        "h",
+        "resend",
+        "r",
+        "sources",
+        "src",
+        "source",
+        "search",
+        "s",
+        "stats",
+        "storage",
+        "help",
+        "?",
+        "quit",
+        "exit",
+        "q",
+    ];
+    for name in names {
+        assert!(
+            !matches!(parse(&format!("/{name}")), Command::Unknown(_)),
+            "/{name} is not a command"
+        );
+        assert!(
+            words.contains(&format!("/{name}").as_str()),
+            "/{name} in /help"
+        );
+    }
+    assert!(matches!(parse("/lang zh"), Command::Lang(Some(_))));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1707,12 +1792,12 @@ async fn events_are_listed_and_switched() {
     let out = r.run("/events").await;
     // The rig's register has them off until the user asks.
     assert!(
-        out.contains("ship events off") && out.contains("nothing has happened"),
+        out.contains("daily events off") && out.contains("nothing has happened"),
         "{out}"
     );
     assert!(r.run("/events 2").await.contains("2 a day"));
-    assert!(r.run("/events off").await.contains("ship events off"));
-    assert!(r.run("/events").await.contains("ship events off"));
+    assert!(r.run("/events off").await.contains("daily events off"));
+    assert!(r.run("/events").await.contains("daily events off"));
     assert!(r.run("/events on").await.contains("1 a day"));
     assert!(r.run("/events 3").await.contains("usage"));
     assert!(r.run("/events many").await.contains("usage"));

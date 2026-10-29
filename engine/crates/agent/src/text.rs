@@ -32,9 +32,9 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "host.event.frame",
-        "Something small happened on the ship today, if you would like to hear it.\n\n{title}\n{text}\
-         |A little news from the ship, whenever you have a moment.\n\n{title}\n{text}\
-         |Just so you know, there was a small happening on board today.\n\n{title}\n{text}",
+        "Something small happened today, if you would like to hear it.\n\n{title}\n{text}\
+         |A little news from today, whenever you have a moment.\n\n{title}\n{text}\
+         |Just so you know, there was a small happening today.\n\n{title}\n{text}",
     ),
     (
         "host.intro.app",
@@ -251,16 +251,16 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.opening.words", "{user} said recently: {text}"),
     (
         "harness.opening.event",
-        "Something happened on the ship today that you are part of: {text}",
+        "Something happened today that you are part of: {text}",
     ),
     (
         "harness.event",
-        "Something happened on the ship today, and you may mention it if it comes up \
+        "Something happened today, and you may mention it if it comes up \
          naturally: {text}",
     ),
     (
         "harness.event.ask",
-        "Make up one small happening on the ship for today, {date}, for {user} to hear about. \
+        "Make up one small happening for today, {date}, for {user} to hear about. \
          Keep it everyday and small, something people mention over a meal, told in two to \
          four sentences, set in the world as it is. It involves one to three of the people \
          listed below, and may suggest that a few of them gather for a reason, or that {user} \

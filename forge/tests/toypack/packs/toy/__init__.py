@@ -181,7 +181,7 @@ PACK = Pack(
     roster=ROSTER,
     wording={"host.name": "Keeper", "user.title": "Captain {name}"},
     year_offset=100,
-    audit=DocAudit(id_prefixes=("D",), planned_keys=("units.later",)),
+    audit=DocAudit(id_prefixes=("R",), planned_keys=("units.later",)),
     text={"samples.title": "# Toy samples", "record.lore": "prose sections"},
     stopwords=("the", "a"),
 )

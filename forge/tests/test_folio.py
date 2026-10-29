@@ -179,7 +179,12 @@ def test_fingerprint_deterministic_and_rebuild_replaces(built, pack, tmp_path):
 
 def test_bigram_segmenter_on_cjk_placeholders():
     seg = segment.load("bigram")
-    assert seg("甲乙丙 ab1 丁") == "甲乙 乙丙 ab1 丁"
+    # Ideographs built at run time: capitals become the ideographs from U+4E00 on. The same
+    # case with real text is in the private repo's bigram vectors.
+    def han(text):
+        return "".join(chr(0x4E00 + ord(c) - 65) if "A" <= c <= "Z" else c for c in text)
+
+    assert seg(han("ABC ab1 D")) == han("AB BC ab1 D")
 
 
 def test_contract_folio(built):

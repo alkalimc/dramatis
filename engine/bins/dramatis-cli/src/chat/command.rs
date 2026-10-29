@@ -69,7 +69,7 @@ pub enum Command {
     Lang(Option<String>),
     /// Show quiet hours, switch them `on`/`off`, or set `HH:MM-HH:MM`.
     Quiet(Option<String>),
-    /// List the ship events, or switch them `on`/`off` or set how many a day.
+    /// List the daily events, or switch them `on`/`off` or set how many a day.
     Events(Option<String>),
     Save(Save),
     History(usize),

@@ -211,18 +211,18 @@ def test_check_reports_dangling_link_undefined_id_unknown_key(tmp_path, pack):
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "a.md").write_text(
-        "| D10 | a decision |\n\nSee [b](b.md), [gone](missing.md), D10 and D99.\n"
+        "| R10 | a decision |\n\nSee [b](b.md), [gone](missing.md), R10 and R99.\n"
         "Measured: `units`, `units.later`, `persons`, `units.bogus`, `forms.{alt}`.\n",
         encoding="utf-8")
-    (docs / "b.md").write_text("Clean: `units`, D10.\n", encoding="utf-8")
+    (docs / "b.md").write_text("Clean: `units`, R10.\n", encoding="utf-8")
     hits = [(h.path.name, h.what, h.detail) for h in figures.scan(docs, pack).hits]
     assert hits == [
         ("a.md", "dangling link", "missing.md"),
-        ("a.md", "undefined id", "D99 is referenced but never defined"),
+        ("a.md", "undefined id", "R99 is referenced but never defined"),
         ("a.md", "unknown key", "`units.bogus` is neither computed nor planned"),
     ]
     (docs / "a.md").unlink()
-    (docs / "b.md").write_text("| D10 | x |\nClean: `units` and D10.\n", encoding="utf-8")
+    (docs / "b.md").write_text("| R10 | x |\nClean: `units` and R10.\n", encoding="utf-8")
     assert figures.scan(docs, pack).hits == []
 
 

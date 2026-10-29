@@ -306,15 +306,17 @@ def _run(
 def _person_sources(archive: Archive) -> dict[str, PersonSource]:
     """Each person's dossier pages merged over their forms, canonical first."""
     out: dict[str, PersonSource] = {}
+    dossiers = {
+        r["page"]: r
+        for r in archive.db.execute("SELECT page,fields,sections,items FROM dossiers")
+    }
     for person_id, forms in archive.persons().items():
         facets: dict[str, str] = {}
         sections: list[dict[str, str]] = []
         items: dict[str, object] = {}
         own: list[dict[str, str]] = []
         for f in forms:
-            row = archive.db.execute(
-                "SELECT fields,sections,items FROM dossiers WHERE page=?", (f["page"],)
-            ).fetchone()
+            row = dossiers.get(f["page"])
             if row is None:
                 continue
             own.append(json.loads(row["fields"]))

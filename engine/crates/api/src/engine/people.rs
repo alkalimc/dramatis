@@ -34,14 +34,14 @@ fn activity(a: world::presence::Activity, offset: i32) -> Activity {
 }
 
 impl Engine {
-    /// The ship events, newest first. A person the corpus no longer has is left out.
-    pub(crate) fn ship_events_impl(&self) -> ApiResult<Vec<ShipEvent>> {
+    /// The daily events, newest first. A person the corpus no longer has is left out.
+    pub(crate) fn daily_events_impl(&self) -> ApiResult<Vec<DailyEvent>> {
         let offset = self.now().offset_min;
         let events =
             world::event::recent(&self.w(), self.params.world.events.list).map_err(world_err)?;
         Ok(events
             .into_iter()
-            .map(|e| ShipEvent {
+            .map(|e| DailyEvent {
                 day: e.day,
                 at: convert::ts(e.at, offset),
                 title: e.title,

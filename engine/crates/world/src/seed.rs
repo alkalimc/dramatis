@@ -2,7 +2,7 @@
 //!
 //! Event seeds (a commitment falling due, a conclusion or pinned question that hit a
 //! person's own units) come before daily ones (the user's birthday, a memory about the
-//! user worth asking after, the user's recent words hitting his units, a ship event of
+//! user worth asking after, the user's recent words hitting his units, a daily event of
 //! the day he is part of); within a class
 //! whoever has gone longest without talking with the user goes first. At most one person
 //! opens per occasion, and four experience limits hold on every tier. A seed held back
@@ -37,7 +37,7 @@ pub enum SeedKind {
     Memory(FactId),
     /// The user's recent words (this message) hit his units.
     Words(MessageId),
-    /// A ship event of today that involves him (the fact that tells of it).
+    /// A daily event of today that involves him (the fact that tells of it).
     Happening(FactId),
 }
 

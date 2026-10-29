@@ -256,7 +256,7 @@ impl AgentBridge {
     }
 
     /// One scheduled step: idle conversations wrap up, due seeds may open. `present`: the
-    /// user is about (the window shown, the terminal in use), so the day's ship event may
+    /// user is about (the window shown, the terminal in use), so the day's daily event may
     /// be made.
     pub async fn tick(self: &Arc<Self>, present: bool) {
         if let Ok(a) = self.agent().await

@@ -51,7 +51,6 @@ impl Engine {
     /// The user's own picture, else the corpus's player portrait. Their own comes out of
     /// the save as a `data:` URL, so it never sits in a file outside the save.
     pub(crate) async fn user_avatar_impl(&self) -> ApiResult<Option<MediaFile>> {
-        self.adopt_legacy_avatar()?;
         if let Some((mime, bytes)) = settings::user_avatar(&self.w()).map_err(world_err)? {
             return Ok(Some(MediaFile {
                 path: format!("data:{mime};base64,{}", media::base64_encode(&bytes)),
@@ -64,25 +63,6 @@ impl Engine {
             Some(url) => self.cached_avatar("~player", Some(url)).await,
             None => Ok(None),
         }
-    }
-
-    /// A picture set before pictures lived in the save is a file under `uploads/`, named
-    /// in a setting: move it in, once. The file stays (a group may share it).
-    fn adopt_legacy_avatar(&self) -> ApiResult<()> {
-        let w = self.w();
-        let Some(name) =
-            settings::get::<String>(&w, settings::USER_AVATAR_FILE).map_err(world_err)?
-        else {
-            return Ok(());
-        };
-        if settings::user_avatar(&w).map_err(world_err)?.is_none()
-            && let Ok(bytes) = std::fs::read(self.home.uploads().join(&name))
-            && let Some(ext) = media::image_ext(&bytes)
-        {
-            settings::set_user_avatar(&w, Some((media::image_mime(ext), &bytes)))
-                .map_err(world_err)?;
-        }
-        settings::unset(&w, settings::USER_AVATAR_FILE).map_err(world_err)
     }
 
     pub(crate) async fn set_user_avatar_impl(
@@ -108,7 +88,6 @@ impl Engine {
             let w = self.w();
             settings::set_user_avatar(&w, stored.as_ref().map(|(m, b)| (*m, b.as_slice())))
                 .map_err(world_err)?;
-            settings::unset(&w, settings::USER_AVATAR_FILE).map_err(world_err)?;
         }
         self.user_avatar_impl().await
     }

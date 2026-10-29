@@ -1,4 +1,4 @@
-//! Ship events: short happenings the host makes up for a local day so the ship feels
+//! Daily events: short happenings the host makes up for a local day so the world feels
 //! lived in. This module keeps them and decides when one is due; making one is the
 //! caller's (it takes a model call).
 //!
@@ -78,7 +78,7 @@ fn read(r: &Row<'_>) -> rusqlite::Result<Event> {
 pub fn record(conn: &Connection, new: &New, now: Now) -> Result<i64> {
     let persons: Vec<&str> = new.persons.iter().map(PersonId::as_str).collect();
     conn.execute(
-        "INSERT INTO ship_event(day, at, title, text, persons, material, fact)
+        "INSERT INTO daily_event(day, at, title, text, persons, material, fact)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         (
             day_key(now),
@@ -96,7 +96,7 @@ pub fn record(conn: &Connection, new: &New, now: Now) -> Result<i64> {
 /// The host's post that tells the user about the event.
 pub fn set_message(conn: &Connection, id: i64, message: MessageId) -> Result<()> {
     conn.execute(
-        "UPDATE ship_event SET message = ?2 WHERE id = ?1",
+        "UPDATE daily_event SET message = ?2 WHERE id = ?1",
         (id, message),
     )?;
     Ok(())
@@ -104,7 +104,7 @@ pub fn set_message(conn: &Connection, id: i64, message: MessageId) -> Result<()>
 
 pub fn get(conn: &Connection, id: i64) -> Result<Event> {
     Ok(conn.query_row(
-        &format!("SELECT {COLUMNS} FROM ship_event WHERE id = ?1"),
+        &format!("SELECT {COLUMNS} FROM daily_event WHERE id = ?1"),
         [id],
         read,
     )?)
@@ -113,7 +113,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Event> {
 /// The newest events, newest first.
 pub fn recent(conn: &Connection, limit: u32) -> Result<Vec<Event>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {COLUMNS} FROM ship_event ORDER BY id DESC LIMIT ?1"
+        "SELECT {COLUMNS} FROM daily_event ORDER BY id DESC LIMIT ?1"
     ))?;
     let rows = stmt.query_map([limit], read)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -129,7 +129,7 @@ pub fn used_material(conn: &Connection, limit: u32) -> Result<Vec<String>> {
 
 pub fn count_on(conn: &Connection, day: &str) -> Result<u32> {
     Ok(conn.query_row(
-        "SELECT count(*) FROM ship_event WHERE day = ?1",
+        "SELECT count(*) FROM daily_event WHERE day = ?1",
         [day],
         |r| r.get(0),
     )?)
@@ -156,7 +156,7 @@ pub fn due(conn: &Connection, now: Now, params: &Params, status: &Status) -> Res
 /// today as something he knows of.
 pub fn facts_for(conn: &Connection, person: &PersonId, now: Now) -> Result<Vec<Fact>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {COLUMNS} FROM ship_event WHERE day = ?1 AND fact IS NOT NULL ORDER BY id"
+        "SELECT {COLUMNS} FROM daily_event WHERE day = ?1 AND fact IS NOT NULL ORDER BY id"
     ))?;
     let events: Vec<Event> = stmt
         .query_map([day_key(now)], read)?

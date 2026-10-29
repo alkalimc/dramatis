@@ -1935,23 +1935,6 @@ async fn a_group_picture_is_a_file_and_the_users_own_stays_in_the_save() {
 }
 
 #[tokio::test]
-async fn a_picture_from_before_pictures_lived_in_the_save_is_adopted_once() {
-    let r = rig();
-    let e = &r.engine;
-    let png = [0x89, b'P', b'N', b'G', 13, 10, 26, 10, 9];
-    std::fs::write(e.home.uploads().join("old.png"), png).unwrap();
-    world::settings::set(&e.w(), world::settings::USER_AVATAR_FILE, "old.png").unwrap();
-    let own = e.user_avatar().await.unwrap().unwrap();
-    assert_eq!(own.path, format!("data:image/png;base64,{}", b64(&png)));
-    assert_eq!(
-        world::settings::get::<String>(&e.w(), world::settings::USER_AVATAR_FILE).unwrap(),
-        None,
-        "the setting is gone"
-    );
-    assert_eq!(e.user_avatar().await.unwrap().unwrap(), own);
-}
-
-#[tokio::test]
 async fn the_bio_is_trimmed_bounded_and_rolls_the_logs_over_when_it_changes() {
     let r = rig();
     let e = &r.engine;

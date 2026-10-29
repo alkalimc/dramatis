@@ -2030,7 +2030,7 @@ impl Session {
         let chosen = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
             None => None,
             Some("en" | "english") => Some(InterfaceLanguage::English),
-            Some("corpus" | "zh") => Some(InterfaceLanguage::Corpus),
+            Some("corpus") => Some(InterfaceLanguage::Corpus),
             Some(_) => return self.term.line(&self.msg("cli.usage.lang")),
         };
         if let Some(language) = chosen {
@@ -2138,7 +2138,7 @@ impl Session {
         });
     }
 
-    /// The ship events: how many a day, and the last few. A number or `on`/`off` sets it.
+    /// The daily events: how many a day, and the last few. A number or `on`/`off` sets it.
     async fn events(&self, arg: Option<&str>) {
         let settings = match self.engine.settings().await {
             Ok(s) => s,
@@ -2171,7 +2171,7 @@ impl Session {
         if arg.is_some() {
             return;
         }
-        match self.engine.ship_events().await {
+        match self.engine.daily_events().await {
             Ok(events) if events.is_empty() => self.term.note(&self.msg("cli.events.none")),
             Ok(events) => {
                 for e in events {

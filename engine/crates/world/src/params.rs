@@ -198,7 +198,7 @@ impl Default for Wrapup {
     }
 }
 
-/// `events.*`: the happenings the host posts about the ship.
+/// `events.*`: the happenings the host posts about the day.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Events {

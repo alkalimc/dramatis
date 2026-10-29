@@ -43,6 +43,7 @@ fn default_folio() -> Result<PathBuf> {
 #[derive(Parser)]
 #[command(
     name = "dramatis-cli",
+    version,
     about = "Inspect, query and measure a .folio corpus"
 )]
 struct Cli {
@@ -969,4 +970,22 @@ fn calibrate(path: &Path, suite_path: &Path, fit: &Fit, samples_out: Option<&Pat
         show("holdout", &eval::calibrate::assess(&held, b));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    #[test]
+    fn version_flag_prints_the_package_version() {
+        let Err(e) = Cli::try_parse_from(["dramatis-cli", "--version"]) else {
+            panic!("--version should stop parsing");
+        };
+        assert_eq!(e.kind(), ErrorKind::DisplayVersion);
+        assert_eq!(
+            e.to_string().trim(),
+            format!("dramatis-cli {}", env!("CARGO_PKG_VERSION"))
+        );
+    }
 }

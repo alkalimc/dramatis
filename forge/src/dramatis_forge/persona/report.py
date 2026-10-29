@@ -19,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..text import escape_pipe
 from .gates import Verdict
 from .material import KINDS, Material
 from .run import Outcome, Report
@@ -73,7 +74,7 @@ def _markdown(rep: Report, probe: bool) -> str:
     if failed:
         out += ["## Not written", "", "| subject | status | reasons |", "| --- | --- | --- |"]
         for o in failed:
-            reasons = "<br>".join(r.replace("|", "\\|") for r in o.reasons)
+            reasons = "<br>".join(escape_pipe(r) for r in o.reasons)
             out.append(f"| {o.subject} | {o.status} | {reasons} |")
         out.append("")
     return "\n".join(out)

@@ -239,8 +239,8 @@ commands! {
     fn quota() -> QuotaStatus;
     fn set_tier(tier: Tier) -> ();
     fn settings() -> Settings = Ok(Settings::default());
-    /// The ship events the host told of, today's and the last few, newest first.
-    fn ship_events() -> Vec<ShipEvent> = Ok(Vec::new());
+    /// The daily events the host told of, today's and the last few, newest first.
+    fn daily_events() -> Vec<DailyEvent> = Ok(Vec::new());
     fn update_settings(settings: Settings) -> ();
 
     // ---- first run ----

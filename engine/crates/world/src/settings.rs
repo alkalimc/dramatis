@@ -10,18 +10,15 @@ use crate::{Error, Result};
 
 pub const USER_NAME: &str = "user.name";
 pub const USER_BIRTHDAY: &str = "user.birthday";
-/// File name of the user's own picture under the home's uploads directory, from before
-/// the picture lived in the save (see [`user_avatar`]).
-pub const USER_AVATAR_FILE: &str = "user.avatar";
 pub const USER_BIO: &str = "user.bio";
 /// Longest personal bio, in characters.
 pub const BIO_MAX: usize = 200;
 pub const INTENSITY: &str = "intensity";
 pub const QUIET_HOURS: &str = "quiet_hours";
 pub const NOTIFICATIONS: &str = "notifications";
-/// Ship events per local day the user chose (0 = none).
+/// Daily events per local day the user chose (0 = none).
 pub const EVENTS_PER_DAY: &str = "events.per_day";
-/// When the last ship event was tried (unix ms), made or not.
+/// When the last daily event was tried (unix ms), made or not.
 pub const EVENTS_TRIED: &str = "events.tried";
 
 pub fn voice_key(person: &PersonId) -> String {

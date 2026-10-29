@@ -618,7 +618,7 @@ pub struct Settings {
     /// `None`: no quiet hours. The engine fills the register default on first run.
     pub quiet_hours: Option<QuietHours>,
     pub notifications: bool,
-    /// Ship events the host may post per day: 0 turns them off. The engine fills the
+    /// Daily events the host may post per day: 0 turns them off. The engine fills the
     /// register default on first run and cuts a larger number to the register's most.
     pub events_per_day: u32,
 }
@@ -637,10 +637,10 @@ impl Default for Settings {
     }
 }
 
-/// A happening on the ship the host told of: the host's channel history holds the post
+/// A happening of the day the host told of: the host's channel history holds the post
 /// itself; this is the log of them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct ShipEvent {
+pub struct DailyEvent {
     /// The local date it belongs to, `YYYY-MM-DD`.
     pub day: String,
     pub at: Timestamp,
