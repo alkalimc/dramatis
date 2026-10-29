@@ -83,6 +83,11 @@ function Shell() {
   const modelMissing = endpoints !== null && (!chat || endpoints.profiles.some((p) => p.profile.name === chat.profile && !p.has_key));
   usePresence();
   useTheme();
+  // Native controls and screen readers follow the document's language.
+  const locale = t("locale");
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   if (!status) {
     return statusError ? (

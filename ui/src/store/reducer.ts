@@ -62,11 +62,14 @@ function answered(s: State, channel: string): State["awaiting"] {
 export function reduce(s: State, a: Action): State {
   switch (a.type) {
     case "reset":
-      return { ...initialState(), theme: s.theme, pinned: s.pinned };
+      // The words are the person's, not the world's: they stay while the next world loads.
+      return { ...initialState(), theme: s.theme, pinned: s.pinned, wording: s.wording, language: s.language, t: s.t };
     case "status":
       return { ...s, status: a.status };
     case "wording":
       return { ...s, wording: a.wording, t: makeT(a.wording) };
+    case "language":
+      return { ...s, language: a.language };
     case "clock":
       return { ...s, clock: a.clock };
     case "settings":

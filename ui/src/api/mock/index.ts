@@ -17,6 +17,7 @@ import type {
   ApiError,
   AppStatus,
   Author,
+  InterfaceLanguage,
   CaseFile,
   ChannelId,
   ChannelSummary,
@@ -120,6 +121,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   const ref = (id: PersonId): PersonRef => ({ id, name: persons.get(id)?.name ?? id });
 
   let library = params.get("form") === "library";
+  let language: InterfaceLanguage = "corpus";
   let tts = params.get("tts") !== "0";
   let settings: Settings = {
     user_name: params.get("first") === "1" ? null : "Rowan",
@@ -582,7 +584,18 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       library = false;
       return ok(null);
     },
-    wording: () => ok({ entries: Object.values(localWording)[0] ?? {}, scene_marker: scene }),
+    wording: () => {
+      const all = Object.values(localWording)[0] ?? {};
+      // Mirrors the engine: English keeps the corpus's names and model-facing wording only.
+      const keep = (k: string) => ["host.name", "org.name", "user.title", "lang.corpus"].includes(k) || /^(harness|tool|gender)\./.test(k);
+      const entries = language === "english" ? Object.fromEntries(Object.entries(all).filter(([k]) => keep(k))) : all;
+      return ok({ entries, scene_marker: scene });
+    },
+    interfaceLanguage: () => ok(language),
+    setInterfaceLanguage: (next) => {
+      language = next;
+      return ok(null);
+    },
     presence: async () => {
       const r = ok({ items: [...digestItems] });
       if (library || settings.user_name === null || band !== "open") return r;

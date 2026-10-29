@@ -6,11 +6,11 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 
-use api::error::ApiResult;
+use api::error::{ApiError, ApiResult};
 use api::types::{Author, ChannelId, FactId, Mode, PersonId, Target, Tier, Timestamp};
 use api::views::{
-    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, Passage, QuietHours,
-    RosterRow, Settings, StorageKind, StorageUsage, TaskStatus,
+    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, InterfaceLanguage,
+    Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage, TaskStatus,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -117,10 +117,6 @@ enum Pending {
 /// How many times a password is asked for before giving up.
 const TRIES: usize = 3;
 
-/// A password cannot be recovered; the person turning it on must hear that first.
-const FORGET_WARNING: &str =
-    "A forgotten password cannot be recovered: nobody can open this save without it.\n";
-
 /// Kilobytes as a short human size.
 fn size(kb: u32) -> String {
     match kb {
@@ -218,15 +214,40 @@ impl Session {
     pub fn prompt(&self) -> String {
         let style = self.term.style;
         if self.picking {
-            return format!("{} ", self.term.style.bold("save>"));
+            return format!("{} ", self.term.style.bold(&self.msg("cli.prompt.save")));
         }
-        let idle = if self.library { "library" } else { "-" };
-        let channel = self.current.as_ref().map_or(idle, |c| c.label.as_str());
+        let idle = if self.library {
+            self.msg("cli.prompt.library")
+        } else {
+            "-".to_owned()
+        };
+        let channel = self
+            .current
+            .as_ref()
+            .map_or(idle.as_str(), |c| c.label.as_str());
         format!(
             "{} {}> ",
             style.dim(&format!("[{channel}]")),
             style.bold(&self.names.user())
         )
+    }
+
+    /// One of the terminal's own sentences.
+    fn msg(&self, key: &str) -> String {
+        self.names.text(key)
+    }
+
+    /// A failed command, in words.
+    fn fail(&self, e: &ApiError) {
+        let text = self.names.api_error(e);
+        self.term
+            .error(&self.names.say("cli.error", &[("text", &text)]));
+    }
+
+    /// Whether a typed answer is a yes.
+    fn is_yes(&self, line: &str) -> bool {
+        let line = line.trim().to_lowercase();
+        self.msg("cli.answer.yes").split('|').any(|y| y == line)
     }
 
     /// Where passwords come from (tests supply them).
@@ -252,7 +273,7 @@ impl Session {
         }
         .await;
         if let Err(e) = result {
-            self.term.error(&e.to_string());
+            self.fail(&e);
             return false;
         }
         // The rollover may ask the model for a summary.
@@ -271,11 +292,11 @@ impl Session {
         let Some(pending) = self.pending.take() else {
             return self.handle(parse(line)).await;
         };
-        if matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+        if self.is_yes(line) {
             self.confirmed(pending).await;
             self.refresh_completions().await;
         } else {
-            self.term.note("cancelled");
+            self.term.note(&self.msg("cli.cancelled"));
         }
         Flow::Continue
     }
@@ -285,7 +306,10 @@ impl Session {
             Command::Noop => {}
             Command::Quit => return Flow::Quit,
             Command::Help => self.term.print(&format!("{}\n", self.help())),
-            Command::Invalid(text) => self.term.print(&format!("{text}\n")),
+            Command::Invalid(key) => self.term.line(&self.msg(key)),
+            Command::Unknown(name) => self
+                .term
+                .line(&self.names.say("cli.unknown_command", &[("name", &name)])),
             Command::List(filter) => self.list(filter.as_deref()).await,
             Command::Talk(who) => self.talk(&who).await,
             Command::Group(who) => self.group(&who).await,
@@ -316,7 +340,8 @@ impl Session {
             Command::Birthday(day) => self.birthday(day.as_deref()).await,
             Command::Name(name) => {
                 if self.set_user(&name).await {
-                    self.term.note(&format!("you are called {name} now"));
+                    self.term
+                        .note(&self.names.say("cli.name.set", &[("name", &name)]));
                 }
             }
             Command::Bio(text) => self.bio(text).await,
@@ -327,6 +352,7 @@ impl Session {
             Command::Forget(n) => self.change_memory(n, Change::Forget).await,
             Command::Restore(n) => self.change_memory(n, Change::Restore).await,
             Command::Edit(n, text) => self.change_memory(n, Change::Edit(text)).await,
+            Command::Lang(arg) => self.lang(arg.as_deref()).await,
             Command::Tier(level) => self.tier(level.as_deref()).await,
             Command::Quiet(arg) => self.quiet(arg.as_deref()).await,
             Command::Save(cmd) => {
@@ -349,7 +375,7 @@ impl Session {
     async fn mark_seen(&self) {
         for (channel, up_to) in self.show.take_shown() {
             if let Err(e) = self.engine.mark_read(channel, up_to).await {
-                self.term.error(&e.to_string());
+                self.fail(&e);
             }
         }
     }
@@ -376,7 +402,8 @@ impl Session {
             .filter(|(_, m)| m.author != Author::User)
             .nth(unread - 1)
             .map_or(0, |(i, _)| i);
-        self.term.note(&format!("{unread} unread:"));
+        self.term
+            .note(&self.names.say("cli.unread.header", &[("n", &unread)]));
         for m in &messages[from..] {
             self.term.print(&self.show.whole(m));
         }
@@ -411,7 +438,7 @@ impl Session {
     async fn refresh_completions(&self) {
         let roster = match self.roster().await {
             Ok(r) => r,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let talkable: Vec<&Entry> = roster.iter().filter(|e| e.persona).collect();
         let mut names: Vec<String> = talkable
@@ -433,7 +460,7 @@ impl Session {
         let ids = talkable.iter().map(|e| e.id.clone()).collect();
         let saves = match self.engine.saves().await {
             Ok(s) => s,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         self.completions.set(Snapshot::new(
             names,
@@ -445,16 +472,18 @@ impl Session {
     async fn list(&self, filter: Option<&str>) {
         let roster = match self.roster().await {
             Ok(r) => r,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let needle = filter.map(str::to_lowercase);
-        let host = if self.names.has_host() && !self.library {
-            "available"
+        let host = self.msg(if self.names.has_host() && !self.library {
+            "cli.list.host.available"
         } else {
-            "not available"
-        };
-        self.term
-            .print(&format!("host: {} ({host})\n", self.names.host()));
+            "cli.list.host.unavailable"
+        });
+        self.term.line(&self.names.say(
+            "cli.list.host",
+            &[("host", &self.names.host()), ("state", &host)],
+        ));
         let mut shown = 0;
         for e in roster.iter().filter(|e| e.persona || self.library) {
             let hit = needle.as_deref().is_none_or(|n| {
@@ -468,11 +497,12 @@ impl Session {
                 shown += 1;
             }
         }
-        if self.library {
-            self.term.note(&format!("{shown} persons"));
+        let key = if self.library {
+            "cli.list.count"
         } else {
-            self.term.note(&format!("{shown} persons with a persona"));
-        }
+            "cli.list.count.persona"
+        };
+        self.term.note(&self.names.say(key, &[("n", &shown)]));
     }
 
     /// Resolve what the user typed to one person with a persona: id, display name, another
@@ -484,7 +514,7 @@ impl Session {
     /// Like [`Self::resolve`]; with `talkable` false a person without a persona is found
     /// too (for a profile or a mode).
     async fn resolve_as(&self, query: &str, talkable: bool) -> Result<PersonId, String> {
-        let roster = self.roster().await.map_err(|e| e.to_string())?;
+        let roster = self.roster().await.map_err(|e| self.names.api_error(&e))?;
         let q = query.trim();
         let lower = q.to_lowercase();
         let exact: Vec<&Entry> = roster
@@ -522,21 +552,25 @@ impl Session {
             .filter(|e| e.persona || !talkable)
             .collect();
         match (found.len(), with_persona.as_slice()) {
-            (0, _) => Err(format!(
-                "nobody matches \"{q}\"; /list shows who can be talked to"
-            )),
-            (_, []) => Err(format!(
-                "{} has no persona, so cannot be talked to",
-                found[0].display
-            )),
+            (0, _) => Err(self.names.say("cli.resolve.none", &[("q", &q)])),
+            (_, []) => Err(self
+                .names
+                .say("cli.resolve.no_persona", &[("name", &found[0].display)])),
             (_, [one]) => Ok(PersonId(one.id.clone())),
-            (_, many) => Err(format!(
-                "\"{q}\" is ambiguous: {}",
-                many.iter()
-                    .take(8)
-                    .map(|e| format!("{} ({})", e.display, e.id))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            (_, many) => Err(self.names.say(
+                "cli.resolve.ambiguous",
+                &[
+                    ("q", &q),
+                    (
+                        "names",
+                        &many
+                            .iter()
+                            .take(8)
+                            .map(|e| format!("{} ({})", e.display, e.id))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                ],
             )),
         }
     }
@@ -544,7 +578,7 @@ impl Session {
     async fn talk(&mut self, who: &str) {
         match self.resolve(who).await {
             Ok(person) => self.open_person(person).await,
-            Err(e) => self.term.print(&format!("{e}\n")),
+            Err(e) => self.term.line(&e),
         }
     }
 
@@ -552,10 +586,11 @@ impl Session {
         match self.engine.open_direct(person.clone()).await {
             Ok(channel) => {
                 let name = self.names.person(&person.0);
-                self.term.note(&format!(
-                    "talking to {name} ({}); /history shows earlier lines",
-                    person.0
-                ));
+                self.term.note(
+                    &self
+                        .names
+                        .say("cli.talk.person", &[("name", &name), ("id", &person.0)]),
+                );
                 self.catch_up(&channel).await;
                 self.current = Some(Current {
                     channel,
@@ -563,7 +598,7 @@ impl Session {
                     label: name,
                 });
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -573,24 +608,23 @@ impl Session {
             match self.resolve(w).await {
                 Ok(p) if !members.contains(&p) => members.push(p),
                 Ok(_) => {}
-                Err(e) => return self.term.print(&format!("{e}\n")),
+                Err(e) => return self.term.line(&e),
             }
         }
         if members.len() < 2 {
-            return self
-                .term
-                .print("a group needs at least two different persons\n");
+            return self.term.line(&self.msg("cli.group.too_few"));
         }
         match self.engine.create_group(members.clone(), None).await {
             Ok(channel) => self.enter_group(channel, members).await,
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
     async fn enter_group(&mut self, channel: ChannelId, members: Vec<PersonId>) {
         let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
         let label = self.names.group_label(&names);
-        self.term.note(&format!("group with {label}"));
+        self.term
+            .note(&self.names.say("cli.talk.group", &[("label", &label)]));
         self.catch_up(&channel).await;
         self.current = Some(Current {
             channel,
@@ -602,11 +636,11 @@ impl Session {
     /// Switch to choice `n` of the host's latest offer.
     async fn go(&mut self, n: usize) {
         let Some(offer) = self.offers.get(n - 1).cloned() else {
-            return self.term.print(if self.offers.is_empty() {
-                "the host has offered nothing to go to\n"
+            return self.term.line(&self.msg(if self.offers.is_empty() {
+                "cli.go.nothing"
             } else {
-                "no such choice; the host's list is above\n"
-            });
+                "cli.go.no_such"
+            }));
         };
         match offer {
             Offer::Person { id, .. } => self.open_person(PersonId(id)).await,
@@ -628,7 +662,7 @@ impl Session {
                     .await
                 {
                     Ok(channel) => self.enter_group(channel, members).await,
-                    Err(e) => self.term.error(&e.to_string()),
+                    Err(e) => self.fail(&e),
                 }
             }
         }
@@ -649,18 +683,19 @@ impl Session {
             self.term
                 .note(&format!("  {} {}", i + 1, o.text(&self.names)));
         }
-        self.term.note("  /go <n> takes you there");
+        self.term.note(&self.msg("cli.go.hint"));
         self.offers = offers;
     }
 
     async fn host(&mut self) {
         if !self.names.has_host() {
-            return self.term.print("this corpus has no host\n");
+            return self.term.line(&self.msg("cli.host.none"));
         }
         match self.engine.host_channel().await {
             Ok(channel) => {
                 let name = self.names.host();
-                self.term.note(&format!("talking to the host, {name}"));
+                self.term
+                    .note(&self.names.say("cli.talk.host", &[("name", &name)]));
                 self.catch_up(&channel).await;
                 self.current = Some(Current {
                     channel,
@@ -668,7 +703,7 @@ impl Session {
                     label: name,
                 });
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -695,26 +730,29 @@ impl Session {
     async fn list_chats(&mut self, archived: bool) {
         let mut list: Vec<ChannelSummary> = match self.engine.channels().await {
             Ok(l) => l.into_iter().filter(|c| c.archived == archived).collect(),
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         // Newest first; the host's channel leads when nothing was said anywhere.
         list.sort_by(|a, b| b.last_at.cmp(&a.last_at));
         if list.is_empty() {
-            return self.term.note(if archived {
-                "no archived conversations"
+            return self.term.note(&self.msg(if archived {
+                "cli.chats.none_archived"
             } else {
-                "no conversations yet; /talk <person> starts one"
-            });
+                "cli.chats.none"
+            }));
         }
         for (i, c) in list.iter().enumerate() {
-            let kind = match c.kind {
-                ChannelKind::Host => "host",
-                ChannelKind::Direct => "direct",
-                ChannelKind::Group => "group",
-            };
+            let kind = self.msg(match c.kind {
+                ChannelKind::Host => "cli.chats.kind.host",
+                ChannelKind::Direct => "cli.chats.kind.direct",
+                ChannelKind::Group => "cli.chats.kind.group",
+            });
             let when = c.last_at.as_ref().map_or(String::new(), Self::stamp);
             let unread = if c.unread > 0 {
-                format!("  {} unread", c.unread)
+                format!(
+                    "  {}",
+                    self.names.say("cli.chats.unread", &[("n", &c.unread)])
+                )
             } else {
                 String::new()
             };
@@ -727,16 +765,16 @@ impl Session {
             ));
         }
         self.chats = list;
-        self.term.note("/chat <n> opens one");
+        self.term.note(&self.msg("cli.chats.hint"));
     }
 
     async fn chat(&mut self, n: usize) {
         let Some(c) = self.chats.get(n - 1).cloned() else {
-            return self.term.print(if self.chats.is_empty() {
-                "no list yet; /chats shows the conversations\n"
+            return self.term.line(&self.msg(if self.chats.is_empty() {
+                "cli.chat.no_list"
             } else {
-                "no such conversation; /chats shows the list\n"
-            });
+                "cli.chat.no_such"
+            }));
         };
         match (c.kind, c.participants.first()) {
             (ChannelKind::Host, _) => self.host().await,
@@ -751,11 +789,11 @@ impl Session {
     async fn who(&self, who: &str) {
         let person = match self.resolve_as(who, false).await {
             Ok(p) => p,
-            Err(e) => return self.term.print(&format!("{e}\n")),
+            Err(e) => return self.term.line(&e),
         };
         let page = match self.engine.person_page(person).await {
             Ok(p) => p,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         self.term.print(&format!(
             "{}  {}\n",
@@ -765,25 +803,31 @@ impl Session {
         if let Some(s) = &page.summary {
             self.term.print(&format!("{s}\n"));
         }
-        let mode = match page.mode {
-            Mode::Enabled => "enabled",
-            Mode::Frozen => "frozen",
-            Mode::Disabled => "disabled",
-        };
-        self.term
-            .print(&format!("mode: {mode}  trust: {}\n", page.trust));
+        self.term.line(&self.names.say(
+            "cli.who.mode",
+            &[
+                ("mode", &self.names.mode_word(page.mode)),
+                ("trust", &page.trust),
+            ],
+        ));
         if !page.has_persona {
-            self.term.print("no persona, so cannot be talked to\n");
+            self.term.line(&self.msg("cli.who.no_persona"));
         }
-        let seen = page.last_seen.as_ref().map_or("never".into(), Self::stamp);
-        self.term.print(&format!(
-            "last seen: {seen}  requests done: {}\n",
-            page.tasks_done
+        let seen = page
+            .last_seen
+            .as_ref()
+            .map_or_else(|| self.msg("cli.who.never"), Self::stamp);
+        self.term.line(&self.names.say(
+            "cli.who.seen",
+            &[("seen", &seen), ("done", &page.tasks_done)],
         ));
         if !page.companions.is_empty() {
             let names: Vec<&str> = page.companions.iter().map(|p| p.name.as_str()).collect();
-            self.term
-                .print(&format!("close to: {}\n", names.join(", ")));
+            self.term.line(
+                &self
+                    .names
+                    .say("cli.who.close", &[("names", &names.join(", "))]),
+            );
         }
     }
 
@@ -810,12 +854,8 @@ impl Session {
                     },
                     label.clone(),
                 ),
-                Some(_) => return self.term.print("the host has no mode\n"),
-                None => {
-                    return self
-                        .term
-                        .print("no channel yet: /talk <person> or /host first\n");
-                }
+                Some(_) => return self.term.line(&self.msg("cli.mode.host")),
+                None => return self.term.line(&self.msg("cli.no_channel")),
             }
         } else {
             match self.resolve_as(who, false).await {
@@ -823,19 +863,15 @@ impl Session {
                     let name = self.names.person(&p.0);
                     (Target::Person { id: p }, name)
                 }
-                Err(e) => return self.term.print(&format!("{e}\n")),
+                Err(e) => return self.term.line(&e),
             }
         };
         match self.engine.set_mode(target, mode).await {
-            Ok(()) => self.term.note(&format!(
-                "{name} is {} now",
-                match mode {
-                    Mode::Enabled => "enabled",
-                    Mode::Frozen => "frozen",
-                    Mode::Disabled => "disabled",
-                }
+            Ok(()) => self.term.note(&self.names.say(
+                "cli.mode.set",
+                &[("name", &name), ("mode", &self.names.mode_word(mode))],
             )),
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -844,15 +880,13 @@ impl Session {
             return;
         };
         match self.engine.archive_channel(channel, archived).await {
-            Ok(()) => self.term.note(if archived {
-                "archived; a new message from a person brings it back"
+            Ok(()) => self.term.note(&self.msg(if archived {
+                "cli.archive.on"
             } else {
-                "back in the main list"
-            }),
-            Err(api::ApiError::Invalid { .. }) => {
-                self.term.print("the host's channel cannot be archived\n")
-            }
-            Err(e) => self.term.error(&e.to_string()),
+                "cli.archive.off"
+            })),
+            Err(api::ApiError::Invalid { .. }) => self.term.line(&self.msg("cli.archive.host")),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -862,12 +896,12 @@ impl Session {
         };
         let title = (!name.is_empty()).then(|| name.to_owned());
         match self.engine.rename_channel(channel, title).await {
-            Ok(()) => self.term.note(if name.is_empty() {
-                "the title is derived from the members again"
+            Ok(()) => self.term.note(&self.msg(if name.is_empty() {
+                "cli.rename.cleared"
             } else {
-                "renamed"
-            }),
-            Err(e) => self.term.error(&e.to_string()),
+                "cli.rename.done"
+            })),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -877,10 +911,8 @@ impl Session {
                 let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
                 self.term.print(&format!("{}\n", names.join(", ")));
             }
-            Some(_) => self.term.print("this is not a group\n"),
-            None => self
-                .term
-                .print("no channel yet: /talk <person> or /host first\n"),
+            Some(_) => self.term.line(&self.msg("cli.members.not_group")),
+            None => self.term.line(&self.msg("cli.no_channel")),
         }
     }
 
@@ -891,14 +923,11 @@ impl Session {
                 kind: Kind::Group(_),
                 ..
             }) => {
-                self.term
-                    .print("delete this group and everything said in it? (y/n) ");
+                self.term.print(&format!("{} ", self.msg("cli.leave.ask")));
                 self.pending = Some(Pending::DeleteGroup(channel.clone()));
             }
-            Some(_) => self.term.print("only a group can be deleted\n"),
-            None => self
-                .term
-                .print("no channel yet: /talk <person> or /host first\n"),
+            Some(_) => self.term.line(&self.msg("cli.leave.only_group")),
+            None => self.term.line(&self.msg("cli.no_channel")),
         }
     }
 
@@ -911,7 +940,7 @@ impl Session {
                     .filter(|c| c.unread > 0)
                     .map(|c| c.id)
                     .collect(),
-                Err(e) => return self.term.error(&e.to_string()),
+                Err(e) => return self.fail(&e),
             }
         } else {
             match self.current_channel().await {
@@ -922,25 +951,28 @@ impl Session {
         for channel in &channels {
             let last = match self.engine.history(channel.clone(), None, 1).await {
                 Ok(mut m) => m.pop(),
-                Err(e) => return self.term.error(&e.to_string()),
+                Err(e) => return self.fail(&e),
             };
             if let Some(m) = last
                 && let Err(e) = self.engine.mark_read(channel.clone(), m.id).await
             {
-                return self.term.error(&e.to_string());
+                return self.fail(&e);
             }
         }
-        self.term.note(&format!(
-            "marked read: {} conversation{}",
-            channels.len(),
-            if channels.len() == 1 { "" } else { "s" }
+        self.term.note(&self.names.say(
+            if channels.len() == 1 {
+                "cli.read.marked.one"
+            } else {
+                "cli.read.marked"
+            },
+            &[("n", &channels.len())],
         ));
     }
 
     async fn ask(&mut self, who: &str, question: String) {
         let person = match self.resolve(who).await {
             Ok(p) => p,
-            Err(e) => return self.term.print(&format!("{e}\n")),
+            Err(e) => return self.term.line(&e),
         };
         let name = self.names.person(&person.0);
         let (started, at) = (Instant::now(), now_ms());
@@ -953,10 +985,10 @@ impl Session {
             })
             .await;
         match result {
-            Some(Err(e)) => self.term.error(&e.to_string()),
+            Some(Err(e)) => self.fail(&e),
             Some(Ok(())) => self
                 .term
-                .note(&format!("{name} answers in their own channel")),
+                .note(&self.names.say("cli.ask.sent", &[("name", &name)])),
             None => {}
         }
         self.report_failures();
@@ -966,25 +998,34 @@ impl Session {
     async fn requests(&self) {
         let tasks = match self.engine.tasks().await {
             Ok(t) => t,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         if tasks.is_empty() {
-            return self
-                .term
-                .note("no requests yet; /ask <person> <question> makes one");
+            return self.term.note(&self.msg("cli.requests.none"));
         }
         for t in &tasks {
-            let state = match t.status {
-                TaskStatus::Active => "active",
-                TaskStatus::Done => "done",
-            };
+            let state = self.names.word_with(
+                match t.status {
+                    TaskStatus::Active => "cases.active",
+                    TaskStatus::Done => "cases.done",
+                },
+                match t.status {
+                    TaskStatus::Active => "active",
+                    TaskStatus::Done => "done",
+                },
+                &[],
+            );
             let who = t
                 .assignee
                 .as_ref()
-                .map_or("nobody yet", |p| p.name.as_str());
-            let pin = if t.pinned { " (pinned)" } else { "" };
-            self.term.print(&format!(
-                "{:<7} {}  {}: {}{}\n",
+                .map_or_else(|| self.msg("cli.requests.nobody"), |p| p.name.clone());
+            let pin = if t.pinned {
+                format!(" {}", self.msg("cli.requests.pinned"))
+            } else {
+                String::new()
+            };
+            self.term.line(&format!(
+                "{:<7} {}  {}: {}{}",
                 state,
                 Self::stamp(&t.created_at),
                 who,
@@ -1000,13 +1041,13 @@ impl Session {
                 "{:04}-{:02}-{:02} {}\n",
                 c.in_world.year, c.in_world.month, c.in_world.day, c.local_time
             )),
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
     async fn find(&self, topic: &str) {
         match self.engine.find_people(topic.to_owned()).await {
-            Ok(found) if found.is_empty() => self.term.note("nobody on the roster matches"),
+            Ok(found) if found.is_empty() => self.term.note(&self.msg("cli.find.none")),
             Ok(found) => {
                 for c in found {
                     self.term.print(&format!(
@@ -1017,7 +1058,7 @@ impl Session {
                     ));
                 }
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1025,34 +1066,46 @@ impl Session {
         use api::views::Activity;
         let digest = match self.engine.digest().await {
             Ok(d) => d,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         if digest.items.is_empty() {
-            return self.term.note("nobody is waiting on you");
+            return self.term.note(&self.msg("cli.waiting.none"));
         }
         for w in &digest.items {
-            let what = match &w.activity {
-                Activity::Messaged { .. } => "wrote to you".to_owned(),
-                Activity::Replied { question, .. } => {
-                    format!("answered: {}", excerpt(question, 50))
-                }
-                Activity::CommitmentDue { text, .. } => format!("due: {}", excerpt(text, 50)),
-                Activity::CameBy { .. } => "came by".to_owned(),
-                Activity::Birthday => "has a birthday today".to_owned(),
+            let word = |key: &str, default: &str, vars: &[(&str, &dyn std::fmt::Display)]| {
+                self.names.word_with(key, default, vars)
             };
-            self.term.print(&format!("{}  {what}\n", w.person.name));
+            let what = match &w.activity {
+                Activity::Messaged { .. } => word("activity.messaged", "wrote to you", &[]),
+                Activity::Replied { question, .. } => word(
+                    "activity.replied",
+                    "answered: {question}",
+                    &[("question", &excerpt(question, 50))],
+                ),
+                Activity::CommitmentDue { text, .. } => word(
+                    "activity.commitment_due",
+                    "due: {text}",
+                    &[("text", &excerpt(text, 50))],
+                ),
+                Activity::CameBy { .. } => word("activity.came_by", "came by", &[]),
+                Activity::Birthday => word("activity.birthday", "has a birthday today", &[]),
+            };
+            self.term.line(&format!("{}  {what}", w.person.name));
         }
     }
 
     async fn birthday(&self, day: Option<&str>) {
         let settings = match self.engine.settings().await {
             Ok(s) => s,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let Some(day) = day else {
             return self.term.note(&match settings.birthday {
-                Some(d) => format!("birthday: {:02}-{:02}", d.month, d.day),
-                None => "no birthday; /birthday MM-DD sets one".to_owned(),
+                Some(d) => self.names.say(
+                    "cli.birthday.show",
+                    &[("date", &format!("{:02}-{:02}", d.month, d.day))],
+                ),
+                None => self.msg("cli.birthday.none"),
             });
         };
         let parsed = if day == "clear" {
@@ -1063,7 +1116,7 @@ impl Session {
                 .map(|(month, day)| Some(api::views::MonthDay { month, day }))
         };
         let Some(birthday) = parsed else {
-            return self.term.print("usage: /birthday [MM-DD | clear]\n");
+            return self.term.line(&self.msg("cli.usage.birthday"));
         };
         match self
             .engine
@@ -1073,15 +1126,13 @@ impl Session {
             })
             .await
         {
-            Ok(()) => self.term.note(if birthday.is_some() {
-                "birthday saved"
+            Ok(()) => self.term.note(&self.msg(if birthday.is_some() {
+                "cli.birthday.saved"
             } else {
-                "birthday cleared"
-            }),
-            Err(api::ApiError::Invalid { .. }) => {
-                self.term.print("that is not a date; use MM-DD\n")
-            }
-            Err(e) => self.term.error(&e.to_string()),
+                "cli.birthday.cleared"
+            })),
+            Err(api::ApiError::Invalid { .. }) => self.term.line(&self.msg("cli.birthday.invalid")),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1097,7 +1148,7 @@ impl Session {
             _ = self.interrupt.wait() => {
                 self.bridge.cancel();
                 self.show.abort();
-                self.term.note("cancelled; the message stays in the history");
+                self.term.note(&self.msg("cli.interrupted"));
                 None
             }
         }
@@ -1107,15 +1158,15 @@ impl Session {
     /// ended without a reply.
     fn report_failures(&self) {
         for f in self.bridge.take_failures() {
-            self.term.error(&f);
+            self.term
+                .error(&self.names.say("cli.error", &[("text", &f)]));
         }
     }
 
     async fn current_channel(&self) -> Option<ChannelId> {
         let channel = self.current.as_ref().map(|c| c.channel.clone());
         if channel.is_none() {
-            self.term
-                .print("no channel yet: /talk <person> or /host first\n");
+            self.term.line(&self.msg("cli.no_channel"));
         }
         channel
     }
@@ -1135,7 +1186,7 @@ impl Session {
             })
             .await;
         if let Some(Err(e)) = result {
-            self.term.error(&e.to_string());
+            self.fail(&e);
         }
         self.report_failures();
         self.offer();
@@ -1147,10 +1198,16 @@ impl Session {
     async fn footer(&mut self, at: i64, started: Instant) {
         let n = self.collect(at).await;
         if n > 0 {
-            self.term.note(&format!(
-                "· {n} call{}, {:.1}s",
-                if n == 1 { "" } else { "s" },
-                started.elapsed().as_secs_f64()
+            self.term.note(&self.names.say(
+                if n == 1 {
+                    "cli.footer.one"
+                } else {
+                    "cli.footer"
+                },
+                &[
+                    ("n", &n),
+                    ("secs", &format!("{:.1}", started.elapsed().as_secs_f64())),
+                ],
             ));
         }
     }
@@ -1180,9 +1237,7 @@ impl Session {
             return;
         };
         if matches!(self.current.as_ref().map(|c| &c.kind), Some(Kind::Host)) {
-            return self
-                .term
-                .print("the host keeps no memories; nothing to wrap up\n");
+            return self.term.line(&self.msg("cli.wrapup.host"));
         }
         let before = self.fact_ids().await;
         let (started, at) = (Instant::now(), now_ms());
@@ -1198,7 +1253,7 @@ impl Session {
             .await;
         self.report_failures();
         match result {
-            Some(Err(e)) => self.term.error(&e.to_string()),
+            Some(Err(e)) => self.fail(&e),
             Some(Ok(())) => {
                 let written: Vec<FactView> = self
                     .facts(None, FactScope::All)
@@ -1208,10 +1263,13 @@ impl Session {
                     .filter(|f| !before.contains(&f.id))
                     .collect();
                 if written.is_empty() {
-                    self.term.note("wrapped up; no memories were written");
+                    self.term.note(&self.msg("cli.wrapup.empty"));
                 } else {
-                    self.term
-                        .note(&format!("wrapped up; {} memories written", written.len()));
+                    self.term.note(
+                        &self
+                            .names
+                            .say("cli.wrapup.written", &[("n", &written.len())]),
+                    );
                     self.print_memories(&written);
                     // So `/forget 1` right after a wrap-up means the first of these.
                     self.listed = written;
@@ -1245,22 +1303,37 @@ impl Session {
     /// Who may see a memory, in words.
     fn audience(&self, f: &FactView) -> String {
         match &f.audience {
-            Audience::World => "everyone".into(),
-            Audience::Own { person } => format!("only {}", person.name),
+            Audience::World => self.msg("cli.audience.world"),
+            Audience::Own { person } => self
+                .names
+                .say("cli.audience.own", &[("name", &person.name)]),
             Audience::Participants { channel, persons } => {
                 let names: Vec<&str> = persons.iter().map(|p| p.name.as_str()).collect();
-                format!("channel {} ({})", channel.0, names.join(", "))
+                self.names.say(
+                    "cli.audience.channel",
+                    &[("channel", &channel.0), ("names", &names.join(", "))],
+                )
             }
         }
     }
 
+    /// A memory's kind in words.
+    fn kind_word(&self, m: &FactView) -> String {
+        let kind = format!("{:?}", m.kind).to_lowercase();
+        self.names.word(&format!("world.kind.{kind}"), &kind)
+    }
+
+    /// The line saying who may recall a memory.
+    fn seen_by(&self, m: &FactView) -> String {
+        self.names
+            .say("cli.memories.seen_by", &[("who", &self.audience(m))])
+    }
+
     fn print_memories(&self, memories: &[FactView]) {
         for (i, m) in memories.iter().enumerate() {
-            let kind = format!("{:?}", m.kind).to_lowercase();
-            self.term
-                .print(&format!("{}. [{kind}] {}\n", i + 1, m.text));
-            self.term
-                .note(&format!("    seen by: {}", self.audience(m)));
+            let kind = self.kind_word(m);
+            self.term.line(&format!("{}. [{kind}] {}", i + 1, m.text));
+            self.term.note(&self.seen_by(m));
         }
     }
 
@@ -1268,13 +1341,13 @@ impl Session {
         let person = match who {
             Some(who) => match self.resolve(who).await {
                 Ok(p) => Some(p),
-                Err(e) => return self.term.print(&format!("{e}\n")),
+                Err(e) => return self.term.line(&e),
             },
             None => None,
         };
         let mut all = match self.facts(person.clone(), FactScope::All).await {
             Ok(m) => m,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let live = all.len();
         // Deleted ones follow in the same numbering, so `/restore` has something to name.
@@ -1284,54 +1357,66 @@ impl Session {
                 .unwrap_or_default(),
         );
         if all.is_empty() {
-            return self.term.note("no memories");
+            return self.term.note(&self.msg("cli.memories.none"));
         }
         for (i, m) in all.iter().enumerate() {
-            let kind = format!("{:?}", m.kind).to_lowercase();
+            let kind = self.kind_word(m);
             let line = format!("{}. [{kind}] {}", i + 1, m.text);
             if i < live {
-                self.term.print(&format!("{line}\n"));
-                self.term
-                    .note(&format!("    seen by: {}", self.audience(m)));
+                self.term.line(&line);
+                self.term.note(&self.seen_by(m));
             } else {
-                self.term.note(&format!("{line}  (deleted)"));
+                self.term.note(&format!(
+                    "{line}  {}",
+                    self.msg("cli.memories.deleted_mark")
+                ));
             }
         }
-        self.term.note(&format!(
-            "{live} memories, {} deleted; /forget, /restore or /edit <n>",
-            all.len() - live
+        self.term.note(&self.names.say(
+            "cli.memories.summary",
+            &[("live", &live), ("deleted", &(all.len() - live))],
         ));
         self.listed = all;
     }
 
     async fn change_memory(&mut self, n: usize, change: Change) {
         let Some(m) = self.listed.get(n - 1).cloned() else {
-            return self.term.note(if self.listed.is_empty() {
-                "no list yet: /memories first"
+            return self.term.note(&self.msg(if self.listed.is_empty() {
+                "cli.memory.no_list"
             } else {
-                "no such memory in the last list"
-            });
+                "cli.memory.no_such"
+            }));
         };
         let done = match (&change, m.retracted) {
             (Change::Forget, true) | (Change::Edit(_), true) => {
-                return self.term.note("that one is deleted; /restore it first");
+                return self.term.note(&self.msg("cli.memory.is_deleted"));
             }
-            (Change::Restore, false) => return self.term.note("that one is not deleted"),
-            (Change::Forget, false) => self.engine.delete_fact(m.id).await.map(|()| "deleted"),
-            (Change::Restore, true) => self.engine.restore_fact(m.id).await.map(|()| "restored"),
+            (Change::Restore, false) => {
+                return self.term.note(&self.msg("cli.memory.not_deleted"));
+            }
+            (Change::Forget, false) => self
+                .engine
+                .delete_fact(m.id)
+                .await
+                .map(|()| "cli.memory.deleted"),
+            (Change::Restore, true) => self
+                .engine
+                .restore_fact(m.id)
+                .await
+                .map(|()| "cli.memory.restored"),
             (Change::Edit(text), false) => self
                 .engine
                 .edit_fact(m.id, text.clone())
                 .await
-                .map(|_| "rewritten"),
+                .map(|_| "cli.memory.rewritten"),
         };
         match done {
-            Ok(what) => {
+            Ok(key) => {
                 // Numbers would now point at different memories.
                 self.listed.clear();
-                self.term.note(&format!("{what}; /memories lists again"));
+                self.term.note(&self.msg(key));
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1342,13 +1427,13 @@ impl Session {
             return;
         };
         match self.engine.history(channel, None, n as u32).await {
-            Ok(messages) if messages.is_empty() => self.term.note("nothing said yet"),
+            Ok(messages) if messages.is_empty() => self.term.note(&self.msg("cli.history.none")),
             Ok(messages) => {
                 for m in &messages {
                     self.term.print(&self.show.whole(m));
                 }
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1366,7 +1451,7 @@ impl Session {
             .await
         {
             Ok(m) => m,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let Some(at) = messages
             .iter()
@@ -1376,22 +1461,25 @@ impl Session {
             .nth(n - 1)
             .map(|(i, _)| i)
         else {
-            return self.term.note("no message of yours to send again");
+            return self.term.note(&self.msg("cli.resend.none"));
         };
         let removed = messages.len() - at;
         match self.engine.rewind(channel, messages[at].id.clone()).await {
             Ok(text) => {
-                self.term.note(&format!(
-                    "took back {removed} message{}; edit it and send again",
-                    if removed == 1 { "" } else { "s" }
+                self.term.note(&self.names.say(
+                    if removed == 1 {
+                        "cli.resend.done.one"
+                    } else {
+                        "cli.resend.done"
+                    },
+                    &[("n", &removed)],
                 ));
                 self.prefill = Some(text);
             }
             Err(api::ApiError::Invalid { field }) if field == "busy" => {
-                self.term
-                    .note("a reply is still being written here; try again when it ends");
+                self.term.note(&self.msg("cli.resend.busy"));
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1403,7 +1491,7 @@ impl Session {
         };
         let messages = match self.engine.history(channel, None, Self::LOOKBACK).await {
             Ok(m) => m,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let Some(reply) = messages
             .iter()
@@ -1411,7 +1499,7 @@ impl Session {
             .filter(|m| m.author != Author::User && !m.cites.is_empty())
             .nth(n - 1)
         else {
-            return self.term.note("no reply with sources there");
+            return self.term.note(&self.msg("cli.sources.none"));
         };
         let mut cites: Vec<&api::types::Citation> = Vec::new();
         for c in &reply.cites {
@@ -1420,7 +1508,10 @@ impl Session {
             }
         }
         let Some(k) = entry else {
-            let mut out = format!("sources ({}):\n", cites.len());
+            let mut out = format!(
+                "{}\n",
+                self.names.say("cli.sources.header", &[("n", &cites.len())])
+            );
             for (i, c) in cites.iter().enumerate() {
                 let label = match self.engine.resolve_citation((*c).clone()).await {
                     Ok(v) => v.passage.map(|p| unit_label(&p).to_owned()),
@@ -1432,18 +1523,20 @@ impl Session {
                     label.unwrap_or_else(|| c.page.clone())
                 ));
             }
-            out.push_str("  /sources [n] <k> shows the text of entry k\n");
+            out.push_str(&format!("{}\n", self.msg("cli.sources.hint")));
             return self.term.print(&out);
         };
         let Some(cite) = cites.get(k - 1) else {
-            return self
-                .term
-                .note(&format!("no entry {k}; the reply has {}", cites.len()));
+            return self.term.note(
+                &self
+                    .names
+                    .say("cli.sources.no_entry", &[("k", &k), ("n", &cites.len())]),
+            );
         };
         match self.engine.resolve_citation((*cite).clone()).await {
             Ok(v) => {
                 let Some(p) = v.passage else {
-                    return self.term.note("that source is no longer in the corpus");
+                    return self.term.note(&self.msg("cli.sources.gone"));
                 };
                 self.term.print(&format!(
                     "{}\n{}\n",
@@ -1451,10 +1544,11 @@ impl Session {
                     p.text
                 ));
                 if let Some(url) = v.source_url.or(v.revision_url) {
-                    self.term.print(&format!("source: {url}\n"));
+                    self.term
+                        .line(&self.names.say("cli.source.link", &[("url", &url)]));
                 }
             }
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1497,14 +1591,22 @@ impl Session {
             .await;
         let found = match found {
             Ok(r) => r,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         match &as_person {
-            Some(p) => self.term.note(&format!("as {}", self.names.person(&p.0))),
-            None => self.term.note("as the host: whole corpus"),
+            Some(p) => self.term.note(
+                &self
+                    .names
+                    .say("cli.search.as", &[("name", &self.names.person(&p.0))]),
+            ),
+            None => self.term.note(&self.msg("cli.search.as_host")),
         }
-        self.term
-            .note(&format!("confidence: {:?}", found.confidence).to_lowercase());
+        let confidence = format!("{:?}", found.confidence).to_lowercase();
+        self.term.note(
+            &self
+                .names
+                .say("cli.search.confidence", &[("level", &confidence)]),
+        );
         for (i, hit) in found.hits.iter().enumerate() {
             self.term.print(&format!(
                 "{}. {} {}\n",
@@ -1516,10 +1618,9 @@ impl Session {
                 .print(&format!("   {}\n", excerpt(&hit.text, 100)));
         }
         if found.hits.is_empty() {
-            self.term.note("no hits");
+            self.term.note(&self.msg("cli.search.none"));
         } else {
-            self.term
-                .note("/read <n> opens a result with its neighbours");
+            self.term.note(&self.msg("cli.search.hint"));
         }
         self.found = found.hits;
     }
@@ -1531,11 +1632,11 @@ impl Session {
             Ok(n) => match self.found.get(n.wrapping_sub(1)) {
                 Some(p) => p.citation.chunk_id.clone(),
                 None => {
-                    return self.term.note(if self.found.is_empty() {
-                        "no results to number yet; /search first, or give a unit id"
+                    return self.term.note(&self.msg(if self.found.is_empty() {
+                        "cli.read.no_results"
                     } else {
-                        "no such result; the list from /search is above"
-                    });
+                        "cli.read.no_such"
+                    }));
                 }
             },
             Err(_) => what.to_owned(),
@@ -1543,9 +1644,11 @@ impl Session {
         let view = match self.engine.read_unit(id, 2).await {
             Ok(v) => v,
             Err(api::ApiError::NotFound) => {
-                return self.term.note(&format!("no unit \"{what}\" in the corpus"));
+                return self
+                    .term
+                    .note(&self.names.say("cli.read.no_unit", &[("what", &what)]));
             }
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let style = self.term.style;
         for p in &view.before {
@@ -1563,7 +1666,8 @@ impl Session {
                 .print(&format!("{}\n", style.dim(&excerpt(&p.text, 160))));
         }
         if let Some(url) = &view.unit.source_url {
-            self.term.print(&format!("source: {url}\n"));
+            self.term
+                .line(&self.names.say("cli.source.link", &[("url", url)]));
         }
     }
 
@@ -1619,16 +1723,18 @@ impl Session {
 
     /// The new password, typed twice.
     fn new_password(&self) -> Option<String> {
-        let first = (self.secret)("new password: ");
-        let again = first.as_ref().and_then(|_| (self.secret)("again: "));
+        let first = (self.secret)(&self.msg("cli.password.new"));
+        let again = first
+            .as_ref()
+            .and_then(|_| (self.secret)(&self.msg("cli.password.again")));
         match (first, again) {
             (Some(a), Some(b)) if a == b => Some(a),
             (Some(_), Some(_)) => {
-                self.term.print("the two did not match\n");
+                self.term.line(&self.msg("cli.password.mismatch"));
                 None
             }
             _ => {
-                self.term.note("cancelled");
+                self.term.note(&self.msg("cli.cancelled"));
                 None
             }
         }
@@ -1636,8 +1742,8 @@ impl Session {
 
     async fn set_password(&self, old: Option<String>, new: Option<String>, done: &str) {
         match self.engine.set_password(old, new).await {
-            Ok(()) => self.term.note(done),
-            Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+            Ok(()) => self.term.note(&self.msg(done)),
+            Err(e) => self.term.line(&self.why(&e)),
         }
     }
 
@@ -1651,39 +1757,36 @@ impl Session {
             .iter()
             .any(|s| s.current && s.encrypted);
         match (act, encrypted) {
-            (None, true) => self
-                .term
-                .note("this save is encrypted; /password change or /password off"),
-            (None, false) => self
-                .term
-                .note("this save is not encrypted; /password on turns it on"),
+            (None, true) => self.term.note(&self.msg("cli.password.is_on")),
+            (None, false) => self.term.note(&self.msg("cli.password.is_off")),
             (Some(PasswordAct::On), false) => {
-                self.term.print(FORGET_WARNING);
-                self.term.print("encrypt this save with a password? (y/n) ");
+                self.term.line(&self.msg("cli.password.warning"));
+                self.term
+                    .print(&format!("{} ", self.msg("cli.password.ask_on")));
                 self.pending = Some(Pending::PasswordOn);
             }
             (Some(PasswordAct::Off), true) => {
                 self.term
-                    .print("remove the password from this save? (y/n) ");
+                    .print(&format!("{} ", self.msg("cli.password.ask_off")));
                 self.pending = Some(Pending::PasswordOff);
             }
             (Some(PasswordAct::Change), true) => {
-                let Some(old) = (self.secret)("current password: ") else {
-                    return self.term.note("cancelled");
+                let Some(old) = (self.secret)(&self.msg("cli.password.current")) else {
+                    return self.term.note(&self.msg("cli.cancelled"));
                 };
                 let Some(new) = self.new_password() else {
                     return;
                 };
-                self.set_password(Some(old), Some(new), "password changed")
+                self.set_password(Some(old), Some(new), "cli.password.changed")
                     .await;
             }
             (Some(PasswordAct::On), true)
             | (Some(PasswordAct::Change | PasswordAct::Off), false) => {
-                self.term.print(if encrypted {
-                    "this save is already encrypted; /password change or /password off\n"
+                self.term.line(&self.msg(if encrypted {
+                    "cli.password.already_on"
                 } else {
-                    "this save is not encrypted; /password on first\n"
-                })
+                    "cli.password.not_on"
+                }))
             }
         }
     }
@@ -1692,12 +1795,12 @@ impl Session {
     async fn bio(&self, text: Option<String>) {
         let settings = match self.engine.settings().await {
             Ok(s) => s,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let Some(text) = text else {
             return self.term.note(&match settings.bio {
-                Some(b) => format!("bio: {b}"),
-                None => "no bio; /bio <text> sets one".to_owned(),
+                Some(b) => self.names.say("cli.bio.show", &[("bio", &b)]),
+                None => self.msg("cli.bio.none"),
             });
         };
         let next = Settings {
@@ -1708,17 +1811,18 @@ impl Session {
             // A change rolls the channels over, which may ask the model for a summary.
             Ok(()) => {
                 self.interruptible(self.bridge.idle()).await;
-                self.term.note(if next.bio.is_some() {
-                    "bio saved"
+                self.term.note(&self.msg(if next.bio.is_some() {
+                    "cli.bio.saved"
                 } else {
-                    "bio cleared"
-                })
+                    "cli.bio.cleared"
+                }))
             }
-            Err(api::ApiError::Invalid { .. }) => self.term.print(&format!(
-                "a bio is at most {} characters\n",
-                world::settings::BIO_MAX
-            )),
-            Err(e) => self.term.error(&e.to_string()),
+            Err(api::ApiError::Invalid { .. }) => self.term.line(
+                &self
+                    .names
+                    .say("cli.bio.too_long", &[("max", &world::settings::BIO_MAX)]),
+            ),
+            Err(e) => self.fail(&e),
         }
     }
 
@@ -1742,6 +1846,40 @@ impl Session {
         groups.join("\n\n")
     }
 
+    /// `/lang`: the words of the interface, the corpus's language or English. Applies at
+    /// once; the home keeps it for the app too.
+    async fn lang(&self, arg: Option<&str>) {
+        let chosen = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
+            None => None,
+            Some("en" | "english") => Some(InterfaceLanguage::English),
+            Some("corpus" | "zh") => Some(InterfaceLanguage::Corpus),
+            Some(_) => return self.term.line(&self.msg("cli.usage.lang")),
+        };
+        if let Some(language) = chosen {
+            let done = async {
+                self.engine.set_interface_language(language).await?;
+                self.names.reload(&self.engine).await
+            }
+            .await;
+            if let Err(e) = done {
+                return self.fail(&e);
+            }
+        }
+        let current = self.engine.interface_language().await.unwrap_or_default();
+        let name = match current {
+            InterfaceLanguage::Corpus => self.names.word("lang.corpus", "corpus language"),
+            InterfaceLanguage::English => "English".to_owned(),
+        };
+        self.term.note(&self.names.say(
+            if chosen.is_some() {
+                "cli.lang.set"
+            } else {
+                "cli.lang.current"
+            },
+            &[("language", &name)],
+        ));
+    }
+
     async fn tier(&self, level: Option<&str>) {
         const LEVELS: [(&str, Tier); 6] = [
             ("low", Tier::Low),
@@ -1756,26 +1894,32 @@ impl Session {
             let want = level.trim().to_lowercase().replace(['-', ' '], "_");
             let Some((_, tier)) = LEVELS.iter().find(|(n, _)| *n == want) else {
                 let all: Vec<&str> = LEVELS.iter().map(|(n, _)| *n).collect();
-                return self.term.print(&format!("levels: {}\n", all.join(", ")));
+                return self.term.line(
+                    &self
+                        .names
+                        .say("cli.tier.levels", &[("levels", &all.join(", "))]),
+                );
             };
             if let Err(e) = self.engine.set_tier(*tier).await {
-                return self.term.error(&e.to_string());
+                return self.fail(&e);
             }
         }
         match self.engine.quota().await {
-            Ok(q) => self.term.note(&format!(
-                "tier {}, quota {}",
-                name(q.tier),
-                format!("{:?}", q.band).to_lowercase()
+            Ok(q) => self.term.note(&self.names.say(
+                "cli.tier.status",
+                &[
+                    ("tier", &name(q.tier)),
+                    ("band", &format!("{:?}", q.band).to_lowercase()),
+                ],
             )),
-            Err(e) => self.term.error(&e.to_string()),
+            Err(e) => self.fail(&e),
         }
     }
 
     async fn quiet(&self, arg: Option<&str>) {
         let settings = match self.engine.settings().await {
             Ok(s) => s,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         let quiet = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
             None => settings.quiet_hours.clone(),
@@ -1793,7 +1937,7 @@ impl Session {
                     from: from.trim().into(),
                     to: to.trim().into(),
                 }),
-                None => return self.term.print("usage: /quiet [on|off|HH:MM-HH:MM]\n"),
+                None => return self.term.line(&self.msg("cli.usage.quiet")),
             },
         };
         if arg.is_some() {
@@ -1803,43 +1947,35 @@ impl Session {
             };
             if let Err(e) = self.engine.update_settings(next).await {
                 return match e {
-                    api::ApiError::Invalid { .. } => self
-                        .term
-                        .print("hours are 24-hour HH:MM, like 23:00-07:00\n"),
-                    e => self.term.error(&e.to_string()),
+                    api::ApiError::Invalid { .. } => self.term.line(&self.msg("cli.quiet.invalid")),
+                    e => self.fail(&e),
                 };
             }
         }
         self.term.note(&match quiet {
-            Some(q) => format!("quiet hours on, {} to {}", q.from, q.to),
-            None => "quiet hours off".to_owned(),
+            Some(q) => self
+                .names
+                .say("cli.quiet.on", &[("from", &q.from), ("to", &q.to)]),
+            None => self.msg("cli.quiet.off"),
         });
     }
 
     // ---- saves ----
 
     /// What a save command's failure means in a terminal.
-    fn why(e: &api::ApiError) -> String {
-        match e {
-            api::ApiError::Busy => "a reply is still being written; try again when it ends".into(),
-            api::ApiError::Exists => "a save with that name already exists".into(),
-            api::ApiError::Locked => {
-                "that save is encrypted; /save switch to it and enter its password".into()
-            }
-            api::ApiError::WrongPassword => "wrong password".into(),
-            api::ApiError::Invalid { field } if field == "new" => {
-                "that is not a usable password".into()
-            }
-            api::ApiError::NotFound => "no such save (or file)".into(),
-            api::ApiError::Invalid { field } if field == "name" => {
-                "that is not a usable name (no slashes, no leading dot, at most 48 characters)"
-                    .into()
-            }
-            api::ApiError::Invalid { field } if field == "file" => {
-                "that file is not a world database this version can read".into()
-            }
-            other => other.to_string(),
-        }
+    fn why(&self, e: &api::ApiError) -> String {
+        let key = match e {
+            api::ApiError::Busy => "cli.save.busy",
+            api::ApiError::Exists => "cli.save.exists",
+            api::ApiError::Locked => "cli.save.locked",
+            api::ApiError::WrongPassword => "cli.save.wrong_password",
+            api::ApiError::Invalid { field } if field == "new" => "cli.save.bad_password",
+            api::ApiError::NotFound => "cli.save.not_found",
+            api::ApiError::Invalid { field } if field == "name" => "cli.save.bad_name",
+            api::ApiError::Invalid { field } if field == "file" => "cli.save.bad_file",
+            other => return self.names.api_error(other),
+        };
+        self.msg(key)
     }
 
     async fn save(&mut self, cmd: Save) {
@@ -1849,49 +1985,58 @@ impl Session {
                 .engine
                 .new_save(n.clone())
                 .await
-                .map(|()| format!("created {n}")),
+                .map(|()| self.names.say("cli.save.created", &[("n", &n)])),
             Save::Switch(n) => return self.switch_save(&n).await,
             Save::Logout => return self.log_out().await,
             Save::Copy(a, b) => self
                 .engine
                 .copy_save(a.clone(), b.clone())
                 .await
-                .map(|()| format!("copied {a} to {b}")),
+                .map(|()| self.names.say("cli.save.copied", &[("a", &a), ("b", &b)])),
             Save::Rename(a, b) => self
                 .engine
                 .rename_save(a.clone(), b.clone())
                 .await
-                .map(|()| format!("renamed {a} to {b}")),
+                .map(|()| self.names.say("cli.save.renamed", &[("a", &a), ("b", &b)])),
             Save::Delete(n) => return self.ask_delete(n).await,
             Save::Export(n, path) => return self.export_save(n, path).await,
             Save::Import(path, name) => self
                 .import(expand(&path), name)
                 .await
-                .map(|n| format!("imported as {n}; /save switch {n} opens it")),
+                .map(|n| self.names.say("cli.save.imported", &[("n", &n)])),
         };
         match done {
             Ok(text) => self.term.note(&text),
-            Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+            Err(e) => self.term.line(&self.why(&e)),
         }
     }
 
     async fn list_saves(&self) {
         let saves = match self.engine.saves().await {
             Ok(s) => s,
-            Err(e) => return self.term.error(&e.to_string()),
+            Err(e) => return self.fail(&e),
         };
         for s in &saves {
             let played = s.played_at.as_ref().map_or_else(
                 || "-".to_owned(),
                 |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
             );
-            self.term.print(&format!(
-                "{} {:<24} {:>8} KB  {played}{}\n",
+            self.term.line(&format!(
+                "{} {:<24} {:>8} KB  {played}{}",
                 if s.current { "*" } else { " " },
                 s.name,
                 s.size_kb,
-                if s.encrypted { "  encrypted" } else { "" }
+                self.encrypted_mark(s.encrypted)
             ));
+        }
+    }
+
+    /// The mark after an encrypted save in a list; nothing otherwise.
+    fn encrypted_mark(&self, encrypted: bool) -> String {
+        if encrypted {
+            format!("  {}", self.msg("cli.save.encrypted"))
+        } else {
+            String::new()
         }
     }
 
@@ -1906,7 +2051,7 @@ impl Session {
             switched = self.engine.switch_save(name.to_owned()).await;
         }
         if let Err(e) = switched {
-            return self.term.print(&format!("{}\n", Self::why(&e)));
+            return self.term.line(&self.why(&e));
         }
         self.current = None;
         self.offers.clear();
@@ -1920,11 +2065,10 @@ impl Session {
             .and_then(|c| c.last().map(|c| c.id))
             .unwrap_or(0);
         if let Err(e) = self.names.refresh_user(&self.engine).await {
-            self.term.error(&e.to_string());
+            self.fail(&e);
         }
-        self.term.note(&format!(
-            "now playing {name}; /talk <person> or /host to begin"
-        ));
+        self.term
+            .note(&self.names.say("cli.save.playing", &[("name", &name)]));
     }
 
     /// Whether no save is open and the lines typed choose one.
@@ -1935,14 +2079,14 @@ impl Session {
     /// `/save logout`: close the open save, forget where it was, and show the save list.
     async fn log_out(&mut self) {
         if let Err(e) = self.engine.log_out().await {
-            return self.term.print(&format!("{}\n", Self::why(&e)));
+            return self.term.line(&self.why(&e));
         }
         self.current = None;
         self.offers.clear();
         self.listed.clear();
         self.calls.clear();
         self.picking = true;
-        self.term.note("logged out of the save");
+        self.term.note(&self.msg("cli.save.logged_out"));
         self.show_picker().await;
     }
 
@@ -1951,34 +2095,31 @@ impl Session {
     pub async fn show_picker(&mut self) {
         let status = self.engine.app_status().await.ok();
         if let Some(gone) = status.as_ref().and_then(|s| s.missing_save.as_ref()) {
-            self.term.print(&format!(
-                "The save you used last, \"{gone}\", is not there any more (renamed or deleted elsewhere).\n"
-            ));
+            self.term
+                .line(&self.names.say("cli.picker.gone", &[("gone", gone)]));
         }
         let saves = self.engine.saves().await.unwrap_or_default();
         let dir = status.map_or_else(String::new, |s| s.saves_dir);
-        self.term.print(&format!("Saves in {dir}\n"));
+        self.term
+            .line(&self.names.say("cli.picker.header", &[("dir", &dir)]));
         if saves.is_empty() {
-            self.term.print("  (none yet)\n");
+            self.term.line(&self.msg("cli.picker.none"));
         }
         for (i, s) in saves.iter().enumerate() {
             let played = s.played_at.as_ref().map_or_else(
                 || "-".to_owned(),
                 |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
             );
-            self.term.print(&format!(
-                "  {:>2}  {:<24} {:>8} KB  {played}{}\n",
+            self.term.line(&format!(
+                "  {:>2}  {:<24} {:>8} KB  {played}{}",
                 i + 1,
                 s.name,
                 s.size_kb,
-                if s.encrypted { "  encrypted" } else { "" }
+                self.encrypted_mark(s.encrypted)
             ));
         }
         self.pickable = saves.into_iter().map(|s| s.name).collect();
-        self.term.print(
-            "Type a number to open a save, \"new <name>\" to start one, \"import <path> [name]\" \
-             to add a file, or \"quit\".\n",
-        );
+        self.term.line(&self.msg("cli.picker.help"));
     }
 
     /// One line typed while no save is open.
@@ -2009,16 +2150,13 @@ impl Session {
             {
                 Some(name) => name.clone(),
                 None => {
-                    self.term.print("there is no save with that number\n");
+                    self.term.line(&self.msg("cli.picker.no_number"));
                     return Flow::Continue;
                 }
             },
             [name] if self.pickable.iter().any(|s| s == name) => (*name).to_owned(),
             _ => {
-                self.term.print(
-                    "No save is open. Type a number from the list, \"new <name>\", \
-                     \"import <path> [name]\" or \"quit\".\n",
-                );
+                self.term.line(&self.msg("cli.picker.reminder"));
                 return Flow::Continue;
             }
         };
@@ -2039,22 +2177,26 @@ impl Session {
     }
 
     fn picker_error(&self, e: &api::ApiError) -> Flow {
-        self.term.print(&format!("{}\n", Self::why(e)));
+        self.term.line(&self.why(e));
         Flow::Continue
     }
 
     /// Ask for the password of save `name` until it opens it or the tries run out.
     async fn unlock(&self, name: &str) -> bool {
         for _ in 0..TRIES {
-            let Some(password) = (self.secret)(&format!("password for {name}: ")) else {
-                self.term.note("cancelled");
+            let Some(password) =
+                (self.secret)(&self.names.say("cli.password.for", &[("name", &name)]))
+            else {
+                self.term.note(&self.msg("cli.cancelled"));
                 return false;
             };
             match self.engine.unlock(name.to_owned(), password).await {
                 Ok(()) => return true,
-                Err(api::ApiError::WrongPassword) => self.term.print("wrong password\n"),
+                Err(api::ApiError::WrongPassword) => {
+                    self.term.line(&self.msg("cli.save.wrong_password"))
+                }
                 Err(e) => {
-                    self.term.print(&format!("{}\n", Self::why(&e)));
+                    self.term.line(&self.why(&e));
                     return false;
                 }
             }
@@ -2073,9 +2215,9 @@ impl Session {
                 break;
             }
             if result == Err(api::ApiError::WrongPassword) {
-                self.term.print("wrong password\n");
+                self.term.line(&self.msg("cli.save.wrong_password"));
             }
-            let Some(password) = (self.secret)("password of that file: ") else {
+            let Some(password) = (self.secret)(&self.msg("cli.password.file")) else {
                 break;
             };
             result = self
@@ -2095,20 +2237,22 @@ impl Session {
             .iter()
             .any(|s| s.current && s.name == name);
         if in_use {
-            return self
-                .term
-                .print("that is the save in use; /save switch to another first\n");
+            return self.term.line(&self.msg("cli.delete.in_use"));
         }
-        self.term
-            .print(&format!("delete save {name} for good? (y/n) "));
+        self.term.print(&format!(
+            "{} ",
+            self.names.say("cli.delete.ask", &[("name", &name)])
+        ));
         self.pending = Some(Pending::DeleteSave(name));
     }
 
     async fn export_save(&mut self, name: String, path: String) {
         let path = expand(&path);
         if std::path::Path::new(&path).exists() {
-            self.term
-                .print(&format!("{path} exists; replace it? (y/n) "));
+            self.term.print(&format!(
+                "{} ",
+                self.names.say("cli.export.replace", &[("path", &path)])
+            ));
             self.pending = Some(Pending::Overwrite { name, path });
             return;
         }
@@ -2117,16 +2261,20 @@ impl Session {
 
     async fn export_now(&self, name: &str, path: String) {
         match self.engine.export_save(name.to_owned(), path.clone()).await {
-            Ok(()) => self.term.note(&format!("wrote {path}")),
-            Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+            Ok(()) => self
+                .term
+                .note(&self.names.say("cli.export.wrote", &[("path", &path)])),
+            Err(e) => self.term.line(&self.why(&e)),
         }
     }
 
     async fn confirmed(&mut self, pending: Pending) {
         match pending {
             Pending::DeleteSave(name) => match self.engine.delete_save(name.clone()).await {
-                Ok(()) => self.term.note(&format!("deleted {name}")),
-                Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+                Ok(()) => self
+                    .term
+                    .note(&self.names.say("cli.delete.done", &[("name", &name)])),
+                Err(e) => self.term.line(&self.why(&e)),
             },
             Pending::DeleteGroup(channel) => {
                 match self.engine.delete_group(channel.clone()).await {
@@ -2134,31 +2282,31 @@ impl Session {
                         if self.current.as_ref().is_some_and(|c| c.channel == channel) {
                             self.current = None;
                         }
-                        self.term.note("group deleted");
+                        self.term.note(&self.msg("cli.leave.done"));
                     }
-                    Err(e) => self.term.error(&e.to_string()),
+                    Err(e) => self.fail(&e),
                 }
             }
             Pending::Overwrite { name, path } => self.export_now(&name, path).await,
             Pending::ClearStorage(kinds) => match self.engine.clear_storage(kinds).await {
                 Ok(usage) => {
-                    self.term.note("cleared");
+                    self.term.note(&self.msg("cli.storage.cleared"));
                     self.print_storage(&usage);
                 }
-                Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+                Err(e) => self.term.line(&self.why(&e)),
             },
             Pending::PasswordOn => {
                 let Some(new) = self.new_password() else {
                     return;
                 };
-                self.set_password(None, Some(new), "this save is encrypted now")
+                self.set_password(None, Some(new), "cli.password.now_on")
                     .await;
             }
             Pending::PasswordOff => {
-                let Some(old) = (self.secret)("password: ") else {
-                    return self.term.note("cancelled");
+                let Some(old) = (self.secret)(&self.msg("cli.password.plain")) else {
+                    return self.term.note(&self.msg("cli.cancelled"));
                 };
-                self.set_password(Some(old), None, "this save is not encrypted now")
+                self.set_password(Some(old), None, "cli.password.now_off")
                     .await;
             }
         }
@@ -2189,7 +2337,7 @@ impl Session {
             })
             .await;
         if let Some(Err(e)) = ran {
-            self.term.error(&e.to_string());
+            self.fail(&e);
         }
         self.report_failures();
         self.offer();
@@ -2200,12 +2348,12 @@ impl Session {
         match act {
             StorageAct::Show => match self.engine.storage_usage().await {
                 Ok(usage) => self.print_storage(&usage),
-                Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+                Err(e) => self.term.line(&self.why(&e)),
             },
             StorageAct::Clear(kinds) => {
                 let usage = match self.engine.storage_usage().await {
                     Ok(u) => u,
-                    Err(e) => return self.term.print(&format!("{}\n", Self::why(&e))),
+                    Err(e) => return self.term.line(&self.why(&e)),
                 };
                 let kb: u32 = usage
                     .categories
@@ -2214,8 +2362,8 @@ impl Session {
                     .map(|c| c.kb)
                     .sum();
                 self.term.print(&format!(
-                    "clear {} of cached files? Saves and the corpus stay. (y/n) ",
-                    size(kb)
+                    "{} ",
+                    self.names.say("cli.storage.ask", &[("size", &size(kb))])
                 ));
                 self.pending = Some(Pending::ClearStorage(kinds));
             }
@@ -2224,45 +2372,59 @@ impl Session {
 
     fn print_storage(&self, usage: &StorageUsage) {
         let label = |k: StorageKind| match k {
-            StorageKind::Saves => "saves",
-            StorageKind::Avatars => "avatars",
-            StorageKind::Audio => "audio",
-            StorageKind::Uploads => "uploads",
-            StorageKind::Corpus => "corpus",
+            StorageKind::Saves => self.names.word("storage.kind.saves", "saves"),
+            StorageKind::Avatars => self.names.word("storage.kind.avatars", "avatars"),
+            StorageKind::Audio => self.names.word("storage.kind.audio", "audio"),
+            StorageKind::Uploads => self.names.word("storage.kind.uploads", "uploads"),
+            StorageKind::Corpus => self.names.word("storage.kind.corpus", "corpus"),
         };
         for c in &usage.categories {
             let note = if c.clearable {
-                "  (/storage clear)"
+                format!("  {}", self.msg("cli.storage.clearable"))
             } else {
-                ""
+                String::new()
             };
-            self.term.print(&format!(
-                "{:<8} {:>10}  {} files{note}\n",
+            self.term.line(&format!(
+                "{:<8} {:>10}  {}{note}",
                 label(c.kind),
                 size(c.kb),
-                c.files
+                self.names.say("cli.storage.files", &[("n", &c.files)])
             ));
         }
         for s in &usage.saves {
             let mark = if s.current { " *" } else { "" };
-            self.term
-                .print(&format!("  save {}{mark}: {}\n", s.name, size(s.kb)));
+            self.term.line(&self.names.say(
+                "cli.storage.save",
+                &[
+                    ("name", &format!("{}{mark}", s.name)),
+                    ("size", &size(s.kb)),
+                ],
+            ));
         }
-        self.term.print(&format!(
-            "pictures in this save: {} ({})\ntotal    {:>10}\n",
-            usage.pictures,
-            size(usage.picture_kb),
-            size(usage.total_kb)
+        self.term.line(&self.names.say(
+            "cli.storage.pictures",
+            &[("n", &usage.pictures), ("size", &size(usage.picture_kb))],
+        ));
+        self.term.line(&self.names.say(
+            "cli.storage.total",
+            &[("size", &format!("{:>10}", size(usage.total_kb)))],
         ));
     }
 
     fn stats(&self) {
         if self.calls.is_empty() {
-            return self.term.note("no model calls yet");
+            return self.term.note(&self.msg("cli.stats.none"));
         }
-        self.term.print(&format!(
-            "{:>3}  {:<10} {:<28} {:>9} {:>9} {:>7} {:>6}\n",
-            "#", "shape", "model", "uncached", "cached", "output", "secs"
+        let head = |k: &str| self.msg(k);
+        self.term.line(&format!(
+            "{:>3}  {:<10} {:<28} {:>9} {:>9} {:>7} {:>6}",
+            "#",
+            head("cli.stats.shape"),
+            head("cli.stats.model"),
+            head("cli.stats.uncached"),
+            head("cli.stats.cached"),
+            head("cli.stats.output"),
+            head("cli.stats.secs")
         ));
         let (mut u, mut c, mut o, mut s) = (0, 0, 0, 0.0);
         for (i, t) in self.calls.iter().enumerate() {
@@ -2284,7 +2446,13 @@ impl Session {
         }
         self.term.print(&format!(
             "{:>3}  {:<10} {:<28} {:>9} {:>9} {:>7} {:>6.1}\n",
-            "", "total", "", u, c, o, s
+            "",
+            self.msg("cli.stats.total"),
+            "",
+            u,
+            c,
+            o,
+            s
         ));
     }
 }

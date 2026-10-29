@@ -60,6 +60,19 @@ pub enum CorpusState {
     },
 }
 
+/// Which words the interface speaks. The person's choice, kept in the home, so the app and
+/// the terminal agree. Model-facing text is not affected: characters keep speaking the
+/// corpus's language.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum InterfaceLanguage {
+    /// The corpus's own wording (its language).
+    #[default]
+    Corpus,
+    /// The built-in English defaults; only the corpus's names and its model-facing text stay.
+    English,
+}
+
 /// Runtime phrasing from the corpus manifest, keyed like the UI's i18n keys; a missing
 /// key falls back to the UI's neutral default.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]

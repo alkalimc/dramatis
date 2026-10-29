@@ -57,7 +57,7 @@ export function PersonDrawer({ id }: { id: PersonId }) {
       </section>
       <section className="info-section">
         <p>
-          {page.last_seen ? t("person.last_seen", { when: when(page.last_seen) }) : t("person.never")}
+          {page.last_seen ? t("person.last_seen", { when: when(page.last_seen, t) }) : t("person.never")}
           {" · "}
           {t("person.tasks", { count: page.tasks_done, ...pronounOf(t, page.person) })}
         </p>

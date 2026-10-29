@@ -5,6 +5,7 @@
 //! params.toml      optional: calibration register overrides, same dotted names
 //! saves/<name>.sqlite  one world per save: everything that changes with play
 //! current_save     the name of the save a process opens when it starts (empty: none)
+//! interface_language  `corpus` or `en`: the words the interface speaks (absent: never chosen)
 //! corpus_path      optional: the full path of the corpus the user chose in the app
 //! office/          notes written by people looking into a request
 //! uploads/         pictures the user chose (theirs, a group's), named by content hash
@@ -15,6 +16,8 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+
+use crate::views::InterfaceLanguage;
 
 /// Overrides the home directory.
 pub const HOME_ENV: &str = "DRAMATIS_HOME";
@@ -164,6 +167,30 @@ impl Home {
     /// Log out: the next process starts at the save picker.
     pub fn clear_current_save(&self) -> io::Result<()> {
         self.set_current_save("")
+    }
+
+    /// The interface language the person chose; `None` before any choice.
+    pub fn interface_language(&self) -> Option<InterfaceLanguage> {
+        match std::fs::read_to_string(self.root.join("interface_language"))
+            .ok()?
+            .trim()
+        {
+            "corpus" => Some(InterfaceLanguage::Corpus),
+            "en" => Some(InterfaceLanguage::English),
+            _ => None,
+        }
+    }
+
+    pub fn set_interface_language(&self, language: InterfaceLanguage) -> io::Result<()> {
+        let word = match language {
+            InterfaceLanguage::Corpus => "corpus",
+            InterfaceLanguage::English => "en",
+        };
+        let tmp = self
+            .root
+            .join(format!("interface_language.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, word)?;
+        std::fs::rename(&tmp, self.root.join("interface_language"))
     }
 
     /// The corpus the user chose in the app, if the file is still there.

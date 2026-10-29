@@ -22,6 +22,7 @@ import type {
   Roster,
   Settings,
   TaskId,
+  InterfaceLanguage,
   ToolAction,
   ToolCalled,
   TurnActivity,
@@ -45,7 +46,7 @@ export type Drawer =
 export type ProfileMode = "view" | "edit";
 
 /** The pages of the settings card; `root` is its list. */
-export type SystemPage = "root" | "quota" | "quiet" | "endpoints" | "saves" | "privacy" | "storage";
+export type SystemPage = "root" | "language" | "quota" | "quiet" | "endpoints" | "saves" | "privacy" | "storage";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -105,6 +106,8 @@ export type LoadKey =
 export interface State {
   status: AppStatus | null;
   wording: Wording;
+  /** The words the interface speaks; the home's choice, shared with the terminal. */
+  language: InterfaceLanguage;
   t: T;
   clock: Clock | null;
   settings: Settings | null;
@@ -174,6 +177,7 @@ export function initialState(): State {
   return {
     status: null,
     wording: emptyWording,
+    language: "corpus",
     t: makeT(emptyWording),
     clock: null,
     settings: null,
@@ -222,6 +226,7 @@ export type Action =
   | { type: "reset" }
   | { type: "status"; status: AppStatus }
   | { type: "wording"; wording: Wording }
+  | { type: "language"; language: InterfaceLanguage }
   | { type: "clock"; clock: Clock }
   | { type: "settings"; settings: Settings }
   | { type: "endpoints"; endpoints: EndpointsView }

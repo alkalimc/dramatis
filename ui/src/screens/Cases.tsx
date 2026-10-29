@@ -93,7 +93,7 @@ function TaskList({ tasks, onPin }: { tasks: TaskSummary[]; onPin?: (id: TaskId)
           )}
           <span className="muted small">
             {task.assignee ? `${task.assignee.name} · ` : task.pinned ? "" : `${t("cases.nobody")} · `}
-            {task.pinned ? when(task.created_at) : t(task.status === "done" ? "cases.done" : "cases.active")}
+            {task.pinned ? when(task.created_at, t) : t(task.status === "done" ? "cases.done" : "cases.active")}
           </span>
           {onPin && (
             <button type="button" className="link" onClick={() => onPin(task.id)}>

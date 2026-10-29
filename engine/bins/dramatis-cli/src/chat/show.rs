@@ -2,14 +2,15 @@
 //! events into streamed, styled lines.
 
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::io::Write;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use api::corpus::Corpus;
-use api::error::ApiResult;
+use api::error::{ApiError, ApiResult};
 use api::events::ActivityState;
 use api::port::{Event, Sink};
-use api::types::{Author, ChannelId, Citation, MessageId, PersonId, PersonRef};
+use api::types::{Author, ChannelId, Citation, MessageId, Mode, PersonId, PersonRef, Target};
 use api::views::{ChannelKind, Message, ToolAction};
 use api::{Api, Engine};
 
@@ -37,17 +38,27 @@ impl Term {
         let _ = out.flush();
     }
 
+    /// A line of text.
+    pub fn line(&self, text: &str) {
+        self.print(&format!("{text}\n"));
+    }
+
     /// A dim line.
     pub fn note(&self, text: &str) {
         self.print(&format!("{}\n", self.style.dim(text)));
     }
 
     pub fn error(&self, text: &str) {
-        self.print(&format!(
-            "{}\n",
-            self.style.error(&format!("error: {text}"))
-        ));
+        self.print(&format!("{}\n", self.style.error(text)));
     }
+}
+
+/// `template` with each `{name}` replaced by its value.
+fn fill(mut template: String, vars: &[(&str, &dyn Display)]) -> String {
+    for (name, value) in vars {
+        template = template.replace(&format!("{{{name}}}"), &value.to_string());
+    }
+    template
 }
 
 /// What the terminal needs to put names on things: the corpus's display names and
@@ -55,7 +66,7 @@ impl Term {
 /// kept, so the event sink can look things up without waiting.
 pub struct Names {
     corpus: Option<Arc<Corpus>>,
-    wording: BTreeMap<String, String>,
+    wording: RwLock<BTreeMap<String, String>>,
     user: RwLock<String>,
 }
 
@@ -73,11 +84,18 @@ impl Names {
     pub async fn load(engine: &Engine) -> ApiResult<Self> {
         let names = Self {
             corpus: engine.corpus_handle(),
-            wording: engine.wording().await?.entries,
+            wording: RwLock::new(engine.wording().await?.entries),
             user: RwLock::new(String::new()),
         };
         names.refresh_user(engine).await?;
         Ok(names)
+    }
+
+    /// Read the wording again, after the interface language changed. The user's name is
+    /// read with it: unnamed, the user is called by the wording's word for "you".
+    pub async fn reload(&self, engine: &Engine) -> ApiResult<()> {
+        *self.wording.write().unwrap_or_else(|e| e.into_inner()) = engine.wording().await?.entries;
+        self.refresh_user(engine).await
     }
 
     /// Read the user's name again, after it was changed.
@@ -95,8 +113,20 @@ impl Names {
     /// The corpus's wording for `key`, else `default`.
     pub fn word(&self, key: &str, default: &str) -> String {
         self.wording
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .get(key)
             .map_or_else(|| default.to_owned(), Clone::clone)
+    }
+
+    /// [`Self::word`] with its `{field}`s filled.
+    pub fn word_with(&self, key: &str, default: &str, vars: &[(&str, &dyn Display)]) -> String {
+        fill(self.word(key, default), vars)
+    }
+
+    /// One of the terminal's own sentences with its `{field}`s filled.
+    pub fn say(&self, key: &str, vars: &[(&str, &dyn Display)]) -> String {
+        fill(self.text(key), vars)
     }
 
     /// One of the terminal's own sentences: the corpus's wording for `key`, else the
@@ -177,40 +207,152 @@ impl Names {
     }
 }
 
-/// One tool call as a short English line; the contents are the model's and the corpus's.
-pub fn action_line(action: &ToolAction) -> String {
-    match action {
-        ToolAction::Search { query } => format!("searched: {query}"),
-        ToolAction::GetChunk { chunk_id } => format!("read passage: {chunk_id}"),
-        ToolAction::RequestJoin { person, topic } => match (person, topic) {
-            (Some(p), _) => format!("asked to bring in: {}", p.name),
-            (None, Some(t)) => format!("asked to bring someone in on: {t}"),
-            (None, None) => "asked to bring someone in".into(),
-        },
-        ToolAction::Remember { text } => format!("remembered: {text}"),
-        ToolAction::Report => "reported back".into(),
-        ToolAction::Wrapup => "wrapped up the conversation".into(),
-        ToolAction::Digest => "looked at the digest".into(),
-        ToolAction::FindPeople { topic, .. } => format!("looked for people on: {topic}"),
-        ToolAction::Ask { person, question } => format!("asked {}: {question}", person.name),
-        ToolAction::CreateGroup { members, channel } => format!(
-            "{} a group: {}",
-            // No channel yet: a person's suggestion, which waits for the user.
-            if channel.is_some() {
-                "created"
-            } else {
-                "suggested"
+impl Names {
+    /// One tool call as a short line, in the wording the app shows for it when the corpus
+    /// has one; the contents are the model's and the corpus's.
+    pub fn action_line(&self, action: &ToolAction) -> String {
+        let with = |key: &str, default: &str, vars: &[(&str, &dyn Display)]| {
+            self.word_with(key, default, vars)
+        };
+        let list = |members: &[PersonRef]| {
+            self.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
+        };
+        match action {
+            ToolAction::Search { query } => {
+                with("action.search", "searched: {query}", &[("query", query)])
+            }
+            ToolAction::GetChunk { chunk_id } => with(
+                "action.get_chunk",
+                "read passage: {chunk_id}",
+                &[("chunk_id", chunk_id)],
+            ),
+            ToolAction::RequestJoin { person, topic } => match (person, topic) {
+                (Some(p), _) => with(
+                    "action.request_join.person",
+                    "asked to bring in: {name}",
+                    &[("name", &p.name)],
+                ),
+                (None, Some(t)) => with(
+                    "action.request_join.topic",
+                    "asked to bring someone in on: {topic}",
+                    &[("topic", t)],
+                ),
+                (None, None) => self.text("cli.action.join"),
             },
-            members
-                .iter()
-                .map(|m| m.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ToolAction::SetMode { mode, .. } => format!("set mode: {mode:?}").to_lowercase(),
-        ToolAction::Forget { fact } => format!("forgot memory {}", fact.0),
-        ToolAction::ListChannels { channels } => {
-            format!("listed {} conversations", channels.len())
+            ToolAction::Remember { text } => {
+                with("action.remember", "remembered: {text}", &[("text", text)])
+            }
+            ToolAction::Report => self.word("action.report", "reported back"),
+            ToolAction::Wrapup => self.text("cli.action.wrapup"),
+            ToolAction::Digest => self.word("action.digest", "looked at the digest"),
+            ToolAction::FindPeople { topic, .. } => with(
+                "action.find_people",
+                "looked for people on: {topic}",
+                &[("topic", topic)],
+            ),
+            ToolAction::Ask { person, question } => with(
+                "action.ask",
+                "asked {name}: {question}",
+                &[("name", &person.name), ("question", question)],
+            ),
+            // No channel yet: a person's suggestion, which waits for the user.
+            ToolAction::CreateGroup { members, channel } => {
+                let (key, default) = if channel.is_some() {
+                    ("action.create_group", "created a group: {names}")
+                } else {
+                    ("action.suggest_group", "suggested a group: {names}")
+                };
+                with(key, default, &[("names", &list(members))])
+            }
+            ToolAction::SetMode { target, mode } => {
+                let target = match target {
+                    Target::Person { id } => self.person(&id.0),
+                    Target::Channel { .. } => self.word("action.target.group", "a group"),
+                };
+                with(
+                    "action.set_mode",
+                    "set mode: {target} {mode}",
+                    &[("target", &target), ("mode", &self.mode_word(*mode))],
+                )
+            }
+            ToolAction::Forget { fact } => self.say("cli.action.forget", &[("n", &fact.0)]),
+            ToolAction::ListChannels { channels } => {
+                self.say("cli.action.list_channels", &[("n", &channels.len())])
+            }
+        }
+    }
+
+    /// A failed command in words: the app's wording for the error when the corpus has it,
+    /// else the engine's own plain text.
+    pub fn api_error(&self, e: &ApiError) -> String {
+        match e {
+            ApiError::Invalid { field } => {
+                let key = format!("error.invalid.{field}");
+                match self
+                    .wording
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get(&key)
+                {
+                    Some(text) => text.clone(),
+                    None => self.word_with("error.invalid", &e.to_string(), &[("field", field)]),
+                }
+            }
+            ApiError::Disabled { person } => self.word_with(
+                "error.disabled",
+                &e.to_string(),
+                &[("name", &self.person(&person.0))],
+            ),
+            ApiError::NoPersona { person } => self.word_with(
+                "error.no_persona",
+                &e.to_string(),
+                &[("name", &self.person(&person.0))],
+            ),
+            ApiError::QuotaExhausted { release_at } => self.word_with(
+                "error.quota_exhausted",
+                &e.to_string(),
+                &[(
+                    "when",
+                    &release_at
+                        .0
+                        .chars()
+                        .take(16)
+                        .collect::<String>()
+                        .replace('T', " "),
+                )],
+            ),
+            ApiError::Endpoint { detail }
+            | ApiError::Keychain { detail }
+            | ApiError::Io { detail } => {
+                let code = match e {
+                    ApiError::Endpoint { .. } => "error.endpoint",
+                    ApiError::Keychain { .. } => "error.keychain",
+                    _ => "error.io",
+                };
+                // The detail is the remote's or the system's own text, shown as it came.
+                let lead = self.word(code, "");
+                if lead.is_empty() {
+                    e.to_string()
+                } else {
+                    format!("{lead} {detail}")
+                }
+            }
+            ApiError::NotImplemented => self.word("error.not_implemented", &e.to_string()),
+            ApiError::NotFound => self.word("error.not_found", &e.to_string()),
+            ApiError::NoEndpoint => self.word("error.no_endpoint", &e.to_string()),
+            ApiError::Busy => self.word("error.busy", &e.to_string()),
+            ApiError::Exists => self.word("error.exists", &e.to_string()),
+            ApiError::Locked => self.word("error.locked", &e.to_string()),
+            ApiError::WrongPassword => self.word("error.wrong_password", &e.to_string()),
+        }
+    }
+
+    /// A trust mode in words.
+    pub fn mode_word(&self, mode: Mode) -> String {
+        match mode {
+            Mode::Enabled => self.word("mode.enabled", "enabled"),
+            Mode::Frozen => self.word("mode.frozen", "frozen"),
+            Mode::Disabled => self.word("mode.disabled", "disabled"),
         }
     }
 }
@@ -291,17 +433,21 @@ pub struct Line {
     pub index: u32,
 }
 
+fn member_names(members: &[PersonRef]) -> Vec<String> {
+    members.iter().map(|m| m.name.clone()).collect()
+}
+
 impl Offer {
     pub fn text(&self, names: &Names) -> String {
         match self {
-            Offer::Person { name, .. } => format!("talk to {name}"),
-            Offer::Group { members, .. } => format!(
-                "open group: {}",
-                names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
+            Offer::Person { name, .. } => names.say("cli.offer.person", &[("name", name)]),
+            Offer::Group { members, .. } => names.say(
+                "cli.offer.group",
+                &[("names", &names.group_label(&member_names(members)))],
             ),
-            Offer::NewGroup { members, .. } => format!(
-                "start a group: {}",
-                names.group_label(&members.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
+            Offer::NewGroup { members, .. } => names.say(
+                "cli.offer.new_group",
+                &[("names", &names.group_label(&member_names(members)))],
             ),
         }
     }
@@ -426,7 +572,7 @@ impl Show {
     /// label here.
     fn sources(&self, names: &Names, m: &Message) -> Option<String> {
         let n = Self::source_list(names, m).len();
-        (n > 0).then(|| format!("sources: {n}  (/sources to show)"))
+        (n > 0).then(|| names.say("cli.sources.count", &[("n", &n)]))
     }
 
     /// A stored message in full: name, text, tool lines, sources.
@@ -438,7 +584,7 @@ impl Show {
         let style = self.term.style;
         let mut out = String::new();
         for a in &m.actions {
-            out.push_str(&style.dim(&format!("· {}", action_line(a))));
+            out.push_str(&style.dim(&format!("· {}", b.names.action_line(a))));
             out.push('\n');
         }
         let picture = m.attachment.is_some() || m.picture_lost;
@@ -450,12 +596,12 @@ impl Show {
             if m.text.trim().is_empty() {
                 out.push_str(&self.prefix(&b.names, &m.author));
             }
-            let marker = if m.attachment.is_some() {
-                "[picture]"
+            let marker = b.names.text(if m.attachment.is_some() {
+                "cli.picture"
             } else {
-                "[picture unavailable]"
-            };
-            out.push_str(&style.dim(marker));
+                "cli.picture.lost"
+            });
+            out.push_str(&style.dim(&marker));
             out.push('\n');
         }
         if let Some(s) = self.sources(&b.names, m) {
@@ -528,7 +674,8 @@ impl Sink for Show {
                         st.offers.push(offer);
                     }
                 }
-                self.term.note(&format!("· {}", action_line(&t.action)));
+                self.term
+                    .note(&format!("· {}", names.action_line(&t.action)));
             }
             Event::MessageAdded(a) => {
                 let m = a.message;

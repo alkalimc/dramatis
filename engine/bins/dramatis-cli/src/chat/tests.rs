@@ -603,7 +603,7 @@ fn the_terminal_guide_names_only_commands_the_parser_knows() {
     expected.sort_unstable();
     assert_eq!(named, expected);
     for c in GUIDE_COMMANDS {
-        let unknown = matches!(parse(&format!("/{c}")), Command::Invalid(m) if m.starts_with("unknown command"));
+        let unknown = matches!(parse(&format!("/{c}")), Command::Unknown(_));
         assert!(!unknown, "/{c} is in the guide but not a command");
     }
     // The app's guide carries none of them.
@@ -705,6 +705,66 @@ async fn the_start_lines_say_how_to_send_in_the_corpus_wording() {
     .await;
     assert_eq!(super::intro_lines(&worded.names)[0], "line / send");
     assert_eq!(worded.names.text("cli.typing.more"), "send key");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lang_switches_the_terminal_wording_at_once_and_keeps_the_choice_in_the_home() {
+    let mut r = rig_wording(
+        r#"{"user.you": "Doc", "host.name": "Host", "cli.list.count.persona": "{n} others", "cli.lang.set": "now {language}"}"#,
+    )
+    .await;
+    assert!(r.run("/list").await.contains(" others"));
+    let set = r.run("/lang en").await;
+    assert!(set.contains("interface language is now English"), "{set}");
+    // The corpus's phrasing is gone; the built-in English is back, with no restart.
+    let listed = r.run("/list").await;
+    assert!(listed.contains("persons with a persona"), "{listed}");
+    assert!(r.run("/lang").await.contains("interface language: English"));
+    assert_eq!(
+        Home::new(&r._home.0).interface_language(),
+        Some(api::views::InterfaceLanguage::English)
+    );
+    assert!(r.run("/lang corpus").await.contains("now "));
+    assert!(r.run("/list").await.contains(" others"));
+    assert!(r.run("/lang klingon").await.contains("usage: /lang"));
+}
+
+#[tokio::test]
+async fn the_first_run_questions_are_optional_and_asked_once_per_home() {
+    let home = TempHome::new();
+    let h = Home::new(&home.0);
+    let engine = Engine::open(h.clone(), None, api::Ports::default()).unwrap();
+    engine.new_save("main".into()).await.unwrap();
+    engine.switch_save("main".into()).await.unwrap();
+    let names = Names::load(&engine).await.unwrap();
+    assert!(super::setup::needs_first_run(&engine, &h).await);
+
+    let mut ask = Script::new(&["2", "Rowan", "03-14", "Likes tea"], &[]);
+    super::setup::first_run(&engine, &names, &mut ask).await;
+    let s = engine.settings().await.unwrap();
+    assert_eq!(s.user_name.as_deref(), Some("Rowan"));
+    assert_eq!(s.birthday.map(|d| (d.month, d.day)), Some((3, 14)));
+    assert_eq!(s.bio.as_deref(), Some("Likes tea"));
+    assert_eq!(
+        h.interface_language(),
+        Some(api::views::InterfaceLanguage::English)
+    );
+    assert!(!super::setup::needs_first_run(&engine, &h).await);
+
+    // Skipping everything still records the language, so the questions do not return.
+    let other = TempHome::new();
+    let oh = Home::new(&other.0);
+    let e2 = Engine::open(oh.clone(), None, api::Ports::default()).unwrap();
+    e2.new_save("main".into()).await.unwrap();
+    e2.switch_save("main".into()).await.unwrap();
+    let n2 = Names::load(&e2).await.unwrap();
+    super::setup::first_run(&e2, &n2, &mut Script::new(&["", "", "", ""], &[])).await;
+    assert_eq!(e2.settings().await.unwrap().user_name, None);
+    assert_eq!(
+        oh.interface_language(),
+        Some(api::views::InterfaceLanguage::Corpus)
+    );
+    assert!(!super::setup::needs_first_run(&e2, &oh).await);
 }
 
 /// Two memories in the world, written the way a wrap-up would.
@@ -1259,7 +1319,8 @@ async fn the_endpoints_wizard_writes_a_valid_file_and_the_key_goes_to_the_fake_k
         &["sk-secret", "sk-secret"],
     );
     // First pass: "not a url" is refused with a plain reason, then the form runs again.
-    assert!(super::setup::endpoints(&engine, super::setup::Gap::Endpoint, &mut ask).await);
+    let names = Names::load(&engine).await.unwrap();
+    assert!(super::setup::endpoints(&engine, &names, super::setup::Gap::Endpoint, &mut ask).await);
     let said = ask.said.join("\n");
     assert!(said.contains("must start with http"), "{said}");
     let text = std::fs::read_to_string(h.endpoints()).unwrap();
@@ -1280,9 +1341,11 @@ async fn the_endpoints_wizard_writes_a_valid_file_and_the_key_goes_to_the_fake_k
     // Declining changes nothing.
     let fresh = TempHome::new();
     let e2 = Engine::open(Home::new(&fresh.0), None, api::Ports::default()).unwrap();
+    let n2 = Names::load(&e2).await.unwrap();
     assert!(
         !super::setup::endpoints(
             &e2,
+            &n2,
             super::setup::Gap::Endpoint,
             &mut Script::new(&["n"], &[])
         )

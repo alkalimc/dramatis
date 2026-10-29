@@ -1,4 +1,4 @@
-import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ImagePart, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
+import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ImagePart, type InterfaceLanguage, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
 import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Store } from ".";
 import type { LoadKey, Theme } from "./state";
@@ -85,12 +85,14 @@ export function createActions(api: Api, store: Store) {
   }
 
   async function boot() {
-    const [wording, settings, coldstart] = await Promise.all([
+    const [wording, language, settings, coldstart] = await Promise.all([
       attempt(c.wording(), "wording"),
+      settle(c.interfaceLanguage()),
       attempt(c.settings(), "settings"),
       attempt(c.coldstart(), "coldstart"),
     ]);
     if (wording) d({ type: "wording", wording });
+    if (language.ok) d({ type: "language", language: language.data });
     if (settings) d({ type: "settings", settings });
     if (coldstart) d({ type: "coldstart", candidates: coldstart });
     const prefs = loadPrefs();
@@ -218,6 +220,15 @@ export function createActions(api: Api, store: Store) {
     return true;
   }
 
+  /** Switch the interface language: kept in the home, applied at once by reading the wording again. */
+  async function setInterfaceLanguage(language: InterfaceLanguage) {
+    if ((await attempt(c.setInterfaceLanguage(language))) === undefined) return false;
+    d({ type: "language", language });
+    const wording = await attempt(c.wording(), "wording");
+    if (wording) d({ type: "wording", wording });
+    return true;
+  }
+
   /**
    * Close the open save and show the save list. What was loaded belonged to that world, so
    * it goes; the status that follows says no save is open.
@@ -259,6 +270,7 @@ export function createActions(api: Api, store: Store) {
     resend,
     setMode,
     saveSettings,
+    setInterfaceLanguage,
   };
 }
 

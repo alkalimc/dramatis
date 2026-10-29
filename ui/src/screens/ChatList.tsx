@@ -99,7 +99,7 @@ function SearchPanel({ query }: { query: string }) {
                   <span className="chat-main">
                     <span className="chat-top">
                       <span className="chat-name">{authorName(m.author, t, names, user)}</span>
-                      <time className="chat-time" dateTime={m.at}>{when(m.at)}</time>
+                      <time className="chat-time" dateTime={m.at}>{when(m.at, t)}</time>
                     </span>
                     <span className="chat-bottom">
                       <span className="chat-preview">{m.text}</span>
@@ -278,7 +278,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
                 <Icon name="pin" size={14} />
               </span>
             )}
-            {at && <time className="chat-time" dateTime={at}>{when(at)}</time>}
+            {at && <time className="chat-time" dateTime={at}>{when(at, t)}</time>}
           </span>
           <span className="chat-bottom">
             <span className={`chat-preview${typing ? " typing" : ""}`} title={typing ?? preview}>{typing ?? preview}</span>

@@ -103,7 +103,7 @@ function FactRow({ fact, onChange }: { fact: FactView; onChange: () => void }) {
         {fact.due && (
           <>
             {" · "}
-            <span>{t("world.due", { when: when(fact.due) })}</span>
+            <span>{t("world.due", { when: when(fact.due, t) })}</span>
           </>
         )}
       </p>

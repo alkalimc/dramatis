@@ -153,7 +153,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
               )}
               <div className="muted small">
                 {t("saves.size", { kb: s.size_kb })}
-                {s.played_at && <> · {t("saves.played", { when: when(s.played_at) })}</>}
+                {s.played_at && <> · {t("saves.played", { when: when(s.played_at, t) })}</>}
               </div>
             </div>
             <div className="row wrap" role="group" aria-label={t("saves.actions", { name: s.name })}>

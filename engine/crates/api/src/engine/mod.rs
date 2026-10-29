@@ -15,7 +15,7 @@ mod storage;
 mod tasks;
 mod uploads;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -362,8 +362,12 @@ impl Engine {
         let Some(c) = &self.corpus else {
             return Wording::default();
         };
+        let entries = match self.home.interface_language().unwrap_or_default() {
+            InterfaceLanguage::Corpus => c.manifest.wording.clone(),
+            InterfaceLanguage::English => english_entries(&c.manifest.wording),
+        };
         Wording {
-            entries: c.manifest.wording.clone(),
+            entries,
             scene_marker: SceneMarker {
                 open: c.manifest.scene_marker.0.clone(),
                 close: c.manifest.scene_marker.1.clone(),
@@ -489,6 +493,18 @@ fn valid_time(s: &str) -> bool {
     })
 }
 
+/// What of the corpus's wording stays when the interface speaks English: its names, the
+/// facet that tells genders apart, the corpus language's own name, and everything the
+/// model reads (characters keep speaking the corpus's language).
+fn english_entries(all: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    const KEEP: [&str; 4] = ["host.name", "org.name", "user.title", "lang.corpus"];
+    const KEEP_PREFIX: [&str; 3] = ["harness.", "tool.", "gender."];
+    all.iter()
+        .filter(|(k, _)| KEEP.contains(&k.as_str()) || KEEP_PREFIX.iter().any(|p| k.starts_with(p)))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 type Clock_ = crate::views::Clock;
 
 #[async_trait]
@@ -498,6 +514,16 @@ impl Api for Engine {
     }
     async fn wording(&self) -> ApiResult<Wording> {
         Ok(self.wording_impl())
+    }
+    async fn interface_language(&self) -> ApiResult<InterfaceLanguage> {
+        Ok(self.home.interface_language().unwrap_or_default())
+    }
+    async fn set_interface_language(&self, language: InterfaceLanguage) -> ApiResult<()> {
+        self.home
+            .set_interface_language(language)
+            .map_err(|e| ApiError::Io {
+                detail: e.to_string(),
+            })
     }
     async fn presence(&self) -> ApiResult<Digest> {
         self.presence_impl().await

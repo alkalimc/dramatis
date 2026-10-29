@@ -48,7 +48,7 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
             {t(`quota.band.${quota.band}`)}
           </p>
           {exhaustedLine && <p className="host-line">{exhaustedLine}</p>}
-          {quota.band !== "open" && quota.window?.release_at && <p className="muted">{t("quota.release", { when: when(quota.window.release_at) })}</p>}
+          {quota.band !== "open" && quota.window?.release_at && <p className="muted">{t("quota.release", { when: when(quota.window.release_at, t) })}</p>}
         </>
       )}
 
@@ -66,6 +66,34 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
         </ul>
       )}
     </section>
+  );
+}
+
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * A 24-hour HH:MM field. The native time control draws the system's own clock (AM/PM and
+ * its words), which the interface language does not control.
+ */
+function TimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const t = useT();
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      maxLength={5}
+      size={6}
+      placeholder={t("quiet.time.placeholder")}
+      value={draft}
+      aria-invalid={draft !== "" && !CLOCK.test(draft)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        if (CLOCK.test(e.target.value)) onChange(e.target.value);
+      }}
+      onBlur={() => setDraft(value)}
+    />
   );
 }
 
@@ -100,11 +128,11 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
         <div className="field-row">
           <label className="field">
             <span>{t("quiet.from")}</span>
-            <input type="time" value={hours.from} onChange={(e) => update({ ...hours, from: e.target.value })} />
+            <TimeInput value={hours.from} onChange={(from) => update({ ...hours, from })} />
           </label>
           <label className="field">
             <span>{t("quiet.to")}</span>
-            <input type="time" value={hours.to} onChange={(e) => update({ ...hours, to: e.target.value })} />
+            <TimeInput value={hours.to} onChange={(to) => update({ ...hours, to })} />
           </label>
         </div>
       )}

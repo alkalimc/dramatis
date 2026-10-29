@@ -7,6 +7,7 @@ import { Icon, type IconName } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { UserAvatar } from "../ui/Avatar";
 import { EndpointsPage } from "./Endpoints";
+import { LanguagePage } from "./Language";
 import { QuietSection, QuotaSection } from "./Quota";
 import { PrivacyPage } from "./Privacy";
 import { SavesPage } from "./Saves";
@@ -16,6 +17,7 @@ import { statusLine, useCurrentSave } from "./Profile";
 const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
   { page: "quota", icon: "gauge" },
   { page: "quiet", icon: "bell" },
+  { page: "language", icon: "language" },
   { page: "endpoints", icon: "server" },
   { page: "saves", icon: "bookmark" },
   { page: "privacy", icon: "lock" },
@@ -42,6 +44,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
   const settings = useStore((s) => s.settings);
   const theme = useStore((s) => s.theme);
   const tier = useStore((s) => s.quota?.tier);
+  const language = useStore((s) => s.language);
   const save = useCurrentSave();
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
   const close = () => dispatch({ type: "drawer", drawer: null });
@@ -109,7 +112,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           <ul className="settings-list settings-gap">
             <Row icon="profile" label={t("menu.profile")} onClick={() => dispatch({ type: "profile", mode: "view" })} />
             {PAGES.map((p) => (
-              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : p.page === "saves" ? (save ?? undefined) : undefined} onClick={() => go(p.page)} />
+              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : p.page === "saves" ? (save ?? undefined) : p.page === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : undefined} onClick={() => go(p.page)} />
             ))}
           </ul>
           <ul className="settings-list settings-gap">
@@ -126,6 +129,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
         <div className="settings-page" role="region" aria-label={label(page)}>
           {page === "quota" && <QuotaSection />}
           {page === "quiet" && <QuietSection />}
+          {page === "language" && <LanguagePage />}
           {page === "endpoints" && <EndpointsPage />}
           {page === "saves" && <SavesPage />}
           {page === "privacy" && <PrivacyPage />}
