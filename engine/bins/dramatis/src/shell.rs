@@ -345,6 +345,15 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 show(tray.app_handle());
             }
         });
+    // On macOS the menu bar takes a black silhouette and tints it for light and dark bars;
+    // elsewhere the tray shows the app icon itself.
+    #[cfg(target_os = "macos")]
+    {
+        tray = tray
+            .icon(tauri::include_image!("icons/tray.png"))
+            .icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }

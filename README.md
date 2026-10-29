@@ -333,15 +333,16 @@ cd ../.. && xattr -cr target/release/bundle/macos/dramatis.app
 codesign --force --deep --sign dramatis target/release/bundle/macos/dramatis.app
 ```
 
-To build the app with another icon than the neutral default, point `bundle.icon` at your own
-files with `--config`; the default build is unchanged:
+The app's icon is a chess knight, drawn in `engine/bins/dramatis/icons/icon.svg`; the macOS menu
+bar uses the black silhouette `tray.png` as a template image. To build with other icons, point
+`bundle.icon` at your own files with `--config`:
 
 ```sh
 cd engine/bins/dramatis && npx --prefix ../../../ui tauri build --bundles app \
   --config '{"bundle":{"icon":["/path/32x32.png","/path/128x128.png","/path/128x128@2x.png","/path/icon.icns"]}}'
 ```
 
-`tauri icon <square-png> -o <dir>` generates such a set from one image of at least 1024 pixels.
+`tauri icon <square-png-or-svg> -o <dir>` generates such a set from one image.
 
 The first run of each signed program asks once more; choose Always Allow and it holds across
 rebuilds. A key saved before signing keeps its old access list, so save it again (profile
