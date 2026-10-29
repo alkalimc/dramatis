@@ -1,4 +1,4 @@
-import type { Activity, Audience, Author, ToolAction } from "../api";
+import type { Activity, Audience, Author, PersonRef, ToolAction } from "../api";
 import { userTitle, type T } from "../i18n";
 
 export type Names = Record<string, string>;
@@ -93,8 +93,8 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
  * a group someone suggested (`new_group`; nothing exists until the user takes it).
  */
 export type Choice =
-  | { kind: "person"; id: string; name: string }
-  | { kind: "group"; channel: string; names: string[] }
+  | { kind: "person"; id: string; name: string; /** The find line this person came from, so the reason they were found is written when they are taken. */ found?: number }
+  | { kind: "group"; channel: string; names: string[]; members: PersonRef[] }
   | { kind: "new_group"; members: string[]; names: string[]; action: number };
 
 export function choicesOf(actions: ToolAction[]): Choice[] {
@@ -103,15 +103,15 @@ export function choicesOf(actions: ToolAction[]): Choice[] {
   actions.forEach((a, index) => {
     const found: Choice[] =
       a.tool === "find_people"
-        ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name }))
+        ? (a.persons ?? []).map((p) => ({ kind: "person", id: p.id, name: p.name, found: index }))
         : a.tool === "create_group" && a.channel
-          ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name) }]
+          ? [{ kind: "group", channel: a.channel, names: a.members.map((m) => m.name), members: a.members }]
           : a.tool === "create_group" && a.members.length >= 2
             ? [{ kind: "new_group", members: a.members.map((m) => m.id), names: a.members.map((m) => m.name), action: index }]
             : a.tool === "list_channels"
               ? (a.channels ?? []).flatMap((c): Choice[] =>
                   c.kind === "group"
-                    ? [{ kind: "group", channel: c.id, names: c.members.map((m) => m.name) }]
+                    ? [{ kind: "group", channel: c.id, names: c.members.map((m) => m.name), members: c.members }]
                     : c.kind === "direct" && c.members[0]
                       ? [{ kind: "person", id: c.members[0].id, name: c.members[0].name }]
                       : [],

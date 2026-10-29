@@ -77,6 +77,30 @@ pub trait AgentPort: Send + Sync + 'static {
     /// The user's name changed: every session rolls over so no log keeps the old one.
     async fn on_rename(&self) -> ApiResult<()>;
 
+    /// A group was made from a suggestion, or by the host, for `purpose`: write the
+    /// group's first line saying why it exists and who suggested it (`by`, or the host
+    /// when none). Fixed wording, no model call.
+    async fn group_opened(
+        &self,
+        _channel: ChannelId,
+        _by: Option<PersonId>,
+        _purpose: String,
+    ) -> ApiResult<()> {
+        Ok(())
+    }
+
+    /// The user took a person found for `topic` from a suggestion by `by` (or the host
+    /// when none): put the reason in the person's log and show it as a service line.
+    /// Once per reason; no model call.
+    async fn found_opened(
+        &self,
+        _channel: ChannelId,
+        _by: Option<PersonId>,
+        _topic: String,
+    ) -> ApiResult<()> {
+        Ok(())
+    }
+
     /// The endpoints changed; the next call uses these.
     fn set_endpoints(&self, endpoints: &Endpoints);
 

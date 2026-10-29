@@ -132,11 +132,18 @@ export function createActions(api: Api, store: Store) {
     }
   }
 
-  /** `who` is the one the conversation is with, so a not yet spoken-in channel can show a row. */
-  async function open(channel: ChannelId | null, who?: PersonRef) {
-    const s = store.getState();
-    if (channel && who && !s.channels.some((ch) => ch.id === channel)) {
-      d({ type: "temp", row: { id: channel, kind: "direct", origin: "system", participants: [who], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary });
+  /**
+   * Open any conversation, from wherever. `who` is who it is with (one person, or the
+   * members of a group), so one nobody has spoken in yet can show a temporary row. One that
+   * is newer than the list (a group just made) is looked up first.
+   */
+  async function open(channel: ChannelId | null, who?: PersonRef | PersonRef[]) {
+    if (channel && !store.getState().channels.some((ch) => ch.id === channel)) {
+      await refreshChannels();
+      if (who && !store.getState().channels.some((ch) => ch.id === channel)) {
+        const group = Array.isArray(who);
+        d({ type: "temp", row: { id: channel, kind: group ? "group" : "direct", origin: "system", participants: group ? who : [who], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary });
+      }
     }
     d({ type: "open", channel });
     const target = channel ?? store.getState().hostChannel;
@@ -145,17 +152,20 @@ export function createActions(api: Api, store: Store) {
     await markRead(target);
   }
 
-  async function openDirect(person: string) {
-    const channel = await attempt(c.openDirect(person));
-    if (!channel) return;
-    const name = store.getState().names[person] ?? person;
-    await open(channel, { id: person, name });
+  function personRef(person: string, name?: string): PersonRef {
+    return { id: person, name: name ?? store.getState().names[person] ?? person };
   }
 
-  /** Open a channel that may be newer than the list (a group the host just made). */
-  async function openChannel(channel: ChannelId) {
-    if (!store.getState().channels.some((ch) => ch.id === channel)) await refreshChannels();
-    await open(channel);
+  async function openDirect(person: string) {
+    const channel = await attempt(c.openDirect(person));
+    if (channel) await open(channel, personRef(person));
+  }
+
+  /** Take a person a find suggestion offered: their chat opens with the reason they were found. */
+  async function openFound(message: string, action: number, person: string, name?: string) {
+    const channel = await attempt(c.openFound(message, action, person));
+    if (!channel) return;
+    await open(channel, personRef(person, name));
   }
 
   /**
@@ -266,7 +276,7 @@ export function createActions(api: Api, store: Store) {
     setUserAvatar,
     open,
     openDirect,
-    openChannel,
+    openFound,
     resend,
     setMode,
     saveSettings,

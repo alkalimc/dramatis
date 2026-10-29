@@ -41,7 +41,7 @@ function Choices({ actions, message }: { actions: ToolAction[]; message: Message
     <div className="choices message-offers">
       {choices.map((c) =>
         c.kind === "person" ? (
-          <button key={`p:${c.id}`} type="button" className="ghost" onClick={() => acts.openDirect(c.id)}>
+          <button key={`p:${c.id}`} type="button" className="ghost" onClick={() => (c.found === undefined ? acts.openDirect(c.id) : acts.openFound(message.id, c.found, c.id, c.name))}>
             {t("choice.person", { name: c.name })}
           </button>
         ) : c.kind === "new_group" ? (
@@ -55,13 +55,13 @@ function Choices({ actions, message }: { actions: ToolAction[]; message: Message
               const group = await acts.attempt(api.commands.openOffer(message.id, c.action));
               if (!group) return;
               dispatch({ type: "offerTaken", channel: message.channel, message: message.id, action: c.action, group });
-              await acts.openChannel(group);
+              await acts.open(group, c.members.map((id, i) => ({ id, name: c.names[i] ?? id })));
             }}
           >
             {t("choice.new_group", { names: nameList(c.names, t) })}
           </button>
         ) : (
-          <button key={`g:${c.channel}`} type="button" className="ghost" onClick={() => acts.openChannel(c.channel)}>
+          <button key={`g:${c.channel}`} type="button" className="ghost" onClick={() => acts.open(c.channel, c.members)}>
             {t("choice.group", { names: nameList(c.names, t) })}
           </button>
         ),
@@ -152,7 +152,20 @@ function BubbleView({ b, label, foot, top }: { b: ReturnType<typeof bubbles>[num
  * last one of the run. `first` and `last` say where this message sits in a run by the same
  * speaker; only the first carries the name, only the last the avatar.
  */
-export const MessageView = memo(function MessageView({
+export const MessageView = memo(function MessageView(props: { message: Message; showPlay: boolean; first?: boolean; last?: boolean }) {
+  return props.message.service ? <ServiceLine message={props.message} /> : <BubbleMessage {...props} />;
+});
+
+/** A line from the harness (why someone was found): a quiet note between the bubbles. */
+function ServiceLine({ message }: { message: Message }) {
+  return (
+    <p className="service-line" id={`m-${message.id}`}>
+      {message.text}
+    </p>
+  );
+}
+
+const BubbleMessage = memo(function BubbleMessage({
   message,
   showPlay,
   first = true,

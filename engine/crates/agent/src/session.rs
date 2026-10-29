@@ -1180,7 +1180,7 @@ impl Agent {
         turn.text = closing.text;
         turn.hand_off = closing.hand_off;
         if turn.proposing && (closing.find.is_some() || closing.group.is_some()) {
-            self.propose(turn, closing.find, closing.group)?;
+            self.propose(turn, closing.find, closing.group, closing.purpose)?;
         }
         if turn.in_group() {
             // A model that starts by repeating the message before it word for word: the

@@ -141,6 +141,8 @@ export interface State {
   pinned: ChannelId[];
   theme: Theme;
   listView: ListView;
+  /** The list was switched to the archived view by opening an archived conversation, so leaving it switches back. */
+  listAuto: boolean;
   /** The left drawer (profile, settings shortcuts). */
   menuOpen: boolean;
   /** The user's own profile card: reading it, or editing it; `null` = closed. */
@@ -201,6 +203,7 @@ export function initialState(): State {
     pinned: [],
     theme: "system",
     listView: "chats",
+    listAuto: false,
     menuOpen: false,
     profile: null,
     find: null,

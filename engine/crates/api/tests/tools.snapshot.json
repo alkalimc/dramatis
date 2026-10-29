@@ -21,7 +21,7 @@
             "additionalProperties": false,
             "properties": {
               "topic": {
-                "description": "The subject, in plain words.",
+                "description": "The subject, in plain words. The one the user picks is told it as the reason.",
                 "type": "string"
               }
             },
@@ -81,8 +81,8 @@
                 "minItems": 1,
                 "type": "array"
               },
-              "topic": {
-                "description": "What the group is about. Leave out for casual talk.",
+              "purpose": {
+                "description": "Why the group exists, in one short line (about sixty characters), for example\n\"plan a birthday party\". Every member is told. Leave out for casual talk.",
                 "type": [
                   "string",
                   "null"
@@ -245,7 +245,7 @@
           "additionalProperties": false,
           "properties": {
             "topic": {
-              "description": "The subject, in plain words.",
+              "description": "The subject, in plain words. The one the user picks is told it as the reason.",
               "type": "string"
             }
           },
@@ -299,8 +299,8 @@
               "minItems": 1,
               "type": "array"
             },
-            "topic": {
-              "description": "What the group is about. Leave out for casual talk.",
+            "purpose": {
+              "description": "Why the group exists, in one short line (about sixty characters), for example\n\"plan a birthday party\". Every member is told. Leave out for casual talk.",
               "type": [
                 "string",
                 "null"
@@ -449,7 +449,7 @@
           "additionalProperties": false,
           "properties": {
             "topic": {
-              "description": "The subject, in plain words.",
+              "description": "The subject, in plain words. The one the user picks is told it as the reason.",
               "type": "string"
             }
           },
@@ -505,8 +505,8 @@
               "minItems": 1,
               "type": "array"
             },
-            "topic": {
-              "description": "What the group is about. Leave out for casual talk.",
+            "purpose": {
+              "description": "Why the group exists, in one short line (about sixty characters), for example\n\"plan a birthday party\". Every member is told. Leave out for casual talk.",
               "type": [
                 "string",
                 "null"
@@ -886,7 +886,7 @@
             "additionalProperties": false,
             "properties": {
               "find": {
-                "description": "A subject, in plain words, for the host to find colleagues who know it.",
+                "description": "A subject, in plain words, for the host to find colleagues who know it. The one\nfound is told it as the reason.",
                 "type": [
                   "string",
                   "null"
@@ -900,6 +900,13 @@
                 "minItems": 1,
                 "type": [
                   "array",
+                  "null"
+                ]
+              },
+              "purpose": {
+                "description": "With `group`: why the group is worth making, in one short line (about sixty\ncharacters), for example \"plan a birthday party\". The members are told.",
+                "type": [
+                  "string",
                   "null"
                 ]
               }
@@ -1132,7 +1139,7 @@
           "additionalProperties": false,
           "properties": {
             "find": {
-              "description": "A subject, in plain words, for the host to find colleagues who know it.",
+              "description": "A subject, in plain words, for the host to find colleagues who know it. The one\nfound is told it as the reason.",
               "type": [
                 "string",
                 "null"
@@ -1146,6 +1153,13 @@
               "minItems": 1,
               "type": [
                 "array",
+                "null"
+              ]
+            },
+            "purpose": {
+              "description": "With `group`: why the group is worth making, in one short line (about sixty\ncharacters), for example \"plan a birthday party\". The members are told.",
+              "type": [
+                "string",
                 "null"
               ]
             }
@@ -1384,7 +1398,7 @@
           "additionalProperties": false,
           "properties": {
             "find": {
-              "description": "A subject, in plain words, for the host to find colleagues who know it.",
+              "description": "A subject, in plain words, for the host to find colleagues who know it. The one\nfound is told it as the reason.",
               "type": [
                 "string",
                 "null"
@@ -1398,6 +1412,13 @@
               "minItems": 1,
               "type": [
                 "array",
+                "null"
+              ]
+            },
+            "purpose": {
+              "description": "With `group`: why the group is worth making, in one short line (about sixty\ncharacters), for example \"plan a birthday party\". The members are told.",
+              "type": [
+                "string",
                 "null"
               ]
             }

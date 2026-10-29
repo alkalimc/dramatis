@@ -54,7 +54,7 @@ export function GroupDialog() {
     if (name.trim()) await actions.rename(channel, name.trim());
     if (picture) await actions.setChannelAvatar(channel, picture);
     await actions.refreshChannels();
-    await actions.open(channel);
+    await actions.open(channel, members);
   };
 
   if (step === "name") {

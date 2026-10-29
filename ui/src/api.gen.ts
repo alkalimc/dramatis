@@ -82,6 +82,12 @@ export const commands = {
 	 *  deleted since is made again.
 	 */
 	openOffer: (message: MessageId, action: number) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_offer", { message, action })),
+	/**
+	 *  Take one of the people a find suggestion (the `action`-th action line of `message`)
+	 *  offered: their direct channel, with the reason they were found written as its first
+	 *  line the first time. `Invalid` when the person is not on that line.
+	 */
+	openFound: (message: MessageId, action: number, person: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_found", { message, action, person })),
 	deleteGroup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_group", { channel })),
 	/**  Title a channel. `None` or blank returns to the derived title. */
 	renameChannel: (channel: ChannelId, name: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("rename_channel", { channel, name })),
@@ -589,6 +595,11 @@ export type Message = {
 	confidence: Confidence | null,
 	/**  A retelling of something said elsewhere. */
 	relayed: boolean,
+	/**
+	 *  A line from the harness that gives context (why someone was found); shown as a
+	 *  quiet note between the bubbles, not as something the user said.
+	 */
+	service?: boolean,
 	/**  The request this message answers. */
 	task: TaskId | null,
 	note: MediaFile | null,
@@ -972,7 +983,9 @@ export type ToolAction = { tool: "search"; query: string } | { tool: "get_chunk"
 /**  Who was found, so a front end can offer to open their channels. */
 persons?: PersonRef[] } | { tool: "ask"; person: PersonRef; question: string } | { tool: "create_group"; members: PersonRef[]; 
 /**  The new group, so a front end can offer to open it. Absent on older rows. */
-channel?: ChannelId | null } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId } | { tool: "list_channels"; 
+channel?: ChannelId | null; 
+/**  Why the group exists, in a few words. It becomes the group's topic. */
+purpose?: string | null } | { tool: "set_mode"; target: Target; mode: Mode } | { tool: "forget"; fact: FactId } | { tool: "list_channels"; 
 /**  The conversations listed, so a front end can offer to open each. */
 channels?: ChannelRef[] };
 

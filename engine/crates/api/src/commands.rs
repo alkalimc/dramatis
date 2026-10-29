@@ -156,6 +156,10 @@ commands! {
     /// every later call returns that same group (`Invalid` for any other action). A group
     /// deleted since is made again.
     fn open_offer(message: MessageId, action: u32) -> ChannelId;
+    /// Take one of the people a find suggestion (the `action`-th action line of `message`)
+    /// offered: their direct channel, with the reason they were found written as its first
+    /// line the first time. `Invalid` when the person is not on that line.
+    fn open_found(message: MessageId, action: u32, person: PersonId) -> ChannelId;
     fn delete_group(channel: ChannelId) -> ();
     /// Title a channel. `None` or blank returns to the derived title.
     fn rename_channel(channel: ChannelId, name: Option<String>) -> ();

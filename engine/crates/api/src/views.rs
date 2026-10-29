@@ -277,6 +277,10 @@ pub struct Message {
     pub confidence: Option<Confidence>,
     /// A retelling of something said elsewhere.
     pub relayed: bool,
+    /// A line from the harness that gives context (why someone was found); shown as a
+    /// quiet note between the bubbles, not as something the user said.
+    #[serde(default)]
+    pub service: bool,
     /// The request this message answers.
     pub task: Option<TaskId>,
     pub note: Option<MediaFile>,
@@ -326,6 +330,9 @@ pub enum ToolAction {
         /// The new group, so a front end can offer to open it. Absent on older rows.
         #[serde(default)]
         channel: Option<ChannelId>,
+        /// Why the group exists, in a few words. It becomes the group's topic.
+        #[serde(default)]
+        purpose: Option<String>,
     },
     SetMode {
         target: Target,

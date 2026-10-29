@@ -385,10 +385,12 @@ impl Session {
         let Ok(list) = self.engine.channels().await else {
             return;
         };
-        let unread = list
-            .iter()
-            .find(|c| &c.id == channel)
-            .map_or(0, |c| c.unread as usize);
+        let shown = list.iter().find(|c| &c.id == channel);
+        // An archived conversation stays archived when opened; say so, and how to undo it.
+        if shown.is_some_and(|c| c.archived) {
+            self.term.note(&self.msg("cli.archived.open"));
+        }
+        let unread = shown.map_or(0, |c| c.unread as usize);
         if unread == 0 {
             return;
         }
@@ -583,7 +585,12 @@ impl Session {
     }
 
     async fn open_person(&mut self, person: PersonId) {
-        match self.engine.open_direct(person.clone()).await {
+        let opened = self.engine.open_direct(person.clone()).await;
+        self.enter_person(person, opened).await;
+    }
+
+    async fn enter_person(&mut self, person: PersonId, opened: ApiResult<ChannelId>) {
+        match opened {
             Ok(channel) => {
                 let name = self.names.person(&person.0);
                 self.term.note(
@@ -643,6 +650,19 @@ impl Session {
             }));
         };
         match offer {
+            // Taking a found person writes why they were found, once.
+            Offer::Person {
+                id,
+                line: Some(line),
+                ..
+            } => {
+                let person = PersonId(id);
+                let opened = self
+                    .engine
+                    .open_found(line.message, line.index, person.clone())
+                    .await;
+                self.enter_person(person, opened).await;
+            }
             Offer::Person { id, .. } => self.open_person(PersonId(id)).await,
             group @ Offer::Group { .. } => {
                 let Offer::Group { channel, .. } = &group else {

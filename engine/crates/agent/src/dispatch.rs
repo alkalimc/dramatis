@@ -26,6 +26,21 @@ const LISTED_CHANNELS_MAX: usize = 12;
 /// Most colleagues a person's group suggestion may name, apart from the person.
 const SUGGESTED_GROUP_MAX: usize = 4;
 
+/// Longest purpose a group proposal carries, in characters; more is cut.
+const PURPOSE_MAX: usize = 60;
+
+/// A purpose as one short line: the first line, trimmed, cut to [`PURPOSE_MAX`].
+fn clean_purpose(purpose: Option<&str>) -> Option<String> {
+    let line = purpose?.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(
+        line.chars()
+            .take(PURPOSE_MAX)
+            .collect::<String>()
+            .trim_end()
+            .to_owned(),
+    )
+}
+
 /// A refused call: its text goes back to the model as the tool's output.
 struct Refusal(String);
 
@@ -455,6 +470,7 @@ impl Agent {
                     ToolAction::CreateGroup {
                         members: refs,
                         channel: None,
+                        purpose: clean_purpose(a.purpose.as_deref()),
                     },
                 )?;
             }
@@ -477,6 +493,7 @@ impl Agent {
         turn: &mut Turn,
         find: Option<String>,
         group: Option<Vec<String>>,
+        purpose: Option<String>,
     ) -> Result<()> {
         let Some(me) = turn.speaker.person().cloned() else {
             return Ok(());
@@ -506,8 +523,16 @@ impl Agent {
         };
         // Two lines are two calls; the second meets the one-per-reply limit.
         for ask in [
-            tools::AskHost { find, group: None },
-            tools::AskHost { find: None, group },
+            tools::AskHost {
+                find,
+                group: None,
+                purpose: None,
+            },
+            tools::AskHost {
+                find: None,
+                group,
+                purpose,
+            },
         ] {
             if ask.find.is_some() || ask.group.is_some() {
                 let _ = self.ask_host(turn, &me, ask, &names)?;
@@ -622,15 +647,20 @@ impl Agent {
                     .iter()
                     .map(|m| view::person_ref(self.ix().folio(), m.as_str()))
                     .collect::<Result<Vec<_>>>()?;
+                let purpose = clean_purpose(g.purpose.as_deref());
                 let created =
-                    channel::create_group(&self.db(), &members, g.topic.as_deref(), Origin::User);
+                    channel::create_group(&self.db(), &members, purpose.as_deref(), Origin::User);
                 match created {
                     Ok(id) => {
+                        if let Some(p) = &purpose {
+                            self.group_opening(id, None, p)?;
+                        }
                         self.show_action(
                             turn,
                             ToolAction::CreateGroup {
                                 members: refs,
                                 channel: Some(view::channel_id(id)),
+                                purpose: purpose.clone(),
                             },
                         )?;
                         self.changed(vec![api::events::WorldChange::Channel {

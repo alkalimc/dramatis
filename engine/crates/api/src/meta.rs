@@ -16,6 +16,8 @@ pub struct MessageMeta {
     pub task: Option<world::TaskId>,
     /// A retelling of something said elsewhere.
     pub relayed: bool,
+    /// A context line written by the harness, shown as a service line.
+    pub service: bool,
     /// The request's note, relative to the office directory.
     pub note: Option<String>,
     /// Hash of the picture the user attached, which lives in the save (`world::picture`).

@@ -24,7 +24,7 @@ function useStreams(channel: ChannelId): [string, Stream][] {
 const RUN_GAP_MS = 5 * 60_000;
 
 function continues(a: Message, b: Message): boolean {
-  return sameAuthor(a.author, b.author) && Math.abs(Date.parse(b.at) - Date.parse(a.at)) < RUN_GAP_MS;
+  return !a.service && !b.service && sameAuthor(a.author, b.author) && Math.abs(Date.parse(b.at) - Date.parse(a.at)) < RUN_GAP_MS;
 }
 
 /** One conversation: the header, the log, anything being written, and the composer. */

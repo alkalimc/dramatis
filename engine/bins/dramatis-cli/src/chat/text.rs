@@ -204,6 +204,10 @@ line is one message.",
         "archived; a new message from a person brings it back",
     ),
     ("cli.archive.off", "back in the main list"),
+    (
+        "cli.archived.open",
+        "this conversation is archived; /unarchive brings it back to the main list",
+    ),
     ("cli.archive.host", "the host's channel cannot be archived"),
     (
         "cli.rename.cleared",

@@ -446,13 +446,37 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
     assert!(r.run("/go 1").await.contains("offered nothing"));
 
     // The host's tool calls become a numbered list after its reply.
-    r.show.emit(host_called(ToolAction::FindPeople {
+    let find = ToolAction::FindPeople {
         topic: "tea".into(),
         persons: vec![person("ann")],
-    }));
+    };
+    let host = r.engine.host_channel().await.unwrap();
+    let message = {
+        let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
+        let calls = serde_json::to_value([&find]).unwrap();
+        let id = world::message::append(
+            &w,
+            world::ChannelId(host.0.parse().unwrap()),
+            &world::Actor::Host,
+            "Here.",
+            Some(&calls),
+            None,
+            1,
+        )
+        .unwrap();
+        api::types::MessageId(id.to_string())
+    };
+    r.show
+        .emit(api::port::Event::ToolCalled(api::events::ToolCalled {
+            channel: host,
+            message,
+            author: api::types::Author::Host,
+            action: find,
+        }));
     r.show.emit(host_called(ToolAction::CreateGroup {
         members: vec![person("ann"), person("cy")],
         channel: Some(group),
+        purpose: None,
     }));
     r.session.offers_for_test();
     let listed = r.out.take();
@@ -494,6 +518,7 @@ async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_grou
     let offer = ToolAction::CreateGroup {
         members: vec![person("ann"), person("cy")],
         channel: None,
+        purpose: Some("plan a party".into()),
     };
     let direct = r.engine.open_direct(PersonId("ann".into())).await.unwrap();
     let message = {
@@ -529,6 +554,16 @@ async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_grou
     assert!(!r.session.prompt().starts_with("[ann, cy]"));
     assert!(r.run("/go 1").await.contains("group with ann, cy"));
     assert!(r.session.prompt().starts_with("[ann, cy]"));
+    // The purpose is the group's topic.
+    let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
+    let topics: Vec<_> = world::channel::list(&w)
+        .unwrap()
+        .into_iter()
+        .filter(|c| c.kind == world::ChannelKind::Group)
+        .map(|c| c.topic)
+        .collect();
+    assert_eq!(topics, [Some("plan a party".to_string())]);
+    drop(w);
     // Taking it again opens the same group instead of making another.
     r.run("/talk ann").await;
     assert!(r.run("/go 1").await.contains("group with ann, cy"));
@@ -1462,6 +1497,16 @@ async fn conversations_are_listed_opened_archived_and_titled() {
     assert!(r.run("/rename").await.contains("derived"));
     assert!(r.run("/archive").await.contains("archived"));
     assert!(!r.run("/chats").await.contains("ann"));
+    assert!(r.run("/chats archived").await.contains("ann"));
+    // Opening an archived conversation says so and names the way out; it stays archived.
+    r.run("/talk cy").await;
+    let opened = r.run("/chats archived").await;
+    assert!(opened.contains("ann"), "{opened}");
+    let opened = r.run("/chat 1").await;
+    assert!(
+        opened.contains("talking to ann") && opened.contains("archived; /unarchive"),
+        "{opened}"
+    );
     assert!(r.run("/chats archived").await.contains("ann"));
     assert!(r.run("/unarchive").await.contains("main list"));
     assert!(r.run("/read").await.contains("marked read: 1 conversation"));

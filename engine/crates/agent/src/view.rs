@@ -105,6 +105,7 @@ pub fn message(
         cites: meta.cites.iter().map(citation).collect(),
         confidence: meta.confidence.map(confidence),
         relayed: meta.relayed,
+        service: meta.service,
         task: meta.task.map(task_id),
         note: meta.note.map(|n| t::MediaFile {
             path: office.join(n).to_string_lossy().into_owned(),

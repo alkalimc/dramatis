@@ -85,6 +85,8 @@ test("the channel shows who is typing, a lookup wording for tools, and clears on
 });
 
 test("a host message that found people or made a group offers them, and a click switches the open channel", async () => {
+  // The stand-in has no stored line for this message; it takes the person like a plain chat.
+  const taken: unknown[][] = [];
   const { store } = renderWith(
     <MessageView
       showPlay={false}
@@ -99,6 +101,18 @@ test("a host message that found people or made a group offers them, and a click 
         ],
       }}
     />,
+    {
+      patch: (api) => ({
+        ...api,
+        commands: {
+          ...api.commands,
+          openFound: async (...args) => {
+            taken.push(args);
+            return api.commands.openDirect(args[2]);
+          },
+        },
+      }),
+    },
   );
   expect(screen.getByRole("button", { name: "Open the group with Mira, Oren" })).toBeDefined();
   await act(async () => {
@@ -109,6 +123,14 @@ test("a host message that found people or made a group offers them, and a click 
     screen.getByRole("button", { name: "Talk to Mira" }).click();
   });
   expect(store.getState().channel).toBe("dm:mira");
+  // A found person is taken through the line they came from, so the reason is written.
+  expect(taken).toEqual([["m1", 0, "mira"]]);
+});
+
+test("a service line is a quiet note, not a bubble", () => {
+  const { container } = renderWith(<MessageView showPlay={false} message={{ ...base, author: { kind: "user" }, service: true, text: "Amia suggested you could help the Doctor with: ledgers" }} />);
+  expect(container.querySelector(".service-line")?.textContent).toBe("Amia suggested you could help the Doctor with: ledgers");
+  expect(container.querySelector(".bubble")).toBeNull();
 });
 
 test("a person's group suggestion makes the group only when pressed, and only once", async () => {
