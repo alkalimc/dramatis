@@ -31,7 +31,7 @@ impl Ctx<'_> {
 
 /// Block A: the global static text, identical for every person of this user. A group's
 /// log adds how a member hands the turn on.
-pub fn block_a(ctx: &Ctx<'_>, group: bool) -> String {
+pub fn block_a(ctx: &Ctx<'_>, group: bool, proposing: bool) -> String {
     let mut parts = vec![ctx.fill("harness.rules", &[])];
     // The user's words go in as written, so the line is filled, never substituted into.
     if let Some(about) = ctx.names.about() {
@@ -44,6 +44,13 @@ pub fn block_a(ctx: &Ctx<'_>, group: bool) -> String {
     parts.push(ctx.fill("harness.citation", &[]));
     if group {
         parts.push(ctx.fill("harness.next", &[("mark", hand_off_mark(ctx.wording))]));
+    }
+    if proposing {
+        let marks = closing_marks(ctx.wording, false, true);
+        parts.push(ctx.fill(
+            "harness.propose",
+            &[("find", marks.find), ("group", marks.group)],
+        ));
     }
     parts.join("\n\n")
 }
@@ -86,7 +93,7 @@ pub fn block_a_host(
     layers: &HostLayers,
     frontend: Frontend,
 ) -> String {
-    let mut parts = vec![block_a(ctx, false), heading(ctx, host_name)];
+    let mut parts = vec![block_a(ctx, false, false), heading(ctx, host_name)];
     for layer in [&layers.in_world, &layers.meta] {
         if !layer.trim().is_empty() {
             parts.push(ctx.names.sub(layer.trim()).into_owned());
@@ -342,76 +349,168 @@ pub fn hand_off_mark(wording: &Wording) -> &str {
     wording.get("harness.next_mark").trim()
 }
 
-/// A reply without its closing hand-off line, and the names that line listed. The line
-/// is the last non-empty one and starts with `mark`, or comes just before closing lines
-/// of citation marks only (a model that writes the two closing lines in the other order);
-/// those stay. Names are separated by commas (ASCII or full-width), enumeration commas or
-/// semicolons. A marker anywhere else is speech and stays.
-pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
+/// The marks a reply's closing lines start with. An empty mark is off.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Marks<'a> {
+    /// A group reply's hand-off line (`harness.next_mark`).
+    pub hand_off: &'a str,
+    /// A proposal to find someone (`harness.find_mark`), written where tools are emulated.
+    pub find: &'a str,
+    /// A proposal for a group (`harness.group_mark`).
+    pub group: &'a str,
+}
+
+impl<'a> Marks<'a> {
+    pub fn list(&self) -> Vec<&'a str> {
+        [self.hand_off, self.find, self.group]
+            .into_iter()
+            .filter(|m| !m.is_empty())
+            .collect()
+    }
+}
+
+/// The marks for a turn: the hand-off mark in a group, the proposal marks where the
+/// person's tools are emulated.
+pub fn closing_marks(wording: &Wording, group: bool, proposing: bool) -> Marks<'_> {
+    Marks {
+        hand_off: if group { hand_off_mark(wording) } else { "" },
+        find: if proposing {
+            wording.get("harness.find_mark").trim()
+        } else {
+            ""
+        },
+        group: if proposing {
+            wording.get("harness.group_mark").trim()
+        } else {
+            ""
+        },
+    }
+}
+
+/// A reply without its last closing line that starts with `mark`, and what follows the
+/// mark. The line is the last non-empty one, or comes just before closing lines of
+/// citation marks and `others` only (a model that writes the closing lines in another
+/// order); those stay. A marker anywhere else is speech and stays.
+fn split_line(text: &str, mark: &str, others: &[&str]) -> (String, Option<String>) {
     if mark.is_empty() {
-        return (text.to_owned(), Vec::new());
+        return (text.to_owned(), None);
     }
     let lines: Vec<&str> = text.trim_end().lines().collect();
     let mut i = lines.len();
-    while i > 0 && (lines[i - 1].trim().is_empty() || api::cites::is_cite_line(lines[i - 1])) {
+    while i > 0
+        && (lines[i - 1].trim().is_empty()
+            || api::cites::is_cite_line(lines[i - 1])
+            || others
+                .iter()
+                .any(|o| lines[i - 1].trim_start().starts_with(o)))
+    {
         i -= 1;
     }
-    let Some(list) = i
+    let Some(rest) = i
         .checked_sub(1)
         .and_then(|k| lines[k].trim_start().strip_prefix(mark))
     else {
-        return (text.to_owned(), Vec::new());
+        return (text.to_owned(), None);
     };
-    let names = list
-        .split([',', '\u{ff0c}', '\u{3001}', ';', '\u{ff1b}'])
-        .map(|n| n.trim().trim_matches(['"', '\'', '`']).trim())
-        .filter(|n| !n.is_empty())
-        .map(str::to_owned)
-        .collect();
     let head = lines[..i - 1].join("\n");
-    let cites = lines[i..].join("\n");
-    let kept = match (head.trim_end(), cites.trim()) {
+    let tail = lines[i..].join("\n");
+    let kept = match (head.trim_end(), tail.trim()) {
         (h, "") => h.to_owned(),
         ("", c) => c.to_owned(),
         (h, c) => format!("{h}\n{c}"),
     };
-    (kept, names)
+    (kept, Some(rest.to_owned()))
 }
 
-/// How much of the streamed text is safe to show: everything except a trailing line that
-/// is, or may still turn out to be, the hand-off line. A marker line followed by more
-/// speech was never a closing line and is released.
-pub fn shown_len(pending: &str, mark: &str) -> usize {
-    if mark.is_empty() {
+/// Names separated by commas (ASCII or full-width), enumeration commas or semicolons.
+fn split_names(list: &str) -> Vec<String> {
+    list.split([',', '\u{ff0c}', '\u{3001}', ';', '\u{ff1b}'])
+        .map(|n| n.trim().trim_matches(['"', '\'', '`']).trim())
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A reply without its closing hand-off line, and the names that line listed.
+pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
+    let (kept, rest) = split_line(text, mark, &[]);
+    (kept, rest.map(|r| split_names(&r)).unwrap_or_default())
+}
+
+/// A reply split into its speech and its closing lines.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Closing {
+    pub text: String,
+    pub hand_off: Vec<String>,
+    /// The subject of a proposal to find someone.
+    pub find: Option<String>,
+    /// The members named by a group proposal.
+    pub group: Option<Vec<String>>,
+}
+
+/// Split off the closing lines `marks` name. A proposal line with nothing after its mark
+/// is not one: it stays in the text.
+pub fn split_closing(text: &str, marks: Marks<'_>) -> Closing {
+    let all = marks.list();
+    let others = |m: &str| all.iter().copied().filter(|o| *o != m).collect::<Vec<_>>();
+    let mut out = Closing {
+        text: text.to_owned(),
+        ..Closing::default()
+    };
+    let (kept, rest) = split_line(&out.text, marks.hand_off, &others(marks.hand_off));
+    if let Some(rest) = rest {
+        out.text = kept;
+        out.hand_off = split_names(&rest);
+    }
+    let (kept, rest) = split_line(&out.text, marks.find, &others(marks.find));
+    if let Some(topic) = rest.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty()) {
+        out.text = kept;
+        out.find = Some(topic);
+    }
+    let (kept, rest) = split_line(&out.text, marks.group, &others(marks.group));
+    if let Some(names) = rest.map(|r| split_names(&r)).filter(|n| !n.is_empty()) {
+        out.text = kept;
+        out.group = Some(names);
+    }
+    out
+}
+
+/// How much of the streamed text is safe to show: everything except trailing closing
+/// lines that are, or may still turn out to be, one of `marks`. A marker line followed
+/// by more speech was never a closing line and is released.
+pub fn shown_len(pending: &str, marks: &[&str]) -> usize {
+    let marks: Vec<&str> = marks.iter().copied().filter(|m| !m.is_empty()).collect();
+    if marks.is_empty() {
         return pending.len();
     }
     let body = pending.trim_end();
-    let mut start = body.rfind('\n').map_or(0, |i| i + 1);
-    // Closing citation lines (or one still being written) after a marker line: the
-    // marker line is still the hand-off line, so hold from there.
+    let unfinished = pending.len() == body.len();
+    let mut hold = None;
     let mut end = body.len();
-    while start > 0 {
+    let mut last = true;
+    loop {
+        let start = body[..end].rfind('\n').map_or(0, |i| i + 1);
         let line = body[start..end].trim();
-        let cite = api::cites::is_cite_line(line)
-            || (end == body.len() && line.starts_with('[') && !line.contains(']'));
-        if !(line.is_empty() || cite) {
+        let marked = marks.iter().any(|m| line.starts_with(m))
+            || (last
+                && unfinished
+                && !line.is_empty()
+                && marks.iter().any(|m| m.starts_with(line)));
+        if marked {
+            hold = Some(start);
+        } else if !(line.is_empty()
+            || api::cites::is_cite_line(line)
+            || (last && line.starts_with('[') && !line.contains(']')))
+        {
+            break;
+        }
+        if start == 0 {
             break;
         }
         end = start - 1;
-        let prev = body[..end].rfind('\n').map_or(0, |i| i + 1);
-        if body[prev..end].trim_start().starts_with(mark) {
-            return prev;
-        }
-        start = prev;
+        last = false;
     }
-    let start = body.rfind('\n').map_or(0, |i| i + 1);
-    let line = body[start..].trim_start();
-    let held = line.starts_with(mark) || (pending.len() == body.len() && mark.starts_with(line));
-    if held && !line.is_empty() {
-        start
-    } else {
-        pending.len()
-    }
+    hold.unwrap_or(pending.len())
 }
 
 /// Whether a reply is an endpoint's canned boilerplate.
@@ -678,9 +777,60 @@ mod tests {
     }
 
     #[test]
+    fn closing_proposal_lines_are_split_off() {
+        let w = Wording::new(&BTreeMap::new());
+        let marks = closing_marks(&w, true, true);
+        let (find, group, hand) = (marks.find, marks.group, marks.hand_off);
+        let c = split_closing(&format!("Hi.\n{find} forge steel\n"), marks);
+        assert_eq!(c.text, "Hi.");
+        assert_eq!(c.find.as_deref(), Some("forge steel"));
+        let c = split_closing(&format!("Hi.\n{group} Ann, Bo"), marks);
+        assert_eq!(c.group, Some(vec!["Ann".to_owned(), "Bo".to_owned()]));
+        // Both closing lines, either order, and a citation line: all leave, the marks stay.
+        for body in [
+            format!("Hi.\n{hand} Ann\n{find} x\n[#u1]"),
+            format!("Hi.\n{find} x\n{hand} Ann"),
+        ] {
+            let c = split_closing(&body, marks);
+            assert_eq!(c.hand_off, vec!["Ann".to_owned()]);
+            assert_eq!(c.find.as_deref(), Some("x"));
+            assert!(c.text.starts_with("Hi."));
+            assert!(!c.text.contains(find) && !c.text.contains(hand));
+        }
+        // Empty, mid-text or unmarked: speech.
+        for body in [
+            format!("Hi.\n{find}"),
+            format!("Hi.\n{group} , "),
+            format!("{find} x\nmore"),
+            "plain".to_owned(),
+        ] {
+            let c = split_closing(&body, marks);
+            assert_eq!(
+                (c.text.as_str(), c.find, c.group),
+                (body.as_str(), None, None)
+            );
+        }
+        // Off when the tools are native.
+        let off = closing_marks(&w, false, false);
+        assert_eq!(split_closing(&format!("a\n{find} x"), off).find, None);
+    }
+
+    #[test]
+    fn the_stream_holds_back_proposal_lines_too() {
+        let w = Wording::new(&BTreeMap::new());
+        let marks = closing_marks(&w, true, true).list();
+        let (find, hand) = (marks[1], marks[0]);
+        let body = format!("Hello\n{hand} Ann\n{find} x");
+        assert_eq!(shown_len(&body, &marks), 6);
+        assert_eq!(shown_len(&format!("Hello\n{}", &find[..3]), &marks), 6);
+        let more = format!("{body}\nmore");
+        assert_eq!(shown_len(&more, &marks), more.len());
+    }
+
+    #[test]
     fn the_stream_holds_back_only_a_possible_hand_off_line() {
         let m = "\u{2192}";
-        let at = |s: &str| shown_len(s, m);
+        let at = |s: &str| shown_len(s, &[m]);
         assert_eq!(at("Hello"), 5);
         assert_eq!(at("Hello\n"), 6);
         assert_eq!(at("Hello\n\u{2192}"), 6);
@@ -696,8 +846,8 @@ mod tests {
         assert_eq!(at("Hello\n\u{2192} Ann\n[#u"), 6);
         assert_eq!(at("Hello\n[#u1]"), "Hello\n[#u1]".len());
         // A multi-character marker is held while it could still complete.
-        assert_eq!(shown_len("Hi\n=", "=>"), 3);
-        assert_eq!(shown_len("Hi\n=x", "=>"), 5);
+        assert_eq!(shown_len("Hi\n=", &["=>"]), 3);
+        assert_eq!(shown_len("Hi\n=x", &["=>"]), 5);
     }
 
     use super::*;
@@ -931,7 +1081,11 @@ mod tests {
                 persona: &person,
             },
         );
-        for text in [section, block_a(&ctx, false), block_a(&ctx, true)] {
+        for text in [
+            section,
+            block_a(&ctx, false, false),
+            block_a(&ctx, true, false),
+        ] {
             assert!(
                 !text.contains("/talk") && !text.contains("Roster"),
                 "{text}"
@@ -949,6 +1103,7 @@ mod tests {
                     names,
                     scene: ("*", "*"),
                 },
+                false,
                 false,
             )
         };

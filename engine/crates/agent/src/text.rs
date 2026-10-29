@@ -146,6 +146,19 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.chorus", "{name} answers too, after the others."),
     ("harness.collective", "everyone everybody"),
     ("harness.next_mark", "→"),
+    ("harness.find_mark", "⇒ find:"),
+    ("harness.group_mark", "⇒ group:"),
+    (
+        "harness.propose",
+        "You can offer {user} a choice through the host, and nothing happens until {user} \
+         takes it; {user} sees it under your reply and decides, so never say you sent or \
+         arranged anything. To offer someone who knows a subject, end the reply with one \
+         final line that starts with {find} followed by the subject in plain words. To offer \
+         a group with colleagues from the roster, end it with one final line that starts \
+         with {group} followed by their names, separated by commas, and at most four. Use at \
+         most one such line per reply, and only when {user} would gain from it. If a \
+         citation line is also written, these lines come last.",
+    ),
     (
         "harness.next",
         "In a group, a member may hand the turn on. Only if the reply really calls for one \
