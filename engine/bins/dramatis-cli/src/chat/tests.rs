@@ -1641,3 +1641,59 @@ async fn events_are_listed_and_switched() {
     assert!(r.run("/events 3").await.contains("usage"));
     assert!(r.run("/events many").await.contains("usage"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_posted_whole_offers_what_it_carries() {
+    use api::port::Sink;
+    use api::views::ToolAction;
+    let mut r = rig().await;
+    let person = |id: &str| api::types::PersonRef {
+        id: api::types::PersonId(id.into()),
+        name: id.into(),
+        pronoun: None,
+    };
+    let actions = vec![
+        ToolAction::CreateGroup {
+            members: vec![person("ann"), person("cy")],
+            channel: None,
+            purpose: Some("tea".into()),
+        },
+        ToolAction::FindPeople {
+            topic: "Tea on the deck".into(),
+            persons: vec![person("ann")],
+        },
+    ];
+    let host = r.engine.host_channel().await.unwrap();
+    let mut shown = r
+        .engine
+        .history(host.clone(), None, 1)
+        .await
+        .unwrap_or_default();
+    let mut message = shown.pop().unwrap_or_else(|| api::views::Message {
+        id: api::types::MessageId("9".into()),
+        channel: host.clone(),
+        author: api::types::Author::Host,
+        text: "Something small happened.".into(),
+        actions: Vec::new(),
+        attachment: None,
+        picture_lost: false,
+        cites: Vec::new(),
+        confidence: None,
+        relayed: false,
+        service: false,
+        task: None,
+        note: None,
+        at: api::types::Timestamp("2026-03-10T12:00:00+00:00".into()),
+    });
+    message.actions = actions;
+    r.show
+        .emit(api::port::Event::MessageAdded(api::events::MessageAdded {
+            message,
+        }));
+    r.session.offers_for_test();
+    let listed = r.out.take();
+    assert!(
+        listed.contains("1 start a group: ann, cy") && listed.contains("2 talk to ann"),
+        "{listed}"
+    );
+}

@@ -697,6 +697,19 @@ impl Sink for Show {
                         self.term.note(&format!("  {s}"));
                     }
                 } else {
+                    // A message posted whole (a happening the host tells of) carries its
+                    // offers with it; one already offered as it streamed is not offered twice.
+                    for (i, action) in m.actions.iter().enumerate() {
+                        let line = Line {
+                            message: m.id.clone(),
+                            index: i as u32,
+                        };
+                        for offer in offers_of(action, line) {
+                            if !st.offers.contains(&offer) {
+                                st.offers.push(offer);
+                            }
+                        }
+                    }
                     drop(st);
                     self.term.print(&self.whole(&m));
                 }
