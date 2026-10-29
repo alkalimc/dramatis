@@ -26,6 +26,9 @@ const LISTED_CHANNELS_MAX: usize = 12;
 /// Most colleagues a person's group suggestion may name, apart from the person.
 const SUGGESTED_GROUP_MAX: usize = 4;
 
+/// Most colleagues a person may point the user to in one suggestion.
+const SUGGESTED_FIND_MAX: usize = 3;
+
 /// Longest purpose a group proposal carries, in characters; more is cut.
 const PURPOSE_MAX: usize = 60;
 
@@ -394,8 +397,8 @@ impl Agent {
 
     /// A person asks the host to arrange something. Only a suggestion: it becomes an action
     /// line the front end offers as a choice, and nothing is created or opened until the
-    /// user takes it. One per reply; colleagues from the roster only; the topic is the
-    /// person's own wording, never the user's memories.
+    /// user takes it. One per reply; colleagues from the roster only. The person names who
+    /// is offered: nobody is searched for, so the choices are the ones the reply means.
     fn ask_host(
         &self,
         turn: &mut Turn,
@@ -419,30 +422,30 @@ impl Agent {
         }
         let offer = self.offerable(&self.db())?;
         match (a.find, a.group) {
-            (Some(topic), None) => {
-                let topic = topic.trim().to_owned();
-                if topic.is_empty() {
-                    return Ok(Err(unavailable()));
-                }
+            (Some(listed), None) => {
                 let scope: Vec<String> = offer.into_iter().filter(|p| p != me.as_str()).collect();
-                let people =
-                    self.ix()
-                        .find_people(&topic, Some(&scope), self.config.find_people.k, &[])?;
-                let found = people
-                    .persons
-                    .iter()
-                    // Weak evidence is no reason to point the user at someone.
-                    .filter(|m| m.level != index::Level::Low)
-                    .map(|m| view::person_ref(self.ix().folio(), &m.person))
-                    .collect::<Result<Vec<_>>>()?;
+                // A name nobody on the roster answers to is left out; the rest stay offered.
+                let mut found: Vec<PersonId> = Vec::new();
+                for n in &listed {
+                    if let Some(p) = self.person_named(n.trim(), &scope)?
+                        && !found.contains(&p)
+                    {
+                        found.push(p);
+                    }
+                }
+                found.truncate(SUGGESTED_FIND_MAX);
                 if found.is_empty() {
                     return Ok(Err(unavailable()));
                 }
+                let persons = found
+                    .iter()
+                    .map(|p| view::person_ref(self.ix().folio(), p.as_str()))
+                    .collect::<Result<Vec<_>>>()?;
                 self.show_action(
                     turn,
                     ToolAction::FindPeople {
-                        topic,
-                        persons: found,
+                        topic: clean_purpose(a.purpose.as_deref()).unwrap_or_default(),
+                        persons,
                     },
                 )?;
             }
@@ -488,14 +491,15 @@ impl Agent {
 
     /// A person's closing proposal line (where tools are emulated) takes the path of the
     /// `ask_host` call, with its limits; a refused one is dropped, since nothing answers
-    /// the person. Names in a group line are the roster's display names, ids or aliases.
-    pub(crate) fn propose(
-        &self,
-        turn: &mut Turn,
-        find: Option<String>,
-        group: Option<Vec<String>>,
-        purpose: Option<String>,
-    ) -> Result<()> {
+    /// the person. Names in a line are the roster's display names, ids or aliases.
+    pub(crate) fn propose(&self, turn: &mut Turn, closing: assemble::Closing) -> Result<()> {
+        let assemble::Closing {
+            find,
+            find_purpose,
+            group,
+            purpose,
+            ..
+        } = closing;
         let Some(me) = turn.speaker.person().cloned() else {
             return Ok(());
         };
@@ -527,7 +531,7 @@ impl Agent {
             tools::AskHost {
                 find,
                 group: None,
-                purpose: None,
+                purpose: find_purpose,
             },
             tools::AskHost {
                 find: None,

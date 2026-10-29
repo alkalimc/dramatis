@@ -442,8 +442,10 @@ pub fn split_hand_off(text: &str, mark: &str) -> (String, Vec<String>) {
 pub struct Closing {
     pub text: String,
     pub hand_off: Vec<String>,
-    /// The subject of a proposal to find someone.
-    pub find: Option<String>,
+    /// The colleagues a proposal points the user to.
+    pub find: Option<Vec<String>>,
+    /// What going to them is for, when the find line gives it after the names.
+    pub find_purpose: Option<String>,
     /// The members named by a group proposal.
     pub group: Option<Vec<String>>,
     /// Why the group is proposed, when the line gives a reason after the names.
@@ -453,8 +455,8 @@ pub struct Closing {
 /// Separators between a group line's names and its purpose: ASCII or full-width bar.
 const PURPOSE_BARS: [char; 2] = ['|', '\u{ff5c}'];
 
-/// A group line's text after its mark, split into the names and the purpose. A line with
-/// no bar, or nothing after it, has no purpose.
+/// A find or group line's text after its mark, split into the names and the purpose. A
+/// line with no bar, or nothing after it, has no purpose.
 fn split_purpose(rest: &str) -> (Vec<String>, Option<String>) {
     let (names, purpose) = match rest.split_once(PURPOSE_BARS) {
         Some((n, p)) => (n, Some(p.trim().to_owned()).filter(|p| !p.is_empty())),
@@ -478,9 +480,13 @@ pub fn split_closing(text: &str, marks: Marks<'_>) -> Closing {
         out.hand_off = split_names(&rest);
     }
     let (kept, rest) = split_line(&out.text, marks.find, &others(marks.find));
-    if let Some(topic) = rest.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty()) {
+    if let Some((names, purpose)) = rest
+        .map(|r| split_purpose(&r))
+        .filter(|(n, _)| !n.is_empty())
+    {
         out.text = kept;
-        out.find = Some(topic);
+        out.find = Some(names);
+        out.find_purpose = purpose;
     }
     let (kept, rest) = split_line(&out.text, marks.group, &others(marks.group));
     if let Some((names, purpose)) = rest
@@ -802,7 +808,10 @@ mod tests {
         let (find, group, hand) = (marks.find, marks.group, marks.hand_off);
         let c = split_closing(&format!("Hi.\n{find} forge steel\n"), marks);
         assert_eq!(c.text, "Hi.");
-        assert_eq!(c.find.as_deref(), Some("forge steel"));
+        assert_eq!(c.find, Some(vec!["forge steel".to_owned()]));
+        let c = split_closing(&format!("Hi.\n{find} Ann, Bo | a party"), marks);
+        assert_eq!(c.find, Some(vec!["Ann".to_owned(), "Bo".to_owned()]));
+        assert_eq!(c.find_purpose.as_deref(), Some("a party"));
         let c = split_closing(&format!("Hi.\n{group} Ann, Bo"), marks);
         assert_eq!(c.group, Some(vec!["Ann".to_owned(), "Bo".to_owned()]));
         assert_eq!(c.purpose, None);
@@ -830,7 +839,7 @@ mod tests {
         ] {
             let c = split_closing(&body, marks);
             assert_eq!(c.hand_off, vec!["Ann".to_owned()]);
-            assert_eq!(c.find.as_deref(), Some("x"));
+            assert_eq!(c.find, Some(vec!["x".to_owned()]));
             assert!(c.text.starts_with("Hi."));
             assert!(!c.text.contains(find) && !c.text.contains(hand));
         }

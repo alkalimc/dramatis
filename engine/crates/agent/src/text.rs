@@ -161,9 +161,12 @@ const DEFAULTS: &[(&str, &str)] = &[
          you know or can do, or {user} asks you to find someone or set up a group, you can \
          offer {user} a choice through the host; nothing happens until {user} takes it, and \
          {user} sees it under your reply and decides, so never say you sent or arranged \
-         anything. To offer someone who knows a subject, end the reply with one final line \
-         that starts with {find} followed by the subject in plain words; the person found is \
-         told that subject as the reason. To offer a group with colleagues from the roster, \
+         anything. When you mean {user} to go and talk to particular colleagues, you can \
+         offer a way to reach them: end the reply with one final line that starts with \
+         {find} followed by their names, separated by commas, at most three, and if you like \
+         a bar and what it is about in a few words, which the person {user} goes to is told. \
+         Only the people on that line are offered, so name exactly those you mean; a \
+         colleague merely mentioned needs no line. To offer a group with colleagues from the roster, \
          end it with one final line that starts with {group} followed by their names, \
          separated by commas, and at most four, then a bar and the purpose of the group in a \
          few words (at most sixty characters), which every member is told. Such a line comes \

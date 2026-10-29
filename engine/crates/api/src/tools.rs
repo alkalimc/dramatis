@@ -64,24 +64,25 @@ pub struct RequestJoin {
     pub turns: Option<u32>,
 }
 
-/// Ask the host to arrange something for the user: someone who knows a subject, or a group
-/// with some colleagues. You help the user yourself first; this is for matters clearly
-/// outside what you know or can do, or when the user asks for someone or a group. The user
-/// is only shown the suggestion and decides; nothing happens before. Give exactly one of
-/// `find` and `group`, at most once per reply.
+/// Ask the host to arrange something for the user: a way to talk to colleagues you point
+/// the user to, or a group with some colleagues. You help the user yourself first; this is
+/// for matters clearly outside what you know or can do, or when the user asks for someone
+/// or a group. The user is only shown the suggestion and decides; nothing happens before.
+/// Give exactly one of `find` and `group`, at most once per reply.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AskHost {
-    /// A subject, in plain words, for the host to find colleagues who know it. The one
-    /// found is told it as the reason.
+    /// Names or roster ids of the colleagues you suggest the user goes to, at most three:
+    /// the ones your reply names for this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub find: Option<String>,
+    #[schemars(length(min = 1))]
+    pub find: Option<Vec<String>>,
     /// Roster ids of colleagues for the host to propose a group with; you are included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub group: Option<Vec<String>>,
-    /// With `group`: why the group is worth making, in one short line (about sixty
-    /// characters), for example "plan a birthday party". The members are told.
+    /// Optional: what it is for, in one short line (about sixty characters), for example
+    /// "plan a birthday party". Whoever the user goes to, or every member, is told.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purpose: Option<String>,
 }

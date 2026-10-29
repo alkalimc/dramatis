@@ -2722,7 +2722,7 @@ async fn a_persons_suggestion_is_an_offer_and_changes_nothing() {
     let e = env(WireApi::Chat);
     let ch = direct(&e, "ann");
     e.fake.push([
-        call("ask_host", json!({"find": "forge blade steel"})),
+        call("ask_host", json!({"find": ["bo"]})),
         say("Bo knows more about that than I do."),
     ]);
     e.agent.send(ch, "who forges blades?", None).await.unwrap();
@@ -2784,7 +2784,7 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
         .with_world(|w| bond::set_mode(w, &p("dee"), Mode::Disabled).unwrap());
     e.fake.push([
         call("ask_host", json!({"group": ["bo"]})),
-        call("ask_host", json!({"find": "forge blade steel"})),
+        call("ask_host", json!({"find": ["bo"]})),
         call("ask_host", json!({"group": ["nobody"]})),
         say("Done."),
     ]);
@@ -2811,7 +2811,7 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
     // Neither or both of the arguments is no suggestion.
     e.fake.push([
         call("ask_host", json!({})),
-        call("ask_host", json!({"find": "x", "group": ["bo"]})),
+        call("ask_host", json!({"find": ["bo"], "group": ["bo"]})),
         say("Hm."),
     ]);
     e.agent.send(ch, "third", None).await.unwrap();
@@ -3004,9 +3004,8 @@ fn turn_events(e: &Env) -> (String, Vec<api::views::ToolAction>) {
 async fn an_emulated_person_proposes_with_a_closing_line() {
     use api::views::ToolAction;
     let (e, ch) = emulated_env();
-    e.fake.push([say(&format!(
-        "Bo knows more than I do.\n{FIND} forge blade steel"
-    ))]);
+    e.fake
+        .push([say(&format!("Bo knows more than I do.\n{FIND} Bo"))]);
     e.agent.send(ch, "find someone for me", None).await.unwrap();
     let (streamed, actions) = turn_events(&e);
     // The line is neither streamed nor stored, and the offer waits under the message.
@@ -3080,8 +3079,7 @@ async fn an_emulated_proposal_keeps_the_same_limits_as_the_tool() {
     e.agent
         .with_world(|w| bond::set_mode(w, &p("dee"), Mode::Disabled).unwrap());
     // One per reply: the second line is refused.
-    e.fake
-        .push([say(&format!("Ok.\n{FIND} forge blade steel\n{GROUP} Bo"))]);
+    e.fake.push([say(&format!("Ok.\n{FIND} Bo\n{GROUP} Bo"))]);
     e.agent.send(ch, "hello", None).await.unwrap();
     let (_, actions) = turn_events(&e);
     assert_eq!(actions.len(), 1, "{actions:?}");
@@ -3103,6 +3101,69 @@ async fn an_emulated_proposal_keeps_the_same_limits_as_the_tool() {
     q.fake.push([say(&format!("Never mind.\n{GROUP} Bo"))]);
     q.agent.send(qch, "hello", None).await.unwrap();
     assert!(turn_events(&q).1.is_empty());
+}
+
+#[tokio::test]
+async fn a_find_offer_is_exactly_the_people_named_on_both_paths() {
+    use api::views::ToolAction;
+    let offered = |actions: &[ToolAction]| {
+        actions
+            .iter()
+            .find_map(|a| match a {
+                ToolAction::FindPeople { topic, persons } => Some((
+                    topic.clone(),
+                    persons.iter().map(|x| x.id.0.clone()).collect::<Vec<_>>(),
+                )),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    // Native tools: names in the order given; strangers, the speaker and repeats are left
+    // out; nobody else is searched for.
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        call(
+            "ask_host",
+            json!({"find": ["Dee", "nobody", "ann", "bo", "dee"], "purpose": "plan a party"}),
+        ),
+        say("Dee and Bo would do it well."),
+    ]);
+    e.agent.send(ch, "a party?", None).await.unwrap();
+    let (_, actions) = turn_events(&e);
+    assert_eq!(
+        offered(&actions),
+        (
+            "plan a party".to_owned(),
+            vec!["dee".to_owned(), "bo".to_owned()]
+        )
+    );
+    // Nobody on the roster: no offer at all.
+    e.fake
+        .push([call("ask_host", json!({"find": ["nobody"]})), say("Hm.")]);
+    e.agent.send(ch, "again", None).await.unwrap();
+    assert!(turn_events(&e).1.is_empty());
+
+    // Emulated tools: the same line, with or without what it is about.
+    let (e, ch) = emulated_env();
+    e.fake
+        .push([say(&format!("Dee would.\n{FIND} dee, Bo | plan a party"))]);
+    e.agent.send(ch, "a party?", None).await.unwrap();
+    let (streamed, actions) = turn_events(&e);
+    assert!(!streamed.contains("plan a party"), "{streamed}");
+    assert_eq!(
+        offered(&actions),
+        (
+            "plan a party".to_owned(),
+            vec!["dee".to_owned(), "bo".to_owned()]
+        )
+    );
+    e.fake.push([say(&format!("Bo.\n{FIND} Bo"))]);
+    e.agent.send(ch, "who?", None).await.unwrap();
+    assert_eq!(
+        offered(&turn_events(&e).1),
+        (String::new(), vec!["bo".to_owned()])
+    );
 }
 
 #[tokio::test]

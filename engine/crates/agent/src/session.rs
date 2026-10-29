@@ -1178,10 +1178,10 @@ impl Agent {
         }
         let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), turn.proposing);
         let closing = assemble::split_closing(&turn.text, marks);
-        turn.text = closing.text;
-        turn.hand_off = closing.hand_off;
+        turn.text = closing.text.clone();
+        turn.hand_off = closing.hand_off.clone();
         if turn.proposing && (closing.find.is_some() || closing.group.is_some()) {
-            self.propose(turn, closing.find, closing.group, closing.purpose)?;
+            self.propose(turn, closing)?;
         }
         if turn.in_group() {
             // A model that starts by repeating the message before it word for word: the
