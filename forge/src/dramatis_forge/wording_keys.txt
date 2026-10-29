@@ -542,6 +542,7 @@ group.name.more
 group.name.separator
 group.new
 group.next
+group.rename
 group.start
 group.title
 group.topic
