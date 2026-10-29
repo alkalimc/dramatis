@@ -10,6 +10,7 @@ function message(id: string, at: string, extra: Partial<Message> = {}): Message 
     text: id,
     actions: [],
     attachment: null,
+    picture_lost: false,
     cites: [],
     confidence: null,
     relayed: false,
@@ -264,4 +265,19 @@ test("pinning, marking unread and the temporary row", () => {
   // Opening it keeps the row; opening anything else drops it.
   expect(reduce(s, { type: "open", channel: "t1" }).temp?.id).toBe("t1");
   expect(reduce(s, { type: "open", channel: "c9" }).temp).toBeNull();
+});
+
+test("a picture arrives with the sent message and with the reloaded history alike", () => {
+  const picture = { attachment: { path: "data:image/png;base64,AAAA" } };
+  let s = reduce(initialState(), { type: "messageAdded", event: { message: message("m1", "2026-01-01T00:00:01Z", { author: { kind: "user" }, ...picture }) } });
+  expect(s.messages.c1[0].attachment).toEqual(picture.attachment);
+  // Reloaded from the save: the same message, then one whose picture is gone.
+  s = reduce(initialState(), {
+    type: "history",
+    channel: "c1",
+    messages: [message("m1", "2026-01-01T00:00:01Z", picture), message("m2", "2026-01-01T00:00:02Z", { picture_lost: true })],
+    older: false,
+    done: true,
+  });
+  expect(s.messages.c1.map((m) => [m.attachment?.path ?? null, m.picture_lost])).toEqual([["data:image/png;base64,AAAA", false], [null, true]]);
 });

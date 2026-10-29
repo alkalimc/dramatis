@@ -125,6 +125,15 @@ pub fn complete(
     Ok(())
 }
 
+/// Replace what a stored message's attachment holds.
+pub fn set_attachment(conn: &Connection, id: MessageId, attachment: &Value) -> Result<()> {
+    conn.execute(
+        "UPDATE message SET attachment = ?2 WHERE id = ?1",
+        (id, attachment.to_string()),
+    )?;
+    Ok(())
+}
+
 /// Remove a message that never got any text (its stream failed before the first delta).
 pub fn discard(conn: &Connection, id: MessageId) -> Result<()> {
     conn.execute("DELETE FROM message WHERE id = ?1", [id])?;

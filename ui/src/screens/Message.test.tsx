@@ -18,6 +18,7 @@ const base: Message = {
   task: null,
   note: null,
   attachment: null,
+  picture_lost: false,
 };
 
 test("citation marks, single or listed, never show in the speech", () => {
@@ -222,4 +223,32 @@ test("right click on a message offers to copy it, and to send an own message aga
   await user.pointer({ keys: "[MouseRight]", target: container.querySelector(".bubble")! });
   expect(await screen.findByRole("menuitem", { name: "Copy text" })).toBeDefined();
   expect(screen.getByRole("menuitem", { name: "Send again" })).toBeDefined();
+});
+
+const mine: Message = { ...base, author: { kind: "user" }, text: "look at this" };
+const url = "data:image/png;base64,iVBORw0KGgo=";
+
+test("a sent picture shows in the user's bubble and opens larger on a click", async () => {
+  const user = userEvent.setup();
+  const { container } = renderWith(<MessageView message={{ ...mine, attachment: { path: url } }} showPlay={false} />);
+  const img = container.querySelector(".from-user .bubble img.attachment") as HTMLImageElement;
+  expect(img.getAttribute("src")).toBe(url);
+  await user.click(screen.getByRole("button", { name: "Open the picture larger" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog.querySelector("img")!.getAttribute("src")).toBe(url);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("a picture sent without words is still one bubble holding the picture", () => {
+  const { container } = renderWith(<MessageView message={{ ...mine, text: "", attachment: { path: url } }} showPlay={false} />);
+  expect(container.querySelectorAll(".bubble")).toHaveLength(1);
+  expect(container.querySelector(".bubble img.attachment")).not.toBeNull();
+});
+
+test("a picture that is gone shows a placeholder instead of a broken image", () => {
+  const { container } = renderWith(<MessageView message={{ ...mine, picture_lost: true }} showPlay={false} />);
+  expect(container.querySelector("img")).toBeNull();
+  expect(screen.getByText("Picture unavailable")).toBeDefined();
+  expect(screen.getByText("look at this")).toBeDefined();
 });

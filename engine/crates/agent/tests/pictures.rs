@@ -164,3 +164,64 @@ async fn a_model_marked_blind_is_never_sent_a_picture() {
     );
     assert!(body.contains("cannot show pictures"), "{body}");
 }
+
+#[tokio::test]
+async fn a_sent_picture_is_in_the_message_the_history_and_the_save() {
+    let e = env(WireApi::Chat);
+    let ch = e.agent.open_direct(&p("ann")).unwrap();
+    let posted = e.agent.post(ch, "look", Some(tiny())).unwrap();
+    let url = format!("data:image/png;base64,{TINY}");
+
+    let announced = e
+        .sink
+        .take()
+        .into_iter()
+        .find_map(|ev| match ev {
+            agent::Event::MessageAdded(m) => Some(m.message),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(announced.attachment.map(|a| a.path), Some(url.clone()));
+
+    let shown = e.agent.history(ch, None, 10).unwrap();
+    assert_eq!(
+        shown[0].attachment.as_ref().map(|a| a.path.clone()),
+        Some(url)
+    );
+    assert!(!shown[0].picture_lost);
+    assert_eq!(
+        e.agent.with_world(|w| world::picture::usage(w).unwrap().0),
+        1
+    );
+
+    // Taking the message back takes the picture with it.
+    e.agent.rewind(ch, posted.message).unwrap();
+    assert_eq!(
+        e.agent.with_world(|w| world::picture::usage(w).unwrap().0),
+        0
+    );
+}
+
+#[tokio::test]
+async fn one_picture_sent_twice_is_kept_until_both_messages_are_gone() {
+    let e = env(WireApi::Chat);
+    let ch = e.agent.open_direct(&p("ann")).unwrap();
+    let first = e.agent.post(ch, "one", Some(tiny())).unwrap();
+    e.clock.advance(60_000);
+    let second = e.agent.post(ch, "two", Some(tiny())).unwrap();
+    assert_eq!(
+        e.agent.with_world(|w| world::picture::usage(w).unwrap().0),
+        1
+    );
+    e.clock.advance(60_000);
+    e.agent.rewind(ch, second.message).unwrap();
+    assert_eq!(
+        e.agent.with_world(|w| world::picture::usage(w).unwrap().0),
+        1
+    );
+    e.agent.rewind(ch, first.message).unwrap();
+    assert_eq!(
+        e.agent.with_world(|w| world::picture::usage(w).unwrap().0),
+        0
+    );
+}

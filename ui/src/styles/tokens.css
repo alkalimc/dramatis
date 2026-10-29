@@ -47,6 +47,13 @@
   --hue-6: #f0cf6a;
   --hue-7: #6fd0e8;
 
+  /* storage kinds: an eight-colour set made for colour-vision differences, lighter on the night panel */
+  --k-saves: #4aa3df;
+  --k-avatars: #f0ad1a;
+  --k-audio: #1fbf93;
+  --k-uploads: #dc8fbb;
+  --k-corpus: #b9def5;
+
   /* shape */
   --r-xs: 6px;
   --r-sm: 10px;
@@ -117,5 +124,10 @@
   --hue-6: #7a5f00;
   --hue-7: #0b6f87;
   --shadow: 0 8px 28px rgb(20 30 40 / 0.18);
+  --k-saves: #0072b2;
+  --k-avatars: #c98400;
+  --k-audio: #00875f;
+  --k-uploads: #b5578f;
+  --k-corpus: #56b4e9;
   color-scheme: light;
 }

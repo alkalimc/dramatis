@@ -8,11 +8,14 @@ use std::time::Instant;
 
 use api::error::ApiResult;
 use api::types::{Author, ChannelId, FactId, PersonId, Tier};
-use api::views::{Audience, FactFilter, FactScope, FactView, QuietHours, RosterRow, Settings};
+use api::views::{
+    Audience, FactFilter, FactScope, FactView, QuietHours, RosterRow, Settings, StorageKind,
+    StorageUsage,
+};
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
 
-use super::command::{Command, PasswordAct, Save, parse};
+use super::command::{Command, PasswordAct, Save, StorageAct, parse};
 use super::complete::{Completions, Snapshot};
 use super::interrupt::Interrupt;
 use super::show::{Names, Offer, Show, Term, Working};
@@ -97,6 +100,7 @@ enum Pending {
     Overwrite { name: String, path: String },
     PasswordOn,
     PasswordOff,
+    ClearStorage(Vec<StorageKind>),
 }
 
 /// How many times a password is asked for before giving up.
@@ -105,6 +109,15 @@ const TRIES: usize = 3;
 /// A password cannot be recovered; the person turning it on must hear that first.
 const FORGET_WARNING: &str =
     "A forgotten password cannot be recovered: nobody can open this save without it.\n";
+
+/// Kilobytes as a short human size.
+fn size(kb: u32) -> String {
+    match kb {
+        0..1024 => format!("{kb} KB"),
+        1024..1_048_576 => format!("{:.1} MB", f64::from(kb) / 1024.0),
+        _ => format!("{:.1} GB", f64::from(kb) / 1_048_576.0),
+    }
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -274,6 +287,7 @@ impl Session {
             Command::Sources(n) => self.sources(n).await,
             Command::Search(query) => self.search(&query).await,
             Command::Stats => self.stats(),
+            Command::Storage(act) => self.storage(act).await,
         }
         Flow::Continue
     }
@@ -1452,6 +1466,13 @@ impl Session {
                 Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
             },
             Pending::Overwrite { name, path } => self.export_now(&name, path).await,
+            Pending::ClearStorage(kinds) => match self.engine.clear_storage(kinds).await {
+                Ok(usage) => {
+                    self.term.note("cleared");
+                    self.print_storage(&usage);
+                }
+                Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+            },
             Pending::PasswordOn => {
                 let Some(new) = self.new_password() else {
                     return;
@@ -1495,6 +1516,66 @@ impl Session {
         self.report_failures();
         self.offer();
         self.footer(at, started).await;
+    }
+
+    async fn storage(&mut self, act: StorageAct) {
+        match act {
+            StorageAct::Show => match self.engine.storage_usage().await {
+                Ok(usage) => self.print_storage(&usage),
+                Err(e) => self.term.print(&format!("{}\n", Self::why(&e))),
+            },
+            StorageAct::Clear(kinds) => {
+                let usage = match self.engine.storage_usage().await {
+                    Ok(u) => u,
+                    Err(e) => return self.term.print(&format!("{}\n", Self::why(&e))),
+                };
+                let kb: u32 = usage
+                    .categories
+                    .iter()
+                    .filter(|c| kinds.contains(&c.kind))
+                    .map(|c| c.kb)
+                    .sum();
+                self.term.print(&format!(
+                    "clear {} of cached files? Saves and the corpus stay. (y/n) ",
+                    size(kb)
+                ));
+                self.pending = Some(Pending::ClearStorage(kinds));
+            }
+        }
+    }
+
+    fn print_storage(&self, usage: &StorageUsage) {
+        let label = |k: StorageKind| match k {
+            StorageKind::Saves => "saves",
+            StorageKind::Avatars => "avatars",
+            StorageKind::Audio => "audio",
+            StorageKind::Uploads => "uploads",
+            StorageKind::Corpus => "corpus",
+        };
+        for c in &usage.categories {
+            let note = if c.clearable {
+                "  (/storage clear)"
+            } else {
+                ""
+            };
+            self.term.print(&format!(
+                "{:<8} {:>10}  {} files{note}\n",
+                label(c.kind),
+                size(c.kb),
+                c.files
+            ));
+        }
+        for s in &usage.saves {
+            let mark = if s.current { " *" } else { "" };
+            self.term
+                .print(&format!("  save {}{mark}: {}\n", s.name, size(s.kb)));
+        }
+        self.term.print(&format!(
+            "pictures in this save: {} ({})\ntotal    {:>10}\n",
+            usage.pictures,
+            size(usage.picture_kb),
+            size(usage.total_kb)
+        ));
     }
 
     fn stats(&self) {

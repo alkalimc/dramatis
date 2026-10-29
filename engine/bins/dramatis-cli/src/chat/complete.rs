@@ -10,7 +10,7 @@ use rustyline::completion::Pair;
 const COMMANDS: &[&str] = &[
     "list", "talk", "group", "host", "go", "name", "bio", "wrapup", "memories", "forget",
     "restore", "edit", "tier", "quiet", "password", "save", "history", "resend", "sources",
-    "search", "stats", "help", "quit",
+    "search", "stats", "storage", "help", "quit",
 ];
 
 const SAVE_VERBS: &[&str] = &[
@@ -211,7 +211,10 @@ mod tests {
         let found = at("/");
         assert_eq!(found.0, 1);
         assert_eq!(found.1.len(), COMMANDS.len());
-        assert_eq!(shown(&at("/s")), ["save", "sources", "search", "stats"]);
+        assert_eq!(
+            shown(&at("/s")),
+            ["save", "sources", "search", "stats", "storage"]
+        );
         assert_eq!(shown(&at("/tal")), ["talk"]);
         assert!(at("/zzz").1.is_empty());
     }

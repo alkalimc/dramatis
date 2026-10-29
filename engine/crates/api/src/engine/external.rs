@@ -105,7 +105,7 @@ impl Engine {
         let mut changes = Vec::new();
         for m in &rows {
             watch.message = m.id.0;
-            let view = self.message_view(m, offset);
+            let view = self.message_view(&self.w(), m, offset);
             if self.ports.seen.has(&view.id.0) {
                 continue;
             }

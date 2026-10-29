@@ -281,10 +281,11 @@ impl Agent {
         limit: u32,
     ) -> Result<Vec<api::views::Message>> {
         let offset = self.now().offset_min;
-        let msgs = world::message::history(&self.db(), channel, before, limit)?;
+        let conn = self.db();
+        let msgs = world::message::history(&conn, channel, before, limit)?;
         Ok(msgs
             .iter()
-            .map(|m| crate::view::message(m, offset, &self.config.office))
+            .map(|m| crate::view::message(&conn, m, offset, &self.config.office))
             .collect())
     }
 

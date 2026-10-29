@@ -93,25 +93,35 @@ impl Agent {
         if let Some(p) = ch.person() {
             self.available(&conn, p)?;
         }
-        let attachment = (!meta.is_empty())
-            .then(|| serde_json::to_value(meta))
-            .transpose()?;
-        let id = message::append(
-            &conn,
-            channel,
-            &Actor::User,
-            text,
-            None,
-            attachment.as_ref(),
-            now.ms,
-        )?;
+        // The picture as shrunk goes into the save with the message: it is what the log
+        // keeps too, and no cache or file outside the save can lose it.
+        let id = world::atomic(&conn, |conn| {
+            let mut meta = meta.clone();
+            if let Some(i) = &image
+                && let Some(bytes) = api::media::base64_decode(&i.data_base64)
+            {
+                meta.picture = Some(world::picture::put(conn, &i.mime, &bytes)?);
+            }
+            let attachment = (!meta.is_empty())
+                .then(|| serde_json::to_value(&meta))
+                .transpose()
+                .map_err(|e| world::Error::Invalid(e.to_string()))?;
+            message::append(
+                conn,
+                channel,
+                &Actor::User,
+                text,
+                None,
+                attachment.as_ref(),
+                now.ms,
+            )
+        })?;
         session::touch_channel(&conn, channel, now.ms)?;
         let stored = message::get(&conn, id)?;
         let host = ch.is_host_channel();
+        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
         drop(conn);
-        self.emit(Event::MessageAdded(MessageAdded {
-            message: view::message(&stored, now.offset_min, &self.config.office),
-        }));
+        self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(Posted {
             channel,
             message: id,
@@ -284,10 +294,9 @@ impl Agent {
         let host = channel::host(&conn)?;
         let id = message::append(&conn, host, &Actor::Host, &text, None, None, now.ms)?;
         let stored = message::get(&conn, id)?;
+        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
         drop(conn);
-        self.emit(Event::MessageAdded(MessageAdded {
-            message: view::message(&stored, now.offset_min, &self.config.office),
-        }));
+        self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(())
     }
 

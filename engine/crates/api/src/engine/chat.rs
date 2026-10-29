@@ -26,8 +26,14 @@ fn spoken(text: &str, open: &str, close: &str) -> String {
 }
 
 impl Engine {
-    pub(crate) fn message_view(&self, m: &message::Message, offset: i32) -> Message {
+    pub(crate) fn message_view(
+        &self,
+        w: &rusqlite::Connection,
+        m: &message::Message,
+        offset: i32,
+    ) -> Message {
         let meta = MessageMeta::of(m.attachment.as_ref());
+        let (attachment, picture_lost) = crate::meta::picture_of(w, m);
         Message {
             id: convert::message_id(m.id),
             channel: convert::channel_id(m.channel),
@@ -38,7 +44,8 @@ impl Engine {
                 .as_ref()
                 .and_then(|a| serde_json::from_value(a.clone()).ok())
                 .unwrap_or_default(),
-            attachment: None,
+            attachment,
+            picture_lost,
             cites: meta.cites.iter().map(convert::citation).collect(),
             confidence: meta.confidence.map(convert::confidence),
             relayed: meta.relayed,
@@ -104,7 +111,10 @@ impl Engine {
         channel::get(&w, ch).map_err(world_err)?;
         let rows =
             message::history(&w, ch, before, limit.clamp(1, HISTORY_MAX)).map_err(world_err)?;
-        Ok(rows.iter().map(|m| self.message_view(m, offset)).collect())
+        Ok(rows
+            .iter()
+            .map(|m| self.message_view(&w, m, offset))
+            .collect())
     }
 
     pub(crate) fn open_direct_impl(&self, person: &PersonId) -> ApiResult<ChannelId> {

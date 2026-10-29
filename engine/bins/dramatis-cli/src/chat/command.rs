@@ -1,5 +1,7 @@
 //! The REPL's line grammar: a slash command, or a message for the current channel.
 
+use api::views::StorageKind;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// Blank line.
@@ -38,6 +40,8 @@ pub enum Command {
     Sources(usize),
     Search(String),
     Stats,
+    /// Disk use by kind, or empty some caches.
+    Storage(StorageAct),
     Help,
     Quit,
     /// A known command used wrongly, or an unknown one: the text to show.
@@ -49,6 +53,27 @@ pub enum PasswordAct {
     On,
     Change,
     Off,
+}
+
+/// What `/storage` was asked to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageAct {
+    Show,
+    /// Empty these caches (after a yes).
+    Clear(Vec<StorageKind>),
+}
+
+const STORAGE_USAGE: &str = "usage: /storage [clear avatars|audio|all]";
+
+fn parse_storage(args: &str) -> Command {
+    let w: Vec<&str> = args.split_whitespace().collect();
+    Command::Storage(match w.as_slice() {
+        [] => StorageAct::Show,
+        ["clear", "avatars"] => StorageAct::Clear(vec![StorageKind::Avatars]),
+        ["clear", "audio"] => StorageAct::Clear(vec![StorageKind::Audio]),
+        ["clear", "all"] => StorageAct::Clear(vec![StorageKind::Avatars, StorageKind::Audio]),
+        _ => return Command::Invalid(STORAGE_USAGE.into()),
+    })
 }
 
 /// What `/save` was asked to do. Names and paths may be "double quoted" to hold spaces.
@@ -210,6 +235,7 @@ pub fn parse(line: &str) -> Command {
         "search" | "s" if args.is_empty() => Command::Invalid("usage: /search <query>".into()),
         "search" | "s" => Command::Search(args.to_owned()),
         "stats" => Command::Stats,
+        "storage" => parse_storage(args),
         "help" | "?" => Command::Help,
         "quit" | "exit" | "q" => Command::Quit,
         other => Command::Invalid(format!("unknown command /{other}; try /help")),
@@ -314,6 +340,23 @@ mod tests {
             save("/save import /x.sqlite name"),
             Import("/x.sqlite".into(), Some("name".into()))
         );
+    }
+
+    #[test]
+    fn storage_shows_or_clears_named_caches() {
+        use StorageAct::*;
+        assert_eq!(parse("/storage"), Command::Storage(Show));
+        assert_eq!(
+            parse("/storage clear audio"),
+            Command::Storage(Clear(vec![StorageKind::Audio]))
+        );
+        assert_eq!(
+            parse("/storage clear all"),
+            Command::Storage(Clear(vec![StorageKind::Avatars, StorageKind::Audio]))
+        );
+        for bad in ["/storage clear", "/storage clear saves", "/storage x"] {
+            assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");
+        }
     }
 
     #[test]

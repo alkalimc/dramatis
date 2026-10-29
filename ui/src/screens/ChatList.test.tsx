@@ -43,6 +43,7 @@ test("rows are ordered by last activity, and a new message moves its chat to the
           text: "Something new.",
           actions: [],
           attachment: null,
+          picture_lost: false,
           cites: [],
           confidence: null,
           relayed: false,

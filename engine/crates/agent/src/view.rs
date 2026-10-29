@@ -82,11 +82,13 @@ pub fn confidence(l: index::Level) -> t::Confidence {
 
 /// A stored message as the UI renders it. `office` resolves a request's note.
 pub fn message(
+    conn: &rusqlite::Connection,
     m: &world::message::Message,
     offset_min: i32,
     office: &std::path::Path,
 ) -> v::Message {
     let meta = api::meta::MessageMeta::of(m.attachment.as_ref());
+    let (attachment, picture_lost) = api::meta::picture_of(conn, m);
     let actions: Vec<ToolAction> = m
         .tool_calls
         .as_ref()
@@ -98,7 +100,8 @@ pub fn message(
         author: author(&m.author),
         text: m.text.clone(),
         actions,
-        attachment: None,
+        attachment,
+        picture_lost,
         cites: meta.cites.iter().map(citation).collect(),
         confidence: meta.confidence.map(confidence),
         relayed: meta.relayed,

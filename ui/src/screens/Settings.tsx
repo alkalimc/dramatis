@@ -10,6 +10,7 @@ import { EndpointsPage } from "./Endpoints";
 import { QuietSection, QuotaSection } from "./Quota";
 import { PrivacyPage } from "./Privacy";
 import { SavesPage } from "./Saves";
+import { StoragePage } from "./Storage";
 import { statusLine, useCurrentSave } from "./Profile";
 
 const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
@@ -18,6 +19,7 @@ const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
   { page: "endpoints", icon: "server" },
   { page: "saves", icon: "bookmark" },
   { page: "privacy", icon: "lock" },
+  { page: "storage", icon: "archive" },
 ];
 
 function Row({ icon, label, value, onClick }: { icon: IconName; label: string; value?: string; onClick: () => void }) {
@@ -127,6 +129,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           {page === "endpoints" && <EndpointsPage />}
           {page === "saves" && <SavesPage />}
           {page === "privacy" && <PrivacyPage />}
+          {page === "storage" && <StoragePage />}
         </div>
       )}
     </Dialog>

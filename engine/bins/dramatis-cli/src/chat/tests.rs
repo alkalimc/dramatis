@@ -1240,3 +1240,46 @@ async fn the_endpoints_wizard_writes_a_valid_file_and_the_key_goes_to_the_fake_k
     );
     assert!(!Home::new(&fresh.0).endpoints().exists());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn history_marks_pictures_and_storage_clears_only_caches() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    let ch = r
+        .engine
+        .open_direct(api::types::PersonId("ann".into()))
+        .await
+        .unwrap();
+    {
+        let ch = world::ChannelId(ch.0.parse().unwrap());
+        let w = world::World::open_with(r.engine.home().world().unwrap(), None).unwrap();
+        let hash = world::picture::put(&w, "image/png", b"\x89PNG\r\n\x1a\nx").unwrap();
+        for (text, meta) in [
+            ("with a picture", serde_json::json!({ "picture": hash })),
+            ("without one", serde_json::json!({ "picture_lost": true })),
+        ] {
+            world::message::append(&w, ch, &world::Actor::User, text, None, Some(&meta), 5)
+                .unwrap();
+        }
+    }
+    let shown = r.run("/history 5").await;
+    assert!(shown.contains("[picture]"), "{shown}");
+    assert!(shown.contains("[picture unavailable]"), "{shown}");
+
+    let home = r.engine.home().clone();
+    std::fs::create_dir_all(home.tts()).unwrap();
+    std::fs::write(home.tts().join("a.mp3"), [0u8; 2048]).unwrap();
+    let usage = r.run("/storage").await;
+    assert!(usage.contains("audio") && usage.contains("2 KB"), "{usage}");
+    assert!(usage.contains("pictures in this save: 1"), "{usage}");
+
+    // A no keeps the cache; a yes empties it and nothing else.
+    assert!(r.run("/storage clear audio").await.contains("(y/n)"));
+    assert!(r.run("n").await.contains("cancelled"));
+    assert!(home.tts().join("a.mp3").exists());
+    r.run("/storage clear audio").await;
+    assert!(r.run("y").await.contains("cleared"));
+    assert!(!home.tts().join("a.mp3").exists());
+    assert!(home.world().unwrap().is_file());
+    assert!(r.run("/storage clear saves").await.contains("usage:"));
+}

@@ -144,6 +144,28 @@ impl MediaCache {
         Ok(path)
     }
 
+    /// Bytes and file count under `dir` (a cache directory such as `avatar`).
+    pub fn usage(&self, dir: &str) -> (u64, u32) {
+        let mut files = Vec::new();
+        collect(&self.root.join(dir), &mut files);
+        (
+            files.iter().map(|(_, len, _)| len).sum(),
+            u32::try_from(files.len()).unwrap_or(u32::MAX),
+        )
+    }
+
+    /// Delete every file under `dir`; returns the bytes freed. Only cache files live here,
+    /// so nothing is lost that cannot be fetched or synthesised again.
+    pub fn clear(&self, dir: &str) -> u64 {
+        let mut files = Vec::new();
+        collect(&self.root.join(dir), &mut files);
+        files
+            .into_iter()
+            .filter(|(path, _, _)| std::fs::remove_file(path).is_ok())
+            .map(|(_, len, _)| len)
+            .sum()
+    }
+
     fn evict(&self, keep: &Path) {
         let mut files = Vec::new();
         collect(&self.root, &mut files);
@@ -213,6 +235,22 @@ mod tests {
         assert!(a.exists() && c.exists());
         assert!(!b.exists(), "b was the least recently used");
         assert_eq!(cache.get("avatar", "b"), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn usage_counts_and_clear_empties_one_directory() {
+        let root = std::env::temp_dir().join(format!("dramatis-usage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let cache = MediaCache::new(&root, u64::MAX);
+        cache.put("tts", "a", "mp3", &[1; 10]).unwrap();
+        cache.put("tts", "b", "mp3", &[1; 5]).unwrap();
+        let keep = cache.put("avatar", "c", "png", &[2; 7]).unwrap();
+        assert_eq!(cache.usage("tts"), (15, 2));
+        assert_eq!(cache.usage("none"), (0, 0));
+        assert_eq!(cache.clear("tts"), 15);
+        assert_eq!(cache.usage("tts"), (0, 0));
+        assert!(keep.exists());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
