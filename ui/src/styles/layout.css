@@ -59,7 +59,7 @@ button.rail-menu {
 }
 button.rail-menu:hover {
   color: var(--ink);
-  filter: none;
+  background: var(--hover);
 }
 button.rail-item {
   width: 100%;
@@ -75,10 +75,11 @@ button.rail-item {
   padding: 0 var(--s-1);
 }
 button.rail-item:hover {
-  background: var(--panel);
-  filter: none;
+  background: var(--hover);
+  color: var(--ink);
 }
-button.rail-item.on {
+button.rail-item.on,
+button.rail-item.on:hover {
   color: var(--accent);
   background: var(--panel);
 }
@@ -93,7 +94,7 @@ button.rail-item.on {
   min-width: 1.2rem;
   height: 1.2rem;
   line-height: 1.2rem;
-  padding: 0 0.3rem;
+  padding: 0 var(--s-1);
   box-shadow: 0 0 0 2px var(--rail);
 }
 .rail-item.on .rail-icon .badge {
@@ -134,6 +135,7 @@ button.rail-item.on {
   background: var(--field);
   border: 1px solid transparent;
   color: var(--muted);
+  min-height: var(--ctl);
 }
 .search-field:focus-within {
   border-color: var(--accent);
@@ -141,6 +143,7 @@ button.rail-item.on {
 .search-field input {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   border: none;
   background: none;
   padding: var(--s-2) 0;
@@ -183,12 +186,14 @@ button.chat-row {
   padding: var(--s-2) var(--s-3);
 }
 button.chat-row:hover:not(.selected) {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 button.chat-row.selected {
   background: var(--select);
   color: var(--select-ink);
+}
+button.chat-row.selected:hover {
+  background: var(--accent-fill-hover);
 }
 .chat-main {
   flex: 1;
@@ -214,7 +219,7 @@ button.chat-row.selected {
   display: flex;
   align-items: center;
   gap: var(--s-1);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .chat-name .icon-svg {
   flex: none;
@@ -235,7 +240,7 @@ button.chat-row.selected {
   overflow: hidden;
   text-overflow: ellipsis;
   /* room for the unread badge that sits over the row's right edge */
-  padding-right: 2rem;
+  padding-right: var(--s-6);
 }
 .chat-row.unread .chat-preview {
   color: var(--ink);
@@ -270,7 +275,7 @@ button.chat-row.selected {
   gap: var(--s-2);
   padding: var(--s-2) var(--s-4);
   border-top: 1px solid var(--line);
-  min-height: 2.2rem;
+  min-height: var(--ctl-sm);
 }
 .clock {
   color: var(--muted);
@@ -283,6 +288,7 @@ button.chat-row.selected {
   width: min(var(--info-w), 45vw);
   flex: none;
   background: var(--panel);
+  border-left: 1px solid var(--line);
   overflow-y: auto;
   position: relative;
 }
@@ -294,15 +300,14 @@ button.chat-row.selected {
   background: none;
   border: none;
   color: var(--muted);
-  font-size: 1.4rem;
-  line-height: 1;
-  width: 2rem;
-  height: 2rem;
+  width: var(--ctl);
+  height: var(--ctl);
   padding: 0;
   border-radius: 50%;
 }
-.drawer > .close:hover {
-  background: var(--raised);
+.drawer > .close:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
 }
 .drawer:focus,
 .left-drawer:focus {
@@ -367,8 +372,7 @@ button.left-head {
   text-align: left;
 }
 button.left-head:hover {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 button.left-head .avatar {
   --size: 4.4rem;
@@ -386,7 +390,7 @@ button.left-head > .icon-svg {
   min-width: 0;
 }
 .left-name {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   font-size: var(--fs-lg);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -406,7 +410,8 @@ button.left-head > .icon-svg {
   align-items: center;
   gap: var(--s-4);
   width: 100%;
-  padding: var(--s-3) var(--s-4);
+  min-height: var(--row-s);
+  padding: 0 var(--s-4);
   justify-content: flex-start;
   text-align: left;
   background: none;
@@ -417,8 +422,7 @@ button.left-head > .icon-svg {
 }
 button.drawer-item:hover,
 .switch-row:hover {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 .drawer-item svg {
   color: var(--muted);
@@ -448,7 +452,7 @@ button.drawer-item:hover,
 }
 .dialog {
   background: var(--panel);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: var(--s-4) var(--s-5);
   width: min(34rem, 100%);
   max-height: 90vh;
@@ -460,20 +464,25 @@ button.drawer-item:hover,
   flex-direction: column;
   gap: var(--s-2);
 }
+/* a form that is one line of label, field and button stays a line */
+.dialog form.row {
+  flex-direction: row;
+}
 .menu-pop {
   position: fixed;
   z-index: 40;
   min-width: 14rem;
   padding: var(--s-1) 0;
-  background: var(--panel);
+  background: var(--raised);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-menu);
+  border: 1px solid var(--line);
   overflow: hidden;
 }
 .menu-sep {
   height: 1px;
   margin: var(--s-1) 0;
-  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  background: var(--edge);
 }
 .menu-pop button {
   display: flex;
@@ -485,23 +494,22 @@ button.drawer-item:hover,
   border: none;
   border-radius: 0;
   color: var(--ink);
-  height: 2.9rem;
+  height: var(--ctl-lg);
   padding: 0 var(--s-4);
+  font-weight: var(--fw);
   font-size: var(--fs-md);
   text-align: left;
 }
 .menu-pop button .icon-svg {
   flex: none;
   color: var(--muted);
-  stroke-width: 1.4;
 }
 .menu-pop button.danger .icon-svg {
   color: inherit;
 }
 .menu-pop button:hover,
 .menu-pop button:focus-visible {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 /* The highlight already says which item is current; a ring would be clipped by the card. */
 .menu-pop button:focus-visible {
@@ -518,6 +526,7 @@ button.drawer-item:hover,
   padding: var(--s-2) var(--s-4);
   background: var(--panel);
   border-top: 1px solid var(--danger);
+  color: var(--danger);
 }
 
 /* ---- avatars: one round shape, five sizes, a 2x2 grid for groups ---- */
@@ -531,7 +540,7 @@ button.drawer-item:hover,
   border-radius: 50%;
   background: var(--raised);
   color: var(--ink);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   font-size: calc(var(--size) * 0.42);
   overflow: hidden;
 }
@@ -625,7 +634,7 @@ button.drawer-item:hover,
 .scope-name {
   flex: 1;
   min-width: 0;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -658,14 +667,13 @@ button.square {
   height: 5.2rem;
   background: var(--raised);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   color: var(--ink);
   font-size: var(--fs-xs);
   padding: var(--s-2);
 }
 button.square:hover:not(:disabled) {
   background: var(--field);
-  filter: none;
 }
 button.square.danger {
   color: var(--danger);
@@ -719,25 +727,26 @@ button.settings-head .avatar {
   padding: var(--s-1) 0;
 }
 .settings-gap {
-  border-top: 12px solid var(--line);
+  border-top: var(--s-3) solid var(--line);
 }
 .settings-row {
   display: flex;
   align-items: center;
   gap: var(--s-4);
   width: 100%;
-  padding: var(--s-3) var(--s-4);
+  min-height: var(--row-s);
+  padding: 0 var(--s-4);
   background: none;
   border: none;
   border-radius: 0;
   color: var(--ink);
+  font-weight: var(--fw);
   text-align: left;
   justify-content: flex-start;
 }
 button.settings-row:hover,
 label.settings-row:hover {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 .settings-row svg {
   color: var(--muted);
@@ -788,8 +797,7 @@ button.contact-row {
   padding: var(--s-2) var(--s-4);
 }
 button.contact-row:hover:not(:disabled) {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 .text-actions {
   display: flex;
@@ -807,12 +815,11 @@ button.text-btn {
   background: none;
   border: none;
   color: var(--accent);
-  font-weight: 600;
-  padding: var(--s-1) var(--s-2);
+  font-weight: var(--fw-strong);
+  padding: 0 var(--s-3);
 }
 button.text-btn:hover:not(:disabled) {
-  background: var(--raised);
-  filter: none;
+  background: var(--hover);
 }
 .dialog.group-card {
   width: min(32.5rem, 100%);
@@ -833,7 +840,7 @@ button.camera-big {
   border-radius: 50%;
   border: none;
   background: var(--camera);
-  color: #fff;
+  color: var(--accent-ink);
   overflow: hidden;
 }
 button.camera-big img {
@@ -868,5 +875,5 @@ button.camera-big img {
   margin: 0;
   padding: var(--s-4) var(--s-4) var(--s-2);
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }

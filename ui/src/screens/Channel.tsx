@@ -312,7 +312,7 @@ export function ChannelHeader({ channel, finding = false, onFind }: { channel: C
   return (
     <header className="channel-header">
       <div className="titles">
-        <h2>{channelTitle(summary, t)}</h2>
+        <h2 title={channelTitle(summary, t)}>{channelTitle(summary, t)}</h2>
         <p className={`subtitle${typing ? " typing" : ""}`} role="status">
           {typing ?? fallback}
         </p>

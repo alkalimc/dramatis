@@ -266,8 +266,8 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       aria-label={drawer.kind === "channel" ? t("channel.group_info") : t(`nav.${drawerKey(drawer) as "roster"}`)}
       onKeyDown={(e) => e.key === "Escape" && dispatch({ type: "drawer", drawer: null })}
     >
-      <button type="button" className="icon close" aria-label={t("drawer.close")} onClick={() => dispatch({ type: "drawer", drawer: null })}>
-        ×
+      <button type="button" className="icon close" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={() => dispatch({ type: "drawer", drawer: null })}>
+        <Icon name="close" size={20} />
       </button>
       {drawer.kind === "roster" && <RosterDrawer />}
       {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}

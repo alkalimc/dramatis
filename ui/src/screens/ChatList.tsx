@@ -84,7 +84,7 @@ function SearchPanel({ query }: { query: string }) {
       <p className="scope-title">{t("search.scope")}</p>
       <div className="scope-row">
         <ChannelAvatar channel={stand} size="s" />
-        <span className="scope-name">{channelTitle(stand, t)}</span>
+        <span className="scope-name" title={channelTitle(stand, t)}>{channelTitle(stand, t)}</span>
         <button type="button" className="round small" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={close}>
           <Icon name="close" size={18} />
         </button>
@@ -271,7 +271,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
           <span className="chat-top">
             <span className="chat-name">
               {channel.kind === "group" && <Icon name="people" size={18} />}
-              <span className="chat-title">{title}</span>
+              <span className="chat-title" title={title}>{title}</span>
             </span>
             {pinned && (
               <span className="chat-pin" role="img" aria-label={t("chatlist.pinned")}>
@@ -281,7 +281,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
             {at && <time className="chat-time" dateTime={at}>{when(at)}</time>}
           </span>
           <span className="chat-bottom">
-            <span className={`chat-preview${typing ? " typing" : ""}`}>{typing ?? preview}</span>
+            <span className={`chat-preview${typing ? " typing" : ""}`} title={typing ?? preview}>{typing ?? preview}</span>
           </span>
         </span>
       </button>
