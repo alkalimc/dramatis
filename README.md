@@ -104,7 +104,7 @@ All generated; do not edit them.
 cd engine && cargo build --release
 export DRAMATIS_FOLIO=/path/to/artifacts/<pack>/<pack>.folio
 ./target/release/dramatis-cli inspect
-./target/release/dramatis-cli search "<query>" --top-k 6 --expand 1
+./target/release/dramatis-cli search "<query>" --top-k 6
 ./target/release/dramatis-cli evaluate --suite ../artifacts/<pack>/evals/structural.queries.jsonl \
     --markdown ../artifacts/<pack>/reports/RESULTS.md
 ./target/release/dramatis-cli bench
