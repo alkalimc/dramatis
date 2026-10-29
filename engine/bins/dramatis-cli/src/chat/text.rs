@@ -62,6 +62,7 @@ anything else       send it to the current channel
         "Other
 /search <query>     retrieval only, as the current speaker would see it
 /stats              model calls made in this session
+/storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)
 Tab completes command names, person names (/talk, /group) and save names (/save).
 A line that starts with a slash is a command and Enter runs it. With --plain each input

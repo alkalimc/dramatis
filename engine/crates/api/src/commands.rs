@@ -227,6 +227,14 @@ commands! {
     /// `password` (`Locked` without one, `WrongPassword` with a wrong one); the save keeps it.
     fn import_save(path: String, name: Option<String>, password: Option<String>) -> String;
 
+    // ---- storage ----
+
+    /// What the app keeps on disk, by kind.
+    fn storage_usage() -> StorageUsage;
+    /// Empty the named caches (`Avatars`, `Audio`) and answer the usage afterwards. A kind
+    /// that is not a cache is `Invalid`; saves and the corpus are never touched.
+    fn clear_storage(categories: Vec<StorageKind>) -> StorageUsage;
+
     // ---- encryption ----
 
     /// Open the encrypted save `name` with its password and remember the password until

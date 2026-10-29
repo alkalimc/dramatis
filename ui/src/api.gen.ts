@@ -165,6 +165,13 @@ export const commands = {
 	 *  `password` (`Locked` without one, `WrongPassword` with a wrong one); the save keeps it.
 	 */
 	importSave: (path: string, name: string | null, password: string | null) => typedError<string, ApiError>(__TAURI_INVOKE("import_save", { path, name, password })),
+	/**  What the app keeps on disk, by kind. */
+	storageUsage: () => typedError<StorageUsage, ApiError>(__TAURI_INVOKE("storage_usage")),
+	/**
+	 *  Empty the named caches (`Avatars`, `Audio`) and answer the usage afterwards. A kind
+	 *  that is not a cache is `Invalid`; saves and the corpus are never touched.
+	 */
+	clearStorage: (categories: StorageKind[]) => typedError<StorageUsage, ApiError>(__TAURI_INVOKE("clear_storage", { categories })),
 	/**
 	 *  Open the encrypted save `name` with its password and remember the password until
 	 *  this process ends (a switch to it then needs no asking). `WrongPassword` leaves
@@ -476,7 +483,10 @@ export type Message = {
 	text: string,
 	/**  Visible action lines, in call order. */
 	actions: ToolAction[],
+	/**  The picture the user attached, as a `data:` URL. */
 	attachment: MediaFile | null,
+	/**  A picture was attached but is gone; show a placeholder. */
+	picture_lost: boolean,
 	cites: Citation[],
 	/**  Low: render the thin-archive marker. */
 	confidence: Confidence | null,
@@ -759,6 +769,12 @@ export type SaveInfo = {
 	encrypted: boolean,
 };
 
+export type SaveSize = {
+	name: string,
+	kb: number,
+	current: boolean,
+};
+
 /**  A line wrapped in these is scene description, rendered apart from speech. */
 export type SceneMarker = {
 	open: string,
@@ -789,6 +805,40 @@ export type ShapeSpend = {
 	shape: CallShape,
 	/**  Calls in the window. */
 	calls: number | null,
+};
+
+export type StorageCategory = {
+	kind: StorageKind,
+	/**  Kilobytes (1024 bytes), rounded up. */
+	kb: number,
+	files: number,
+	/**  A cache that `clear_storage` may empty. */
+	clearable: boolean,
+};
+
+/**  What takes room on disk, by kind. */
+export type StorageKind = 
+/**  Every save file, pictures inside them included. Not clearable. */
+"saves" | 
+/**  Fetched portraits: fetched again when needed. */
+"avatars" | 
+/**  Read-aloud audio: synthesised again when needed. */
+"audio" | 
+/**  Pictures the user chose (their group pictures): cannot be fetched again. Not clearable. */
+"uploads" | 
+/**  The corpus file. Not clearable. */
+"corpus";
+
+export type StorageUsage = {
+	/**  Everything below, once: the pictures inside the current save are part of `Saves`. */
+	total_kb: number,
+	categories: StorageCategory[],
+	saves: SaveSize[],
+	/**  Pictures attached to messages in the current save, and the room they take. */
+	pictures: number,
+	picture_kb: number,
+	/**  The size the avatar and audio caches are trimmed to (`media.cache_gb`). */
+	cache_limit_kb: number,
 };
 
 export type Target = { kind: "person"; id: PersonId } | { kind: "channel"; id: ChannelId };

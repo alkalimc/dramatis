@@ -60,7 +60,7 @@ impl Engine {
         for child in task::children(&w, id).map_err(world_err)? {
             let reply = match child.reply {
                 Some(m) => {
-                    Some(self.message_view(&message::get(&w, m).map_err(world_err)?, offset))
+                    Some(self.message_view(&w, &message::get(&w, m).map_err(world_err)?, offset))
                 }
                 None => None,
             };

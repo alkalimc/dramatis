@@ -1061,13 +1061,13 @@ impl Agent {
             .transpose()?;
         world::message::complete(&conn, id, &turn.text, actions.as_ref(), meta.as_ref())?;
         let stored = world::message::get(&conn, id)?;
+        let shown =
+            crate::view::message(&conn, &stored, self.now().offset_min, &self.config.office);
         drop(conn);
         turn.message = None;
         turn.text.clear();
         turn.actions.clear();
-        self.emit(Event::MessageAdded(MessageAdded {
-            message: crate::view::message(&stored, self.now().offset_min, &self.config.office),
-        }));
+        self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(())
     }
 
@@ -1104,6 +1104,7 @@ impl Agent {
             task: Some(task),
             relayed: false,
             note: note.or(t.note_path.clone()),
+            ..MessageMeta::default()
         };
         turn.text = text;
         self.complete(turn, reply, &meta)?;

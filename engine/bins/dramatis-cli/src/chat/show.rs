@@ -392,9 +392,22 @@ impl Show {
             out.push_str(&style.dim(&format!("· {}", action_line(a))));
             out.push('\n');
         }
+        let picture = m.attachment.is_some() || m.picture_lost;
         if !m.text.trim().is_empty() {
             out.push_str(&self.prefix(&b.names, &m.author));
             out.push_str(&render::message(&m.text, &b.marker, style));
+        }
+        if picture {
+            if m.text.trim().is_empty() {
+                out.push_str(&self.prefix(&b.names, &m.author));
+            }
+            let marker = if m.attachment.is_some() {
+                "[picture]"
+            } else {
+                "[picture unavailable]"
+            };
+            out.push_str(&style.dim(marker));
+            out.push('\n');
         }
         if let Some(s) = self.sources(&b.names, m) {
             out.push_str(&style.dim(&format!("  {s}")));

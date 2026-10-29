@@ -1742,3 +1742,132 @@ async fn a_rewind_frees_ids_that_a_terminal_write_then_reuses() {
     terminal_says(e, &ch, "from the terminal");
     assert_eq!(e.poll_external().unwrap(), 1);
 }
+
+#[tokio::test]
+async fn history_carries_the_picture_and_marks_a_lost_one() {
+    let r = rig();
+    let e = &r.engine;
+    let direct = e.open_direct(id("amy")).await.unwrap();
+    let ch = convert::world_channel(&direct).unwrap();
+    let dir = e.home.root().join("old");
+    std::fs::create_dir_all(&dir).unwrap();
+    let kept = dir.join("kept.png");
+    std::fs::write(&kept, b"\x89PNG\r\n\x1a\nold").unwrap();
+    {
+        let w = e.w();
+        let hash = world::picture::put(&w, "image/png", b"\x89PNG\r\n\x1a\nnew").unwrap();
+        let say = |text: &str, meta: serde_json::Value, at: i64| {
+            world::message::append(&w, ch, &world::Actor::User, text, None, Some(&meta), at)
+                .unwrap();
+        };
+        say("stored", serde_json::json!({ "picture": hash }), 1);
+        // The blob is gone from the save.
+        say(
+            "blob lost",
+            serde_json::json!({ "picture": "0".repeat(64) }),
+            2,
+        );
+        // An older build left files: one still there, one not, one not a picture.
+        say("file kept", serde_json::json!({ "file": kept }), 3);
+        say(
+            "file gone",
+            serde_json::json!({ "file": dir.join("none.png") }),
+            4,
+        );
+        std::fs::write(dir.join("page.html"), b"<html>").unwrap();
+        say(
+            "file junk",
+            serde_json::json!({ "file": dir.join("page.html") }),
+            5,
+        );
+    }
+    let shown = |m: &Message| m.attachment.as_ref().map(|a| a.path.clone());
+    let msgs = e.history(direct.clone(), None, 10).await.unwrap();
+    let by = |t: &str| msgs.iter().find(|m| m.text == t).unwrap();
+    assert!(
+        shown(by("stored"))
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+    assert!(!by("stored").picture_lost);
+    assert_eq!(
+        (shown(by("blob lost")), by("blob lost").picture_lost),
+        (None, true)
+    );
+    assert!(shown(by("file kept")).is_some() && !by("file kept").picture_lost);
+    for t in ["file gone", "file junk"] {
+        assert_eq!((shown(by(t)), by(t).picture_lost), (None, true), "{t}");
+    }
+
+    // The file's bytes now live in the save: removing the file changes nothing.
+    std::fs::remove_file(&kept).unwrap();
+    let again = e.history(direct, None, 10).await.unwrap();
+    assert_eq!(shown(&again[2]), shown(by("file kept")));
+}
+
+#[tokio::test]
+async fn storage_usage_counts_each_kind_and_clearing_touches_only_caches() {
+    let r = rig();
+    let e = &r.engine;
+    let home = e.home.clone();
+    std::fs::write(home.uploads().join("group.png"), [0u8; 4096]).unwrap();
+    std::fs::write(home.root().join("pack.folio"), [0u8; 9216]).unwrap();
+    e.media.put("avatar", "a", "png", &[0; 1024]).unwrap();
+    e.media.put("avatar", "b", "png", &[0; 1024]).unwrap();
+    e.media.put("tts", "c", "mp3", &[0; 3000]).unwrap();
+    {
+        let w = e.w();
+        world::picture::put(&w, "image/png", &[1, 2, 3]).unwrap();
+    }
+
+    let of = |u: &StorageUsage, k: StorageKind| {
+        u.categories.iter().find(|c| c.kind == k).unwrap().clone()
+    };
+    let u = e.storage_usage().await.unwrap();
+    assert_eq!(
+        (
+            of(&u, StorageKind::Avatars).kb,
+            of(&u, StorageKind::Avatars).files
+        ),
+        (2, 2)
+    );
+    assert_eq!(of(&u, StorageKind::Audio).kb, 3);
+    assert_eq!(of(&u, StorageKind::Uploads).kb, 4);
+    assert_eq!(of(&u, StorageKind::Corpus).kb, 9);
+    assert!(!of(&u, StorageKind::Corpus).clearable && !of(&u, StorageKind::Saves).clearable);
+    assert_eq!((u.pictures, u.picture_kb), (1, 1));
+    let save_file = std::fs::metadata(home.world()).unwrap().len();
+    assert_eq!(u.saves.len(), 1);
+    assert!(u.saves[0].current && u64::from(u.saves[0].kb) * 1024 >= save_file);
+    assert_eq!(u.total_kb, u.categories.iter().map(|c| c.kb).sum::<u32>());
+    assert_eq!(
+        u64::from(u.cache_limit_kb),
+        e.params.media.cache_bytes().div_ceil(1024)
+    );
+
+    // A kind that is not a cache refuses the whole request.
+    assert_eq!(
+        e.clear_storage(vec![StorageKind::Audio, StorageKind::Saves])
+            .await,
+        Err(ApiError::Invalid {
+            field: "categories".into()
+        })
+    );
+    assert_eq!(
+        of(&e.storage_usage().await.unwrap(), StorageKind::Audio).kb,
+        3
+    );
+
+    let after = e
+        .clear_storage(vec![StorageKind::Avatars, StorageKind::Audio])
+        .await
+        .unwrap();
+    assert_eq!(
+        of(&after, StorageKind::Avatars).kb + of(&after, StorageKind::Audio).kb,
+        0
+    );
+    assert_eq!(of(&after, StorageKind::Uploads).kb, 4);
+    assert_eq!(of(&after, StorageKind::Corpus).kb, 9);
+    assert_eq!(after.pictures, 1, "pictures inside the save stay");
+    assert!(home.world().is_file() && home.root().join("pack.folio").is_file());
+}

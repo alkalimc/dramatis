@@ -4,7 +4,7 @@
 //! What goes: the channel's later messages, the model log from that instant (entries
 //! after it, and any segment opened after it), the memories written in the channel since
 //! (a hurt gives its trust back), the seeds those memories or messages queued, the
-//! requests filed in the channel, and the sessions opened there. What stays: the meter
+//! requests filed in the channel, and the sessions opened there, and the pictures only those messages carried. What stays: the meter
 //! (the calls were made), trust earned by shared turns, sessions that were open before
 //! the message and closed after it, and requests the host filed in other channels.
 //!
@@ -197,6 +197,9 @@ fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound>
         (ch, id),
     )?;
 
+    // A picture only the removed messages named has no reason to stay.
+    crate::picture::drop_orphans(conn)?;
+
     Ok(Rewound {
         text: m.text,
         removed: removed_messages.len() as u32,
@@ -304,6 +307,23 @@ mod tests {
             .query_row("SELECT count(*) FROM seed", [], |r| r.get(0))
             .unwrap();
         assert_eq!(seeds, 0);
+    }
+
+    #[test]
+    fn rewinding_drops_a_picture_only_the_removed_messages_named() {
+        let w = world();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let shared = crate::picture::put(&w, "image/png", &[1]).unwrap();
+        let alone = crate::picture::put(&w, "image/png", &[2]).unwrap();
+        let named = |h: &str| serde_json::json!({ "picture": h });
+        let keep = message::append(&w, c, &Actor::User, "a", None, Some(&named(&shared)), 100);
+        keep.unwrap();
+        let m = message::append(&w, c, &Actor::User, "b", None, Some(&named(&shared)), 200);
+        let m2 = message::append(&w, c, &Actor::User, "c", None, Some(&named(&alone)), 300);
+        rewind(&w, c, m.unwrap()).unwrap();
+        assert!(m2.is_ok());
+        assert!(crate::picture::get(&w, &shared).unwrap().is_some());
+        assert!(crate::picture::get(&w, &alone).unwrap().is_none());
     }
 
     #[test]

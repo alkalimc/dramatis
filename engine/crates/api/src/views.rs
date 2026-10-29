@@ -242,7 +242,10 @@ pub struct Message {
     pub text: String,
     /// Visible action lines, in call order.
     pub actions: Vec<ToolAction>,
+    /// The picture the user attached, as a `data:` URL.
     pub attachment: Option<MediaFile>,
+    /// A picture was attached but is gone; show a placeholder.
+    pub picture_lost: bool,
     pub cites: Vec<Citation>,
     /// Low: render the thin-archive marker.
     pub confidence: Option<Confidence>,
@@ -587,6 +590,54 @@ pub struct SaveInfo {
     pub current: bool,
     /// Protected by a password.
     pub encrypted: bool,
+}
+
+// ---- storage ----
+
+/// What takes room on disk, by kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageKind {
+    /// Every save file, pictures inside them included. Not clearable.
+    Saves,
+    /// Fetched portraits: fetched again when needed.
+    Avatars,
+    /// Read-aloud audio: synthesised again when needed.
+    Audio,
+    /// Pictures the user chose (their group pictures): cannot be fetched again. Not clearable.
+    Uploads,
+    /// The corpus file. Not clearable.
+    Corpus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct StorageCategory {
+    pub kind: StorageKind,
+    /// Kilobytes (1024 bytes), rounded up.
+    pub kb: u32,
+    pub files: u32,
+    /// A cache that `clear_storage` may empty.
+    pub clearable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SaveSize {
+    pub name: String,
+    pub kb: u32,
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct StorageUsage {
+    /// Everything below, once: the pictures inside the current save are part of `Saves`.
+    pub total_kb: u32,
+    pub categories: Vec<StorageCategory>,
+    pub saves: Vec<SaveSize>,
+    /// Pictures attached to messages in the current save, and the room they take.
+    pub pictures: u32,
+    pub picture_kb: u32,
+    /// The size the avatar and audio caches are trimmed to (`media.cache_gb`).
+    pub cache_limit_kb: u32,
 }
 
 // ---- endpoints ----

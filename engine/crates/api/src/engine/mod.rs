@@ -11,6 +11,7 @@ mod external;
 mod library;
 mod people;
 mod saves;
+mod storage;
 mod tasks;
 mod uploads;
 
@@ -606,6 +607,12 @@ impl Api for Engine {
     }
     async fn set_user_avatar(&self, image: Option<ImagePart>) -> ApiResult<Option<MediaFile>> {
         self.set_user_avatar_impl(image).await
+    }
+    async fn storage_usage(&self) -> ApiResult<StorageUsage> {
+        self.storage_usage_impl()
+    }
+    async fn clear_storage(&self, categories: Vec<StorageKind>) -> ApiResult<StorageUsage> {
+        self.clear_storage_impl(&categories)
     }
     async fn tts_play(&self, message: MessageId) -> ApiResult<MediaFile> {
         self.tts_play_impl(&message).await

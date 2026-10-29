@@ -18,6 +18,7 @@ pub mod leakcheck;
 pub mod log;
 pub mod message;
 pub mod params;
+pub mod picture;
 pub mod presence;
 pub mod quota;
 pub mod rewind;
@@ -46,6 +47,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005.sql"),
     include_str!("../migrations/0006.sql"),
     include_str!("../migrations/0007.sql"),
+    include_str!("../migrations/0008.sql"),
 ];
 
 /// The schema version a fully migrated database reports.
@@ -338,6 +340,7 @@ mod tests {
         "seed",
         "session",
         "user_avatar",
+        "picture",
     ];
 
     fn migrated() -> Connection {
