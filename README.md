@@ -216,7 +216,7 @@ A turn that ends without a reply leaves one line in `$DRAMATIS_HOME/logs/dramati
 
 Tab completes command names, the fixed words some commands take (`/tier`, `/quiet`, `/events`, `/away`,
 `/lang`, `/library`, `/read`, `/chats`, `/storage`, `/password`), person names (`/talk`, `/group`,
-`/invite`, `/remove`, `/who`, `/mode`, `/ask`, `/memories`) and save names (`/save`).
+`/invite`, `/remove`, `/who`, `/mode`, `/memories`) and save names (`/save`).
 
 Anything else is sent to the current channel (`//text` sends a message that starts with a slash).
 Enter starts a new line and Alt-Enter (Option set as Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
@@ -268,7 +268,7 @@ The app follows a chat client's layout: a conversation list on the left (search,
 archived conversations, unread counts, a right-click menu per row) and the conversation on the
 right, with a side panel for a person's or a group's profile; a person's name or avatar in a chat
 opens their page as a card over the conversation. You can set your own name, birthday,
-bio and avatar, give a group a name and an avatar, paste pictures into the input line, and open a
+bio and avatar, give a group a name and an avatar, attach pictures with the paperclip or paste them into the input line, and open a
 reply's sources to see the original passage and its page. Enter inserts a new line and Cmd-Enter
 sends. The roster has quick filters (mode, talked to or never talked, has a persona). Saves are managed on the saves page (new, switch, copy, rename, delete, export, import; the same page
 is shown after logging out) and the password
