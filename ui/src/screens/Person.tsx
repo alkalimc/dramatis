@@ -43,7 +43,7 @@ export function HostCard() {
   );
 }
 
-const HOST_CAN = ["host.can.find", "host.can.group", "host.can.ask", "host.can.explain"] as const;
+const HOST_CAN = ["host.can.find", "host.can.group", "host.can.explain"] as const;
 
 /** The host's page, laid out like a person's: picture and name, one line about it, what it does, and the way to talk to it. */
 export function HostDrawer({ card = false }: { card?: boolean }) {
@@ -150,15 +150,6 @@ export function PersonDrawer({ id, card = false }: { id: PersonId; card?: boolea
           <button type="button" disabled={!ready} aria-describedby={ready ? undefined : "unavailable-note"} onClick={() => actions.openDirect(id)}>
             {t("person.talk")}
           </button>
-          <button
-            type="button"
-            className="ghost"
-            disabled={!ready}
-            aria-describedby={ready ? undefined : "unavailable-note"}
-            onClick={() => dispatch({ type: "ask", draft: { person: id } })}
-          >
-            {t("person.ask", pronounOf(t, page.person))}
-          </button>
         </p>
       )}
       <section className="info-section">
@@ -173,8 +164,6 @@ export function PersonDrawer({ id, card = false }: { id: PersonId; card?: boolea
       <section className="info-section">
         <p>
           {page.last_seen ? t("person.last_seen", { when: when(page.last_seen, t) }) : t("person.never")}
-          {" · "}
-          {t("person.tasks", { count: page.tasks_done, ...pronounOf(t, page.person) })}
         </p>
         {page.companions.length > 0 && <p>{t("roster.companions", { names: page.companions.map((c) => c.name).join(" · ") })}</p>}
       </section>

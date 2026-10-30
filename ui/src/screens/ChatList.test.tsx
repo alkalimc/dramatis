@@ -48,8 +48,6 @@ test("rows are ordered by last activity, and a new message moves its chat to the
           cites: [],
           confidence: null,
           relayed: false,
-          task: null,
-          note: null,
           at: new Date(Date.now() + 60_000).toISOString(),
         },
       },
@@ -136,15 +134,15 @@ test("a second right click opens the menu of the new row instead of closing", as
   expect(screen.getAllByRole("menu", { name: "Chat actions" })).toHaveLength(1);
 });
 
-test("a group's menu renames it through the info panel", async () => {
+test("a group's menu holds the chat actions; renaming and the picture live in its info panel", async () => {
   const user = userEvent.setup();
   renderApp();
   const nav = await list();
   const group = rowsOf(nav).find((r) => r.querySelector(".chat-name svg"))!;
   await user.pointer({ keys: "[MouseRight]", target: group });
-  for (const name of ["Rename", "Change picture", "Delete group"]) expect(await screen.findByRole("menuitem", { name })).toBeDefined();
-  await user.click(screen.getByRole("menuitem", { name: "Rename" }));
-  expect(await screen.findByRole("textbox", { name: "Rename" })).toBeDefined();
+  expect(await screen.findByRole("menuitem", { name: "Delete group" })).toBeDefined();
+  expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Change picture" })).toBeNull();
 });
 
 /** The list on the stand-in engine, which hides the conversations in `hidden` as the real one hides empty ones. */

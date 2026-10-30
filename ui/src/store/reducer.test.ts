@@ -14,8 +14,6 @@ function message(id: string, at: string, extra: Partial<Message> = {}): Message 
     cites: [],
     confidence: null,
     relayed: false,
-    task: null,
-    note: null,
     at,
     ...extra,
   };

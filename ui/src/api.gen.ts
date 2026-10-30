@@ -81,7 +81,7 @@ export const commands = {
 	/**
 	 *  Take back one of the user's own messages and everything after it in the channel, as
 	 *  if it was never sent: the later messages, the model's log of them, the memories
-	 *  and requests they led to. Returns the message's text for the input box. Refused
+	 *  they led to. Returns the message's text for the input box. Refused
 	 *  while a reply is being written in the channel, and for a message that is not the
 	 *  user's. `Rewound` follows.
 	 */
@@ -141,19 +141,6 @@ export const commands = {
 	 *  it (`WorldChanged`); the user's own messages do not.
 	 */
 	archiveChannel: (channel: ChannelId, archived: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("archive_channel", { channel, archived })),
-	/**
-	 *  Ask a person to look into a question. `turns` absent: the tier's default.
-	 *  `parent`: file it under a pinned question.
-	 */
-	ask: (person: PersonId, question: string, turns: number | null, parent: string | null) => typedError<TaskId, ApiError>(__TAURI_INVOKE("ask", { person, question, turns, parent })),
-	tasks: () => typedError<TaskSummary[], ApiError>(__TAURI_INVOKE("tasks")),
-	caseFile: (task: TaskId) => typedError<CaseFile, ApiError>(__TAURI_INVOKE("case_file", { task })),
-	/**  Pin a question nobody is on yet. */
-	openCase: (question: string) => typedError<TaskId, ApiError>(__TAURI_INVOKE("open_case", { question })),
-	pinTask: (task: TaskId) => typedError<null, ApiError>(__TAURI_INVOKE("pin_task", { task })),
-	unpinTask: (task: TaskId) => typedError<null, ApiError>(__TAURI_INVOKE("unpin_task", { task })),
-	/**  Write or replace the conclusion; replacing retracts the old one. */
-	writeConclusion: (task: TaskId, text: string) => typedError<FactId, ApiError>(__TAURI_INVOKE("write_conclusion", { task, text })),
 	facts: (filter: FactFilter) => typedError<FactList, ApiError>(__TAURI_INVOKE("facts", { filter })),
 	/**  Retract and write anew; returns the new fact. */
 	editFact: (fact: FactId, text: string) => typedError<FactId, ApiError>(__TAURI_INVOKE("edit_fact", { fact, text })),
@@ -342,10 +329,10 @@ export const events = {
 };
 
 /* Types */
-export type About = { kind: "task"; id: TaskId } | { kind: "fact"; id: FactId } | { kind: "person"; id: PersonId } | { kind: "user" } | { kind: "citation"; citation: Citation };
+export type About = { kind: "fact"; id: FactId } | { kind: "person"; id: PersonId } | { kind: "user" } | { kind: "citation"; citation: Citation };
 
 /**  Something a person did that the user has not seen, or that is due. */
-export type Activity = { kind: "messaged"; at: Timestamp } | { kind: "replied"; task: TaskId; question: string; at: Timestamp } | { kind: "commitment_due"; fact: FactId; text: string; due: Timestamp } | { kind: "came_by"; at: Timestamp } | { kind: "birthday" };
+export type Activity = { kind: "messaged"; at: Timestamp } | { kind: "commitment_due"; fact: FactId; text: string; due: Timestamp } | { kind: "came_by"; at: Timestamp } | { kind: "birthday" };
 
 /**  Why a turn failed, coarse enough to pick a word and nothing more. */
 export type ActivityFailure = "rate_limited" | "quota_exhausted" | 
@@ -480,7 +467,7 @@ export type Billing =
 "request";
 
 /**  The call shapes spending is broken down by. */
-export type CallShape = "direct" | "group" | "opening" | "ask" | "host" | "wrapup";
+export type CallShape = "direct" | "group" | "opening" | "host" | "wrapup";
 
 /**  A person offered for something, with one line from the material that matched. */
 export type Candidate = {
@@ -488,16 +475,6 @@ export type Candidate = {
 	mode: Mode,
 	reason: string,
 	citation: Citation | null,
-};
-
-/**  A pinned question and everything that hangs off it. */
-export type CaseFile = {
-	task: TaskSummary,
-	/**  Each request made under it, with its reply once there is one. */
-	trail: TrailEntry[],
-	conclusion: FactView | null,
-	/**  Messages elsewhere that responded to the conclusion. */
-	reactions: MessageRef[],
 };
 
 export type ChannelId = string;
@@ -641,12 +618,11 @@ export type FactFilter = {
 	scope: FactScope,
 	/**  Only facts about, or recalled by, this person. */
 	person: PersonId | null,
-	task: TaskId | null,
 };
 
 export type FactId = string;
 
-export type FactKind = "fact" | "commitment" | "conclusion" | "hurt";
+export type FactKind = "fact" | "commitment" | "hurt";
 
 export type FactList = {
 	total: number,
@@ -721,9 +697,6 @@ export type Message = {
 	 *  quiet note between the bubbles, not as something the user said.
 	 */
 	service?: boolean,
-	/**  The request this message answers. */
-	task: TaskId | null,
-	note: MediaFile | null,
 	at: Timestamp,
 };
 
@@ -744,13 +717,6 @@ export type MessageDelta = {
 };
 
 export type MessageId = string;
-
-export type MessageRef = {
-	channel: ChannelId,
-	message: MessageId,
-	author: Author,
-	excerpt: string,
-};
 
 /**  Whether a person or a group may act without being addressed. */
 export type Mode = 
@@ -838,7 +804,6 @@ export type PersonPage = {
 	/**  See [`RosterRow::has_persona`]. */
 	has_persona: boolean,
 	last_seen: Timestamp | null,
-	tasks_done: number,
 	companions: PersonRef[],
 	/**  Read-aloud voice; `None` = endpoint default. */
 	voice: string | null,
@@ -1083,22 +1048,6 @@ export type StorageUsage = {
 
 export type Target = { kind: "person"; id: PersonId } | { kind: "channel"; id: ChannelId };
 
-export type TaskId = string;
-
-export type TaskStatus = "active" | "done";
-
-export type TaskSummary = {
-	id: TaskId,
-	question: string,
-	/**  A pinned question may have nobody on it yet. */
-	assignee: PersonRef | null,
-	parent: TaskId | null,
-	status: TaskStatus,
-	pinned: boolean,
-	channel: ChannelId | null,
-	created_at: Timestamp,
-};
-
 /**  The intensity slider: the only quota control. */
 export type Tier = "low" | "middle" | "high" | "extra_high" | "max" | 
 /**  No windows; only the daily experience limits apply. */
@@ -1111,9 +1060,9 @@ export type Tier = "low" | "middle" | "high" | "extra_high" | "max" |
 export type Timestamp = string;
 
 /**  One tool call as the UI shows it: typed, so each kind gets its own i18n line. */
-export type ToolAction = { tool: "search"; query: string } | { tool: "get_chunk"; chunk_id: string } | { tool: "request_join"; person: PersonRef | null; topic: string | null } | { tool: "remember"; text: string } | { tool: "report" } | { tool: "wrapup" } | { tool: "digest" } | { tool: "find_people"; topic: string; 
+export type ToolAction = { tool: "search"; query: string } | { tool: "get_chunk"; chunk_id: string } | { tool: "request_join"; person: PersonRef | null; topic: string | null } | { tool: "remember"; text: string } | { tool: "wrapup" } | { tool: "digest" } | { tool: "find_people"; topic: string; 
 /**  Who was found, so a front end can offer to open their channels. */
-persons?: PersonRef[] } | { tool: "ask"; person: PersonRef; question: string } | { tool: "create_group"; members: PersonRef[]; 
+persons?: PersonRef[] } | { tool: "create_group"; members: PersonRef[]; 
 /**  The new group, so a front end can offer to open it. Absent on older rows. */
 channel?: ChannelId | null; 
 /**  Why the group exists, in a few words. It becomes the group's topic. */
@@ -1138,11 +1087,6 @@ export type ToolCalled = {
 	message: MessageId,
 	author: Author,
 	action: ToolAction,
-};
-
-export type TrailEntry = {
-	task: TaskSummary,
-	reply: Message | null,
 };
 
 /**
@@ -1207,7 +1151,7 @@ export type Wording = {
 	scene_marker: SceneMarker,
 };
 
-export type WorldChange = { kind: "fact"; id: FactId } | { kind: "task"; id: TaskId } | { kind: "channel"; id: ChannelId } | { kind: "trust"; person: PersonId } | { kind: "digest" } | 
+export type WorldChange = { kind: "fact"; id: FactId } | { kind: "channel"; id: ChannelId } | { kind: "trust"; person: PersonId } | { kind: "digest" } | 
 /**
  *  The open save's file was changed by another process and this one stopped using it
  *  (see `AppStatus::changed_elsewhere`).

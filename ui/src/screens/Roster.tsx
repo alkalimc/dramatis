@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { Candidate, RosterGroup } from "../api";
-import { pronounOf, useT, useUserName } from "../i18n";
+import { useT, useUserName } from "../i18n";
 import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
 import { canTalk } from "../lib/library";
@@ -23,15 +23,11 @@ export function TypingMark() {
 export function RosterDrawer() {
   const t = useT();
   const roster = useStore((s) => s.roster);
-  const dispatch = useDispatch();
   return (
     <div className="drawer-body">
       <header className="drawer-head">
         <h2>{t("roster.title")}</h2>
         {roster && <p className="muted">{t("roster.counts", { total: roster.total, enabled: roster.enabled })}</p>}
-        <button type="button" className="ghost" onClick={() => dispatch({ type: "groupDialog", open: true })}>
-          {t("roster.new_group")}
-        </button>
       </header>
       <GroupList />
       <RosterList />
@@ -257,7 +253,7 @@ function FindByTopic() {
       </form>
       {shown &&
         (shown.length === 0 ? (
-          <p className="muted">{t("select.who.empty")}</p>
+          <p className="muted">{t("roster.find.empty")}</p>
         ) : (
           <ul className="candidates">
             {shown.map((c) => (
@@ -270,11 +266,6 @@ function FindByTopic() {
                   {c.person.name}
                 </button>
                 <span className="reason">{c.reason}</span>
-                {!library && (
-                  <button type="button" className="link" onClick={() => dispatch({ type: "ask", draft: { question: topic, person: c.person.id } })}>
-                    {t("person.ask", pronounOf(t, c.person))}
-                  </button>
-                )}
               </li>
             ))}
           </ul>

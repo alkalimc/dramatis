@@ -18,8 +18,6 @@ function message(id: string, channel: string, at: string, text = "hi"): Message 
     cites: [],
     confidence: null,
     relayed: false,
-    task: null,
-    note: null,
     at,
   };
 }

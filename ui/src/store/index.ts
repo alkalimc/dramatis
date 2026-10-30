@@ -4,7 +4,7 @@ import type { Actions } from "./actions";
 import { reduce } from "./reducer";
 import { initialState, type Action, type State } from "./state";
 
-export type { Action, AskDraft, Drawer, ListView, ProfileMode, State, SystemPage, Stream, Theme, TurnFailure } from "./state";
+export type { Action, Drawer, ListView, ProfileMode, State, SystemPage, Stream, Theme, TurnFailure } from "./state";
 export { initialState } from "./state";
 export { reduce } from "./reducer";
 export { createActions, subscribe, type Actions } from "./actions";

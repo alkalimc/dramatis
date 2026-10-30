@@ -11,7 +11,6 @@ import { Avatar, HOST_ID, UserAvatar } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
-import { SelectionMenu } from "./SelectionMenu";
 
 export function ActionLines({ author, actions }: { author: Author; actions: ToolAction[] }) {
   const t = useT();
@@ -241,7 +240,6 @@ const BubbleMessage = memo(function BubbleMessage({
   });
   // A reply being written holds the channel; the engine would refuse the take-back.
   const writing = useStore((s) => Boolean(s.typing[message.channel]) || Object.values(s.streams).some((v) => v.channel === message.channel));
-  const [selection, setSelection] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -249,15 +247,6 @@ const BubbleMessage = memo(function BubbleMessage({
   const mine = message.author.kind === "user";
   const name = authorName(message.author, t, names, user);
   const speech = useMemo(() => speechOnly(message.text, marker).trim(), [message.text, marker]);
-
-  const captureSelection = () => {
-    const sel = window.getSelection();
-    const root = body.current;
-    if (!sel || sel.isCollapsed || !root) return;
-    if (!root.contains(sel.anchorNode) || !root.contains(sel.focusNode)) return;
-    const text = sel.toString().trim();
-    if (text) setSelection(text);
-  };
 
   const play = async () => {
     setPlaying(true);
@@ -284,9 +273,6 @@ const BubbleMessage = memo(function BubbleMessage({
           void resend(message.channel, message.id);
         },
       });
-    }
-    if (message.cites.length > 0) {
-      out.push({ label: t("message.sources", { count: message.cites.length }), icon: "cases", onSelect: () => dispatch({ type: "sources", message: message.id }) });
     }
     return out;
   };
@@ -318,38 +304,9 @@ const BubbleMessage = memo(function BubbleMessage({
       )}
       <span className="spacer" />
       <span className="hover-actions">
-        {mine && (
-          <button
-            type="button"
-            className="link"
-            disabled={writing}
-            onClick={() => {
-              if (after > 0 && !window.confirm(t("message.resend.confirm", { count: after }))) return;
-              void resend(message.channel, message.id);
-            }}
-          >
-            {t("message.resend")}
-          </button>
-        )}
-        {message.note && (
-          <a className="link" href={api.mediaUrl(message.note.path)} target="_blank" rel="noopener noreferrer">
-            {t("message.note")}
-          </a>
-        )}
         {showPlay && message.author.kind === "person" && speech && (
           <button type="button" className="icon" aria-label={playing ? t("message.playing") : t("message.play")} disabled={playing} onClick={play}>
             ▷
-          </button>
-        )}
-        {!mine && speech && (
-          <button
-            type="button"
-            className="icon"
-            aria-label={t("message.actions")}
-            aria-expanded={selection !== null}
-            onClick={() => setSelection((cur) => (cur === null ? speech : null))}
-          >
-            ⋯
           </button>
         )}
       </span>
@@ -388,14 +345,13 @@ const BubbleMessage = memo(function BubbleMessage({
     >
       {!mine && <div className="message-avatar">{last && <SpeakerAvatar author={message.author} name={name} />}</div>}
       <div className="message-stack">
-        <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
+        <div ref={body} className="message-body">
           {parts.map((b, i) => (
             <BubbleView key={i} b={b} label={i === 0 ? label : null} top={i === 0 ? picture : null} foot={i === parts.length - 1 ? withSources(foot) : null} />
           ))}
           {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} top={picture} foot={withSources(foot)} />}
         </div>
 
-        {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
         {menuAt && <Menu at={menuAt} items={menuItems()} label={t("message.actions")} onClose={closeMenu} />}
       </div>
       {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}

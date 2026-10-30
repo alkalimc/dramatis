@@ -21,7 +21,6 @@ import type {
   AppInfo,
   Author,
   InterfaceLanguage,
-  CaseFile,
   ChannelId,
   ChannelSummary,
   Citation,
@@ -34,7 +33,6 @@ import type {
   FactView,
   MediaFile,
   Message,
-  MessageRef,
   Mode,
   PersonId,
   PersonRef,
@@ -49,7 +47,6 @@ import type {
   StorageUsage,
   RosterRow,
   Settings,
-  TaskSummary,
   Tier,
   ToolAction,
   UpdateStatus,
@@ -227,8 +224,6 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       cites: [],
       confidence: null,
       relayed: false,
-      task: null,
-      note: null,
       at: iso(minutesAgo),
       ...extra,
     };
@@ -263,80 +258,62 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     mode: "frozen",
   });
 
-  // ---- tasks and facts ----
-  const tasks = new Map<string, TaskSummary>();
-  const addTask = (t: Omit<TaskSummary, "created_at">, minutesAgo: number) => {
-    const task = { ...t, created_at: iso(minutesAgo) };
-    tasks.set(t.id, task);
-    return task;
-  };
+  // ---- facts ----
   const facts = new Map<FactId, FactView>();
   const addFact = (f: Omit<FactView, "id" | "created_at" | "delivered" | "retracted"> & Partial<FactView>, minutesAgo = 0) => {
     const fact: FactView = { id: nextId("f"), delivered: false, retracted: false, created_at: iso(minutesAgo), ...f };
     facts.set(fact.id, fact);
     return fact;
   };
-  const reactions: MessageRef[] = [];
 
   if (!introPending) {
     // `?long=1`: 120 older lines in the host channel, so history needs more than one page.
     if (params.get("long") === "1") {
       for (let i = 1; i <= 120; i++) msg("host", i % 2 ? USER : HOST, `Older line ${i}`, 60 * 48 + (121 - i));
     }
-    msg("host", USER, "Who knows about the harbor flood? Ask someone for me.", 60 * 26);
+    msg("host", USER, "Who knows about the harbor flood?", 60 * 26);
     msg(
       "host",
       HOST,
-      "Mira Vale keeps the flood ledgers, so I asked her. Her answer will land in your conversation with her.",
+      "Mira Vale keeps the flood ledgers; Oren was on the ward that night.",
       60 * 26 - 1,
       {
         actions: [
           { tool: "find_people", topic: "harbor flood", persons: [ref("mira"), ref("oren")] },
-          { tool: "ask", person: ref("mira"), question: "How did the east corridor come to be sealed?" },
         ],
       },
     );
-
-    addTask({ id: "t-case", question: "What really happened in the east corridor?", assignee: null, parent: null, status: "active", pinned: true, channel: null }, 60 * 30);
-    addTask({ id: "t-mira", question: "How did the east corridor come to be sealed?", assignee: ref("mira"), parent: "t-case", status: "done", pinned: false, channel: direct("mira") }, 60 * 26);
-    addTask({ id: "t-oren", question: "When was the east corridor sealed?", assignee: ref("oren"), parent: "t-case", status: "active", pinned: false, channel: direct("oren") }, 60 * 5);
-    addTask({ id: "t-tess", question: "Which route is safest after dark?", assignee: ref("tess"), parent: null, status: "done", pinned: false, channel: direct("tess") }, 60 * 50);
 
     msg(direct("mira"), USER, "Morning. Busy day at the archive?", 60 * 48);
     msg(direct("mira"), person("mira"), `${sc("Mira sets down a stack of ledgers.")}\nAlways. The tide books don't file themselves.`, 60 * 48 - 2);
     msg(
       direct("mira"),
       person("mira"),
-      `${sc("She runs a finger down the index.")}\nThe east corridor was sealed in the **first month** after the gates failed. My own ledger says so.\nOren remembers that night differently: he says it was high summer.\n\nI wrote it up for you.`,
+      `${sc("She runs a finger down the index.")}\nThe east corridor was sealed in the **first month** after the gates failed. My own ledger says so.\nOren remembers that night differently: he says it was high summer.`,
       60 * 20,
       {
         actions: [
           { tool: "search", query: "east corridor sealed flood" },
           { tool: "request_join", person: ref("oren"), topic: null },
-          { tool: "report" },
         ],
         cites: [cite("c-ledger-1"), cite("c-ward-1", 2201)],
-        task: "t-mira",
-        note: { path: "data:text/plain;charset=utf-8,East%20corridor%3A%20sealed%20in%20the%20first%20month%20(ledger)%3B%20Oren%20recalls%20summer." },
       },
     );
 
     msg(direct("oren"), person("oren"), "You said you'd bring the new rota by today. No rush, just reminding you.", 60 * 9);
     msg(direct("oren"), USER, "Mira says the corridor closed in the first month. What do you remember?", 60 * 8);
-    const orenReaction = msg(
+    msg(
       direct("oren"),
       person("oren"),
       `${sc("Oren frowns.")}\nIf Mira wrote that down, she has the ledger. But I was on that ward, and it was hot. I remember it differently: the evacuation order came late, not the warning.`,
       60 * 8 - 1,
       { relayed: true },
     );
-    reactions.push({ channel: orenReaction.channel, message: orenReaction.id, author: orenReaction.author, excerpt: "I remember it differently: the evacuation order came late, not the warning." });
 
     msg(direct("tess"), USER, "Which route is safest after dark?", 60 * 50);
     msg(direct("tess"), person("tess"), "Take the stairs by the fish market, never the bridge after dark.", 60 * 49, {
-      actions: [{ tool: "search", query: "dock routes after dark" }, { tool: "report" }],
+      actions: [{ tool: "search", query: "dock routes after dark" }],
       cites: [cite("c-docks-1")],
-      task: "t-tess",
     });
 
     msg(group.id, USER, "Did the rota change today?", 60 * 3);
@@ -354,13 +331,12 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     addFact({ author: USER, audience: { kind: "participants", channel: direct("mira"), persons: [ref("mira")] }, kind: "hurt", about: { kind: "person", id: "mira" }, due: null, text: "Your ledgers are useless, nobody reads them." }, 60 * 47);
     addFact({ author: USER, audience: { kind: "participants", channel: direct("mira"), persons: [ref("mira")] }, kind: "fact", about: { kind: "user" }, due: null, text: "You said you don't like sweets.", retracted: true }, 60 * 46);
     addFact({ author: person("mira"), audience: { kind: "own", person: ref("mira") }, kind: "fact", about: { kind: "user" }, due: null, text: "Mira noticed you prefer short answers." }, 60 * 45);
-    addFact({ author: USER, audience: { kind: "world" }, kind: "conclusion", about: { kind: "task", id: "t-case" }, due: null, text: "The warning came late, so the corridor closed before people got out." }, 60 * 7);
   }
 
   const digestItems: Waiting[] = introPending
     ? []
     : [
-        { person: ref("mira"), channel: direct("mira"), activity: { kind: "replied", task: "t-mira", question: tasks.get("t-mira")!.question, at: iso(60 * 20) } },
+        { person: ref("mira"), channel: direct("mira"), activity: { kind: "messaged", at: iso(60 * 20) } },
         { person: ref("oren"), channel: direct("oren"), activity: { kind: "commitment_due", fact: [...facts.values()].find((f) => f.kind === "commitment")!.id, text: "Bring Oren the new rota", due: iso(60) } },
         { person: ref("tess"), channel: direct("tess"), activity: { kind: "came_by", at: iso(60 * 11) } },
         { person: ref("juno"), channel: direct("juno"), activity: { kind: "birthday" } },
@@ -474,7 +450,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       actions.push({ tool: "digest" });
       reply = digestItems.length ? "Mira answered your question and Oren is waiting on the rota." : "Nothing new.";
     } else {
-      reply = "I'm here. Ask me to find someone, to ask someone something for you, or to note something down.";
+      reply = "I'm here. Ask me to find someone, or to note something down.";
     }
     await stream("host", HOST, reply, { actions });
     if (actions.some((a) => a.tool === "set_mode")) {
@@ -532,7 +508,6 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     return [
       { shape: "direct" as const, calls: 14 },
       { shape: "group" as const, calls: 6 },
-      { shape: "ask" as const, calls: 7 },
       { shape: "host" as const, calls: 3 },
       { shape: "opening" as const, calls: 1 },
       { shape: "wrapup" as const, calls: 2 },
@@ -658,7 +633,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         void stream(
           "host",
           HOST,
-          `${sc("A soft chime.")}\nHello, ${settings.user_name}. I look after things here. Everyone on the roster can be reached directly: open someone and talk.\n\nYou can also ask me to find who knows about something, or to have someone look into a question for you. Everyone starts **frozen**: they answer when you reach out and never start on their own. Enable someone if you'd like them to come to you now and then.`,
+          `${sc("A soft chime.")}\nHello, ${settings.user_name}. I look after things here. Everyone on the roster can be reached directly: open someone and talk.\n\nYou can also ask me to find who knows about something. Everyone starts **frozen**: they answer when you reach out and never start on their own. Enable someone if you'd like them to come to you now and then.`,
         );
       } else if (!greeted && digestItems.length) {
         greeted = true;
@@ -715,7 +690,6 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         trust: p.trust,
         mode: p.mode,
         last_seen: p.lastSeenMin === null ? null : iso(p.lastSeenMin),
-        tasks_done: p.tasksDone,
         companions: p.companions.map(ref),
         voice: p.voice,
         channel: channels.has(`dm:${id}`) ? `dm:${id}` : null,
@@ -931,81 +905,6 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       ch.archived = archived;
       setTimeout(() => announceWorld({ kind: "channel", id: channel }));
       return ok(null);
-    },
-    ask: (id, question, _turns, parent) => {
-      const p = persons.get(id);
-      if (!p) return fail({ code: "not_found" });
-      if (p.mode === "disabled") return fail({ code: "disabled", person: id });
-      if (!question.trim()) return fail({ code: "invalid", field: "question" });
-      const blocked = gate();
-      if (blocked) return fail(blocked);
-      const cid = direct(id);
-      const task = addTask({ id: nextId("t"), question, assignee: ref(id), parent, status: "active", pinned: false, channel: cid }, 0);
-      setTimeout(async () => {
-        announceWorld({ kind: "task", id: task.id });
-        const hit = PASSAGES.find((x) => x.persons.some((q) => q.id === id));
-        const other = p.companions.find((c) => persons.get(c)?.mode !== "disabled");
-        const found = hit && knows(p, question);
-        const actions: ToolAction[] = [{ tool: "search", query: question.slice(0, 48) }];
-        if (!found && other) actions.push({ tool: "request_join", person: ref(other), topic: null });
-        actions.push({ tool: "report" });
-        const text = found
-          ? `${sc(`${p.name.split(" ")[0]} comes back with a folder.`)}\nHere's what I found: ${hit.text}`
-          : "I looked, but I couldn't find anything solid on this. Someone else may know more.";
-        const extra: Partial<Message> = found ? { actions, cites: [hit.citation], task: task.id } : { actions, confidence: "low", task: task.id };
-        await stream(cid, person(id), text, extra);
-        tasks.set(task.id, { ...task, status: "done" });
-        digestItems.unshift({ person: ref(id), channel: cid, activity: { kind: "replied", task: task.id, question, at: iso() } });
-        announceWorld({ kind: "task", id: task.id }, { kind: "digest" });
-      });
-      return ok(task.id);
-    },
-    tasks: () => ok([...tasks.values()].sort((a, b) => b.created_at.localeCompare(a.created_at))),
-    caseFile: (id) => {
-      const task = tasks.get(id);
-      if (!task) return fail({ code: "not_found" });
-      const replyOf = (t: TaskSummary) => {
-        const ch = t.channel ? channels.get(t.channel) : undefined;
-        return ch?.log.find((m) => m.task === t.id) ?? null;
-      };
-      const conclusion = [...facts.values()].find((f) => f.kind === "conclusion" && !f.retracted && f.about?.kind === "task" && f.about.id === id) ?? null;
-      const cf: CaseFile = {
-        task,
-        trail: [...tasks.values()].filter((t) => t.parent === id).map((t) => ({ task: t, reply: replyOf(t) })),
-        conclusion,
-        reactions: id === "t-case" ? reactions : [],
-      };
-      return ok(cf);
-    },
-    openCase: (question) => {
-      if (!question.trim()) return fail({ code: "invalid", field: "question" });
-      const t = addTask({ id: nextId("t"), question, assignee: null, parent: null, status: "active", pinned: true, channel: null }, 0);
-      setTimeout(() => announceWorld({ kind: "task", id: t.id }));
-      return ok(t.id);
-    },
-    pinTask: (id) => {
-      const t = tasks.get(id);
-      if (!t) return fail({ code: "not_found" });
-      tasks.set(id, { ...t, pinned: true });
-      setTimeout(() => announceWorld({ kind: "task", id }));
-      return ok(null);
-    },
-    unpinTask: (id) => {
-      const t = tasks.get(id);
-      if (!t) return fail({ code: "not_found" });
-      tasks.set(id, { ...t, pinned: false });
-      setTimeout(() => announceWorld({ kind: "task", id }));
-      return ok(null);
-    },
-    writeConclusion: (id, text) => {
-      if (!tasks.has(id)) return fail({ code: "not_found" });
-      if (!text.trim()) return fail({ code: "invalid", field: "text" });
-      for (const f of facts.values()) {
-        if (f.kind === "conclusion" && f.about?.kind === "task" && f.about.id === id && !f.retracted) facts.set(f.id, { ...f, retracted: true });
-      }
-      const f = addFact({ author: USER, audience: { kind: "world" }, kind: "conclusion", about: { kind: "task", id }, due: null, text });
-      setTimeout(() => announceWorld({ kind: "fact", id: f.id }, { kind: "task", id }));
-      return ok(f.id);
     },
     facts: (filter: FactFilter) => {
       const all = [...facts.values()];

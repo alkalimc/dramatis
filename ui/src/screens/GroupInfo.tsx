@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import type { PersonRef } from "../api";
 import { useT, useUserName } from "../i18n";
 import { groupTitle } from "../lib/chats";
@@ -26,14 +26,6 @@ export function GroupInfo({ id }: { id: string }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
 
-  const rename = useStore((s) => s.drawer?.kind === "channel" && s.drawer.rename === true);
-  useEffect(() => {
-    setEditing(rename);
-    if (rename && group) setDraft(group.name?.trim() ? groupTitle(group, t, me) : "");
-    // Only a new group or a new request to rename resets the field.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, rename]);
-
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
   const modeOf = new Map((roster?.groups ?? []).flatMap((g) => g.rows).map((r) => [r.person.id, r.mode] as const));
   const title = groupTitle(group, t, me);
@@ -52,12 +44,6 @@ export function GroupInfo({ id }: { id: string }) {
     if (!window.confirm(t("group.members.remove.confirm", { name: p.name }))) return;
     if ((await actions.attempt(api.commands.removeMember(id, p.id))) === undefined) return;
     await actions.refreshChannels();
-  };
-  const remove = async () => {
-    if (!window.confirm(t("channel.delete.confirm"))) return;
-    if ((await actions.attempt(api.commands.deleteGroup(id))) === undefined) return;
-    await actions.refreshChannels();
-    await actions.open(null);
   };
 
   return (
@@ -98,17 +84,6 @@ export function GroupInfo({ id }: { id: string }) {
         <p className="muted">{t("group.members.count", { count: group.participants.length })}</p>
         <PictureButtons onPick={async (f) => actions.setChannelAvatar(id, await readAvatar(f))} onClear={() => void actions.setChannelAvatar(id, null)} clearable={Boolean(group.avatar)} />
       </header>
-
-      <div className="info-squares">
-        <button type="button" className="square" onClick={() => void actions.archive(id, !group.archived)}>
-          <Icon name="archive" size={24} />
-          <span>{t(group.archived ? "chatmenu.unarchive" : "chatmenu.archive")}</span>
-        </button>
-        <button type="button" className="square danger" onClick={remove}>
-          <Icon name="trash" size={24} />
-          <span>{t("channel.delete")}</span>
-        </button>
-      </div>
 
       <section className="info-section">
         <h3>{t("group.mode")}</h3>

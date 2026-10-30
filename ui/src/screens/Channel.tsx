@@ -9,7 +9,6 @@ import { isMac, isSendKey } from "../lib/keys";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
 import { Badge } from "../ui/Badge";
-import { Menu } from "../ui/Menu";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
 import { ActionLines, MessageView, StreamView } from "./Message";
@@ -202,7 +201,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
   const [text, setText] = useState(saved);
   const [image, setImage] = useState<ImagePart | null>(null);
   const [busy, setBusy] = useState(false);
-  const [attach, setAttach] = useState<{ x: number; y: number } | null>(null);
+  const [tray, setTray] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const restore = useStore((s) => (s.restore?.channel === channel ? s.restore : null));
@@ -271,31 +270,52 @@ export function Composer({ channel }: { channel: ChannelId }) {
             e.target.value = "";
           }}
         />
-        <button
-          type="button"
-          className="round"
-          aria-label={t("composer.attach")}
-          title={t("composer.attach")}
-          aria-haspopup="menu"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            setAttach({ x: r.left, y: r.top - 150 });
+        {/* The paperclip opens the picker at once; hovering or focusing it lists the kinds that work. */}
+        <div
+          className="attach"
+          onMouseEnter={() => setTray(true)}
+          onMouseLeave={() => setTray(false)}
+          onFocus={() => setTray(true)}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setTray(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && tray) {
+              e.stopPropagation();
+              setTray(false);
+            }
           }}
         >
-          <Icon name="attach" />
-        </button>
-        {attach && (
-          <Menu
-            at={attach}
-            label={t("composer.attach")}
-            onClose={() => setAttach(null)}
-            items={[
-              { label: t("composer.image"), icon: "image", onSelect: () => file.current?.click() },
-              { label: t("composer.ask"), icon: "people", onSelect: () => dispatch({ type: "ask", draft: {} }) },
-              { label: t("composer.group"), icon: "group", onSelect: () => dispatch({ type: "groupDialog", open: true }) },
-            ]}
-          />
-        )}
+          <button
+            type="button"
+            className="round"
+            aria-label={t("composer.attach")}
+            title={t("composer.attach")}
+            onClick={() => {
+              setTray(false);
+              file.current?.click();
+            }}
+          >
+            <Icon name="attach" />
+          </button>
+          {tray && (
+            <div className="attach-tray">
+              <div className="menu-pop" role="menu" aria-label={t("composer.attach")}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setTray(false);
+                    file.current?.click();
+                  }}
+                >
+                  <Icon name="image" size={20} />
+                  <span>{t("composer.image")}</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         <label htmlFor={id} className="sr-only">
           {t("composer.label")}
         </label>

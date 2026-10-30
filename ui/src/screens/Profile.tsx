@@ -306,7 +306,7 @@ export function LeftDrawer() {
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <aside ref={ref} className="left-drawer" tabIndex={-1} aria-label={t("menu.label")} onKeyDown={(e) => e.key === "Escape" && close()}>
-        <button type="button" className="left-head" onClick={() => dispatch({ type: "profile", mode: "view" })}>
+        <button type="button" className="left-head" aria-label={t("menu.profile")} onClick={() => dispatch({ type: "profile", mode: "view" })}>
           <UserAvatar size="l" />
           <span className="left-who">
             <span className="left-name">{name?.trim() || t("user.you")}</span>
@@ -316,14 +316,9 @@ export function LeftDrawer() {
           <Icon name="chevron" size={20} />
         </button>
         <ul className="drawer-items">
-          <Row icon="profile" label={t("menu.profile")} onClick={() => dispatch({ type: "profile", mode: "view" })} />
-        </ul>
-        <ul className="drawer-items">
           <Row icon="group" label={t("roster.new_group")} onClick={go(() => dispatch({ type: "groupDialog", open: true }))} />
           <Row icon="people" label={t("menu.contacts")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "contacts" } }))} />
           <Row icon="archive" label={archivedCount > 0 ? t("menu.archived.count", { count: archivedCount }) : t("chatlist.archived")} onClick={go(() => dispatch({ type: "listView", view: "archived" }))} />
-          <Row icon="cases" label={t("nav.cases")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "cases" } }))} />
-          <Row icon="bookmark" label={t("system.tab.saves")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "saves" } }))} />
           <Row icon="system" label={t("menu.settings")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "root" } }))} />
           {hasSave && <Row icon="leave" label={t("logout")} onClick={go(() => void actions.logOut())} />}
           <li>

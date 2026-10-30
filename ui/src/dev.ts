@@ -40,12 +40,10 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
     case "find":
       return d({ type: "find", query: "" });
     case "attach":
-      document.querySelector<HTMLElement>('button[aria-label="Attach"]')?.click();
+      document.querySelector<HTMLElement>('button[aria-label="Attach"]')?.focus();
       return;
     case "roster":
       return d({ type: "drawer", drawer: { kind: "roster" } });
-    case "cases":
-      return d({ type: "drawer", drawer: { kind: "cases" } });
     case "world":
       return d({ type: "drawer", drawer: { kind: "world" } });
     case "archived":

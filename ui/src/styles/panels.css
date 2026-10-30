@@ -251,27 +251,13 @@ button.member:hover {
   gap: var(--s-1);
 }
 
-/* ---- requests and world ---- */
-.tasks li,
-.trail li,
+/* ---- world ---- */
 .facts li {
   padding: var(--s-2) 0;
   border-bottom: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   gap: var(--s-1);
-}
-.tasks li {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--s-1) var(--s-3);
-}
-.tasks .name {
-  text-align: left;
-}
-.reactions li {
-  padding: var(--s-1) 0;
 }
 .fact.retracted .fact-text {
   color: var(--muted);

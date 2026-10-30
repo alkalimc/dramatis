@@ -14,7 +14,7 @@ export function WorldDrawer() {
   const api = useApi();
   const version = useStore((s) => s.worldVersion);
   const [scope, setScope] = useState<FactScope>("all");
-  const { data: list, error, loading, reload } = useQuery(() => api.commands.facts({ scope, person: null, task: null }), [api, scope, version]);
+  const { data: list, error, loading, reload } = useQuery(() => api.commands.facts({ scope, person: null }), [api, scope, version]);
 
   return (
     <div className="drawer-body world">

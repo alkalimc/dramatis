@@ -416,7 +416,7 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
       const kinds = new Set(payload.changes.map((ch) => ch.kind));
       // Another window changed the open save's file: the status says what to show now.
       if (kinds.has("save")) void actions.refreshStatus();
-      if (kinds.has("digest") || kinds.has("task")) void actions.refreshDigest();
+      if (kinds.has("digest")) void actions.refreshDigest();
       if (kinds.has("channel")) {
         // Another process (the terminal) may have written: the list and what is on screen.
         void actions.refreshChannels();

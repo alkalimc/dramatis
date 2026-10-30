@@ -51,9 +51,6 @@ export function ContactsCard() {
         )}
       </div>
       <p className="text-actions contacts-foot">
-        <button type="button" className="text-btn" onClick={() => dispatch({ type: "groupDialog", open: true })}>
-          {t("roster.new_group")}
-        </button>
         <button type="button" className="text-btn" onClick={close}>
           {t("drawer.close")}
         </button>

@@ -58,7 +58,8 @@ test("Send again takes a message and what followed back, and puts its text in th
   const before = store.getState().messages.host.length;
   vi.spyOn(window, "confirm").mockReturnValue(true);
   const mine = within(log).getAllByRole("article").find((a) => a.className.includes("from-user") && a.textContent?.includes("Who can help"))!;
-  await user.click(within(mine).getByRole("button", { name: "Send again" }));
+  await user.pointer({ keys: "[MouseRight]", target: mine });
+  await user.click(await screen.findByRole("menuitem", { name: "Send again" }));
   await waitFor(() => expect(box().value).toBe("Who can help with ledgers?"));
   expect(store.getState().messages.host.length).toBeLessThan(before);
   expect(within(log).queryByText("Who can help with ledgers?")).toBeNull();
@@ -100,4 +101,50 @@ test("pasting plain text is left alone", async () => {
   const ev = fireEvent.paste(box(), { clipboardData: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }], files: [] } });
   expect(ev).toBe(true);
   expect(screen.queryByRole("img", { name: "Attached image" })).toBeNull();
+});
+
+test("the paperclip opens the image picker at once", async () => {
+  const user = userEvent.setup();
+  await mounted();
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const picker = vi.spyOn(input, "click");
+  await user.click(screen.getByRole("button", { name: "Attach" }));
+  expect(picker).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("hovering the paperclip lists the kinds that work, and the item opens the picker", async () => {
+  const user = userEvent.setup();
+  await mounted();
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const picker = vi.spyOn(input, "click");
+  expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+  await user.hover(screen.getByRole("button", { name: "Attach" }));
+  const tray = await screen.findByRole("menu", { name: "Attach" });
+  const items = within(tray).getAllByRole("menuitem");
+  expect(items.map((i) => i.textContent)).toEqual(["Picture"]);
+  fireEvent.click(items[0]);
+  expect(picker).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+});
+
+test("the tray closes when the pointer leaves", async () => {
+  const user = userEvent.setup();
+  await mounted();
+  await user.hover(screen.getByRole("button", { name: "Attach" }));
+  await screen.findByRole("menu", { name: "Attach" });
+  await user.unhover(screen.getByRole("button", { name: "Attach" }));
+  expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+});
+
+test("the tray is reachable from the keyboard: focus shows it, the item opens the picker", async () => {
+  const user = userEvent.setup();
+  await mounted();
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const picker = vi.spyOn(input, "click");
+  screen.getByRole("button", { name: "Attach" }).focus();
+  await screen.findByRole("menu", { name: "Attach" });
+  await user.tab();
+  await user.keyboard("{Enter}");
+  expect(picker).toHaveBeenCalledTimes(1);
 });

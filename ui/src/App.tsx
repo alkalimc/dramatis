@@ -10,8 +10,6 @@ import { isDark } from "./lib/prefs";
 import { Icon, type IconName } from "./ui/Icon";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { ChatList } from "./screens/ChatList";
-import { AskCard } from "./screens/Ask";
-import { CaseDrawer, CasesDrawer } from "./screens/Cases";
 import { FirstOpen } from "./screens/FirstOpen";
 import { GroupDialog } from "./screens/Group";
 import { Badge } from "./ui/Badge";
@@ -68,7 +66,6 @@ function Guarded() {
 function Shell() {
   const t = useT();
   const status = useStore((s) => s.status);
-  const ask = useStore((s) => s.ask);
   const personCard = useStore((s) => s.personCard);
   const hostCard = useStore((s) => s.hostCard);
   const update = useStore((s) => s.update);
@@ -175,7 +172,6 @@ function Shell() {
       {profile && <ProfileCard mode={profile} />}
       {personCard && <PersonCard id={personCard} />}
       {hostCard && <HostCard />}
-      {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
     </div>
   );
@@ -214,16 +210,14 @@ function useTheme() {
 }
 
 // Settings live in the hamburger's drawer, not on the rail.
-const NAV: { key: "roster" | "cases" | "world"; icon: IconName; drawer: Drawer }[] = [
+const NAV: { key: "roster" | "world"; icon: IconName; drawer: Drawer }[] = [
   { key: "roster", icon: "people", drawer: { kind: "roster" } },
-  { key: "cases", icon: "cases", drawer: { kind: "cases" } },
   { key: "world", icon: "world", drawer: { kind: "world" } },
 ];
 
-function drawerKey(d: Drawer | null): "roster" | "cases" | "world" | "system" | null {
+function drawerKey(d: Drawer | null): "roster" | "world" | "system" | null {
   if (!d || d.kind === "channel" || d.kind === "contacts" || d.kind === "host") return null;
   if (d.kind === "person") return "roster";
-  if (d.kind === "case") return "cases";
   return d.kind;
 }
 
@@ -322,8 +316,6 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}
       {drawer.kind === "host" && <HostDrawer />}
       {drawer.kind === "channel" && <GroupInfo id={drawer.id} />}
-      {drawer.kind === "cases" && <CasesDrawer />}
-      {drawer.kind === "case" && <CaseDrawer id={drawer.id} />}
       {drawer.kind === "world" && <WorldDrawer />}
     </aside>
   );

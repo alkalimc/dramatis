@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../test/render";
 
@@ -30,16 +30,6 @@ test("settings is a card with a list of sections; each opens its page and back r
   expect(within(card).getByRole("button", { name: /^Saves/ })).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-});
-
-test("the menu of the card offers to edit the profile", async () => {
-  const user = userEvent.setup();
-  const { store } = renderApp();
-  const card = await openSettings(user);
-  await user.click(within(card).getByRole("button", { name: "More" }));
-  await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
-  await waitFor(() => expect(store.getState().profile).toBe("edit"));
-  expect(store.getState().drawer).toBeNull();
 });
 
 test("the search icon turns the list column into a search of this chat", async () => {

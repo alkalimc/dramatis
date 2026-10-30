@@ -66,40 +66,6 @@ test("no read-aloud button without a tts role", async () => {
   expect(screen.queryByRole("button", { name: "Read aloud" })).toBeNull();
 });
 
-test("selection menu: where from, and who knows this", async () => {
-  const user = userEvent.setup();
-  renderApp();
-  const panel = (await screen.findByRole("heading", { name: "Who's waiting" })).closest("section")!;
-  await user.click(await within(panel).findByRole("button", { name: "Show the list" }));
-  await user.click(await within(panel).findByRole("button", { name: "Show 2 more" }));
-  await user.click(await within(panel).findByText("Tess Arden"));
-  await within(await screen.findByRole("log")).findByText(/Take the stairs by the fish market/);
-  const actions = screen.getAllByRole("button", { name: "Actions for this message" });
-  await user.click(actions[actions.length - 1]);
-  const menu = screen.getByRole("region", { name: "About the selected text" });
-  await user.click(within(menu).getByRole("button", { name: "Where is this from?" }));
-  expect(await within(menu).findByText("Dock Routes/Upper Town")).toBeDefined();
-  await user.click(within(menu).getByRole("button", { name: "Who knows this?" }));
-  expect(await within(menu).findByText("She has run the dock routes for years.")).toBeDefined();
-  await user.click(within(menu).getByRole("button", { name: "Have someone check both" }));
-  const dialog = await screen.findByRole("dialog", { name: "Ask someone" });
-  expect((within(dialog).getByLabelText("What do you want to know?") as HTMLTextAreaElement).value).toMatch(/Check this one/);
-});
-
-test("ask card: candidates with reasons, turns hidden under more", async () => {
-  const user = userEvent.setup();
-  renderApp();
-  await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getByRole("button", { name: "Attach" }));
-  await user.click(await screen.findByRole("menuitem", { name: "Ask someone" }));
-  const dialog = await screen.findByRole("dialog", { name: "Ask someone" });
-  await user.type(within(dialog).getByLabelText("What do you want to know?"), "the tide gates repair");
-  expect(await within(dialog).findByText("Her own reports describe the gate repairs.")).toBeDefined();
-  expect(within(dialog).getByLabelText("Turns").closest("details")!.open).toBe(false);
-  // Disabled people are never offered.
-  expect(within(dialog).queryByText("Silas Crane")).toBeNull();
-});
-
 test("roster: bands, no numbers on rows, disabled collapsed", async () => {
   const user = userEvent.setup();
   renderApp();
@@ -180,9 +146,11 @@ test("library: always reachable from the rail, filtered search, a unit read with
   await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Chats" }));
   expect(await screen.findByRole("heading", { name: "Who's waiting" })).toBeDefined();
 
-  // With a model, a person page opened from the library talks: the chat opens and the library closes.
+  // The library holds no roster of its own: a person page opened from the roster drawer talks, the chat opens and the library closes.
   await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Library" }));
-  await user.click(screen.getAllByRole("button", { name: "Mira Vale" })[0]);
+  expect(screen.queryByRole("button", { name: "Mira Vale" })).toBeNull();
+  await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: "Roster" }));
+  await user.click(await screen.findByRole("button", { name: "Mira Vale" }));
   const page = await screen.findByRole("complementary", { name: "Roster" });
   await user.click(within(page).getByRole("button", { name: "Talk" }));
   expect(await screen.findByRole("textbox", { name: /Message/ })).toBeDefined();

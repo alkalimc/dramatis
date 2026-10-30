@@ -300,8 +300,6 @@ export function reduce(s: State, a: Action): State {
         : { ...s, unread: omit(s.unread, a.channel), channels: s.channels.map((c) => (c.id === a.channel && c.unread > 0 ? { ...c, unread: 0 } : c)) };
     case "drawer":
       return { ...s, drawer: a.drawer };
-    case "ask":
-      return { ...s, ask: a.draft, ...(a.draft ? { personCard: null } : {}) };
     case "personCard":
       return { ...s, personCard: a.person };
     case "hostCard":

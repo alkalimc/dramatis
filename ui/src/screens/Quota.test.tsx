@@ -11,7 +11,7 @@ function status(band: QuotaBand, tier: Tier = "middle"): QuotaStatus {
     window: { used, release_at: band === "open" ? null : "2030-01-01T10:30:00Z" },
     spent: [
       { shape: "direct", calls: 75 },
-      { shape: "ask", calls: 25 },
+      { shape: "host", calls: 25 },
     ],
     visits_per_day: 5,
     events_max: 4,

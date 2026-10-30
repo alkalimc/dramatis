@@ -9,7 +9,6 @@ export interface MockPerson {
   mode: Mode;
   /** Minutes since the last message with the user; `null` = never talked. */
   lastSeenMin: number | null;
-  tasksDone: number;
   companions: string[];
   voice: string | null;
   /** Topics find_people matches, with the reason line it shows. */
@@ -24,7 +23,6 @@ export const PERSONS: MockPerson[] = [
     trust: 137,
     mode: "enabled",
     lastSeenMin: 60 * 20,
-    tasksDone: 4,
     companions: ["oren", "tess"],
     voice: "verse",
     knows: [
@@ -39,7 +37,6 @@ export const PERSONS: MockPerson[] = [
     trust: 112,
     mode: "frozen",
     lastSeenMin: 60 * 9,
-    tasksDone: 1,
     companions: ["mira", "iris"],
     voice: null,
     knows: [
@@ -54,7 +51,6 @@ export const PERSONS: MockPerson[] = [
     trust: 104,
     mode: "frozen",
     lastSeenMin: 60 * 24 * 3,
-    tasksDone: 2,
     companions: ["mira", "kael"],
     voice: null,
     knows: [
@@ -68,7 +64,6 @@ export const PERSONS: MockPerson[] = [
     trust: 100,
     mode: "frozen",
     lastSeenMin: 60 * 24 * 12,
-    tasksDone: 0,
     companions: ["kael"],
     voice: null,
     knows: [[/gate|tide|engine|flood|repair/i, "Her own reports describe the gate repairs."]],
@@ -80,7 +75,6 @@ export const PERSONS: MockPerson[] = [
     trust: 100,
     mode: "frozen",
     lastSeenMin: null,
-    tasksDone: 0,
     companions: ["juno", "tess"],
     voice: null,
     knows: [[/supply|stores|count|ration|dock/i, "The supply lists are in his hand."]],
@@ -92,7 +86,6 @@ export const PERSONS: MockPerson[] = [
     trust: 100,
     mode: "frozen",
     lastSeenMin: null,
-    tasksDone: 0,
     companions: ["oren"],
     voice: null,
     knows: [[/council|vote|session|law|decree/i, "She took the minutes of those sessions."]],
@@ -104,7 +97,6 @@ export const PERSONS: MockPerson[] = [
     trust: 100,
     mode: "frozen",
     lastSeenMin: null,
-    tasksDone: 0,
     companions: [],
     voice: null,
     knows: [[/light|storm|ship|sea|night/i, "He logged every ship that passed in the storms."]],
@@ -116,7 +108,6 @@ export const PERSONS: MockPerson[] = [
     trust: 100,
     mode: "frozen",
     lastSeenMin: null,
-    tasksDone: 0,
     companions: ["tess"],
     voice: null,
     knows: [[/map|chart|street|route|bridge/i, "She redrew the street charts last spring."]],
@@ -128,7 +119,6 @@ export const PERSONS: MockPerson[] = [
     trust: 88,
     mode: "disabled",
     lastSeenMin: 60 * 24 * 40,
-    tasksDone: 0,
     companions: ["mira"],
     voice: null,
     knows: [[/harbor|flood/i, "He ran the harbor during the first flood."]],

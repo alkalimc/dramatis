@@ -43,8 +43,6 @@ export function activityText(a: Activity, t: T): string {
   switch (a.kind) {
     case "messaged":
       return t("activity.messaged");
-    case "replied":
-      return t("activity.replied", { question: a.question });
     case "commitment_due":
       return t("activity.commitment_due", { text: a.text });
     case "came_by":
@@ -76,8 +74,6 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
         : t("action.request_join.topic", { topic: a.topic ?? "" });
     case "remember":
       return t("action.remember", { text: a.text });
-    case "report":
-      return t("action.report");
     case "wrapup":
       // Wrap-up is bookkeeping, not an action the user asked for; callers skip it.
       return "";
@@ -88,8 +84,6 @@ export function actionText(a: ToolAction, t: T, names: Names): string {
       return a.topic ? t("action.find_people", { topic: a.topic }) : t("action.talk_offer", { names: list(a.persons ?? []) });
     case "invite_to_group":
       return t("action.invite", { names: list(a.persons) });
-    case "ask":
-      return t("action.ask", { name: a.person.name, question: a.question });
     case "create_group":
       // No channel: a suggestion that waits for the user, nothing made yet.
       return t(a.channel ? "action.create_group" : "action.suggest_group", { names: list(a.members) });

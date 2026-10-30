@@ -165,6 +165,3 @@ export function SourcesPanel({ cites, onClose }: { cites: Citation[]; onClose: (
   );
 }
 
-export function CitationList({ cites }: { cites: Citation[] }) {
-  return <SourceEntries cites={cites} />;
-}

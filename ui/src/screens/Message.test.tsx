@@ -15,8 +15,6 @@ const base: Message = {
   cites: [],
   relayed: false,
   confidence: null,
-  task: null,
-  note: null,
   attachment: null,
   picture_lost: false,
 };
@@ -293,6 +291,16 @@ test("right click on a message offers to copy it, and to send an own message aga
   await user.pointer({ keys: "[MouseRight]", target: container.querySelector(".bubble")! });
   expect(await screen.findByRole("menuitem", { name: "Copy text" })).toBeDefined();
   expect(screen.getByRole("menuitem", { name: "Send again" })).toBeDefined();
+});
+
+test("Send again has no button under the message, and selecting text opens nothing", async () => {
+  const user = userEvent.setup();
+  const { container } = renderWith(<MessageView message={{ ...base, author: { kind: "user" }, text: "Hello there" }} showPlay={false} />);
+  expect(screen.queryByRole("button", { name: "Send again" })).toBeNull();
+  const body = container.querySelector(".message-body")!;
+  await user.pointer([{ keys: "[MouseLeft>]", target: body }, { keys: "[/MouseLeft]", target: body }]);
+  expect(screen.queryByRole("region", { name: "About the selected text" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Actions for this message" })).toBeNull();
 });
 
 const mine: Message = { ...base, author: { kind: "user" }, text: "look at this" };

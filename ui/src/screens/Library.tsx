@@ -4,11 +4,10 @@ import { useT } from "../i18n";
 import { useQuery } from "../lib/useQuery";
 import { useApi, useDispatch, useStore } from "../store";
 import { InlineError } from "../ui/ErrorBar";
-import { RosterList } from "./Roster";
 import { ExternalLink } from "../ui/ExternalLink";
 
 /**
- * The library: the roster and full-text search of the corpus, with a unit opened in place.
+ * The library: full-text search of the corpus, with a unit opened in place.
  * It is the main screen when no chat endpoint is set up, and one the user can open at any
  * time. Nothing here calls a model; without one the host says, once, that it is not connected.
  */
@@ -35,7 +34,6 @@ export function Library() {
         </section>
       )}
       <CorpusSearch />
-      <RosterList />
     </div>
   );
 }

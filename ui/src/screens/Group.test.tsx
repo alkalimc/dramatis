@@ -126,8 +126,8 @@ test("group dialog: topic may stay empty and says so; no member cap; frozen by d
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getByRole("button", { name: "Attach" }));
-  await user.click(await screen.findByRole("menuitem", { name: "Bring people in" }));
+  await user.click(screen.getByRole("button", { name: "Menu" }));
+  await user.click(await screen.findByRole("button", { name: "New group" }));
   // First the group's name, then who is in it.
   await user.click(await screen.findByRole("button", { name: "Next" }));
   const dialog = await screen.findByRole("dialog", { name: "Bring people in" });
@@ -230,8 +230,8 @@ test("a group made from the dialog has an info panel before anyone has spoken in
     },
   }));
   await screen.findByRole("heading", { name: "Who's waiting" });
-  await user.click(screen.getByRole("button", { name: "Attach" }));
-  await user.click(await screen.findByRole("menuitem", { name: "Bring people in" }));
+  await user.click(screen.getByRole("button", { name: "Menu" }));
+  await user.click(await screen.findByRole("button", { name: "New group" }));
   await user.click(await screen.findByRole("button", { name: "Next" }));
   const dialog = await screen.findByRole("dialog", { name: "Bring people in" });
   await user.type(within(dialog).getByRole("searchbox"), "Mira");

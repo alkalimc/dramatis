@@ -22,7 +22,6 @@ import type {
   Rewound,
   Roster,
   Settings,
-  TaskId,
   InterfaceLanguage,
   ToolAction,
   ToolCalled,
@@ -41,12 +40,10 @@ export type Drawer =
   | { kind: "person"; id: PersonId }
   /** The host's page, in the side panel of the host's channel. */
   | { kind: "host" }
-  | { kind: "cases" }
-  | { kind: "case"; id: TaskId }
   | { kind: "world" }
   | { kind: "system"; tab: SystemPage }
-  /** A group's info panel (a person's is `person`); `rename` opens it with the name field ready. */
-  | { kind: "channel"; id: ChannelId; rename?: boolean };
+  /** A group's info panel (a person's is `person`). */
+  | { kind: "channel"; id: ChannelId };
 
 export type ProfileMode = "view" | "edit";
 
@@ -57,13 +54,6 @@ export type Theme = "system" | "light" | "dark";
 
 /** Which list the chat column shows: the live chats, or the archived ones. */
 export type ListView = "chats" | "archived";
-
-/** What the ask card starts with; every field optional. */
-export interface AskDraft {
-  question?: string;
-  person?: PersonId;
-  parent?: TaskId;
-}
 
 /** A reply still being written: text so far and the actions it has taken. */
 export interface Stream {
@@ -171,7 +161,7 @@ export interface State {
   restore: { channel: ChannelId; text: string } | null;
   /** Unsent text per channel, kept while the user is elsewhere; cleared on send. */
   drafts: Record<ChannelId, string>;
-  /** Bumped on each `WorldChanged`: screens holding fetched facts or tasks refetch. */
+  /** Bumped on each `WorldChanged`: screens holding fetched facts refetch. */
   worldVersion: number;
   /** Bumped on roster or mode changes: person pages refetch. */
   peopleVersion: number;
@@ -180,7 +170,6 @@ export interface State {
   /** The channel in the main pane; `null` = home (host channel, or the library). */
   channel: ChannelId | null;
   drawer: Drawer | null;
-  ask: AskDraft | null;
   groupDialog: boolean;
   /** A person's page shown as a card over the conversation (from a name or avatar in a chat). */
   personCard: PersonId | null;
@@ -241,7 +230,6 @@ export function initialState(): State {
     loadErrors: {},
     channel: null,
     drawer: null,
-    ask: null,
     groupDialog: false,
     personCard: null,
     hostCard: false,
@@ -302,7 +290,6 @@ export type Action =
   | { type: "loaded"; key: LoadKey; error: Failure | null }
   | { type: "open"; channel: ChannelId | null }
   | { type: "drawer"; drawer: Drawer | null }
-  | { type: "ask"; draft: AskDraft | null }
   | { type: "personCard"; person: PersonId | null }
   | { type: "hostCard"; open: boolean }
   | { type: "groupDialog"; open: boolean }

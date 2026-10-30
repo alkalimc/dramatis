@@ -39,7 +39,7 @@ export function PersonPicker({
   return (
     <div className="picker">
       <label htmlFor={id}>{label}</label>
-      <input id={id} type="search" value={q} placeholder={t("select.relay.search")} onChange={(e) => setQ(e.target.value)} />
+      <input id={id} type="search" value={q} placeholder={t("person_picker.search")} onChange={(e) => setQ(e.target.value)} />
       <ul className="picker-list">
         {shown.map((p) => (
           <li key={p.id}>

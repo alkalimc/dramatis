@@ -44,7 +44,7 @@ describe("user title", () => {
   test("corpus text arrives substituted: placeholders in it are shown as received", () => {
     const m: Message = {
       id: "m1", channel: "c1", author: { kind: "host" }, text: "Hello <user>, welcome to <org>.", actions: [], attachment: null, picture_lost: false,
-      cites: [], confidence: null, relayed: false, task: null, note: null, at: "2030-01-01T00:00:00Z",
+      cites: [], confidence: null, relayed: false, at: "2030-01-01T00:00:00Z",
     };
     const store = createStore();
     store.dispatch({ type: "settings", settings: { user_name: "Rowan" } as never });
@@ -178,7 +178,7 @@ describe("persons without a persona", () => {
     expect((screen.getByRole("button", { name: "Talk" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  test("person page: note and disabled actions", async () => {
+  test("person page: note and disabled talk", async () => {
     const real = renderWith(<p />).api;
     const page = await real.commands.personPage("none");
     void page;
@@ -193,7 +193,6 @@ describe("persons without a persona", () => {
     renderWith(<PersonDrawer id={id} />, { patch });
     expect(await screen.findByText("Not available yet")).toBeDefined();
     expect((screen.getByRole("button", { name: "Talk" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Ask them something" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
@@ -206,7 +205,7 @@ describe("another process wrote", () => {
   test("a channel change reloads the list and the open conversation", async () => {
     const extra: Message = {
       id: "from-terminal", channel: "host", author: { kind: "host" }, text: "Written from the terminal.", actions: [], attachment: null, picture_lost: false,
-      cites: [], confidence: null, relayed: false, task: null, note: null, at: new Date(Date.now() + 120_000).toISOString(),
+      cites: [], confidence: null, relayed: false, at: new Date(Date.now() + 120_000).toISOString(),
     };
     let late = false;
     let api!: Api;
