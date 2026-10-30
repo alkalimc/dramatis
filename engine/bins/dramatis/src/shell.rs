@@ -154,6 +154,16 @@ impl AppSink {
             .body(found.body)
             .show()
         {
+            // An app started from the Finder has no terminal: the log is where this shows.
+            let ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as i64);
+            runtime::diag::record(
+                &engine.home().logs(),
+                ms,
+                &[("what", "notification failed")],
+                &e.to_string(),
+            );
             eprintln!("dramatis: notification failed: {e}");
         }
     }

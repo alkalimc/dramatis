@@ -20,6 +20,7 @@ use api::{Engine, Ports};
 use llm::{Retry, Transport};
 
 pub use agent::Frontend;
+pub use agent::diag;
 pub use bridge::{AgentBridge, BridgeParts, Call};
 
 /// Everything a front end holds: the engine it issues commands to, and, when a corpus is

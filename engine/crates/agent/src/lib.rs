@@ -10,7 +10,7 @@
 mod address;
 pub mod agent;
 pub mod assemble;
-mod diag;
+pub mod diag;
 mod dispatch;
 pub mod endpoint;
 pub mod error;

@@ -12,7 +12,7 @@ const TEXT_MAX: usize = 300;
 
 /// One line: UTC time, then the fields, then the text cut short on one line. A log that
 /// cannot be written is not an error worth failing a turn for.
-pub(crate) fn record(dir: &Path, ms: i64, fields: &[(&str, &str)], text: &str) {
+pub fn record(dir: &Path, ms: i64, fields: &[(&str, &str)], text: &str) {
     if dir.as_os_str().is_empty() {
         return;
     }
