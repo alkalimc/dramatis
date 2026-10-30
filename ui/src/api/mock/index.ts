@@ -260,8 +260,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
 
   // ---- facts ----
   const facts = new Map<FactId, FactView>();
-  const addFact = (f: Omit<FactView, "id" | "created_at" | "delivered" | "retracted"> & Partial<FactView>, minutesAgo = 0) => {
-    const fact: FactView = { id: nextId("f"), delivered: false, retracted: false, created_at: iso(minutesAgo), ...f };
+  const addFact = (f: Omit<FactView, "id" | "created_at" | "delivered" | "outcome" | "retracted"> & Partial<FactView>, minutesAgo = 0) => {
+    const fact: FactView = { id: nextId("f"), delivered: false, outcome: null, retracted: false, created_at: iso(minutesAgo), ...f };
     facts.set(fact.id, fact);
     return fact;
   };

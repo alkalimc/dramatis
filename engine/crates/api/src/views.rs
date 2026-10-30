@@ -431,6 +431,16 @@ pub enum FactKind {
     Hurt,
 }
 
+/// How a commitment ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FactOutcome {
+    /// It was brought up when due.
+    Kept,
+    /// It expired before anyone could bring it up.
+    Lapsed,
+}
+
 /// Who can recall a fact. Shown on every row: the only place visibility surfaces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -464,6 +474,8 @@ pub struct FactView {
     pub about: Option<About>,
     pub due: Option<Timestamp>,
     pub delivered: bool,
+    /// How a commitment ended; none while it is pending.
+    pub outcome: Option<FactOutcome>,
     pub text: String,
     pub retracted: bool,
     pub created_at: Timestamp,

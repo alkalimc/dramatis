@@ -284,6 +284,8 @@ export const en = {
   "world.audience.own": "only {name} remembers",
   "world.hurt.effect": "{name}'s trust went down because of this",
   "world.due": "due {when}",
+  "world.outcome.kept": "kept",
+  "world.outcome.lapsed": "lapsed",
   "world.edit": "Edit",
   "world.edit.save": "Save",
   "world.edit.cancel": "Cancel",

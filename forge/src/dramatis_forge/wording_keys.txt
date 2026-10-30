@@ -502,6 +502,13 @@ events.count.1
 events.count.n
 events.fact
 events.hint
+events.label.group
+events.label.members
+events.label.persons
+events.label.purpose
+events.label.talk
+events.label.text
+events.label.title
 events.per_day
 events.topics
 first.avatar.hint
@@ -583,8 +590,13 @@ harness.error.wrapup_only
 harness.event
 harness.event.ask
 harness.event.recent
+harness.event.tool
 harness.find_mark
 harness.found_for
+harness.group.described
+harness.group.renamed
+harness.group.undescribed
+harness.group.unnamed
 harness.group_created
 harness.group_mark
 harness.group_purpose
@@ -619,6 +631,7 @@ harness.guide.terminal.name
 harness.guide.terminal.resend
 harness.guide.terminal.saves
 harness.guide.terminal.sources
+harness.here
 harness.host.group
 harness.host.manner
 harness.host_away
@@ -988,6 +1001,14 @@ tool.ask_host
 tool.ask_host.find
 tool.ask_host.group
 tool.ask_host.purpose
+tool.event.make_event
+tool.event.make_event.group
+tool.event.make_event.group.members
+tool.event.make_event.group.purpose
+tool.event.make_event.persons
+tool.event.make_event.talk
+tool.event.make_event.text
+tool.event.make_event.title
 tool.get_chunk
 tool.get_chunk.id
 tool.get_chunk.neighbours
@@ -1013,6 +1034,7 @@ tool.host.promise.person
 tool.host.promise.text
 tool.host.recent
 tool.host.recent.channel
+tool.host.recent.person
 tool.host.remember
 tool.host.remember.text
 tool.host.search
@@ -1083,6 +1105,8 @@ world.hurt.effect
 world.kind.commitment
 world.kind.fact
 world.kind.hurt
+world.outcome.kept
+world.outcome.lapsed
 world.restore
 world.scope.all
 world.scope.commitment

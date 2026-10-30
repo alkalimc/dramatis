@@ -93,8 +93,16 @@ impl Default for Cost {
 pub struct Seed {
     /// Unprompted openings per person per local day.
     pub per_agent_day: u32,
+    /// Hours after its due time at which a commitment nobody could bring up lapses.
+    pub lapse_hours: u32,
     /// Default quiet hours (user local time) until the user sets their own.
     pub quiet_hours: QuietHours,
+}
+
+impl Seed {
+    pub fn lapse_ms(&self) -> i64 {
+        i64::from(self.lapse_hours) * crate::clock::HOUR_MS
+    }
 }
 
 /// Local wall-clock `HH:MM` pair; `from` after `to` spans midnight; equal = never quiet.
@@ -108,6 +116,7 @@ impl Default for Seed {
     fn default() -> Self {
         Self {
             per_agent_day: 1,
+            lapse_hours: 72,
             quiet_hours: QuietHours {
                 from: "23:00".into(),
                 to: "08:00".into(),

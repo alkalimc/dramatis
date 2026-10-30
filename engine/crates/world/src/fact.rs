@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension, Row};
 
-use crate::types::{Actor, ChannelId, Citation, FactId, FactKind, PersonId};
+use crate::types::{Actor, ChannelId, Citation, FactId, FactKind, Outcome, PersonId};
 use crate::{Error, Result, channel, not_found, trust};
 
 /// Who may recall a fact.
@@ -88,6 +88,8 @@ pub struct Fact {
     /// The instant the fact ends ([`sweep_expired`] removes it); `None`: it stays.
     pub expires: Option<i64>,
     pub delivered: bool,
+    /// How a commitment ended; `None` while it is pending (and on every other kind).
+    pub outcome: Option<Outcome>,
     pub text: String,
     pub retracted: bool,
     pub created_at: i64,
@@ -155,7 +157,7 @@ impl Written {
 }
 
 const COLUMNS: &str = "id, author, audience_kind, audience_ref, kind, about_kind, about_ref, \
-                       due, expires, delivered, text, retracted, created_at";
+                       due, expires, delivered, outcome, text, retracted, created_at";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Fact> {
     Ok(Fact {
@@ -170,6 +172,7 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Fact> {
         due: row.get("due")?,
         expires: row.get("expires")?,
         delivered: row.get("delivered")?,
+        outcome: row.get("outcome")?,
         text: row.get("text")?,
         retracted: row.get("retracted")?,
         created_at: row.get("created_at")?,
@@ -449,6 +452,30 @@ pub fn mark_delivered(conn: &Connection, id: FactId) -> Result<()> {
     Ok(())
 }
 
+/// A commitment ended: brought up, or not. Also takes it out of the due ones.
+pub fn close(conn: &Connection, id: FactId, outcome: Outcome) -> Result<()> {
+    conn.execute(
+        "UPDATE fact SET delivered = 1, outcome = ?2 WHERE id = ?1",
+        (id, outcome),
+    )?;
+    Ok(())
+}
+
+/// Commitments that fell due more than `grace_ms` ago and were never brought up (the
+/// person was away, disabled, or the quiet hours or the quota held every chance) lapse:
+/// they are not brought up late. Returns the ones that lapsed.
+pub fn lapse_overdue(conn: &Connection, now: i64, grace_ms: i64) -> Result<Vec<Fact>> {
+    let overdue = query(
+        conn,
+        "kind = 'commitment' AND retracted = 0 AND delivered = 0 AND due IS NOT NULL AND due <= ?1",
+        [now.saturating_sub(grace_ms)],
+    )?;
+    for f in &overdue {
+        close(conn, f.id, Outcome::Lapsed)?;
+    }
+    Ok(overdue)
+}
+
 /// The drawer's filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Scope {
@@ -636,6 +663,32 @@ mod tests {
         assert_eq!(due_commitments(&w, 10).unwrap()[0].id, f);
         mark_delivered(&w, f).unwrap();
         assert!(due_commitments(&w, 99).unwrap().is_empty());
+    }
+
+    #[test]
+    fn overdue_commitments_lapse_and_a_closed_one_keeps_its_outcome() {
+        let w = world();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let make = |text: &str, due: i64| {
+            let new = NewFact::new(
+                Actor::Person(p("a")),
+                Audience::Participants(c),
+                FactKind::Commitment,
+                text,
+            )
+            .due(due);
+            write(&w, &new, 0).unwrap().id()
+        };
+        let (old, fresh, kept) = (make("old", 10), make("fresh", 90), make("kept", 10));
+        close(&w, kept, Outcome::Kept).unwrap();
+        let lapsed = lapse_overdue(&w, 100, 50).unwrap();
+        assert_eq!(lapsed.iter().map(|f| f.id).collect::<Vec<_>>(), [old]);
+        assert_eq!(get(&w, old).unwrap().outcome, Some(Outcome::Lapsed));
+        assert_eq!(get(&w, fresh).unwrap().outcome, None);
+        assert_eq!(get(&w, kept).unwrap().outcome, Some(Outcome::Kept));
+        // Lapsed is no longer due, and a second pass finds nothing.
+        assert_eq!(due_commitments(&w, 100).unwrap()[0].id, fresh);
+        assert!(lapse_overdue(&w, 100, 50).unwrap().is_empty());
     }
 
     #[test]

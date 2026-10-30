@@ -7,7 +7,7 @@
 //! reaches the opening block of any segment opened that day, and the first turn of a
 //! segment already open when it happened. A seed lets one of them bring it up.
 
-use llm::{Message, Request};
+use llm::{Message, Request, ToolChoice, ToolSpec};
 use serde_json::{Value, json};
 use world::event::{self, Event as DailyEvent};
 use world::fact::{self, Audience, NewFact};
@@ -20,6 +20,7 @@ use crate::diag;
 use crate::dispatch::clean_purpose;
 use crate::error::Result;
 use crate::session::{LogKind, Turn};
+use crate::text::{Names, Wording};
 use crate::view;
 use crate::wrapup_json;
 use api::events::{MessageAdded, WorldChange};
@@ -146,13 +147,146 @@ fn names(v: Option<&Value>) -> Vec<String> {
     }
 }
 
-/// The event in a reply. Extra fields are ignored and optional ones may be missing; only
-/// a title and a text are needed.
-fn parse(reply: &str) -> std::result::Result<Draft, Unreadable> {
+/// The words a corpus labels the parts of an event with, for a reply written as labelled
+/// prose instead of JSON. Each part has alternatives, matched as prefixes: a label may run
+/// on ("People involved (ids)") before its colon.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Labels {
+    title: Vec<String>,
+    text: Vec<String>,
+    persons: Vec<String>,
+    group: Vec<String>,
+    members: Vec<String>,
+    purpose: Vec<String>,
+    talk: Vec<String>,
+}
+
+impl Labels {
+    pub(crate) fn new(w: &Wording, names: &Names) -> Self {
+        let get = |key: &str| {
+            w.get(key)
+                .split('|')
+                .map(|l| w.fill_text(l.trim(), names, &[]).to_ascii_lowercase())
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<_>>()
+        };
+        Self {
+            title: get("events.label.title"),
+            text: get("events.label.text"),
+            persons: get("events.label.persons"),
+            group: get("events.label.group"),
+            members: get("events.label.members"),
+            purpose: get("events.label.purpose"),
+            talk: get("events.label.talk"),
+        }
+    }
+}
+
+/// How far after a label its colon may be, in characters.
+const LABEL_RUN: usize = 24;
+
+/// Where a label stands in `lower` (the text, ASCII-lowercased), and where its body starts:
+/// after the colon that ends the label, on the same line. The first label that has one.
+fn label_at(text_lower: &str, labels: &[String]) -> Option<(usize, usize)> {
+    labels
+        .iter()
+        .flat_map(|l| {
+            text_lower
+                .match_indices(l.as_str())
+                .filter_map(move |(i, _)| {
+                    let after = i + l.len();
+                    let run: String = text_lower[after..]
+                        .chars()
+                        .take_while(|c| *c != '\n')
+                        .take(LABEL_RUN)
+                        .collect();
+                    let colon = run.find([':', '\u{ff1a}'])?;
+                    let width = run[colon..].chars().next().map_or(1, char::len_utf8);
+                    Some((i, after + colon + width))
+                })
+        })
+        .min()
+}
+
+/// The bodies of the labelled parts of `text`, in the order of `parts`; a body runs to
+/// the next label of any of them.
+fn bodies<'a>(text: &'a str, parts: &[&[String]]) -> Vec<Option<&'a str>> {
+    let lower = text.to_ascii_lowercase();
+    let found: Vec<Option<(usize, usize)>> = parts.iter().map(|l| label_at(&lower, l)).collect();
+    found
+        .iter()
+        .map(|f| {
+            let (_, start) = (*f)?;
+            let end = found
+                .iter()
+                .flatten()
+                .map(|(i, _)| *i)
+                .filter(|i| *i >= start)
+                .min()
+                .unwrap_or(text.len());
+            Some(text[start..end].trim())
+        })
+        .collect()
+}
+
+fn listed(body: Option<&str>) -> Vec<String> {
+    body.map(|b| assemble::split_names(b.trim_end_matches(['.', '\u{3002}', ' '])))
+        .unwrap_or_default()
+}
+
+/// The event in a reply written as labelled prose, the last thing tried: a title and a
+/// text, then the people, a gathering and the people to talk to when they are there.
+fn parse_prose(reply: &str, labels: &Labels) -> Option<Draft> {
+    let [title, text, persons, group, talk] = bodies(
+        reply,
+        &[
+            &labels.title,
+            &labels.text,
+            &labels.persons,
+            &labels.group,
+            &labels.talk,
+        ],
+    )[..] else {
+        return None;
+    };
+    let (title, text) = (
+        title.filter(|t| !t.is_empty())?,
+        text.filter(|t| !t.is_empty())?,
+    );
+    let group = group.filter(|g| !g.is_empty()).map(|g| {
+        match bodies(g, &[&labels.members, &labels.purpose])[..] {
+            [None, None] => DraftGroup {
+                members: listed(Some(g)),
+                purpose: None,
+            },
+            [members, purpose] => DraftGroup {
+                members: listed(members),
+                purpose: purpose
+                    .filter(|p| !p.is_empty())
+                    .map(|p| p.trim_end_matches(['\u{ff1b}', ';']).trim().to_owned()),
+            },
+            _ => unreachable!("two parts, two bodies"),
+        }
+    });
+    Some(Draft {
+        title: title.to_owned(),
+        text: text.to_owned(),
+        persons: listed(persons),
+        group,
+        talk: listed(talk),
+    })
+}
+
+/// The event in a reply: a JSON object (the arguments of the `make_event` call are one),
+/// else labelled prose. Extra fields are ignored and optional ones may be missing; only a
+/// title and a text are needed.
+fn parse(reply: &str, labels: &Labels) -> std::result::Result<Draft, Unreadable> {
     if reply.trim().is_empty() {
         return Err(Unreadable::Empty);
     }
-    let doc = object(reply).ok_or(Unreadable::NoJson)?;
+    let Some(doc) = object(reply) else {
+        return parse_prose(reply, labels).ok_or(Unreadable::NoJson);
+    };
     let field = |k: &str| doc.get(k).and_then(Value::as_str).map(str::trim);
     let (Some(title), Some(text)) = (field("title"), field("text")) else {
         return Err(Unreadable::NoTitleOrText);
@@ -345,20 +479,35 @@ impl Agent {
                 ("extra", &extra.join("\n")),
             ],
         );
-        // The endpoint may not enforce the response schema, so an emulating one is shown
-        // the shape in words.
+        let mut request = Request {
+            messages: Vec::new(),
+            ..Request::default()
+        };
         if role.model.emulated_tools() {
+            // The endpoint may not enforce the response schema, so an emulating one is
+            // shown the shape in words.
             let shape = wrapup_json::example(&schema);
             text = format!(
                 "{text}\n\n{}",
                 w.fill("harness.wrapup.shape", &names, &[("shape", &shape)])
             );
+            request.output_schema = Some(schema);
+        } else {
+            // Tool arguments are honoured where a response schema is not.
+            text = format!("{text}\n\n{}", w.fill("harness.event.tool", &names, &[]));
+            request.tools = api::tools::event_tools(&self.corpus.descriptions)
+                .into_iter()
+                .map(|t| ToolSpec {
+                    name: t.name.to_owned(),
+                    description: t.description,
+                    schema: t.parameters,
+                })
+                .collect();
+            if role.profile.wire_api.may_force_tool() && role.forced_tool() {
+                request.tool_choice = ToolChoice::Tool(api::tools::MAKE_EVENT.into());
+            }
         }
-        let request = Request {
-            messages: vec![Message::user(text.trim())],
-            output_schema: Some(schema),
-            ..Request::default()
-        };
+        request.messages = vec![Message::user(text.trim())];
         Ok(Some((
             units.iter().map(|u| u.id.clone()).collect(),
             request,
@@ -393,8 +542,14 @@ impl Agent {
             &self.config.agent.cost,
         )?;
         self.emit_quota()?;
-        let text = answer(&reply);
-        match parse(&text) {
+        let labels = Labels::new(&self.corpus.wording, &names);
+        // The call's arguments when the model made it; else whatever it wrote.
+        let text = reply
+            .tool_calls()
+            .find(|(_, name, _)| *name == api::tools::MAKE_EVENT)
+            .map(|(_, _, args)| args.to_owned())
+            .unwrap_or_else(|| answer(&reply));
+        match parse(&text, &labels) {
             Ok(draft) => Ok(Some(draft)),
             Err(why) => {
                 self.drop_event(why.reason(), &text);
@@ -573,6 +728,10 @@ impl Agent {
 mod tests {
     use super::*;
 
+    fn labels() -> Labels {
+        Labels::new(&Wording::new(&Default::default()), &Names::fixed("", "Ann"))
+    }
+
     #[test]
     fn an_answer_left_in_a_thinking_block_is_read() {
         let doc = r#"{"title": "T", "text": "X"}"#;
@@ -583,7 +742,7 @@ mod tests {
         };
         let thinking = llm::Part::Native(json!({"type": "thinking", "thinking": doc}));
         let only = reply(vec![thinking.clone()]);
-        assert!(parse(&answer(&only)).is_ok());
+        assert!(parse(&answer(&only), &labels()).is_ok());
         let both = reply(vec![thinking, llm::Part::Text("Done.".into())]);
         assert_eq!(answer(&both), "Done.");
     }
@@ -591,28 +750,119 @@ mod tests {
     #[test]
     fn a_reply_is_read_tolerantly() {
         let ok = r#"{"title": "T", "text": "X", "persons": ["a"], "group": null, "talk": []}"#;
-        assert!(parse(ok).is_ok());
-        assert!(parse(&format!("```json\n{ok}\n```")).is_ok());
-        assert!(parse(&format!("Here is the event:\n{ok}")).is_ok());
-        assert!(parse(&format!("Here it is:\n```json\n{ok}\n```\nDone.")).is_ok());
-        assert!(parse(r#"{"title": "T", "text": "X", "extra": 1}"#).is_ok());
+        assert!(parse(ok, &labels()).is_ok());
+        assert!(parse(&format!("```json\n{ok}\n```"), &labels()).is_ok());
+        assert!(parse(&format!("Here is the event:\n{ok}"), &labels()).is_ok());
+        assert!(
+            parse(
+                &format!("Here it is:\n```json\n{ok}\n```\nDone."),
+                &labels()
+            )
+            .is_ok()
+        );
+        assert!(parse(r#"{"title": "T", "text": "X", "extra": 1}"#, &labels()).is_ok());
         let objects = r#"{"title": "T", "text": "X", "persons": [{"id": "a"}, "b"]}"#;
-        assert_eq!(parse(objects).unwrap().persons, ["a", "b"]);
-        assert_eq!(parse(" ").unwrap_err(), Unreadable::Empty);
+        assert_eq!(parse(objects, &labels()).unwrap().persons, ["a", "b"]);
+        assert_eq!(parse(" ", &labels()).unwrap_err(), Unreadable::Empty);
         assert_eq!(
-            parse(r#"{"title": " ", "text": "X", "persons": []}"#).unwrap_err(),
+            parse(r#"{"title": " ", "text": "X", "persons": []}"#, &labels()).unwrap_err(),
             Unreadable::NoTitleOrText
         );
         assert_eq!(
-            parse(r#"{"headline": "T"}"#).unwrap_err(),
+            parse(r#"{"headline": "T"}"#, &labels()).unwrap_err(),
             Unreadable::NoTitleOrText
         );
         assert_eq!(
-            parse("Something happened on deck.").unwrap_err(),
+            parse("Something happened on deck.", &labels()).unwrap_err(),
             Unreadable::NoJson
         );
         let with_group = r#"{"title": "T", "text": "X", "persons": [], "talk": [],
             "group": {"members": ["a", "b"], "purpose": "tea"}}"#;
-        assert_eq!(parse(with_group).unwrap().group.unwrap().members.len(), 2);
+        assert_eq!(
+            parse(with_group, &labels())
+                .unwrap()
+                .group
+                .unwrap()
+                .members
+                .len(),
+            2
+        );
+    }
+
+    /// The corpus's labels for an event written as prose, as escapes.
+    fn owner_labels() -> Labels {
+        let pairs = [
+            ("events.label.title", "\u{6807}\u{9898}"),
+            ("events.label.text", "\u{6b63}\u{6587}"),
+            ("events.label.persons", "\u{7275}\u{6d89}"),
+            ("events.label.group", "\u{805a}\u{4f1a}"),
+            ("events.label.members", "\u{6210}\u{5458}"),
+            ("events.label.purpose", "\u{7531}\u{5934}"),
+            (
+                "events.label.talk",
+                "{user}\u{53ef}\u{4ee5}\u{53bb}\u{804a}\u{804a}\u{7684}\u{4eba}",
+            ),
+        ];
+        let w = Wording::new(
+            &pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        );
+        Labels::new(&w, &Names::fixed("", "alkali"))
+    }
+
+    #[test]
+    fn an_event_written_as_labelled_prose_is_read() {
+        let parts = [
+            "\u{6807}\u{9898}\u{ff1a}\u{5976}\u{916a}\u{706b}\u{9505}\u{6392}\u{73ed}\u{8868}",
+            "\u{6b63}\u{6587}\u{ff1a}\u{5348}\u{996d}\u{65f6}\u{8036}\u{62c9}\u{7aef}\u{7740}\u{5976}\u{916a}\u{706b}\u{9505}\u{95ee}\u{963f}\u{7c73}\u{5a05}\u{ff0c}\u{7f57}\u{5fb7}\u{5c9b}\u{80fd}\u{4e0d}\u{80fd}\u{5728}\u{201c}\u{521a}\u{8fc7}\u{5b8c}\u{7684}\u{8282}\u{201d}\u{548c}\u{201c}\u{4e0b}\u{4e00}\u{4e2a}\u{8282}\u{201d}\u{4e4b}\u{95f4}\u{518d}\u{8865}\u{4e00}\u{987f}\u{3002}\u{963f}\u{7c73}\u{5a05}\u{7b11}\u{7740}\u{8bf4}\u{53ef}\u{4ee5}\u{ff0c}\u{4f46}\u{5f97}\u{7b49}\u{5979}\u{548c}\u{51ef}\u{5c14}\u{5e0c}\u{5148}\u{8ddf}alkali\u{8c08}\u{5b8c}\u{4e8b}\u{3002}",
+            "\u{7275}\u{6d89}\u{7684}\u{4eba}\u{ff1a}\u{8036}\u{62c9}\u{3001}\u{963f}\u{7c73}\u{5a05}\u{3001}\u{51ef}\u{5c14}\u{5e0c}",
+            "\u{805a}\u{4f1a}\u{ff1a}\u{6210}\u{5458}\u{ff1a}\u{8036}\u{62c9}\u{3001}\u{963f}\u{7c73}\u{5a05}\u{ff1b}\u{7531}\u{5934}\u{ff1a}\u{8036}\u{62c9}\u{63d0}\u{8bae}\u{5728}\u{98df}\u{5802}\u{8bd5}\u{5976}\u{916a}\u{706b}\u{9505}\u{ff0c}\u{987a}\u{4fbf}\u{7b49}alkali\u{8c08}\u{5b8c}\u{4e8b}\u{3002}",
+            "alkali\u{53ef}\u{4ee5}\u{53bb}\u{804a}\u{804a}\u{7684}\u{4eba}\u{ff1a}\u{8036}\u{62c9}\u{3001}\u{963f}\u{7c73}\u{5a05}\u{3001}\u{51ef}\u{5c14}\u{5e0c}",
+        ];
+        // As the host's endpoint wrote it: its parts apart by blanks or by lines.
+        for gap in ["   ", "\n", "\n\n"] {
+            let draft = parse(&parts.join(gap), &owner_labels()).unwrap();
+            assert_eq!(
+                draft.title,
+                "\u{5976}\u{916a}\u{706b}\u{9505}\u{6392}\u{73ed}\u{8868}"
+            );
+            assert!(
+                draft.text.starts_with("\u{5348}\u{996d}\u{65f6}"),
+                "{}",
+                draft.text
+            );
+            assert!(
+                draft.text.ends_with("\u{8c08}\u{5b8c}\u{4e8b}\u{3002}"),
+                "{}",
+                draft.text
+            );
+            assert_eq!(draft.persons.len(), 3);
+            assert_eq!(draft.talk.len(), 3);
+            let group = draft.group.unwrap();
+            assert_eq!(
+                group.members,
+                ["\u{8036}\u{62c9}", "\u{963f}\u{7c73}\u{5a05}"]
+            );
+            assert!(
+                group
+                    .purpose
+                    .unwrap()
+                    .starts_with("\u{8036}\u{62c9}\u{63d0}\u{8bae}")
+            );
+        }
+        // A title and no text is nothing; so is prose with no labels at all.
+        assert!(parse("Title: only", &labels()).is_err());
+        assert!(parse("Something happened on deck.", &owner_labels()).is_err());
+        // The default labels read English prose, and a label may run on before its colon.
+        let english = "Title: Tea\nText: A pot was shared.\nPeople involved (ids): a, b\n\
+                       Gathering: Members: a, b; Purpose: tea\nAnn could talk to: a";
+        let draft = parse(english, &labels()).unwrap();
+        assert_eq!(
+            (draft.title.as_str(), draft.persons.len(), draft.talk),
+            ("Tea", 2, vec!["a".to_owned()])
+        );
+        assert_eq!(draft.group.unwrap().purpose.as_deref(), Some("tea"));
     }
 }

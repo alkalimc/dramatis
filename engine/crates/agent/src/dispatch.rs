@@ -594,7 +594,7 @@ impl Agent {
         let Some(me) = turn.speaker.person().cloned() else {
             return Ok(());
         };
-        if turn.shape != world::Shape::Direct || turn.say.is_some() {
+        if !(turn.shape == world::Shape::Direct || turn.promise) || turn.say.is_some() {
             return Ok(());
         }
         let groups: Vec<_> = channel::groups_of(&self.db(), &me)?
@@ -1180,13 +1180,32 @@ impl Agent {
     /// display name, no service lines, nothing from memory, and a disabled person's
     /// lines left out as the other reads leave them out.
     fn read_recent(&self, turn: &mut Turn, r: tools::Recent, names: &Names) -> Result<Outcome> {
-        let id = r.channel.trim();
-        let Some(ch) = id
-            .parse::<i64>()
-            .ok()
-            .and_then(|n| channel::get(&self.db(), ChannelId(n)).ok())
-            .filter(|c| c.deleted_at.is_none())
-        else {
+        let (id, found) = match (r.channel.as_deref(), r.person.as_deref()) {
+            (Some(id), None) => (
+                id.trim(),
+                id.trim()
+                    .parse::<i64>()
+                    .ok()
+                    .and_then(|n| channel::get(&self.db(), ChannelId(n)).ok()),
+            ),
+            (None, Some(who)) => {
+                let who = who.trim();
+                let found = match self.person_named(who, &self.roster()?)? {
+                    Some(p) => channel::find_direct_with(&self.db(), &p)?
+                        .and_then(|c| channel::get(&self.db(), c).ok()),
+                    None => None,
+                };
+                (who, found)
+            }
+            _ => {
+                return Ok(Err(self.refuse(
+                    names,
+                    "harness.error.arguments",
+                    "channel or person",
+                )));
+            }
+        };
+        let Some(ch) = found.filter(|c| c.deleted_at.is_none()) else {
             return Ok(Err(self.refuse(names, "harness.error.not_found", id)));
         };
         if ch.is_host_channel() || ch.id == turn.channel {

@@ -50,6 +50,7 @@ impl Engine {
             }),
             due: f.due.map(|ms| convert::ts(ms, offset)),
             delivered: f.delivered,
+            outcome: f.outcome.map(convert::fact_outcome),
             text: f.text.clone(),
             retracted: f.retracted,
             created_at: convert::ts(f.created_at, offset),

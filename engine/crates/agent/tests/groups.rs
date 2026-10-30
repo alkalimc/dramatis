@@ -106,6 +106,46 @@ async fn offers_made_inside_a_group_never_name_people_already_in_it() {
 }
 
 #[tokio::test]
+async fn a_renamed_or_described_group_tells_its_members_in_the_log_and_the_chat() {
+    use api::port::GroupChange::{Described, Renamed};
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    // Open the group's log with a turn.
+    e.fake.push([say("Hello.")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    e.agent
+        .group_changed(g, Renamed(Some("Night shift".into())))
+        .await
+        .unwrap();
+    e.agent
+        .group_changed(g, Described(Some("who minds the kettle".into())))
+        .await
+        .unwrap();
+    e.agent.group_changed(g, Renamed(None)).await.unwrap();
+    e.agent.group_changed(g, Described(None)).await.unwrap();
+    let log = log_bytes(&e.agent, g);
+    for line in [
+        "Doc changed the group's name to Night shift.",
+        "Doc changed the group's description to who minds the kettle.",
+        "Doc removed the group's name.",
+        "Doc removed the group's description.",
+    ] {
+        assert!(log.contains(line), "{line}\n{log}");
+    }
+    // The user sees the same fixed lines as service lines, and no model was called.
+    let shown: Vec<_> = e
+        .agent
+        .history(g, None, 20)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.text.starts_with("Doc "))
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(shown.len(), 4, "{shown:?}");
+    assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
 async fn someone_added_to_a_group_reads_what_was_said_before() {
     let e = env(WireApi::Chat);
     let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();

@@ -630,6 +630,13 @@ export type FactList = {
 	items: FactView[],
 };
 
+/**  How a commitment ended. */
+export type FactOutcome = 
+/**  It was brought up when due. */
+"kept" | 
+/**  It expired before anyone could bring it up. */
+"lapsed";
+
 /**  The world drawer's filter chips. */
 export type FactScope = "all" | "world" | "own" | "commitment" | "hurt" | "deleted";
 
@@ -641,6 +648,8 @@ export type FactView = {
 	about: About | null,
 	due: Timestamp | null,
 	delivered: boolean,
+	/**  How a commitment ended; none while it is pending. */
+	outcome: FactOutcome | null,
 	text: string,
 	retracted: boolean,
 	created_at: Timestamp,

@@ -403,6 +403,16 @@ impl AgentPort for Port {
         Ok(agent.members_changed(ch, &ids(joined), &ids(left)).await?)
     }
 
+    async fn group_changed(
+        &self,
+        channel: ChannelId,
+        what: api::port::GroupChange,
+    ) -> ApiResult<()> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        Ok(agent.group_changed(ch, what).await?)
+    }
+
     fn set_endpoints(&self, endpoints: &Endpoints) {
         *self.0.endpoints.lock().unwrap_or_else(|e| e.into_inner()) = endpoints.clone();
         if let Some(a) = self.0.built() {

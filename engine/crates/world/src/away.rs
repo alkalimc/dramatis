@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::clock::Now;
 use crate::params::Params;
 use crate::seed::Slots;
-use crate::types::Actor;
+use crate::types::{Actor, Outcome};
 use crate::{Result, event, fact, settings};
 
 /// Setting: the instant away mode was turned on; absent when it is off.
@@ -95,10 +95,13 @@ pub fn end(conn: &Connection, now: Now, params: &Params) -> Result<Option<Vec<St
         if f.due.is_none_or(|d| d <= since) {
             continue;
         }
-        fact::mark_delivered(conn, f.id)?;
+        // The user's and the host's are told on return and kept; a person could not bring
+        // theirs up while the user was away.
         if f.author != Actor::Host && f.author != Actor::User {
+            fact::close(conn, f.id, Outcome::Lapsed)?;
             continue;
         }
+        fact::close(conn, f.id, Outcome::Kept)?;
         said.push(f.text);
     }
     settings::unset(conn, AWAY)?;

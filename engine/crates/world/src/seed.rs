@@ -18,7 +18,7 @@ use crate::fact::{self, About, Audience};
 use crate::params::{Pace, QuietHours, Seed as SeedParams, Session as SessionParams};
 use crate::quota::{self, Band};
 use crate::session::{self, Budget, Cause};
-use crate::types::{ChannelId, FactId, FactKind, MessageId, Mode, PersonId};
+use crate::types::{ChannelId, FactId, FactKind, MessageId, Mode, Outcome, PersonId};
 use crate::{Result, away, bond, message, settings};
 
 /// What a seed is, with what it points at.
@@ -493,6 +493,7 @@ pub fn plan(
     if away::is_away(conn)? {
         return Ok(Planned::Held(Held::Away));
     }
+    fact::lapse_overdue(conn, now.ms, limits.seed.lapse_ms())?;
     let all = candidates(conn, occasion, now, limits.pace)?;
     if all.is_empty() {
         return Ok(Planned::Held(Held::NoSeed));
@@ -566,7 +567,8 @@ pub fn delivered(conn: &Connection, opening: &Opening, message: MessageId, now: 
     )?;
     let cause = match opening.kind {
         SeedKind::Commitment(f) => {
-            fact::mark_delivered(conn, f)?;
+            // The person opened with it as the reason: that is keeping it.
+            fact::close(conn, f, Outcome::Kept)?;
             Cause::Commitment
         }
         _ => Cause::Opening,

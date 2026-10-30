@@ -256,13 +256,46 @@ pub struct Birthdays {
     pub date: Option<String>,
 }
 
-/// Read the last few lines of one conversation, by the id `list_channels` shows. No
-/// memories are included.
+/// Read the last few lines of one conversation, by the id `list_channels` shows, or the
+/// user's direct chat with a person, by name. Use it before saying what happened or in what
+/// order. No memories are included. Give exactly one of `channel` and `person`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recent {
     /// The conversation id, as listed.
-    pub channel: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    /// A person's name or roster id: reads the user's direct chat with them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<String>,
+}
+
+// ---- daily event ----
+
+/// Make up one small happening of the day, for the user to hear about. Everyday and small,
+/// told in two to four sentences, set in the world as it is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MakeEvent {
+    /// A short title.
+    pub title: String,
+    /// Two to four sentences.
+    pub text: String,
+    /// Ids of the people it involves, one to three.
+    pub persons: Vec<String>,
+    /// A gathering the user could join, or null.
+    pub group: Option<EventGroup>,
+    /// Ids of people the user might talk to about it.
+    pub talk: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EventGroup {
+    /// Ids of the people who would gather.
+    pub members: Vec<String>,
+    /// Why they gather, a few words.
+    pub purpose: String,
 }
 
 // ---- dispatch ----
@@ -449,6 +482,15 @@ pub fn host_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
     ]
 }
 
+/// The name of the daily-event tool.
+pub const MAKE_EVENT: &str = "make_event";
+
+/// The one tool of the daily-event request, for hosts whose endpoint calls tools natively
+/// (tool arguments are honoured where a response schema is not).
+pub fn event_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
+    vec![spec::<MakeEvent>("tool.event", "make_event", overrides)]
+}
+
 /// The `tools` array in the request shape of the given wire API.
 pub fn to_wire(tools: &[ToolSpec], wire: WireApi) -> Value {
     let mut out = Value::Array(
@@ -490,6 +532,7 @@ mod tests {
         for t in shared_tools(&Descriptions::new())
             .iter()
             .chain(&host_tools(&Descriptions::new()))
+            .chain(&event_tools(&Descriptions::new()))
         {
             let props = t.parameters["properties"].as_object().unwrap();
             for forbidden in ["as_person", "audience", "path", "note_path", "turns_left"] {

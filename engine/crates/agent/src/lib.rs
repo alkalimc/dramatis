@@ -15,6 +15,7 @@ pub mod endpoint;
 pub mod error;
 mod events;
 mod flows;
+mod leak;
 pub mod meter;
 pub mod params;
 pub mod persona;

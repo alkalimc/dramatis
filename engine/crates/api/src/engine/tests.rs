@@ -174,6 +174,13 @@ impl AgentPort for Spy {
         ));
         Ok(())
     }
+    async fn group_changed(&self, c: ChannelId, what: crate::port::GroupChange) -> ApiResult<()> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("changed {} {what:?}", c.0));
+        Ok(())
+    }
     async fn found_opened(&self, c: ChannelId, by: Option<PersonId>, t: String) -> ApiResult<()> {
         let by = by.map_or("host".to_string(), |b| b.0);
         self.calls
@@ -1653,6 +1660,25 @@ async fn channels_carry_a_name_an_avatar_and_an_archive_flag() {
     e.rename_channel(g.clone(), Some(" Night shift ".into()))
         .await
         .unwrap();
+    // The members are told once per real change, in groups only.
+    let told = |r: &Rig| -> Vec<String> {
+        r.spy
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.starts_with("changed"))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        told(&r),
+        [format!("changed {} Renamed(Some(\"Night shift\"))", g.0)]
+    );
+    e.rename_channel(g.clone(), Some("Night shift".into()))
+        .await
+        .unwrap();
+    assert_eq!(told(&r).len(), 1, "an unchanged name tells nobody");
     let file = e
         .set_channel_avatar(g.clone(), Some(png_part(2)))
         .await
@@ -1682,6 +1708,10 @@ async fn channels_carry_a_name_an_avatar_and_an_archive_flag() {
     assert!(!row(e).archived);
 
     e.rename_channel(g.clone(), None).await.unwrap();
+    assert_eq!(
+        told(&r).last().map(String::as_str),
+        Some(format!("changed {} Renamed(None)", g.0).as_str())
+    );
     assert_eq!(e.set_channel_avatar(g.clone(), None).await.unwrap(), None);
     let c = row(e);
     assert!(c.name.is_none() && c.avatar.is_none());

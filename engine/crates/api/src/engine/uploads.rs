@@ -92,14 +92,25 @@ impl Engine {
         self.user_avatar_impl().await
     }
 
-    pub(crate) fn rename_channel_impl(
+    pub(crate) async fn rename_channel_impl(
         &self,
         ch: &ChannelId,
         name: Option<String>,
     ) -> ApiResult<()> {
-        channel::set_name(&self.w(), convert::world_channel(ch)?, name.as_deref())
-            .map_err(world_err)?;
+        let id = convert::world_channel(ch)?;
+        let (group, before) = {
+            let found = channel::get(&self.w(), id).map_err(world_err)?;
+            (found.kind == world::ChannelKind::Group, found.name)
+        };
+        channel::set_name(&self.w(), id, name.as_deref()).map_err(world_err)?;
+        let after = channel::get(&self.w(), id).map_err(world_err)?.name;
         self.changed(vec![WorldChange::Channel { id: ch.clone() }]);
+        if group && before != after {
+            self.ports
+                .agent
+                .group_changed(ch.clone(), crate::port::GroupChange::Renamed(after))
+                .await?;
+        }
         Ok(())
     }
 

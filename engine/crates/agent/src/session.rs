@@ -28,6 +28,7 @@ use crate::assemble::{self, Ctx, Member};
 use crate::diag;
 use crate::endpoint::ChatRole;
 use crate::error::{Error, Result};
+use crate::leak::Leaks;
 use crate::meter;
 use crate::persona;
 use crate::request::{self, Call, Image};
@@ -69,9 +70,6 @@ pub(crate) struct Turn {
     pub activity: Option<ActivityState>,
     /// Names the reply's closing hand-off line listed (group replies only).
     pub hand_off: Vec<String>,
-    /// This turn's person has no tool list (emulated tools), so a proposal to the host is a
-    /// closing line of the reply.
-    pub proposing: bool,
     /// The retrieved passages the turn's entry carries, so a second try can leave them out.
     pub material: String,
     /// A line this turn's person is to post in a group, once the turn is over: the group
@@ -79,6 +77,9 @@ pub(crate) struct Turn {
     pub say: Option<(ChannelId, String)>,
     /// `profile/model` of the last call, for the diagnostics log.
     pub model: String,
+    /// A person's opening for a promise that fell due: the person may act on it within
+    /// their means, a line in a group they are in included.
+    pub promise: bool,
     /// A reminder of the host's own started this turn: it may post in a group, as the user
     /// asked for when setting it.
     pub reminder: bool,
@@ -102,10 +103,10 @@ impl Turn {
             wrapped: None,
             activity: None,
             hand_off: Vec::new(),
-            proposing: false,
             material: String::new(),
             say: None,
             model: String::new(),
+            promise: false,
             reminder: false,
         }
     }
@@ -259,6 +260,7 @@ impl Agent {
                     recent: &recent,
                     groups: None,
                     host_here: None,
+                    here: Vec::new(),
                 },
             );
             return Ok([a, String::new(), c_block]);
@@ -372,6 +374,15 @@ impl Agent {
                 recent: &recent,
                 groups,
                 host_here: (c.kind == ChannelKind::Group).then(|| c.has(&Actor::Host)),
+                here: if c.kind == ChannelKind::Group {
+                    let mut here = names_of.clone();
+                    if c.has(&Actor::Host) {
+                        here.push(self.corpus.host_name.clone());
+                    }
+                    here
+                } else {
+                    Vec::new()
+                },
             },
         );
         Ok([a, b, c_block])
@@ -657,7 +668,6 @@ impl Agent {
                 turn.shape,
                 Shape::Direct | Shape::Group | Shape::Interject | Shape::Opening
             );
-        turn.proposing = proposing;
         if proposing {
             shape.tools.clear();
         }
@@ -700,6 +710,7 @@ impl Agent {
             })
         };
         let mut req = build(items)?;
+        let leaks = Leaks::new(&self.corpus.wording, &self.corpus.placeholder);
         let mut retried = false;
         let (reply, refused) = loop {
             let mut events = match self.llm.stream(&ep, &req).await {
@@ -708,15 +719,15 @@ impl Agent {
             };
             let mut done = None;
             let mut failure = None;
-            let mut streamed = false;
             // Text that may still turn out to be a canned refusal is held back, so a
             // refusal never reaches the screen.
             let mut held = String::new();
             let mut holding = true;
-            // A group reply's trailing hand-off line, held back until it is known not to be.
-            let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), proposing);
+            // Closing lines, and lines that may be the harness's own text, are held back
+            // until it is known they are not.
+            let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group());
             let mark_list = marks.list();
-            let mut tail = String::new();
+            let mut hold = Holdback::default();
             while let Some(event) = events.next().await {
                 match event {
                     Ok(LlmEvent::TextDelta(delta)) if !turn.wrapup => {
@@ -725,10 +736,10 @@ impl Agent {
                             if assemble::refusal(&held, self.corpus.cjk) == assemble::Refusal::No {
                                 holding = false;
                                 let all = std::mem::take(&mut held);
-                                self.stream_text(turn, &mut streamed, &mut tail, &mark_list, all)?;
+                                self.stream_text(turn, &mut hold, &leaks, &mark_list, all)?;
                             }
                         } else {
-                            self.stream_text(turn, &mut streamed, &mut tail, &mark_list, delta)?;
+                            self.stream_text(turn, &mut hold, &leaks, &mark_list, delta)?;
                         }
                     }
                     Ok(LlmEvent::Done(r)) => done = Some(r),
@@ -764,12 +775,21 @@ impl Agent {
             let refused = reply.tool_calls().next().is_none()
                 && assemble::refusal(&reply.text(), self.corpus.cjk) == assemble::Refusal::Is;
             if !refused && !held.is_empty() {
-                self.stream_text(turn, &mut streamed, &mut tail, &mark_list, held)?;
+                self.stream_text(turn, &mut hold, &leaks, &mark_list, held)?;
             }
-            // What is still held at the end is the closing line itself, or a start of
-            // speech that only looked like one.
-            if !refused && !tail.is_empty() && assemble::split_closing(&tail, marks).text == tail {
-                self.stream_delta(turn, &mut streamed, std::mem::take(&mut tail))?;
+            // What is still held at the end is the closing line itself, harness text the
+            // reply ran on into, or a start of speech that only looked like one.
+            if !refused && !hold.tail.is_empty() {
+                let after = hold.streamed || !turn.text.is_empty();
+                if let Some(at) = leaks.find(&hold.tail, after, hold.mid, &mark_list) {
+                    hold.tail.truncate(at);
+                }
+                if !hold.tail.is_empty()
+                    && assemble::split_closing(&hold.tail, marks).text == hold.tail
+                {
+                    let rest = std::mem::take(&mut hold.tail);
+                    self.stream_delta(turn, &mut hold.streamed, rest)?;
+                }
             }
             if refused {
                 self.diagnose(turn, "refused", &reply.text());
@@ -786,6 +806,11 @@ impl Agent {
                 continue;
             }
             break (reply, refused);
+        };
+        let reply = if turn.wrapup {
+            reply
+        } else {
+            self.cut_leak(turn, &leaks, reply)
         };
         let reply = if structured {
             adopt_json_call(reply)
@@ -882,25 +907,48 @@ impl Agent {
         self.emit_quota()
     }
 
+    /// Cut a reply where it starts reproducing harness text, so neither the log nor the
+    /// message keeps it. What went is written to the diagnostics log.
+    fn cut_leak(&self, turn: &Turn, leaks: &Leaks, mut reply: Response) -> Response {
+        let full = reply.text();
+        let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group());
+        let Some(at) = leaks.find(&full, false, false, &marks.list()) else {
+            return reply;
+        };
+        self.diagnose(turn, "leak cut", &full[at..]);
+        let mut seen = 0;
+        reply.parts.retain_mut(|part| {
+            let Part::Text(t) = part else { return true };
+            let keep = at.saturating_sub(seen).min(t.len());
+            seen += t.len();
+            t.truncate(keep);
+            !t.is_empty()
+        });
+        reply
+    }
+
     /// Show a piece of a reply as it arrives, keeping back trailing lines that are or may
-    /// become closing lines. With no marker it passes straight through.
+    /// become closing lines, and any that is or may become the harness's own text (what
+    /// follows that is never shown).
     fn stream_text(
         &self,
         turn: &mut Turn,
-        streamed: &mut bool,
-        tail: &mut String,
+        hold: &mut Holdback,
+        leaks: &Leaks,
         marks: &[&str],
         delta: String,
     ) -> Result<()> {
-        if marks.is_empty() {
-            return self.stream_delta(turn, streamed, delta);
-        }
-        tail.push_str(&delta);
-        let n = assemble::shown_len(tail, marks);
+        hold.tail.push_str(&delta);
+        let after = hold.streamed || !turn.text.is_empty();
+        let upto = leaks
+            .hold_from(&hold.tail, after, hold.mid, marks)
+            .unwrap_or(hold.tail.len());
+        let n = assemble::shown_len(&hold.tail[..upto], marks);
         if n > 0 {
-            let rest = tail.split_off(n);
-            let shown = std::mem::replace(tail, rest);
-            self.stream_delta(turn, streamed, shown)?;
+            let rest = hold.tail.split_off(n);
+            let shown = std::mem::replace(&mut hold.tail, rest);
+            hold.mid = !shown.ends_with('\n');
+            self.stream_delta(turn, &mut hold.streamed, shown)?;
         }
         Ok(())
     }
@@ -1147,14 +1195,16 @@ impl Agent {
             turn.actions.clear();
             return Ok(());
         }
-        let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), turn.proposing);
+        let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group());
         let closing = assemble::split_closing(&turn.text, marks);
         turn.text = closing.text.clone();
         turn.hand_off = closing.hand_off.clone();
         if let Some((group, words)) = &closing.say {
             self.plan_say(turn, group, words)?;
         }
-        if turn.proposing && (closing.find.is_some() || closing.group.is_some()) {
+        // Whatever the endpoint: a log opened where tools were emulated may be continued
+        // where they are not, and a line written is an offer either way.
+        if closing.find.is_some() || closing.group.is_some() {
             self.propose(turn, closing)?;
         }
         if turn.in_group() {
@@ -1199,6 +1249,17 @@ impl Agent {
         turn.message = Some(id);
         Ok(())
     }
+}
+
+/// What a streamed reply still holds back, and where the shown part stands.
+#[derive(Default)]
+struct Holdback {
+    /// Not shown yet.
+    tail: String,
+    /// Whether anything was shown for this reply.
+    streamed: bool,
+    /// Whether what was shown ended inside a line.
+    mid: bool,
 }
 
 /// A segment as a request is built from it.

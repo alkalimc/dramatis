@@ -52,7 +52,7 @@ fn block_a_with(ctx: &Ctx<'_>, rules: &str, group: bool, proposing: bool) -> Str
         parts.push(ctx.fill("harness.next", &[("mark", hand_off_mark(ctx.wording))]));
     }
     if proposing {
-        let marks = closing_marks(ctx.wording, false, true);
+        let marks = closing_marks(ctx.wording, false);
         parts.push(ctx.fill(
             "harness.propose",
             &[("find", marks.find), ("group", marks.group)],
@@ -197,6 +197,8 @@ pub struct Opening<'a> {
     pub groups: Option<Groups<'a>>,
     /// In a group: whether the host is a member. `None` elsewhere.
     pub host_here: Option<bool>,
+    /// In a group: who is in it besides the user, the host included. Empty elsewhere.
+    pub here: Vec<String>,
 }
 
 /// A person's groups, as block C lists them.
@@ -227,6 +229,10 @@ pub fn block_c(ctx: &Ctx<'_>, o: &Opening<'_>) -> String {
     }
     if let Some(t) = o.topic.filter(|t| !t.trim().is_empty()) {
         parts.push(ctx.fill("harness.topic", &[("topic", t.trim())]));
+    }
+    if !o.here.is_empty() {
+        let list = o.here.join(ctx.wording.get("list.separator"));
+        parts.push(ctx.fill("harness.here", &[("list", &list)]));
     }
     match o.host_here {
         Some(true) => parts.push(ctx.fill("harness.host_here", &[])),
@@ -439,25 +445,19 @@ impl<'a> Marks<'a> {
     }
 }
 
-/// The marks for a turn: the hand-off mark in a group, the proposal marks where the
-/// person's tools are emulated, and there the say mark in a direct chat.
-pub fn closing_marks(wording: &Wording, group: bool, proposing: bool) -> Marks<'_> {
+/// The marks for a turn: the hand-off mark in a group, the proposal marks, and in a direct
+/// chat the say mark. They are recognised whether or not this turn's endpoint emulates
+/// tools, since a log opened on one may be continued on another and a line written is
+/// never speech.
+pub fn closing_marks(wording: &Wording, group: bool) -> Marks<'_> {
     Marks {
         hand_off: if group { hand_off_mark(wording) } else { "" },
-        find: if proposing {
-            wording.get("harness.find_mark").trim()
-        } else {
+        find: wording.get("harness.find_mark").trim(),
+        group: wording.get("harness.group_mark").trim(),
+        say: if group {
             ""
-        },
-        group: if proposing {
-            wording.get("harness.group_mark").trim()
         } else {
-            ""
-        },
-        say: if proposing && !group {
             wording.get("harness.say_mark").trim()
-        } else {
-            ""
         },
     }
 }
@@ -503,6 +503,11 @@ fn after_mark<'a>(line: &'a str, mark: &str) -> Option<&'a str> {
         Lead::Full(rest) => Some(rest),
         _ => None,
     }
+}
+
+/// Whether a line starts with `mark`, tolerating the same variations as a closing line.
+pub(crate) fn starts_with_mark(line: &str, mark: &str) -> bool {
+    after_mark(line, mark).is_some()
 }
 
 /// A reply without its last closing line that starts with `mark`, and what follows the
@@ -934,7 +939,7 @@ mod tests {
     #[test]
     fn closing_proposal_lines_are_split_off() {
         let w = Wording::new(&BTreeMap::new());
-        let marks = closing_marks(&w, true, true);
+        let marks = closing_marks(&w, true);
         let (find, group, hand) = (marks.find, marks.group, marks.hand_off);
         let c = split_closing(&format!("Hi.\n{find} forge steel\n"), marks);
         assert_eq!(c.text, "Hi.");
@@ -986,9 +991,13 @@ mod tests {
                 (body.as_str(), None, None)
             );
         }
-        // Off when the tools are native.
-        let off = closing_marks(&w, false, false);
-        assert_eq!(split_closing(&format!("a\n{find} x"), off).find, None);
+        // The find line is recognised in a direct chat too; the say line only there.
+        let direct = closing_marks(&w, false);
+        assert_eq!(
+            split_closing(&format!("a\n{find} x"), direct).find,
+            Some(vec!["x".to_owned()])
+        );
+        assert!(direct.hand_off.is_empty() && marks.say.is_empty() && !direct.say.is_empty());
     }
 
     #[test]
@@ -1031,7 +1040,7 @@ mod tests {
     #[test]
     fn the_stream_holds_back_proposal_lines_too() {
         let w = Wording::new(&BTreeMap::new());
-        let marks = closing_marks(&w, true, true).list();
+        let marks = closing_marks(&w, true).list();
         let (find, hand) = (marks[1], marks[0]);
         let body = format!("Hello\n{hand} Ann\n{find} x");
         assert_eq!(shown_len(&body, &marks), 6);

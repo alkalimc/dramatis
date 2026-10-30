@@ -206,6 +206,16 @@ text_enum! {
 }
 
 text_enum! {
+    /// How a commitment ended.
+    Outcome {
+        /// It was brought up when due.
+        Kept = "kept",
+        /// It expired before anyone could bring it up.
+        Lapsed = "lapsed",
+    }
+}
+
+text_enum! {
     /// The call shapes usage is recorded under.
     Shape {
         Direct = "direct",

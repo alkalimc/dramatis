@@ -128,6 +128,13 @@ pub fn fact_kind(k: world::FactKind) -> v::FactKind {
     }
 }
 
+pub fn fact_outcome(o: world::Outcome) -> v::FactOutcome {
+    match o {
+        world::Outcome::Kept => v::FactOutcome::Kept,
+        world::Outcome::Lapsed => v::FactOutcome::Lapsed,
+    }
+}
+
 pub fn fact_scope(s: v::FactScope) -> world::fact::Scope {
     use world::fact::Scope;
     match s {

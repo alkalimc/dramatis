@@ -718,7 +718,7 @@ impl Api for Engine {
         self.remove_member_impl(&channel, &person).await
     }
     async fn rename_channel(&self, channel: ChannelId, name: Option<String>) -> ApiResult<()> {
-        self.rename_channel_impl(&channel, name)
+        self.rename_channel_impl(&channel, name).await
     }
     async fn set_channel_avatar(
         &self,

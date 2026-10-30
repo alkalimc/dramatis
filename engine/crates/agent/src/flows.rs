@@ -631,6 +631,38 @@ impl Agent {
         Ok(())
     }
 
+    /// A group's name or description changed (the world already holds the new value): a
+    /// service line in the group and a line in its log, so the members know. Fixed wording,
+    /// no model call. Whoever edits a group calls this once per edit, through the engine's
+    /// agent port (`AgentPort::group_changed`).
+    pub async fn group_changed(&self, ch: ChannelId, what: api::port::GroupChange) -> Result<()> {
+        use api::port::GroupChange::{Described, Renamed};
+        let _turn = self.lock_channel(ch).await;
+        let seg = world::log::current(&self.db(), ch)?.map(|s| s.id);
+        let names = match seg {
+            Some(s) => self.segment_names(s)?,
+            None => self.names_now(&self.db())?,
+        };
+        let (key, value) = match &what {
+            Renamed(Some(v)) => ("harness.group.renamed", v.as_str()),
+            Renamed(None) => ("harness.group.unnamed", ""),
+            Described(Some(v)) => ("harness.group.described", v.as_str()),
+            Described(None) => ("harness.group.undescribed", ""),
+        };
+        let text = self
+            .corpus
+            .wording
+            .fill(key, &names, &[("text", value.trim())]);
+        if let Some(seg) = seg {
+            self.append_user(seg, &assemble::entry(&[text.as_str()]), None)?;
+        }
+        self.service_line(ch, &text)?;
+        self.changed(vec![WorldChange::Channel {
+            id: view::channel_id(ch),
+        }]);
+        Ok(())
+    }
+
     /// A line only the user sees, in the user's voice, marked as a service line.
     fn service_line(&self, ch: ChannelId, text: &str) -> Result<()> {
         let meta = api::meta::MessageMeta {
@@ -1658,6 +1690,7 @@ impl Agent {
         let now = self.now();
         let due: Vec<_> = {
             let conn = self.db();
+            fact::lapse_overdue(&conn, now.ms, self.config.world.seed.lapse_ms())?;
             fact::due_commitments(&conn, now.ms)?
                 .into_iter()
                 .filter(|f| f.author == Actor::Host)
@@ -1680,6 +1713,12 @@ impl Agent {
             fact::mark_delivered(&self.db(), f.id)?;
             let ran = self.remind(ch, &f.text).await;
             drop(guard);
+            let outcome = if ran.is_ok() {
+                world::Outcome::Kept
+            } else {
+                world::Outcome::Lapsed
+            };
+            fact::close(&self.db(), f.id, outcome)?;
             if let Err(e) = ran {
                 self.host_line("host.reminder_failed", &[("text", &f.text)])?;
                 drop(e);
@@ -1980,15 +2019,25 @@ impl Agent {
         Ok(lines.join("\n"))
     }
 
-    /// Run a planned opening. Returns whether he spoke (the seed is then used).
+    /// Run a planned opening. Returns whether he spoke (the seed is then used). A line he
+    /// was to post in a group for a promise goes out once his own chat is free.
     async fn opening(&self, o: &Opening) -> Result<bool> {
+        let (spoke, said) = self.opening_turn(o).await?;
+        if let Some((person, group, words)) = said {
+            self.say_in_group(&person, group, &words).await?;
+        }
+        Ok(spoke)
+    }
+
+    async fn opening_turn(&self, o: &Opening) -> Result<(bool, Said)> {
+        let none = |spoke| Ok((spoke, None));
         if !self.has_persona(o.person.as_str()) || !self.decide(CallKind::Opening)?.allowed() {
-            return Ok(false);
+            return none(false);
         }
         // A channel in the middle of a turn is not interrupted: the seed stays queued and
         // is planned again at the next occasion.
         let Some(_turn) = self.try_lock_channel(o.channel) else {
-            return Ok(false);
+            return none(false);
         };
         let seg = self.ensure_segment(o.channel, None).await?;
         let names = self.segment_names(seg)?;
@@ -2026,6 +2075,7 @@ impl Agent {
             found
         };
         let mut turn = Turn::new(o.channel, Actor::Person(o.person.clone()), Shape::Opening);
+        turn.promise = matches!(o.kind, SeedKind::Commitment(_));
         if !units.is_empty() {
             let mut seen: HashSet<String> = self.seen(seg)?;
             let m = assemble::units(&self.ctx(&names), &units, &mut seen);
@@ -2041,7 +2091,7 @@ impl Agent {
         self.run(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         let Some(msg) = turn.message else {
-            return Ok(false);
+            return none(false);
         };
         let now = self.now();
         seed::delivered(&self.db(), o, msg, now.ms)?;
@@ -2055,7 +2105,12 @@ impl Agent {
             }));
         }
         self.changed(vec![WorldChange::Digest]);
-        Ok(true)
+        Ok((
+            true,
+            turn.say
+                .take()
+                .map(|(group, words)| (o.person.clone(), group, words)),
+        ))
     }
 
     /// Whether everyone who reads the channel's log may recall a fact.

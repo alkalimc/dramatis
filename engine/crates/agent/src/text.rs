@@ -207,6 +207,19 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.joined", "{name} joins the conversation."),
     ("harness.left", "{name} leaves the conversation."),
+    (
+        "harness.group.renamed",
+        "{user} changed the group's name to {text}.",
+    ),
+    ("harness.group.unnamed", "{user} removed the group's name."),
+    (
+        "harness.group.described",
+        "{user} changed the group's description to {text}.",
+    ),
+    (
+        "harness.group.undescribed",
+        "{user} removed the group's description.",
+    ),
     ("list.separator", ", "),
     (
         "harness.groups",
@@ -250,7 +263,11 @@ const DEFAULTS: &[(&str, &str)] = &[
          into each other; {user} did not come looking for {name}. A scene line, if there is \
          one, shows that.",
     ),
-    ("harness.opening.commitment", "A promise is due: {text}"),
+    (
+        "harness.opening.commitment",
+        "A promise is due: {text} Act on it within your own means: say it to {user}, or ask \
+         {user} for what you need.",
+    ),
     ("harness.opening.birthday", "Today is {user}'s birthday."),
     (
         "harness.opening.visit",
@@ -288,6 +305,14 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.event.recent",
         "Topics of the groups {user} started lately:\n{recent}",
     ),
+    ("harness.event.tool", "Give it through the make_event call."),
+    ("events.label.title", "Title"),
+    ("events.label.text", "Text"),
+    ("events.label.persons", "People involved|Involves"),
+    ("events.label.group", "Gathering"),
+    ("events.label.members", "Members"),
+    ("events.label.purpose", "Purpose"),
+    ("events.label.talk", "{user} could talk to"),
     ("events.fact", "{title}: {text}"),
     (
         "events.topics",
@@ -434,8 +459,16 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.host_away",
         "{host} is not in this group. What {host} would answer comes from {host} alone, so \
-         nobody here voices it or makes it up. To have {host} here, offer {user} {host} among \
-         the colleagues to bring in.",
+         nobody here voices it or makes it up. Nobody here can bring {host} in, connect it, \
+         give it access or pass its answers on; saying so would be made up. When {user} \
+         asks for {host} to join, put {host}'s name among the colleagues you offer {user} \
+         to bring in, as with any colleague, and say you are offering it.",
+    ),
+    (
+        "harness.here",
+        "In this group with {user}: {list}. They are already here, so none of them is \
+         suggested, invited or pointed to. What happened here, and in what order, is \
+         answered from what was said in this conversation.",
     ),
     ("harness.offer_only", "Here is what I suggest."),
     (
@@ -536,7 +569,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.guide.recent",
-        "When {user} asks about a conversation, you can read its recent lines with recent, by the id list_channels shows.",
+        "Before you say what happened, when, or in what order, read the conversation it concerns with recent (by the id list_channels shows, or by a person's name for {user}'s direct chat with them), or look it up with search, and answer from that.",
     ),
     ("harness.done", "Done."),
     (

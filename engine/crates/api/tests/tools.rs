@@ -8,17 +8,22 @@
 use std::path::PathBuf;
 
 use api::endpoints::WireApi;
-use api::tools::{Descriptions, host_tools, shared_tools, to_wire};
+use api::tools::{Descriptions, event_tools, host_tools, shared_tools, to_wire};
 use serde_json::json;
 
 fn render() -> String {
     let none = Descriptions::new();
-    let (shared, host) = (shared_tools(&none), host_tools(&none));
+    let (shared, host, event) = (shared_tools(&none), host_tools(&none), event_tools(&none));
     let mut all = json!({
         "shared": {
             "chat": to_wire(&shared, WireApi::Chat),
             "responses": to_wire(&shared, WireApi::Responses),
             "messages": to_wire(&shared, WireApi::Messages),
+        },
+        "event": {
+            "chat": to_wire(&event, WireApi::Chat),
+            "responses": to_wire(&event, WireApi::Responses),
+            "messages": to_wire(&event, WireApi::Messages),
         },
         "host": {
             "chat": to_wire(&host, WireApi::Chat),

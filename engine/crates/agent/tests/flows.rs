@@ -1880,7 +1880,82 @@ async fn a_due_commitment_opens_on_its_own_log_even_for_a_frozen_person() {
     assert_eq!(meter(&e.agent)[0].0, "opening");
     let due = e.agent.with_world(|w| fact::all(w, false).unwrap());
     assert!(due[0].delivered, "brought up once");
+    assert_eq!(due[0].outcome, Some(world::Outcome::Kept));
     assert_eq!(e.agent.on_event().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_commitment_nobody_could_bring_up_lapses_and_is_not_brought_up_late() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.agent.with_world(|w| {
+        let new = NewFact::new(
+            Actor::Person(p("ann")),
+            Audience::Participants(ch),
+            FactKind::Commitment,
+            "Tea together at noon",
+        )
+        .due(T0 - 60_000);
+        fact::write(w, &new, T0 - 3_600_000).unwrap();
+    });
+    // She is switched off the whole time.
+    let ann = api::types::Target::Person {
+        id: api::types::PersonId::from("ann"),
+    };
+    e.agent.set_mode(&ann, api::types::Mode::Disabled).unwrap();
+    e.clock.advance(80 * 3_600_000);
+    e.agent.set_mode(&ann, api::types::Mode::Enabled).unwrap();
+    assert_eq!(e.agent.on_event().await.unwrap(), None);
+    assert!(e.fake.bodies().is_empty());
+    let all = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    assert_eq!(all[0].outcome, Some(world::Outcome::Lapsed));
+    assert!(all[0].delivered);
+    // The host's reminder past its grace lapses too, and is not acted on (the daily opening
+    // that tick may make is the only call, and it is not the host's).
+    host_commitment(&e, "water the plants", T0 - 119 * 3_600_000);
+    e.fake.push([say("Hello.")]);
+    e.agent.tick(true).await.unwrap();
+    let all = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    assert_eq!(all[1].outcome, Some(world::Outcome::Lapsed));
+    assert!(host_texts(&e).is_empty(), "{:?}", host_texts(&e));
+}
+
+#[tokio::test]
+async fn a_person_acts_on_a_due_promise_by_posting_into_a_group() {
+    let (e, ch) = emulated_env();
+    let group = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("plan the tea"))
+        .unwrap();
+    e.agent.with_world(|w| {
+        let new = NewFact::new(
+            Actor::Person(p("ann")),
+            Audience::Participants(ch),
+            FactKind::Commitment,
+            "Ask the tea group how far along it is",
+        )
+        .due(T0 - 60_000);
+        fact::write(w, &new, T0 - 3_600_000).unwrap();
+    });
+    e.fake.push([
+        say("I said I would ask.\n\u{21d2} say: plan the tea | How far along are you?"),
+        say("Nearly done."),
+    ]);
+    assert_eq!(e.agent.on_event().await.unwrap(), Some((p("ann"), ch)));
+    assert_eq!(
+        e.agent.history(ch, None, 5).unwrap().last().unwrap().text,
+        "I said I would ask."
+    );
+    let texts: Vec<_> = e
+        .agent
+        .history(group, None, 5)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(texts, ["How far along are you?", "Nearly done."]);
+    let all = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    assert_eq!(all[0].outcome, Some(world::Outcome::Kept));
 }
 
 #[tokio::test]
@@ -2954,7 +3029,62 @@ async fn a_find_offer_is_exactly_the_people_named_on_both_paths() {
 }
 
 #[tokio::test]
-async fn a_malformed_proposal_line_is_speech_and_native_tools_ignore_the_mark() {
+async fn a_reply_that_runs_on_into_the_next_prompt_is_cut_and_its_find_line_still_counts() {
+    let (e, ch) = emulated_env();
+    let leaked = format!(
+        "Bo would know.\n\n{FIND} Bo | a party\n\nDee answers too, after the others.\n\n\
+         These passages may be unrelated to the question. Use one only if it really fits.\n\n\
+         [#lore:abc]\n\n[1103-10-30 Fri 19:19, evening]"
+    );
+    e.fake.push([say(&leaked)]);
+    e.agent.send(ch, "a party?", None).await.unwrap();
+    let (streamed, actions) = turn_events(&e);
+    assert_eq!(streamed.trim_end(), "Bo would know.", "{streamed}");
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [api::views::ToolAction::FindPeople { topic, persons }]
+                if topic == "a party" && persons.len() == 1 && persons[0].id.0 == "bo"
+        ),
+        "{actions:?}"
+    );
+    assert_eq!(
+        e.agent.history(ch, None, 5).unwrap().last().unwrap().text,
+        "Bo would know."
+    );
+}
+
+#[tokio::test]
+async fn a_find_line_naming_the_host_offers_to_invite_it_and_the_group_block_names_who_is_here() {
+    use api::views::ToolAction;
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let e = env_with(ep, |_| {});
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake
+        .push([say(&format!("I can ask for it.\n{FIND} Hostess, Bo"))]);
+    e.agent
+        .send(g, "ann, can the Hostess join?", None)
+        .await
+        .unwrap();
+    let (streamed, actions) = turn_events(&e);
+    assert_eq!(streamed.trim_end(), "I can ask for it.");
+    // Bo is here already; only the host is offered, as an invitation into this group.
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [ToolAction::InviteToGroup { persons, .. }]
+                if persons.len() == 1 && persons[0].id.0 == api::types::HOST_MEMBER
+        ),
+        "{actions:?}"
+    );
+    let log = log_bytes(&e.agent, g);
+    assert!(log.contains("In this group with"), "{log}");
+    assert!(log.contains("Nobody here can bring Hostess in"), "{log}");
+}
+
+#[tokio::test]
+async fn a_malformed_proposal_line_is_speech_and_a_well_formed_one_never_stays_in_the_text() {
     let (e, ch) = emulated_env();
     let reply = format!("Mind the {FIND} mark.\n{FIND}");
     e.fake.push([say(&reply)]);
@@ -2972,14 +3102,22 @@ async fn a_malformed_proposal_line_is_speech_and_native_tools_ignore_the_mark() 
     e.agent.send(ch, "again", None).await.unwrap();
     let (streamed, actions) = turn_events(&e);
     assert!(actions.is_empty() && streamed == mid, "{streamed}");
-    // Native tools: the model has the tool, the line means nothing and the prompt is silent.
+    // Native tools: the prompt is silent about the line, but a model that writes it anyway
+    // (a log opened where tools were emulated) does not leave it in its words.
     let n = env(WireApi::Chat);
     let nch = direct(&n, "ann");
     let line = format!("Hm.\n{FIND} steel");
     n.fake.push([say(&line)]);
     n.agent.send(nch, "hello", None).await.unwrap();
     let (streamed, actions) = turn_events(&n);
-    assert!(actions.is_empty() && streamed == line);
+    assert!(
+        actions.is_empty() && streamed.trim_end() == "Hm.",
+        "{streamed}"
+    );
+    assert_eq!(
+        n.agent.history(nch, None, 5).unwrap().last().unwrap().text,
+        "Hm."
+    );
     let body = String::from_utf8(n.fake.bodies()[0].clone()).unwrap();
     assert!(!body.contains("nothing happens until"));
 }
@@ -3318,7 +3456,9 @@ async fn a_promise_is_a_due_commitment_for_a_named_person_with_limits() {
     // It comes due as that person's opening.
     e.agent
         .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
-    e.clock.advance(80 * 365 * 24 * 3_600_000);
+    let now = e.clock.0.load(std::sync::atomic::Ordering::SeqCst);
+    // Noon of the due day: outside the quiet hours, inside the grace.
+    e.clock.advance(f.due.unwrap() - now + 12 * 3_600_000);
     e.fake.push([say("About calling home.")]);
     let opened = e.agent.on_event().await.unwrap();
     assert_eq!(opened.map(|o| o.0), Some(p("ann")));
@@ -3989,6 +4129,18 @@ async fn while_away_nothing_starts_and_the_return_gives_one_line_without_a_model
     let said = host_texts(&e);
     assert_eq!(said.len(), 1, "{said:?}");
     assert_eq!(said[0].1, "While you were away: water the plants");
+    // What was told on return is kept; the person's own, who could not bring it up, lapsed.
+    let outcomes = e.agent.with_world(|w| {
+        fact::all(w, false)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.outcome)
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        outcomes,
+        [Some(world::Outcome::Kept), Some(world::Outcome::Lapsed)]
+    );
     assert_eq!(e.agent.tick(true).await.unwrap(), None);
     assert_eq!(e.agent.on_event().await.unwrap(), None);
     assert!(e.fake.bodies().is_empty());

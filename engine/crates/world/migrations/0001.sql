@@ -75,6 +75,8 @@ CREATE TABLE fact (
     about_ref     TEXT,
     due           INTEGER,
     delivered     INTEGER NOT NULL DEFAULT 0 CHECK (delivered IN (0, 1)),
+    -- How a commitment ended: brought up (kept) or left until it expired (lapsed).
+    outcome       TEXT    CHECK (outcome IN ('kept', 'lapsed')),
     text          TEXT    NOT NULL,
     retracted     INTEGER NOT NULL DEFAULT 0 CHECK (retracted IN (0, 1)),
     created_at    INTEGER NOT NULL,

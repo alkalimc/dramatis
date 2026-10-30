@@ -28,6 +28,13 @@ use crate::events::{
 use crate::types::{ChannelId, MessageId, PersonId};
 use crate::views::ImagePart;
 
+/// What changed about a group, with the new value (`None`: it was cleared).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupChange {
+    Renamed(Option<String>),
+    Described(Option<String>),
+}
+
 #[async_trait]
 pub trait AgentPort: Send + Sync + 'static {
     /// Whether anything is behind this port. `false` keeps the app in library form.
@@ -106,6 +113,13 @@ pub trait AgentPort: Send + Sync + 'static {
         _joined: Vec<PersonId>,
         _left: Vec<PersonId>,
     ) -> ApiResult<()> {
+        Ok(())
+    }
+
+    /// A group's name or description changed (the world already holds the new value): say
+    /// so in the group, for the user and for the members' log. Fixed wording, no model
+    /// call. Call it after every such edit, from whichever command makes it.
+    async fn group_changed(&self, _channel: ChannelId, _what: GroupChange) -> ApiResult<()> {
         Ok(())
     }
 

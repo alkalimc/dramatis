@@ -1,4 +1,205 @@
 {
+  "event": {
+    "chat": [
+      {
+        "function": {
+          "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two to four sentences, set in the world as it is.",
+          "name": "make_event",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "group": {
+                "additionalProperties": false,
+                "description": "A gathering the user could join, or null.",
+                "properties": {
+                  "members": {
+                    "description": "Ids of the people who would gather.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "purpose": {
+                    "description": "Why they gather, a few words.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "members",
+                  "purpose"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "persons": {
+                "description": "Ids of the people it involves, one to three.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "talk": {
+                "description": "Ids of people the user might talk to about it.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "text": {
+                "description": "Two to four sentences.",
+                "type": "string"
+              },
+              "title": {
+                "description": "A short title.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "text",
+              "persons",
+              "talk"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      }
+    ],
+    "messages": [
+      {
+        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two to four sentences, set in the world as it is.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "additionalProperties": false,
+              "description": "A gathering the user could join, or null.",
+              "properties": {
+                "members": {
+                  "description": "Ids of the people who would gather.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "purpose": {
+                  "description": "Why they gather, a few words.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "members",
+                "purpose"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "persons": {
+              "description": "Ids of the people it involves, one to three.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "talk": {
+              "description": "Ids of people the user might talk to about it.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "text": {
+              "description": "Two to four sentences.",
+              "type": "string"
+            },
+            "title": {
+              "description": "A short title.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "text",
+            "persons",
+            "talk"
+          ],
+          "type": "object"
+        },
+        "name": "make_event"
+      }
+    ],
+    "responses": [
+      {
+        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two to four sentences, set in the world as it is.",
+        "name": "make_event",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "additionalProperties": false,
+              "description": "A gathering the user could join, or null.",
+              "properties": {
+                "members": {
+                  "description": "Ids of the people who would gather.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "purpose": {
+                  "description": "Why they gather, a few words.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "members",
+                "purpose"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "persons": {
+              "description": "Ids of the people it involves, one to three.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "talk": {
+              "description": "Ids of people the user might talk to about it.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "text": {
+              "description": "Two to four sentences.",
+              "type": "string"
+            },
+            "title": {
+              "description": "A short title.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "text",
+            "persons",
+            "talk"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      }
+    ]
+  },
   "host": {
     "chat": [
       {
@@ -238,19 +439,26 @@
       },
       {
         "function": {
-          "description": "Read the last few lines of one conversation, by the id `list_channels` shows. No\nmemories are included.",
+          "description": "Read the last few lines of one conversation, by the id `list_channels` shows, or the\nuser's direct chat with a person, by name. Use it before saying what happened or in what\norder. No memories are included. Give exactly one of `channel` and `person`.",
           "name": "recent",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "channel": {
                 "description": "The conversation id, as listed.",
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "description": "A person's name or roster id: reads the user's direct chat with them.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
-            "required": [
-              "channel"
-            ],
             "type": "object"
           }
         },
@@ -519,18 +727,25 @@
         "name": "promise"
       },
       {
-        "description": "Read the last few lines of one conversation, by the id `list_channels` shows. No\nmemories are included.",
+        "description": "Read the last few lines of one conversation, by the id `list_channels` shows, or the\nuser's direct chat with a person, by name. Use it before saying what happened or in what\norder. No memories are included. Give exactly one of `channel` and `person`.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
             "channel": {
               "description": "The conversation id, as listed.",
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "person": {
+              "description": "A person's name or roster id: reads the user's direct chat with them.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
-          "required": [
-            "channel"
-          ],
           "type": "object"
         },
         "name": "recent"
@@ -801,19 +1016,26 @@
         "type": "function"
       },
       {
-        "description": "Read the last few lines of one conversation, by the id `list_channels` shows. No\nmemories are included.",
+        "description": "Read the last few lines of one conversation, by the id `list_channels` shows, or the\nuser's direct chat with a person, by name. Use it before saying what happened or in what\norder. No memories are included. Give exactly one of `channel` and `person`.",
         "name": "recent",
         "parameters": {
           "additionalProperties": false,
           "properties": {
             "channel": {
               "description": "The conversation id, as listed.",
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "person": {
+              "description": "A person's name or roster id: reads the user's direct chat with them.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
-          "required": [
-            "channel"
-          ],
           "type": "object"
         },
         "type": "function"

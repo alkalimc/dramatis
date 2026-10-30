@@ -25,9 +25,9 @@ def collect(repo: Path) -> list[str]:
     keys |= set(re.findall(r'\(\s*"([a-z0-9_.]+)",', table))
     tools = (repo / "engine/crates/api/src/tools.rs").read_text(encoding="utf-8")
     keys |= {f"{ns}.{name}"
-             for ns, name in re.findall(r'spec::<\w+>\("(tool(?:\.host)?)", "(\w+)"', tools)}
+             for ns, name in re.findall(r'spec::<\w+>\("(tool(?:\.host|\.event)?)", "(\w+)"', tools)}
     snap = json.loads((repo / "engine/crates/api/tests/tools.snapshot.json").read_text(encoding="utf-8"))
-    for side, ns in (("shared", "tool"), ("host", "tool.host")):
+    for side, ns in (("shared", "tool"), ("host", "tool.host"), ("event", "tool.event")):
         for tool in snap[side]["chat"]:
             fn = tool["function"]
             keys |= params(f"{ns}.{fn['name']}", fn["parameters"])

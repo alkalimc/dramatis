@@ -129,23 +129,61 @@ async fn an_event_is_made_once_a_day_and_posted_with_offers() {
 }
 
 #[tokio::test]
-async fn the_request_asks_for_json_and_shows_the_shape_only_where_it_is_not_enforced() {
+async fn the_request_is_a_tool_call_where_tools_are_native_and_json_where_they_are_emulated() {
     let native = setup(endpoints(WireApi::Chat, true, None));
-    native.fake.push([say(&reply())]);
+    native
+        .fake
+        .push([call("make_event", serde_json::from_str(&reply()).unwrap())]);
     native.agent.tick(true).await.unwrap();
     let em = setup(emulated());
     em.fake.push([say(&reply())]);
     em.agent.tick(true).await.unwrap();
     let (n, m) = (&native.fake.json()[0], &em.fake.json()[0]);
-    for body in [n, m] {
-        assert_eq!(body["response_format"]["type"], "json_schema");
-        assert!(body.get("tools").is_none());
-    }
+    // Native: the draft is a call of the one tool, and no response schema is sent.
+    assert!(n.get("response_format").is_none(), "{n}");
+    assert_eq!(n["tools"].as_array().map(Vec::len), Some(1));
+    assert_eq!(n["tools"][0]["function"]["name"], "make_event");
+    assert_eq!(
+        n["tools"][0]["function"]["parameters"]["properties"]
+            .as_object()
+            .map(|p| p.keys().cloned().collect::<Vec<_>>()),
+        Some(vec![
+            "group".to_owned(),
+            "persons".to_owned(),
+            "talk".to_owned(),
+            "text".to_owned(),
+            "title".to_owned()
+        ])
+    );
+    // Emulated: a JSON document, with the shape shown in words.
+    assert_eq!(m["response_format"]["type"], "json_schema");
+    assert!(m.get("tools").is_none());
     let text = |b: &Value| b["messages"][0]["content"].to_string();
     assert!(!text(n).contains("\"title\""), "{}", text(n));
     assert!(text(m).contains("title"), "{}", text(m));
     // The theme comes from the rotating list, and the people from the roster.
     assert!(text(n).contains("ann: ann"));
+    // The call made the event.
+    assert_eq!(native.agent.daily_events().unwrap().len(), 1);
+    assert!(posts(&native)[0].text.contains(TEA));
+}
+
+#[tokio::test]
+async fn a_native_endpoint_that_answers_in_prose_is_still_read() {
+    // The labelled form a model wrote when it did not make the call.
+    let prose = "Title: Jasmine tea on the deck\nText: Ann brewed jasmine tea for whoever \
+                 passed by.\nPeople involved: ann, bo\nGathering: Members: ann, bo; Purpose: tea\n\
+                 Ann could talk to: ann";
+    let e = setup(endpoints(WireApi::Chat, true, None));
+    e.fake.push([say(prose)]);
+    e.agent.tick(true).await.unwrap();
+    let posted = posts(&e);
+    assert_eq!(posted.len(), 1, "{}", log(&e));
+    assert!(posted[0].text.contains(TEA));
+    assert!(matches!(
+        posted[0].actions[0],
+        ToolAction::CreateGroup { ref members, .. } if members.len() == 2
+    ));
 }
 
 #[tokio::test]
