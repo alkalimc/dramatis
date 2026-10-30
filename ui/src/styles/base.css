@@ -3,8 +3,23 @@
   box-sizing: border-box;
 }
 
-body {
+/* The page itself never scrolls: the window is exactly the app, and every pane scrolls inside
+   itself. `clip` also refuses programmatic scrolling (focus, scrollIntoView) of the page. */
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+  overflow: clip;
+}
+body {
+  overscroll-behavior: none;
+}
+/* every screen outside the app frame (first run, unlock, loading) scrolls inside itself */
+#root > :not(.app) {
+  max-height: 100%;
+  overflow-y: auto;
 }
 
 h1,
@@ -30,6 +45,22 @@ h5 {
 }
 p {
   margin: var(--s-1) 0;
+}
+/* long words and addresses wrap instead of widening their box */
+p,
+li,
+h1,
+h2,
+h3,
+h4,
+h5,
+dd,
+td,
+th {
+  overflow-wrap: anywhere;
+}
+table {
+  max-width: 100%;
 }
 ul,
 ol {

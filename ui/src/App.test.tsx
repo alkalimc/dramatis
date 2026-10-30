@@ -203,8 +203,8 @@ test("the host's name and avatar in its channel open its page, which has no trus
   expect(within(card).getByRole("heading", { name: "What it does" })).toBeDefined();
   expect(within(card).queryByText(/Trust/)).toBeNull();
   expect(within(card).queryByRole("radio")).toBeNull();
-  // The update setting is one click away, and the card gives way to it.
-  await user.click(within(card).getByRole("button", { name: "Updates" }));
-  expect(await screen.findByRole("region", { name: "About" })).toBeDefined();
+  // The happenings setting is one click away, on the quota page, and the card gives way to it.
+  await user.click(within(card).getByRole("button", { name: "Happenings on board" }));
+  expect(await screen.findByRole("region", { name: "Quota and intensity" })).toBeDefined();
   expect(screen.queryByRole("dialog", { name: "Host" })).toBeNull();
 });

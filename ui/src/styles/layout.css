@@ -1,7 +1,8 @@
 /* The frame: rail | chat list | conversation | right panel, and what floats over it. */
 .app {
   display: flex;
-  height: 100vh;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
 }
 .stage {
@@ -9,20 +10,30 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .body {
   flex: 1;
   display: flex;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg);
 }
 .main.library {
+  position: relative;
+}
+.library-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 var(--s-4) var(--s-5);
 }
@@ -163,7 +174,7 @@ button.rail-item.on:hover {
   min-height: 0;
 }
 .list-scroll .pad {
-  padding: var(--s-4);
+  padding: var(--s-4) var(--s-3);
 }
 .chat-item {
   position: relative;
@@ -276,7 +287,7 @@ button.chat-row.selected:hover {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) var(--s-3);
   border-top: 1px solid var(--line);
   min-height: var(--ctl-sm);
 }
@@ -292,8 +303,15 @@ button.chat-row.selected:hover {
   flex: none;
   background: var(--panel);
   border-left: 1px solid var(--line);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   position: relative;
+}
+.drawer-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .drawer > .close {
   position: absolute;
@@ -378,7 +396,7 @@ button.left-head:hover {
   background: var(--hover);
 }
 button.left-head .avatar {
-  --size: 4.4rem;
+  --size: var(--avatar-row);
 }
 button.left-head > .icon-svg {
   position: absolute;
@@ -656,7 +674,7 @@ button.drawer-item:hover,
 /* ---- search panel: takes over the list column while a conversation is searched ---- */
 .scope-title {
   margin: 0;
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) var(--s-3);
   background: var(--raised);
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -685,10 +703,27 @@ button.drawer-item:hover,
   color: var(--muted);
 }
 button.chat-row.result {
-  min-height: 0;
+  height: auto;
+  min-height: var(--row-h);
+  align-items: flex-start;
 }
-.chat-row.result .chat-preview {
-  padding-right: 0;
+/* two lines of the message, the matched words marked */
+.chat-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+mark {
+  background: none;
+  color: var(--accent);
+  font-weight: var(--fw-strong);
+}
+.chat-row.selected mark {
+  color: inherit;
 }
 
 /* ---- right panel: the info of the open conversation ---- */
@@ -724,7 +759,7 @@ button.square.danger {
   padding: 0;
 }
 .dialog.settings-card {
-  width: min(32.5rem, 100%);
+  width: min(var(--card-w), 100%);
   display: flex;
   flex-direction: column;
 }
@@ -739,7 +774,7 @@ button.square.danger {
   min-height: 0;
 }
 .settings-page {
-  padding: var(--s-3) var(--s-4) var(--s-5);
+  padding: var(--s-3) 0 var(--s-5);
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -758,7 +793,7 @@ button.settings-head {
   padding: var(--s-4);
 }
 button.settings-head .avatar {
-  --size: 4.4rem;
+  --size: var(--avatar-row);
 }
 .settings-list {
   padding: var(--s-1) 0;
@@ -790,12 +825,21 @@ label.settings-row:hover {
 }
 .settings-label {
   flex: 1;
+  min-width: 0;
 }
 .settings-value {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--accent);
 }
+.settings-row svg {
+  flex: none;
+}
 .dialog.contacts-card {
-  width: min(32.5rem, 100%);
+  width: min(var(--card-w), 100%);
   height: min(44rem, 90vh);
   display: flex;
   flex-direction: column;
@@ -859,7 +903,7 @@ button.text-btn:hover:not(:disabled) {
   background: var(--hover);
 }
 .dialog.group-card {
-  width: min(32.5rem, 100%);
+  width: min(var(--card-w), 100%);
 }
 .group-name-form {
   padding: var(--s-5) var(--s-5) 0;

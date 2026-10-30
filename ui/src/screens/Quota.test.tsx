@@ -59,5 +59,5 @@ test("the intensity is a labelled choice that shows the tier and picks another",
 
 test("says what the intensity also sets", () => {
   renderWith(<QuotaPanel quota={status("open")} onTier={() => undefined} />);
-  expect(screen.getByText(/up to 5 visits and 4 daily happenings a day/)).toBeDefined();
+  expect(screen.getByText(/up to 5 visits and 4 happenings on board a day/)).toBeDefined();
 });

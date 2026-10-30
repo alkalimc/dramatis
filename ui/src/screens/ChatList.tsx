@@ -3,8 +3,10 @@ import type { ChannelSummary } from "../api";
 import { useT, useUserName } from "../i18n";
 import { activityText, authorName, typingText, when } from "../lib/format";
 import { byActivity, channelTitle, lastActivity, previewOf, unreadOf } from "../lib/chats";
+import { snippet, termsOf } from "../lib/snippet";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { ChannelAvatar } from "../ui/Avatar";
+import { AuthorAvatar, ChannelAvatar } from "../ui/Avatar";
+import { Highlight } from "../ui/Highlight";
 import { Badge } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
 import { useChatMenu } from "./chatMenu";
@@ -59,8 +61,17 @@ function SearchPanel({ query }: { query: string }) {
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const me = useUserName();
+  const marker = useStore((s) => s.wording.scene_marker);
   const needle = query.trim().toLowerCase();
-  const results = needle ? messages.filter((m) => m.text.toLowerCase().includes(needle)) : [];
+  const terms = termsOf(query);
+  // Match what the reader sees, not the citation marks and scene markers in the stored text.
+  const results = needle
+    ? messages.flatMap((m) => {
+        if (m.service) return [];
+        const text = previewOf(m, marker);
+        return terms.every((w) => text.toLowerCase().includes(w)) ? [{ m, text }] : [];
+      })
+    : [];
   const stand = summary ?? ({ id: channel ?? "", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary);
   const close = () => dispatch({ type: "find", query: null });
 
@@ -95,21 +106,27 @@ function SearchPanel({ query }: { query: string }) {
         {needle && results.length === 0 && <p className="muted pad">{t("channel.find.none")}</p>}
         {results.length > 0 && (
           <ul>
-            {results.map((m) => (
-              <li key={m.id}>
-                <button type="button" className="chat-row result" onClick={() => jump(m.id)}>
-                  <span className="chat-main">
-                    <span className="chat-top">
-                      <span className="chat-name">{authorName(m.author, t, names, user)}</span>
-                      <time className="chat-time" dateTime={m.at}>{when(m.at, t)}</time>
+            {results.map(({ m, text }) => {
+              const name = authorName(m.author, t, names, user);
+              return (
+                <li key={m.id}>
+                  <button type="button" className="chat-row result" onClick={() => jump(m.id)}>
+                    <AuthorAvatar author={m.author} name={name} />
+                    <span className="chat-main">
+                      <span className="chat-top">
+                        <span className="chat-name">
+                          <span className="chat-title" title={name}>{name}</span>
+                        </span>
+                        <time className="chat-time" dateTime={m.at}>{when(m.at, t)}</time>
+                      </span>
+                      <span className="chat-snippet">
+                        <Highlight text={snippet(text, terms)} terms={terms} />
+                      </span>
                     </span>
-                    <span className="chat-bottom">
-                      <span className="chat-preview">{m.text}</span>
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         {!needle && (

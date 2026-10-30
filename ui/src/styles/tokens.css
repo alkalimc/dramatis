@@ -115,8 +115,13 @@
   --avatar-l: 3.9rem;
   --avatar-xl: 7rem;
   --badge: 1.25rem;
+  /* the foot row of a bubble: time, ticks and the small buttons share this height */
+  --foot-h: 1.35rem;
   /* both lines of a chat row share one height, so the badge can sit on the second */
   --chat-line: 1.4rem;
+  /* the widths shared by the centred cards, and the picture of a profile row */
+  --card-w: 32.5rem;
+  --avatar-row: 4.4rem;
   --switch-w: 2.4rem;
   --switch-h: 1.4rem;
 

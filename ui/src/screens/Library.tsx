@@ -1,10 +1,16 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { settle, type Failure, type Passage, type SearchResults } from "../api";
 import { useT } from "../i18n";
+import { snippet, termsOf } from "../lib/snippet";
 import { useQuery } from "../lib/useQuery";
 import { useApi, useDispatch, useStore } from "../store";
+import { BackToTop } from "../ui/BackToTop";
 import { InlineError } from "../ui/ErrorBar";
 import { ExternalLink } from "../ui/ExternalLink";
+import { Highlight } from "../ui/Highlight";
+
+/** Hits shown at first, and added by each "show more". */
+const PAGE = 30;
 
 /**
  * The library: full-text search of the corpus, with a unit opened in place.
@@ -16,8 +22,10 @@ export function Library() {
   const dispatch = useDispatch();
   const dismissed = useStore((s) => s.libraryNoticeDismissed);
   const model = useStore((s) => s.status?.form === "full" && Boolean(s.hostChannel));
+  const scroll = useRef<HTMLDivElement>(null);
   return (
     <div className="main library">
+      <div ref={scroll} className="library-scroll">
       {!model && !dismissed && (
         <section className="card notice" aria-label={t("host.name")}>
           <p>
@@ -34,6 +42,8 @@ export function Library() {
         </section>
       )}
       <CorpusSearch />
+      </div>
+      <BackToTop scroller={scroll} />
     </div>
   );
 }
@@ -51,6 +61,9 @@ function CorpusSearch() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<Failure | null>(null);
   const [reading, setReading] = useState<string | null>(null);
+  // The words the shown results were found for, and how many of them are on screen.
+  const [terms, setTerms] = useState<string[]>([]);
+  const [shown, setShown] = useState(PAGE);
   const people = roster ? roster.groups.flatMap((g) => g.rows.map((r) => r.person)) : [];
 
   useEffect(() => {
@@ -63,7 +76,11 @@ function CorpusSearch() {
     const r = await settle(api.commands.searchCorpus(q.trim(), person ? [person] : [], template ? [template] : []));
     setBusy(false);
     setFailed(r.ok ? null : r.error);
-    if (r.ok) setResults(r.data);
+    if (r.ok) {
+      setResults(r.data);
+      setShown(PAGE);
+      setTerms(termsOf([q, r.data.understood_as ?? ""].join(" ")));
+    }
   };
 
   return (
@@ -128,31 +145,39 @@ function CorpusSearch() {
             {results.hits.length === 0 ? (
               <p className="muted">{t("library.results.empty")}</p>
             ) : (
-              <ol className="hits">
-                {results.hits.map((h) => (
-                  <li key={h.citation.chunk_id}>
-                    <article className="passage-card">
-                      <h3>{h.header || h.citation.page}</h3>
-                      <p>{h.text}</p>
-                      <p className="muted small">
-                        {h.persons.map((p) => p.name).join(" · ")}
-                        {h.persons.length > 0 && " · "}
-                        <button type="button" className="link" onClick={() => setReading(h.citation.chunk_id)}>
-                          {t("library.read")}
-                        </button>
-                        {h.source_url && (
-                          <>
-                            {" · "}
-                            <ExternalLink href={h.source_url}>
-                              {t("citation.open")}
-                            </ExternalLink>
-                          </>
-                        )}
-                      </p>
-                    </article>
-                  </li>
-                ))}
-              </ol>
+              <>
+                <ol className="hits">
+                  {results.hits.slice(0, shown).map((h) => (
+                    <li key={h.citation.chunk_id}>
+                      <article className="passage-card hit">
+                        <header className="hit-head">
+                          <h3>
+                            <Highlight text={h.header || h.citation.page} terms={terms} />
+                          </h3>
+                          <span className="tag">{h.template}</span>
+                        </header>
+                        {h.persons.length > 0 && <p className="hit-people muted small">{h.persons.map((p) => p.name).join(" · ")}</p>}
+                        <p className="hit-snippet">
+                          <Highlight text={snippet(h.text, terms, 120)} terms={terms} />
+                        </p>
+                        <footer className="hit-foot">
+                          <button type="button" className="ghost" onClick={() => setReading(h.citation.chunk_id)}>
+                            {t("library.read")}
+                          </button>
+                          {h.source_url && <ExternalLink href={h.source_url}>{t("citation.open")}</ExternalLink>}
+                        </footer>
+                      </article>
+                    </li>
+                  ))}
+                </ol>
+                {results.hits.length > shown && (
+                  <p className="row end">
+                    <button type="button" className="ghost" onClick={() => setShown(shown + PAGE)}>
+                      {t("library.more", { count: Math.min(PAGE, results.hits.length - shown) })}
+                    </button>
+                  </p>
+                )}
+              </>
             )}
           </div>
         )

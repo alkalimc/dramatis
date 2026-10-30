@@ -57,9 +57,9 @@ export function HostDrawer({ card = false }: { card?: boolean }) {
     dispatch({ type: "hostCard", open: false });
     dispatch({ type: "drawer", drawer: null });
   };
-  const settings = (tab: "quota" | "about") => {
+  const settings = () => {
     dispatch({ type: "hostCard", open: false });
-    dispatch({ type: "drawer", drawer: { kind: "system", tab } });
+    dispatch({ type: "drawer", drawer: { kind: "system", tab: "quota" } });
   };
 
   return (
@@ -92,13 +92,8 @@ export function HostDrawer({ card = false }: { card?: boolean }) {
       </section>
       <section className="info-section">
         <p>
-          <button type="button" className="link" onClick={() => settings("quota")}>
+          <button type="button" className="link" onClick={settings}>
             {t("events.per_day")}
-          </button>
-        </p>
-        <p>
-          <button type="button" className="link" onClick={() => settings("about")}>
-            {t("about.update.title")}
           </button>
         </p>
       </section>
