@@ -122,7 +122,8 @@ anything else       send it to the current channel
 /read <n|unit id>   a unit of the corpus with its neighbours and its source link; n is a
                     number from /search
 /stats              model calls made in this session
-/about              version, author, source and whether a newer version is out
+/about [check]      version, author, source and whether a newer version is out;
+                    check asks the release page now
 /storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)
 Short forms: /ls /t /g /c /lib /req /time /mem /h /r /src /s /? /open /exit /q
@@ -481,6 +482,7 @@ line is one message.",
     ("cli.usage.birthday", "usage: /birthday [MM-DD | clear]"),
     ("cli.usage.talk", "usage: /talk <person>"),
     ("cli.usage.group", "usage: /group <p1> <p2> [...]"),
+    ("cli.usage.about", "usage: /about [check]"),
     ("cli.usage.invite", "usage: /invite <p1>, <p2> [...]"),
     ("cli.usage.remove", "usage: /remove <person>"),
     ("cli.usage.chats", "usage: /chats [archived]"),

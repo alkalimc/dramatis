@@ -155,6 +155,10 @@ impl Names {
     }
 
     pub fn person(&self, id: &str) -> String {
+        // The host in a group is a member under `HOST_MEMBER`: it goes by its own name.
+        if id == api::types::HOST_MEMBER {
+            return self.host();
+        }
         self.corpus
             .as_ref()
             .map_or_else(|| id.to_owned(), |c| c.display(id))

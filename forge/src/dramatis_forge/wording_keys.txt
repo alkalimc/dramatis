@@ -381,6 +381,7 @@ cli.unread.header
 cli.update.ask
 cli.update.off
 cli.update.on
+cli.usage.about
 cli.usage.ask
 cli.usage.birthday
 cli.usage.chat

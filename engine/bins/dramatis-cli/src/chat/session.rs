@@ -413,7 +413,7 @@ impl Session {
             Command::Search(query) => self.search(&query).await,
             Command::Stats => self.stats(),
             Command::Storage(act) => self.storage(act).await,
-            Command::About => self.about().await,
+            Command::About(now) => self.about(now).await,
         }
         self.mark_seen().await;
         Flow::Continue
@@ -805,6 +805,14 @@ impl Session {
         };
         let mut added: Vec<PersonId> = Vec::new();
         for w in who {
+            // The host joins a group as its assistant under the id `HOST_MEMBER`.
+            if self.names_host(w) {
+                let host = PersonId::from(api::types::HOST_MEMBER);
+                if !members.contains(&host) && !added.contains(&host) {
+                    added.push(host);
+                }
+                continue;
+            }
             match self.resolve(w).await {
                 Ok(p) if !members.contains(&p) && !added.contains(&p) => added.push(p),
                 Ok(_) => {}
@@ -829,9 +837,13 @@ impl Session {
         let Some((channel, mut members)) = self.current_group() else {
             return;
         };
-        let person = match self.resolve_as(who, false).await {
-            Ok(p) => p,
-            Err(e) => return self.term.line(&e),
+        let person = if self.names_host(who) {
+            PersonId::from(api::types::HOST_MEMBER)
+        } else {
+            match self.resolve_as(who, false).await {
+                Ok(p) => p,
+                Err(e) => return self.term.line(&e),
+            }
         };
         if !members.contains(&person) {
             let name = self.names.person(&person.0);
@@ -2711,7 +2723,7 @@ impl Session {
 
     /// `/about`: the build and the update status. Asks GitHub only when automatic checks
     /// are on and the stored result is over a day old.
-    async fn about(&self) {
+    async fn about(&self, now: bool) {
         let said = |key: &str, vars: &[(&str, &dyn std::fmt::Display)]| {
             self.term.line(&self.names.say(key, vars))
         };
@@ -2739,7 +2751,7 @@ impl Session {
                 self.term.line(url);
             }
         }
-        let status = match self.engine.check_update(false).await {
+        let status = match self.engine.check_update(now).await {
             Ok(s) => Some(s),
             Err(_) => self.engine.update_status().await.ok(),
         };

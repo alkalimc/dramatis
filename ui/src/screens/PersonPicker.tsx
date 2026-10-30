@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import type { PersonRef } from "../api";
 import { useT } from "../i18n";
+import { HOST_ID } from "../ui/Avatar";
 import { useStore } from "../store";
 
 /**
@@ -11,10 +12,13 @@ export function PersonPicker({
   label,
   exclude = [],
   onPick,
+  withHost = false,
 }: {
   label: string;
   exclude?: string[];
   onPick: (p: PersonRef) => void;
+  /** Offer the host too (a group can have it as its assistant). */
+  withHost?: boolean;
 }) {
   const t = useT();
   const id = useId();
@@ -29,7 +33,9 @@ export function PersonPicker({
         .map((r) => r.person),
     [roster, exclude],
   );
-  const shown = people.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
+  const host = t("host.name");
+  const all = withHost && !exclude.includes(HOST_ID) ? [{ id: HOST_ID, name: host }, ...people] : people;
+  const shown = all.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
   return (
     <div className="picker">
       <label htmlFor={id}>{label}</label>

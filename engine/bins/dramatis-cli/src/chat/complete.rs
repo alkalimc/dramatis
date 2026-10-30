@@ -73,6 +73,7 @@ const FIXED: &[(&[&str], &[&str])] = &[
     (&["read"], &["all"]),
     (&["chats", "c"], &["archived"]),
     (&["password"], &["on", "off", "change"]),
+    (&["about"], &["check"]),
 ];
 
 /// What `/storage clear` takes.

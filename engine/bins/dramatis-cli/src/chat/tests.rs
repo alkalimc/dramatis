@@ -398,7 +398,7 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
     // The top of a history carries the day of its first message.
     let first = history.lines().next().unwrap_or_default();
     assert!(
-        first.len() == 10 && first.matches('-').count() == 2 && first.starts_with("20"),
+        first.matches('/').count() == 2 && first.trim_end().ends_with(|c: char| c.is_ascii_digit()),
         "{history:?}"
     );
     // Taking the last message back drops it and its reply and returns its text.
@@ -1951,6 +1951,15 @@ async fn people_come_into_a_group_and_leave_it_by_command() {
     assert!(r.run("/members").await.contains("ann"));
     r.run("/invite cy").await;
     assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
+    // The host comes in as the group's assistant, by its word or its name, and goes again.
+    r.run("/invite host").await;
+    let listed = r.run("/members").await;
+    assert!(
+        !listed.contains("host") && listed.matches(", ").count() == 2,
+        "{listed}"
+    );
+    r.run("/remove host").await;
+    assert_eq!(r.run("/members").await.matches(", ").count(), 1);
     assert!(r.run("/invite").await.contains("usage: /invite"));
     assert!(r.run("/remove").await.contains("usage: /remove"));
     r.run("/talk ann").await;

@@ -4,7 +4,7 @@ import { useT, useUserName } from "../i18n";
 import { groupTitle } from "../lib/chats";
 import { readAvatar } from "../lib/image";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { Avatar, ChannelAvatar } from "../ui/Avatar";
+import { Avatar, ChannelAvatar, HOST_ID } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { ModeSwitch } from "../ui/ModeSwitch";
@@ -128,7 +128,7 @@ export function GroupInfo({ id }: { id: string }) {
         <ul className="member-list">
           {group.participants.map((p) => (
             <li key={p.id}>
-              <button type="button" className="member" onClick={() => dispatch({ type: "drawer", drawer: { kind: "person", id: p.id } })}>
+              <button type="button" className="member" onClick={() => dispatch({ type: "drawer", drawer: p.id === HOST_ID ? { kind: "host" } : { kind: "person", id: p.id } })}>
                 <Avatar person={p} size="m" />
                 <span className="member-text">
                   <span>{p.name}</span>
@@ -151,6 +151,7 @@ export function GroupInfo({ id }: { id: string }) {
             <PersonPicker
               label={t("group.members.add.search")}
               exclude={group.participants.map((p) => p.id)}
+              withHost
               onPick={(p) => {
                 setAdding(false);
                 void put(p);

@@ -123,7 +123,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
 
   // ---- world ----
   const persons = new Map(PERSONS.map((p) => [p.id, { ...p }]));
-  const ref = (id: PersonId): PersonRef => ({ id, name: persons.get(id)?.name ?? id });
+  const ref = (id: PersonId): PersonRef => ({ id, name: id === "host" ? "Host" : (persons.get(id)?.name ?? id) });
 
   let library = params.get("form") === "library";
   let language: InterfaceLanguage = "corpus";
