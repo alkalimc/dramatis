@@ -138,6 +138,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     notifications: true,
     events_per_day: 1,
   };
+  let away = false;
   let introPending = settings.user_name === null;
   let openSave: string | null = params.get("nosave") === "1" ? null : "default";
   let corpusLoaded = params.get("corpus") !== "missing";
@@ -507,14 +508,24 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     }
   }
 
+  // What each intensity allows a day: visits and daily events (the engine's table).
+  const PACE: Record<Tier, { visits_per_day: number; events_max: number }> = {
+    low: { visits_per_day: 2, events_max: 2 },
+    middle: { visits_per_day: 5, events_max: 4 },
+    high: { visits_per_day: 6, events_max: 5 },
+    extra_high: { visits_per_day: 7, events_max: 6 },
+    max: { visits_per_day: 8, events_max: 6 },
+    ultra: { visits_per_day: 10, events_max: 6 },
+  };
   function quotaStatus(): QuotaStatus {
-    if (tier === "ultra") return { tier, band: "open", window: null, spent: spend() };
+    if (tier === "ultra") return { tier, band: "open", window: null, spent: spend(), ...PACE[tier] };
     const used = band === "open" ? 0.42 : band === "quiet" ? 0.86 : 1.0;
     return {
       tier,
       band,
       window: { used, release_at: band === "open" ? null : later(band === "quiet" ? 20 : 45) },
       spent: spend(),
+      ...PACE[tier],
     };
   }
   function spend() {
@@ -753,6 +764,11 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!text.trim() && !image) return fail({ code: "invalid", field: "text" });
       const blocked = gate();
       if (blocked) return fail(blocked);
+      if (away) {
+        // Writing to anyone means he is back.
+        away = false;
+        setTimeout(() => bus.awayChanged.emit({ away: false, by_message: true }));
+      }
       const m = msg(channel, USER, text, 0, image ? { attachment: { path: `data:${image.mime};base64,${image.data_base64}` } } : {});
       setTimeout(() => {
         bus.messageAdded.emit({ message: m });
@@ -1083,6 +1099,12 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       setTimeout(() => bus.quotaChanged.emit({ status: quotaStatus() }));
       return ok(null);
     },
+    away: () => ok(away),
+    setAway: (next) => {
+      away = next;
+      setTimeout(() => bus.awayChanged.emit({ away, by_message: false }));
+      return ok(null);
+    },
     settings: () => ok({ ...settings }),
     dailyEvents: () =>
       ok(
@@ -1102,7 +1124,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     updateSettings: (next) => {
       if (next.user_name !== null && !next.user_name.trim()) return fail({ code: "invalid", field: "user_name" });
       if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
-      if (next.events_per_day > 6) return fail({ code: "invalid", field: "events_per_day" });
+      if (next.events_per_day > PACE[tier].events_max) return fail({ code: "invalid", field: "events_per_day" });
       settings = { ...next, bio: next.bio?.trim() || null };
       introduced = true;
       return ok(null);

@@ -16,6 +16,7 @@ export function createBus() {
     return source;
   };
   return {
+    awayChanged: make<import("../../api.gen").AwayChanged>(),
     messageAdded: make<import("../../api.gen").MessageAdded>(),
     messageDelta: make<import("../../api.gen").MessageDelta>(),
     modeChanged: make<import("../../api.gen").ModeChanged>(),

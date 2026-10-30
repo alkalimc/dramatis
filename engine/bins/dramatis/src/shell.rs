@@ -6,13 +6,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use api::Engine;
 use api::error::ApiResult;
 use api::home::Home;
 use api::port;
+use api::{Api, Engine};
 use runtime::{AgentBridge, Options, Runtime};
 use tauri::menu::{
-    AboutMetadataBuilder, HELP_SUBMENU_ID, Menu, MenuItem, MenuItemKind, PredefinedMenuItem,
+    AboutMetadataBuilder, CheckMenuItem, HELP_SUBMENU_ID, Menu, MenuItem, MenuItemKind,
+    PredefinedMenuItem,
 };
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
@@ -87,6 +88,9 @@ impl AppSink {
         // line arrives as a message, which covers every kind of arrival once.
         if let port::Event::MessageAdded(added) = &event {
             self.notify(&added.message);
+        }
+        if let port::Event::AwayChanged(changed) = &event {
+            show_away(&self.app, changed.away);
         }
         api::emit(&self.app, event);
     }
@@ -170,6 +174,44 @@ impl AppSink {
 }
 
 const TRAY: &str = "main";
+
+/// The tray's "Away" item, kept in step with the engine's away mode.
+#[derive(Default)]
+pub struct AwayItem(Mutex<Option<CheckMenuItem<tauri::Wry>>>);
+
+fn show_away(app: &AppHandle, away: bool) {
+    if let Some(item) = app
+        .state::<AwayItem>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        let _ = item.set_checked(away);
+    }
+}
+
+/// The tray item was clicked: flip the engine's state (its event moves the check mark).
+fn toggle_away(app: &AppHandle) {
+    let engine = app
+        .state::<Current>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|(engine, _)| engine.clone());
+    let Some(engine) = engine else {
+        return show_away(app, false);
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let on = engine.away().await.unwrap_or(false);
+        if let Err(e) = engine.set_away(!on).await {
+            eprintln!("dramatis: could not switch away mode: {e:?}");
+            show_away(&app, on);
+        }
+    });
+}
 
 /// The number beside the tray icon and in its tooltip.
 fn set_badge(app: &AppHandle, unseen: u32) {
@@ -304,6 +346,11 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
     });
     // The terminal client shares the world database; notice what it writes.
     tauri::async_runtime::spawn(api::Engine::watch_external(Arc::downgrade(&engine)));
+    let away = engine.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        show_away(&handle, away.away().await.unwrap_or(false));
+    });
     *app.state::<Current>()
         .0
         .lock()
@@ -355,6 +402,7 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     app.manage(Current::default());
     app.manage(Arrivals::default());
+    app.manage(AwayItem::default());
     let home = Home::from_env();
     // The webview may read the cached media, the notes people write and the pictures the
     // user chose, and nothing else; the home can be moved by `DRAMATIS_HOME`, so the scope
@@ -373,15 +421,21 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let show_item = MenuItem::with_id(app, "show", "Show dramatis", true, None::<&str>)?;
+    let away_item = CheckMenuItem::with_id(app, "away", "Away", true, false, None::<&str>)?;
     let open_item = MenuItem::with_id(app, "open", "Open corpus...", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &open_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&show_item, &away_item, &open_item, &quit_item])?;
+    *app.state::<AwayItem>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(away_item);
     let mut tray = TrayIconBuilder::with_id(TRAY)
         .tooltip("dramatis")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => show(app),
+            "away" => toggle_away(app),
             "open" => pick_corpus(app, home.clone()),
             "quit" => app.exit(0),
             _ => {}
@@ -409,6 +463,22 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    // The engine may have opened before the item existed.
+    {
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let engine = handle
+                .state::<Current>()
+                .0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .map(|(engine, _)| engine.clone());
+            if let Some(engine) = engine {
+                show_away(&handle, engine.away().await.unwrap_or(false));
+            }
+        });
+    }
     // The window starts shown, so the Dock icon starts shown.
     sync_dock(&handle);
 

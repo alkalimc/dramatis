@@ -379,6 +379,11 @@ impl AgentPort for Port {
         Ok(())
     }
 
+    async fn end_away(&self) -> ApiResult<()> {
+        self.0.agent().await?.end_away(false)?;
+        Ok(())
+    }
+
     async fn group_opened(
         &self,
         channel: ChannelId,

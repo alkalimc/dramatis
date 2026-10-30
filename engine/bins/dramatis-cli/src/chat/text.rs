@@ -105,10 +105,14 @@ anything else       send it to the current channel
                     encrypt this save with a password, change it, or remove it; asked for
                     at start when a save is encrypted
 /tier [level]       how much the people may do on their own: low, middle, high,
-                    extra_high, max, ultra
+                    extra_high, max, ultra; a higher level also means more visits and
+                    happenings a day
 /quiet [on|off|HH:MM-HH:MM]  hours when nobody comes to you unprompted
 /events [on|off|n]  the small happenings of the day the host tells of: list them, switch
-                    them, or set how many a day (0 to 2)
+                    them, or set how many a day (up to what the tier allows)
+/away [on|off]      away mode: while on nobody comes to you, nothing is sent, and the
+                    visits and happenings that fall due count as spent; writing a message
+                    turns it off
 /lang [corpus|en]   the words of the interface: the corpus's language or English; the
                     people keep speaking the corpus's language",
     ),
@@ -128,7 +132,7 @@ anything else       send it to the current channel
 /storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)
 Short forms: /ls /t /g /c /lib /req /time /mem /h /r /src /s /? /open /exit /q
-Tab completes command names, their fixed words (/tier, /quiet, /events, /lang, /library,
+Tab completes command names, their fixed words (/tier, /quiet, /events, /away, /lang, /library,
 /read, /chats, /storage, /password), person names (/talk, /group, /invite, /remove, /who,
 /mode, /ask, /memories) and save names (/save).
 A line that starts with a slash is a command and Enter runs it. With --plain each input
@@ -367,7 +371,20 @@ line is one message.",
     ),
     ("cli.quiet.on", "quiet hours on, {from} to {to}"),
     ("cli.quiet.off", "quiet hours off"),
-    ("cli.usage.events", "usage: /events [on|off|0 to 6]"),
+    ("cli.usage.events", "usage: /events [on|off|0 to {max}]"),
+    ("cli.usage.away", "usage: /away [on|off]"),
+    (
+        "cli.away.on",
+        "away mode on: nobody comes to you until you turn it off or write",
+    ),
+    ("cli.away.off", "away mode off"),
+    ("cli.away.off_message", "away mode off, since you wrote"),
+    ("cli.prompt.away", "away"),
+    (
+        "cli.tier.pacing",
+        "this level also sets how often people come by: up to {visits} visits and {events} \
+         daily events a day",
+    ),
     ("cli.events.on", "daily events on, {n} a day"),
     ("cli.events.off", "daily events off"),
     ("cli.events.none", "nothing has happened yet"),

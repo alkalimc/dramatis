@@ -102,15 +102,15 @@ describe("errors", () => {
 });
 
 describe("events", () => {
-  test("all ten are subscribed and released on unsubscribe", async () => {
+  test("all eleven are subscribed and released on unsubscribe", async () => {
     const live = new Set<string>();
     const api = renderWith(<p />).api;
     const names = Object.keys(api.events) as (keyof Api["events"])[];
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     const spy = { ...api, events: Object.fromEntries(names.map((n) => [n, { listen: () => { live.add(n); return Promise.resolve(() => void live.delete(n)); } }])) } as unknown as Api;
     const store = createStore();
     const off = await subscribe(spy, store, createActions(spy, store));
-    expect(live.size).toBe(10);
+    expect(live.size).toBe(11);
     off();
     expect(live.size).toBe(0);
   });

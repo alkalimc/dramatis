@@ -90,6 +90,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, rosterFilter: a.filter };
     case "quota":
       return { ...s, quota: a.quota };
+    case "away":
+      return { ...s, away: a.away };
     case "hostChannel":
       return { ...s, hostChannel: a.id };
     case "channels":

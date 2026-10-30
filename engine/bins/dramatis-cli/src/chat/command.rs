@@ -71,6 +71,8 @@ pub enum Command {
     Quiet(Option<String>),
     /// List the daily events, or switch them `on`/`off` or set how many a day.
     Events(Option<String>),
+    /// Show away mode, or turn it on or off.
+    Away(Option<bool>),
     Save(Save),
     History(usize),
     /// Take back the n-th last message of the user in this channel (1 = the last) and
@@ -331,6 +333,12 @@ pub fn parse(line: &str) -> Command {
         "lang" => Command::Lang(optional(args)),
         "quiet" => Command::Quiet(optional(args)),
         "events" => Command::Events(optional(args)),
+        "away" => match args {
+            "" => Command::Away(None),
+            "on" => Command::Away(Some(true)),
+            "off" => Command::Away(Some(false)),
+            _ => Command::Invalid("cli.usage.away"),
+        },
         "save" => parse_save(args),
         "logout" if args.is_empty() => Command::Save(Save::Logout),
         "logout" => Command::Invalid("cli.usage.logout"),
@@ -449,6 +457,10 @@ mod tests {
         );
         assert_eq!(parse("/tier"), Command::Tier(None));
         assert_eq!(parse("/quiet off"), Command::Quiet(Some("off".into())));
+        assert_eq!(parse("/away"), Command::Away(None));
+        assert_eq!(parse("/away on"), Command::Away(Some(true)));
+        assert_eq!(parse("/away off"), Command::Away(Some(false)));
+        assert_eq!(parse("/away soon"), Command::Invalid("cli.usage.away"));
         assert_eq!(parse("/events"), Command::Events(None));
         assert_eq!(parse("/events 2"), Command::Events(Some("2".into())));
         assert_eq!(parse("/chats"), Command::Chats(false));

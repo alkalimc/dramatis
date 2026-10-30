@@ -12,7 +12,7 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use api::events::{MessageAdded, Notification, WorldChange};
+use api::events::{AwayChanged, MessageAdded, Notification, WorldChange};
 use world::presence::{Activity, Digest};
 use world::quota::{self, Band, CallKind, Decision};
 use world::seed::{self, Opening, SeedKind, WordsHit};
@@ -97,6 +97,8 @@ impl Agent {
         if text.trim().is_empty() && image.is_none() {
             return Err(Error::Invalid("empty message".into()));
         }
+        // Writing to anyone means he is back.
+        self.end_away(true)?;
         let now = self.now();
         // Before the world is locked: decoding a picture takes a moment.
         let kind = self.log_kind(&self.db(), channel)?;
@@ -977,10 +979,16 @@ impl Agent {
             .iter()
             .map(|m| (PersonId::from(m.person.as_str()), m.score))
             .collect();
-        let min =
-            self.config.agent.interject.min_confidence.unwrap_or(
-                self.ix().params().confidence.high_top1 * self.config.agent.interject.relax,
-            );
+        let relax = {
+            let tier = settings::intensity(&self.db())?;
+            self.config.world.pacing.get(tier).interject_relax
+        };
+        let min = self
+            .config
+            .agent
+            .interject
+            .min_confidence
+            .unwrap_or(self.ix().params().confidence.high_top1 * relax);
         let status = self.quota_status()?;
         let pick = channel::interjector(
             &self.db(),
@@ -1745,6 +1753,35 @@ impl Agent {
         Ok(())
     }
 
+    // ---- away ----
+
+    /// Whether the user is away: every start of unprompted work asks this first (the
+    /// seed plan and the host's line in `world` ask the same through `world::away`).
+    fn away(&self) -> Result<bool> {
+        Ok(world::away::is_away(&self.db())?)
+    }
+
+    /// Turn away mode off (`by_message`: the user wrote). The slots that passed are spent,
+    /// and what fell due meanwhile is said once in one fixed line of the host's, with no
+    /// model call. Returns whether it was on.
+    pub fn end_away(&self, by_message: bool) -> Result<bool> {
+        let said = {
+            let conn = self.db();
+            let now = self.now();
+            world::atomic(&conn, |c| world::away::end(c, now, &self.config.world))?
+        };
+        let Some(said) = said else { return Ok(false) };
+        if !said.is_empty() {
+            self.host_line("host.away_back", &[("items", &said.join("; "))])?;
+            self.changed(vec![WorldChange::Digest]);
+        }
+        self.emit(Event::AwayChanged(AwayChanged {
+            away: false,
+            by_message,
+        }));
+        Ok(true)
+    }
+
     // ---- presence ----
 
     /// The user opened the app (`opened`) or came back from idle. Computes the digest,
@@ -1855,7 +1892,7 @@ impl Agent {
     /// hours and while the quota band is shut, like any unprompted speech; a channel in the
     /// middle of a turn waits for the next tick.
     async fn host_reminders(&self) -> Result<()> {
-        if self.chat().is_err() {
+        if self.chat().is_err() || self.away()? {
             return Ok(());
         }
         let now = self.now();
@@ -1937,8 +1974,10 @@ impl Agent {
             let conn = self.db();
             let tier = settings::intensity(&conn)?;
             let status = quota::status(&conn, tier, now.ms, &self.config.world.quota)?;
+            let pace = self.config.world.pacing.get(tier);
             let limits = seed::Limits {
                 seed: &self.config.world.seed,
+                pace: &pace,
                 session: &self.config.world.session,
                 quota: &status,
             };
@@ -2026,7 +2065,7 @@ impl Agent {
     }
 
     /// The daily seeds outside the user's returns, while he is about but not in a
-    /// conversation: at most one opening, planned at most every `seed.interval_min`
+    /// conversation: at most one opening, planned at most every `interval_min` of the tier
     /// minutes, within every limit.
     pub async fn on_daily(&self) -> Result<Option<(PersonId, ChannelId)>> {
         let _plan = self.planner.lock().await;
@@ -2040,6 +2079,7 @@ impl Agent {
             let tier = settings::intensity(&conn)?;
             let status = quota::status(&conn, tier, now.ms, &self.config.world.quota)?;
             status.band != Band::Open
+                || world::away::is_away(&conn)?
                 || settings::quiet_hours(&conn, &self.config.world.seed)?
                     .is_some_and(|q| world::clock::in_quiet_hours(&q, now))
                 || seed::in_conversation(&conn, now.ms, &self.config.world.session)?
@@ -2049,7 +2089,9 @@ impl Agent {
         }
         {
             let mut last = self.daily_planned.lock().unwrap_or_else(|e| e.into_inner());
-            let wait = i64::from(self.config.world.seed.interval_min) * world::clock::MINUTE_MS;
+            let tier = settings::intensity(&self.db())?;
+            let pace = self.config.world.pacing.get(tier);
+            let wait = i64::from(pace.interval_min) * world::clock::MINUTE_MS;
             if last.is_some_and(|t| now.ms - t < wait) {
                 return Ok(None);
             }
@@ -2061,8 +2103,10 @@ impl Agent {
             let conn = self.db();
             let tier = settings::intensity(&conn)?;
             let status = quota::status(&conn, tier, now.ms, &self.config.world.quota)?;
+            let pace = self.config.world.pacing.get(tier);
             let limits = seed::Limits {
                 seed: &self.config.world.seed,
+                pace: &pace,
                 session: &self.config.world.session,
                 quota: &status,
             };

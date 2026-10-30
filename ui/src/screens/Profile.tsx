@@ -284,6 +284,7 @@ export function LeftDrawer() {
   const actions = useActions();
   const name = useStore((s) => s.settings?.user_name ?? null);
   const theme = useStore((s) => s.theme);
+  const away = useStore((s) => s.away);
   const hasSave = useStore((s) => Boolean(s.status?.save));
   const archivedCount = useStore((s) => s.channels.filter((c) => c.archived).length);
   const ref = useRef<HTMLElement>(null);
@@ -310,6 +311,7 @@ export function LeftDrawer() {
           <span className="left-who">
             <span className="left-name">{name?.trim() || t("user.you")}</span>
             {sub && <span className="left-sub">{sub}</span>}
+            {away && <span className="left-away">{t("menu.away.on")}</span>}
           </span>
           <Icon name="chevron" size={20} />
         </button>
@@ -324,6 +326,13 @@ export function LeftDrawer() {
           <Row icon="bookmark" label={t("system.tab.saves")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "saves" } }))} />
           <Row icon="system" label={t("menu.settings")} onClick={go(() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "root" } }))} />
           {hasSave && <Row icon="leave" label={t("logout")} onClick={go(() => void actions.logOut())} />}
+          <li>
+            <label className="drawer-item switch-row" title={t("menu.away.hint")}>
+              <Icon name="mute" size={24} />
+              <span>{t("menu.away")}</span>
+              <input type="checkbox" role="switch" checked={away} onChange={(e) => void actions.setAway(e.target.checked)} />
+            </label>
+          </li>
           <li>
             <label className="drawer-item switch-row">
               <Icon name="moon" size={24} />

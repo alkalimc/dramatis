@@ -210,10 +210,11 @@ A turn that ends without a reply leaves one line in `$DRAMATIS_HOME/logs/dramati
 | `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
 | `/memories [person]` | numbered memories; `/forget <n>`, `/restore <n>` and `/edit <n> <text>` change them |
 | `/save` | list saves; `new`, `switch`, `copy`, `rename`, `delete`, `export`, `import` |
+| `/away [on\|off]` | away mode: nobody comes to you and nothing is sent until you turn it off or write a message (in the app: the Away switch in the left drawer and the tray menu) |
 
 `/help` lists all commands, including their short forms. `/quit` or Ctrl-D leaves.
 
-Tab completes command names, the fixed words some commands take (`/tier`, `/quiet`, `/events`,
+Tab completes command names, the fixed words some commands take (`/tier`, `/quiet`, `/events`, `/away`,
 `/lang`, `/library`, `/read`, `/chats`, `/storage`, `/password`), person names (`/talk`, `/group`,
 `/invite`, `/remove`, `/who`, `/mode`, `/ask`, `/memories`) and save names (`/save`).
 
@@ -233,7 +234,7 @@ history); at the prompt it clears the line, and Ctrl-D leaves.
 
 Calls are counted in one rolling one-hour window. A call billed per request counts 1; a call
 billed per token counts by its size. The intensity tier (`/tier`, or the system drawer in the app)
-sets how many calls an hour are allowed, and `ultra` has no window. When the window is full new
+sets how many calls an hour are allowed, and `ultra` has no window. It also sets how often people come by and how many daily events there are, within fixed ceilings. When the window is full new
 calls wait until it releases; a turn you start yourself is never refused before then.
 
 ## Writing a pack

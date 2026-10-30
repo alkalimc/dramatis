@@ -138,18 +138,6 @@ impl Default for AskTurns {
 pub struct Seed {
     /// Unprompted openings per person per local day.
     pub per_agent_day: u32,
-    /// Unprompted openings across everyone per local day.
-    pub daily_total: u32,
-    /// Days without the user talking to an enabled person (and without an opening of
-    /// his) after which he may drop by with nothing in particular to say.
-    pub visit_days: u32,
-    /// Hours an enabled group may stay silent before one of its members speaks in it.
-    pub group_quiet_hours: u32,
-    /// Minutes between plannings of the daily seeds while the user is about and not in
-    /// a conversation, apart from his returns.
-    pub interval_min: u32,
-    /// Least minutes between two unprompted openings, whoever opens.
-    pub gap_min: u32,
     /// Default quiet hours (user local time) until the user sets their own.
     pub quiet_hours: QuietHours,
 }
@@ -165,15 +153,125 @@ impl Default for Seed {
     fn default() -> Self {
         Self {
             per_agent_day: 1,
-            daily_total: 5,
-            visit_days: 2,
-            group_quiet_hours: 6,
-            interval_min: 15,
-            gap_min: 60,
             quiet_hours: QuietHours {
                 from: "23:00".into(),
                 to: "08:00".into(),
             },
+        }
+    }
+}
+
+/// What one tier sets of the pacing of unprompted life. A higher tier is a more frequent
+/// life; the ceilings in [`Pace::clamped`] hold on every tier, the unlimited ones included.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pace {
+    /// Unprompted openings across everyone per local day.
+    pub daily_total: u32,
+    /// Least minutes between two unprompted openings (and a daily event), whoever opens.
+    pub gap_min: u32,
+    /// Minutes between plannings of the daily seeds while the user is about and not in
+    /// a conversation, apart from his returns.
+    pub interval_min: u32,
+    /// Days without the user talking to an enabled person (and without an opening of
+    /// his) after which he may drop by with nothing in particular to say.
+    pub visit_days: u32,
+    /// Hours an enabled group may stay silent before one of its members speaks in it.
+    pub group_quiet_hours: u32,
+    /// Share of the high retrieval boundary that lets a member add a line to a group
+    /// (lower = more often).
+    pub interject_relax: f64,
+    /// Daily events per local day until the user chooses another number.
+    pub events_default: u32,
+    /// The most daily events per day the user can choose.
+    pub events_max: u32,
+}
+
+/// Most openings a day on any tier.
+pub const VISITS_CEILING: u32 = 10;
+/// Fewest minutes between two openings on any tier.
+pub const GAP_FLOOR_MIN: u32 = 10;
+/// Most daily events a day on any tier.
+pub const EVENTS_CEILING: u32 = 6;
+/// Lowest `interject_relax` on any tier.
+pub const RELAX_FLOOR: f64 = 0.6;
+
+impl Pace {
+    const fn row(
+        daily_total: u32,
+        gap_min: u32,
+        interval_min: u32,
+        visit_days: u32,
+        group_quiet_hours: u32,
+        interject_relax: f64,
+        events: (u32, u32),
+    ) -> Self {
+        Self {
+            daily_total,
+            gap_min,
+            interval_min,
+            visit_days,
+            group_quiet_hours,
+            interject_relax,
+            events_default: events.0,
+            events_max: events.1,
+        }
+    }
+
+    /// The row held to the ceilings, whatever a configuration file says.
+    pub fn clamped(mut self) -> Self {
+        self.daily_total = self.daily_total.min(VISITS_CEILING);
+        self.gap_min = self.gap_min.max(GAP_FLOOR_MIN);
+        self.interval_min = self.interval_min.max(1);
+        self.interject_relax = self.interject_relax.max(RELAX_FLOOR);
+        self.events_max = self.events_max.min(EVENTS_CEILING);
+        self.events_default = self.events_default.min(self.events_max);
+        self
+    }
+}
+
+impl Default for Pace {
+    /// The Middle row.
+    fn default() -> Self {
+        Self::row(5, 15, 15, 2, 6, 0.8, (1, 4))
+    }
+}
+
+/// `pacing[tier]`: the table of [`Pace`] rows, next to the quota windows.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pacing {
+    pub low: Pace,
+    pub middle: Pace,
+    pub high: Pace,
+    pub extra_high: Pace,
+    pub max: Pace,
+    pub ultra: Pace,
+}
+
+impl Pacing {
+    pub fn get(&self, tier: Tier) -> Pace {
+        match tier {
+            Tier::Low => self.low,
+            Tier::Middle => self.middle,
+            Tier::High => self.high,
+            Tier::ExtraHigh => self.extra_high,
+            Tier::Max => self.max,
+            Tier::Ultra => self.ultra,
+        }
+        .clamped()
+    }
+}
+
+impl Default for Pacing {
+    fn default() -> Self {
+        Self {
+            low: Pace::row(2, 30, 30, 4, 12, 1.0, (1, 2)),
+            middle: Pace::default(),
+            high: Pace::row(6, 15, 15, 2, 5, 0.8, (2, 5)),
+            extra_high: Pace::row(7, 12, 15, 1, 4, 0.75, (2, 6)),
+            max: Pace::row(8, 10, 10, 1, 3, 0.7, (3, 6)),
+            ultra: Pace::row(10, 10, 10, 1, 3, 0.7, (3, 6)),
         }
     }
 }
@@ -216,10 +314,6 @@ impl Default for Wrapup {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Events {
-    /// Happenings per local day until the user chooses another number.
-    pub per_day: u32,
-    /// The most per day the user can choose.
-    pub max_per_day: u32,
     /// Past happenings a listing shows, and how far back the units used are avoided.
     pub list: u32,
     /// People offered to the model as those a happening may involve.
@@ -233,8 +327,6 @@ pub struct Events {
 impl Default for Events {
     fn default() -> Self {
         Self {
-            per_day: 1,
-            max_per_day: 6,
             list: 5,
             pool: 8,
             max_persons: 3,
@@ -276,6 +368,7 @@ pub struct Params {
     pub cost: Cost,
     pub ask: Ask,
     pub seed: Seed,
+    pub pacing: Pacing,
     pub session: Session,
     pub wrapup: Wrapup,
     pub events: Events,
@@ -285,6 +378,86 @@ pub struct Params {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tier_sets_the_pacing_and_no_tier_breaks_the_ceilings() {
+        let table = Pacing::default();
+        let low = table.get(Tier::Low);
+        let middle = table.get(Tier::Middle);
+        let ultra = table.get(Tier::Ultra);
+        assert_eq!(
+            (
+                low.daily_total,
+                low.gap_min,
+                low.interval_min,
+                low.visit_days,
+                low.group_quiet_hours
+            ),
+            (2, 30, 30, 4, 12)
+        );
+        assert_eq!(
+            (low.events_default, low.events_max, low.interject_relax),
+            (1, 2, 1.0)
+        );
+        assert_eq!(middle, Pace::default());
+        assert_eq!(
+            (
+                ultra.daily_total,
+                ultra.gap_min,
+                ultra.visit_days,
+                ultra.group_quiet_hours
+            ),
+            (10, 10, 1, 3)
+        );
+        assert_eq!(
+            (
+                ultra.events_default,
+                ultra.events_max,
+                ultra.interject_relax
+            ),
+            (3, 6, 0.7)
+        );
+        // More life as the tier goes up, never past the ceilings.
+        let tiers = [
+            Tier::Low,
+            Tier::Middle,
+            Tier::High,
+            Tier::ExtraHigh,
+            Tier::Max,
+            Tier::Ultra,
+        ];
+        for pair in tiers.windows(2) {
+            let (a, b) = (table.get(pair[0]), table.get(pair[1]));
+            assert!(a.daily_total <= b.daily_total && a.gap_min >= b.gap_min);
+            assert!(a.events_max <= b.events_max && a.interject_relax >= b.interject_relax);
+        }
+        for tier in tiers {
+            let pace = table.get(tier);
+            assert!(pace.daily_total <= VISITS_CEILING && pace.gap_min >= GAP_FLOOR_MIN);
+            assert!(pace.events_max <= EVENTS_CEILING && pace.interject_relax >= RELAX_FLOOR);
+        }
+        // A configuration cannot lift them.
+        let wild: Pacing = serde_json::from_str(
+            r#"{"ultra": {"daily_total": 99, "gap_min": 1, "events_max": 40, "events_default": 40, "interject_relax": 0.1}}"#,
+        )
+        .unwrap();
+        let ultra = wild.get(Tier::Ultra);
+        assert_eq!(
+            (
+                ultra.daily_total,
+                ultra.gap_min,
+                ultra.events_max,
+                ultra.events_default
+            ),
+            (
+                VISITS_CEILING,
+                GAP_FLOOR_MIN,
+                EVENTS_CEILING,
+                EVENTS_CEILING
+            )
+        );
+        assert_eq!(ultra.interject_relax, RELAX_FLOOR);
+    }
 
     #[test]
     fn missing_keys_fall_back_to_defaults() {

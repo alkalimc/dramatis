@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use api::corpus::Corpus;
@@ -549,6 +550,8 @@ pub struct Show {
     shown: Mutex<BTreeMap<ChannelId, MessageId>>,
     /// The day of the last line printed per channel, so a new day gets a date line.
     days: Mutex<BTreeMap<ChannelId, (i32, u8, u8)>>,
+    /// Away mode, as the engine last said; the prompt shows it.
+    away: AtomicBool,
 }
 
 /// The calendar date in a timestamp's own offset (`2026-10-10T08:00:00+08:00`).
@@ -562,8 +565,17 @@ fn day_of(at: &Timestamp) -> Option<(i32, u8, u8)> {
 }
 
 impl Show {
+    pub fn is_away(&self) -> bool {
+        self.away.load(Ordering::Relaxed)
+    }
+
+    pub fn set_away(&self, away: bool) {
+        self.away.store(away, Ordering::Relaxed);
+    }
+
     pub fn new(term: Arc<Term>) -> Self {
         Self {
+            away: AtomicBool::new(false),
             term,
             bound: OnceLock::new(),
             state: Mutex::new(State::default()),
@@ -776,6 +788,16 @@ impl Sink for Show {
                 if let Some(live) = st.live.as_mut() {
                     self.term.print(&live.streamer.push(&d.delta));
                 }
+            }
+            Event::AwayChanged(a) => {
+                self.set_away(a.away);
+                self.close(&mut st);
+                drop(st);
+                self.term.note(&names.text(match (a.away, a.by_message) {
+                    (true, _) => "cli.away.on",
+                    (false, true) => "cli.away.off_message",
+                    (false, false) => "cli.away.off",
+                }));
             }
             Event::ToolCalled(t) => {
                 self.close(&mut st);

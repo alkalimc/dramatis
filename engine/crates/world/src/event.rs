@@ -17,7 +17,7 @@ use crate::params::{Params, QuietHours};
 use crate::quota::{Band, Status};
 use crate::seed::{self, Slots};
 use crate::types::{FactId, MessageId, PersonId};
-use crate::{Result, message, settings};
+use crate::{Result, away, message, settings};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
@@ -141,11 +141,12 @@ pub fn count_on(conn: &Connection, day: &str) -> Result<u32> {
 /// not before the user has said something (a new world gets its welcome first), and not
 /// where unprompted speech is held: quiet hours, a quota band that is not open.
 pub fn due(conn: &Connection, now: Now, params: &Params, status: &Status) -> Result<bool> {
-    let per_day = settings::events_per_day(conn, &params.events)?;
+    let pace = params.pacing.get(status.tier);
+    let per_day = settings::events_per_day(conn, &pace)?;
     if per_day == 0 || count_on(conn, &day_key(now))? >= per_day {
         return Ok(false);
     }
-    if status.band != Band::Open {
+    if status.band != Band::Open || away::is_away(conn)? || away::event_slot_spent(conn, now)? {
         return Ok(false);
     }
     let quiet = settings::quiet_hours(conn, &params.seed)?;
@@ -155,7 +156,7 @@ pub fn due(conn: &Connection, now: Now, params: &Params, status: &Status) -> Res
     {
         return Ok(false);
     }
-    if clock::too_soon(seed::last_opening(conn)?, now.ms, params.seed.gap_min) {
+    if clock::too_soon(seed::last_opening(conn)?, now.ms, pace.gap_min) {
         return Ok(false);
     }
     // One event to a part of the waking day, from its slot on; a part that went by
@@ -282,7 +283,7 @@ mod tests {
             let made = run_clock(&w, &params, midnight, midnight + 2 * DAY_MS);
             assert_eq!(made.len(), 2 * n as usize, "n = {n}");
             let part = 15 * 60 / i64::from(n) * 60_000;
-            let gap = i64::from(params.seed.gap_min) * 60_000;
+            let gap = i64::from(params.pacing.middle.gap_min) * 60_000;
             let quiet = params.seed.quiet_hours.clone();
             for (i, t) in made.iter().enumerate() {
                 assert!(
@@ -328,9 +329,19 @@ mod tests {
         assert_eq!(run_clock(&w, &params, midnight, midnight + DAY_MS).len(), 2);
         settings::set(&w, settings::EVENTS_PER_DAY, &0).unwrap();
         assert!(run_clock(&w, &params, midnight + DAY_MS, midnight + 2 * DAY_MS).is_empty());
-        // A larger number than the register allows is cut.
+        // A larger number than the tier allows is cut; the choice stays stored.
         settings::set(&w, settings::EVENTS_PER_DAY, &9).unwrap();
-        assert_eq!(settings::events_per_day(&w, &params.events).unwrap(), 6);
+        let pace = |t| params.pacing.get(t);
+        assert_eq!(
+            settings::events_per_day(&w, &pace(Tier::Middle)).unwrap(),
+            4
+        );
+        assert_eq!(settings::events_per_day(&w, &pace(Tier::Ultra)).unwrap(), 6);
+        assert_eq!(settings::events_per_day(&w, &pace(Tier::Low)).unwrap(), 2);
+        // Without a choice the tier's own default stands.
+        settings::unset(&w, settings::EVENTS_PER_DAY).unwrap();
+        assert_eq!(settings::events_per_day(&w, &pace(Tier::Low)).unwrap(), 1);
+        assert_eq!(settings::events_per_day(&w, &pace(Tier::Ultra)).unwrap(), 3);
     }
 
     #[test]
@@ -345,10 +356,33 @@ mod tests {
         assert!(clock::too_soon(
             seed::last_opening(&w).unwrap(),
             soon,
-            params.seed.gap_min
+            params.pacing.middle.gap_min
         ));
         // Even once its slot has come, an event waits out the gap after a visit.
         assert!(!due(&w, at(soon), &params, &status(&w, at(soon))).unwrap());
+    }
+
+    #[test]
+    fn the_event_slot_that_passed_while_away_is_spent() {
+        let w = world();
+        let params = Params::default();
+        user_spoke(&w);
+        let midnight = T0 - 12 * clock::HOUR_MS;
+        away::begin(&w, midnight + 8 * clock::HOUR_MS).unwrap();
+        let held = run_clock(&w, &params, midnight, midnight + 20 * clock::HOUR_MS);
+        assert!(held.is_empty(), "{held:?}");
+        away::end(&w, at(midnight + 20 * clock::HOUR_MS), &params).unwrap();
+        // Back in the evening: today's one slot went by, so nothing is made today and
+        // the next day is whole.
+        let rest = run_clock(
+            &w,
+            &params,
+            midnight + 20 * clock::HOUR_MS,
+            midnight + DAY_MS,
+        );
+        assert!(rest.is_empty(), "{rest:?}");
+        let tomorrow = run_clock(&w, &params, midnight + DAY_MS, midnight + 2 * DAY_MS);
+        assert_eq!(tomorrow.len(), 1);
     }
 
     #[test]

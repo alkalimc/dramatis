@@ -9,6 +9,7 @@
 //! derefs to one) and inside a caller's transaction. Time is always passed in
 //! ([`clock::Now`]); nothing here reads the wall clock.
 
+pub mod away;
 pub mod bond;
 pub mod channel;
 pub mod cipher;

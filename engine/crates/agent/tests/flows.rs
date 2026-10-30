@@ -4294,3 +4294,79 @@ async fn a_group_is_told_whether_the_host_is_there_and_a_find_names_it() {
     e.agent.send(there, "ann, hello", None).await.unwrap();
     assert!(log_bytes(&e.agent, there).contains("Hostess is in this group."));
 }
+
+// ---- away mode ----
+
+fn host_commitment(e: &Env, text: &str, due: i64) {
+    e.agent.with_world(|w| {
+        let new = NewFact::new(Actor::Host, Audience::World, FactKind::Commitment, text).due(due);
+        fact::write(w, &new, T0 - 3_600_000).unwrap();
+    });
+}
+
+#[tokio::test]
+async fn while_away_nothing_starts_and_the_return_gives_one_line_without_a_model_call() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.agent
+        .with_world(|w| world::away::begin(w, T0).map(drop).unwrap());
+    host_commitment(&e, "water the plants", T0 + 3_600_000);
+    e.agent.with_world(|w| {
+        let theirs = NewFact::new(
+            Actor::Person(p("ann")),
+            Audience::Participants(ch),
+            FactKind::Commitment,
+            "Tea together at noon",
+        )
+        .due(T0 + 3_600_000);
+        fact::write(w, &theirs, T0).unwrap();
+    });
+    e.clock.advance(2 * 3_600_000);
+    // A reminder, an event seed and the daily planning all stay quiet: no model call.
+    assert_eq!(e.agent.tick(true).await.unwrap(), None);
+    assert_eq!(e.agent.on_event().await.unwrap(), None);
+    assert_eq!(e.agent.on_daily().await.unwrap(), None);
+    assert!(e.fake.bodies().is_empty());
+    assert!(meter(&e.agent).is_empty());
+    assert!(host_texts(&e).is_empty(), "{:?}", host_texts(&e));
+    assert!(e.sink.take().iter().all(|ev| !matches!(
+        ev,
+        agent::Event::MessageAdded(_) | agent::Event::Notification(_)
+    )));
+
+    // Back: one fixed line for what the user asked of the host; the person's own promise
+    // is spent; nothing replays and no model is called.
+    assert!(e.agent.end_away(false).unwrap());
+    assert!(!e.agent.end_away(false).unwrap());
+    let said = host_texts(&e);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(said[0].1, "While you were away: water the plants");
+    assert_eq!(e.agent.tick(true).await.unwrap(), None);
+    assert_eq!(e.agent.on_event().await.unwrap(), None);
+    assert!(e.fake.bodies().is_empty());
+    assert_eq!(host_texts(&e).len(), 1);
+}
+
+#[tokio::test]
+async fn writing_ends_away_and_a_due_reminder_is_said_before_the_reply() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.agent
+        .with_world(|w| world::away::begin(w, T0).map(drop).unwrap());
+    host_commitment(&e, "call home", T0 + 60_000);
+    e.clock.advance(3_600_000);
+    e.fake.push([say("Welcome back.")]);
+    e.agent.send(ch, "I am back", None).await.unwrap();
+    assert!(!e.agent.with_world(|w| world::away::is_away(w).unwrap()));
+    assert!(e.sink.take().iter().any(|ev| matches!(
+        ev,
+        agent::Event::AwayChanged(a) if !a.away && a.by_message
+    )));
+    assert_eq!(
+        host_texts(&e).last().map(|t| t.1.as_str()),
+        Some("While you were away: call home")
+    );
+    // Delivered by the line, not again by a reminder turn.
+    assert_eq!(e.agent.tick(true).await.unwrap(), None);
+    assert_eq!(e.fake.bodies().len(), 1);
+}

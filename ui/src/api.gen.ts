@@ -206,6 +206,16 @@ export const commands = {
 	setVoice: (person: PersonId, voice: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("set_voice", { person, voice })),
 	quota: () => typedError<QuotaStatus, ApiError>(__TAURI_INVOKE("quota")),
 	setTier: (tier: Tier) => typedError<null, ApiError>(__TAURI_INVOKE("set_tier", { tier })),
+	/**
+	 *  Whether away mode is on: nothing unprompted comes to the user and no notification
+	 *  is sent. Per save.
+	 */
+	away: () => typedError<boolean, ApiError>(__TAURI_INVOKE("away")),
+	/**
+	 *  Turn away mode on or off. Turning it off says in the host's channel, in one line,
+	 *  what fell due meanwhile; the user's own message turns it off too (`AwayChanged`).
+	 */
+	setAway: (away: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("set_away", { away })),
 	settings: () => typedError<Settings, ApiError>(__TAURI_INVOKE("settings")),
 	/**  The daily events the host told of, today's and the last few, newest first. */
 	dailyEvents: () => typedError<DailyEvent[], ApiError>(__TAURI_INVOKE("daily_events")),
@@ -318,6 +328,7 @@ export const commands = {
 
 /** Events */
 export const events = {
+	awayChanged: makeEvent<AwayChanged>("away-changed"),
 	messageAdded: makeEvent<MessageAdded>("message-added"),
 	messageDelta: makeEvent<MessageDelta>("message-delta"),
 	modeChanged: makeEvent<ModeChanged>("mode-changed"),
@@ -455,6 +466,12 @@ export type Audience = { kind: "world" } | { kind: "participants"; channel: Chan
 export type Author = { kind: "user" } | 
 /**  The in-world assistant. */
 { kind: "host" } | { kind: "person"; id: PersonId };
+
+/**  Away mode was turned on or off. `by_message`: the user's own message ended it. */
+export type AwayChanged = {
+	away: boolean,
+	by_message: boolean,
+};
 
 export type Billing = 
 /**  By input and output tokens, at the model's prices. */
@@ -885,6 +902,10 @@ export type QuotaStatus = {
 	/**  The rolling hour; `None` on the tier without a window. */
 	window: QuotaWindow | null,
 	spent: ShapeSpend[],
+	/**  Most openings a day this tier allows. */
+	visits_per_day: number,
+	/**  Most daily events a day this tier allows. */
+	events_max: number,
 };
 
 export type QuotaWindow = {
@@ -1014,8 +1035,8 @@ export type Settings = {
 	quiet_hours: QuietHours | null,
 	notifications: boolean,
 	/**
-	 *  Daily events the host may post per day: 0 turns them off. The engine fills the
-	 *  register default on first run and cuts a larger number to the register's most.
+	 *  Daily events the host may post per day: 0 turns them off. Without a choice of the
+	 *  user's it is the tier's default; a larger number is cut to the tier's most.
 	 */
 	events_per_day: number,
 };

@@ -654,6 +654,10 @@ pub struct QuotaStatus {
     /// The rolling hour; `None` on the tier without a window.
     pub window: Option<QuotaWindow>,
     pub spent: Vec<ShapeSpend>,
+    /// Most openings a day this tier allows.
+    pub visits_per_day: u32,
+    /// Most daily events a day this tier allows.
+    pub events_max: u32,
 }
 
 // ---- settings ----
@@ -681,8 +685,8 @@ pub struct Settings {
     /// `None`: no quiet hours. The engine fills the register default on first run.
     pub quiet_hours: Option<QuietHours>,
     pub notifications: bool,
-    /// Daily events the host may post per day: 0 turns them off. The engine fills the
-    /// register default on first run and cuts a larger number to the register's most.
+    /// Daily events the host may post per day: 0 turns them off. Without a choice of the
+    /// user's it is the tier's default; a larger number is cut to the tier's most.
     pub events_per_day: u32,
 }
 

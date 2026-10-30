@@ -42,23 +42,12 @@ impl Roll {
 }
 
 /// `interject.*`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Interject {
     /// Own-unit score above which an enabled member may add one line. `None` = the
-    /// high boundary of `retrieve.confidence` times `relax`.
+    /// high boundary of `retrieve.confidence` times the tier's `interject_relax`.
     pub min_confidence: Option<f64>,
-    /// Share of the high boundary that counts when `min_confidence` is not set.
-    pub relax: f64,
-}
-
-impl Default for Interject {
-    fn default() -> Self {
-        Self {
-            min_confidence: None,
-            relax: 0.8,
-        }
-    }
 }
 
 /// `group.*`.

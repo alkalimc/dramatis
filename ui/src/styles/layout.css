@@ -46,6 +46,7 @@
   flex-direction: column;
 }
 button.rail-menu {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -402,6 +403,19 @@ button.left-head > .icon-svg {
   font-size: var(--fs-md);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.left-away {
+  color: var(--muted);
+  font-size: var(--fs-md);
+}
+.rail-away {
+  position: absolute;
+  top: 0.9rem;
+  right: 1.1rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent-fill);
 }
 .drawer-items {
   padding: var(--s-2) 0;

@@ -196,6 +196,10 @@ impl AgentPort for Spy {
         self.calls.lock().unwrap().push("event".into());
         Ok(())
     }
+    async fn end_away(&self) -> ApiResult<()> {
+        self.calls.lock().unwrap().push("end_away".into());
+        Ok(())
+    }
     async fn on_rename(&self) -> ApiResult<()> {
         self.calls.lock().unwrap().push("rename".into());
         Ok(())
@@ -1047,6 +1051,49 @@ async fn notifications_pass_when_on_and_outside_quiet_hours() {
         .await
         .unwrap();
     assert!(!e.may_notify().unwrap());
+}
+
+#[tokio::test]
+async fn away_silences_notifications_and_turning_it_off_goes_through_the_agent() {
+    let r = rig();
+    let e = &r.engine;
+    assert!(!e.away().await.unwrap());
+    assert!(e.may_notify().unwrap());
+    e.set_away(true).await.unwrap();
+    assert!(e.away().await.unwrap());
+    assert!(!e.may_notify().unwrap(), "no notification while away");
+    assert!(r.events.0.lock().unwrap().iter().any(|ev| matches!(
+        ev,
+        crate::port::Event::AwayChanged(a) if a.away && !a.by_message
+    )));
+    // Turning it on twice is one change; turning it off is the agent's to settle.
+    e.set_away(true).await.unwrap();
+    e.set_away(false).await.unwrap();
+    assert_eq!(r.spy.calls.lock().unwrap().last().unwrap(), "end_away");
+}
+
+#[tokio::test]
+async fn the_tier_sets_the_events_default_and_cap_and_a_choice_survives_it() {
+    let r = rig();
+    let e = &r.engine;
+    let mut s = e.settings().await.unwrap();
+    assert_eq!(s.events_per_day, 1);
+    // Saving settings unchanged is no choice: the default keeps following the tier.
+    e.update_settings(s.clone()).await.unwrap();
+    e.set_tier(Tier::Ultra).await.unwrap();
+    s = e.settings().await.unwrap();
+    assert_eq!(s.events_per_day, 3);
+    assert_eq!(e.quota().await.unwrap().events_max, 6);
+    assert_eq!(e.quota().await.unwrap().visits_per_day, 10);
+    // A choice is cut to the cap, kept, and clamped again on a lower tier.
+    s.events_per_day = 9;
+    e.update_settings(s).await.unwrap();
+    assert_eq!(e.settings().await.unwrap().events_per_day, 6);
+    e.set_tier(Tier::Low).await.unwrap();
+    assert_eq!(e.settings().await.unwrap().events_per_day, 2);
+    assert_eq!(e.quota().await.unwrap().visits_per_day, 2);
+    e.set_tier(Tier::Max).await.unwrap();
+    assert_eq!(e.settings().await.unwrap().events_per_day, 6);
 }
 
 #[tokio::test]

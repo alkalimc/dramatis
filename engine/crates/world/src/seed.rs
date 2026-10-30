@@ -16,11 +16,11 @@ use crate::channel::{self, Channel};
 use crate::clock::{self, Now};
 use crate::event;
 use crate::fact::{self, About, Audience};
-use crate::params::{QuietHours, Seed as SeedParams, Session as SessionParams};
+use crate::params::{Pace, QuietHours, Seed as SeedParams, Session as SessionParams};
 use crate::quota::{self, Band};
 use crate::session::{self, Budget, Cause};
 use crate::types::{ChannelId, FactId, FactKind, MessageId, Mode, PersonId, TaskId};
-use crate::{Result, bond, message, settings, task};
+use crate::{Result, away, bond, message, settings, task};
 
 /// What a seed is, with what it points at.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -178,14 +178,16 @@ pub enum Held {
     InConversation,
     /// The quota band is not open: unprompted speech is off.
     Quota,
-    /// `seed.daily_total` reached.
+    /// the tier's `daily_total` reached.
     DailyTotal,
     /// Every candidate is at `seed.per_agent_day` or has nowhere to open.
     PerAgent,
-    /// The last opening, whoever's, was less than `seed.gap_min` ago.
+    /// The last opening, whoever's, was less than the tier's `gap_min` ago.
     TooSoon,
     /// The day's openings so far are all the waking day has earned by now.
     NotYet,
+    /// The user is away: nothing comes to him.
+    Away,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,7 +293,7 @@ fn daily_candidates(
     conn: &Connection,
     now: Now,
     words: &[WordsHit],
-    seed: &SeedParams,
+    pace: &Pace,
 ) -> Result<Vec<Candidate>> {
     let enabled = bond::enabled(conn)?;
     let today = now.local_date();
@@ -335,7 +337,7 @@ fn daily_candidates(
             }
         }
     }
-    out.extend(visit_candidates(conn, &enabled, now, seed)?);
+    out.extend(visit_candidates(conn, &enabled, now, pace)?);
     for w in words {
         if !enabled.contains(&w.person) {
             continue;
@@ -359,20 +361,20 @@ fn daily_candidates(
     Ok(out)
 }
 
-/// Visits: an enabled person the user has not talked with for `seed.visit_days` (and
+/// Visits: an enabled person the user has not talked with for the tier's `visit_days` (and
 /// who has not opened for that long) may drop by; a member of an enabled group silent
-/// for `seed.group_quiet_hours` may speak in it. They have nothing to say, so they come
+/// for the tier's `group_quiet_hours` may speak in it. They have nothing to say, so they come
 /// after every seed that has.
 fn visit_candidates(
     conn: &Connection,
     enabled: &[PersonId],
     now: Now,
-    seed: &SeedParams,
+    pace: &Pace,
 ) -> Result<Vec<Candidate>> {
     let d = now.local_date();
     let kind = SeedKind::Visit(d.year * 10_000 + i32::from(d.month) * 100 + i32::from(d.day));
-    let away = now.ms - i64::from(seed.visit_days) * clock::DAY_MS;
-    let quiet = now.ms - i64::from(seed.group_quiet_hours) * clock::HOUR_MS;
+    let away = now.ms - i64::from(pace.visit_days) * clock::DAY_MS;
+    let quiet = now.ms - i64::from(pace.group_quiet_hours) * clock::HOUR_MS;
     let mut out = Vec::new();
     for p in enabled {
         let seen = last_seen(conn, p)?;
@@ -422,12 +424,12 @@ pub fn candidates(
     conn: &Connection,
     occasion: &Occasion<'_>,
     now: Now,
-    seed: &SeedParams,
+    pace: &Pace,
 ) -> Result<Vec<Candidate>> {
     let mut out = commitment_candidates(conn, now.ms)?;
     out.extend(queued_candidates(conn)?);
     if let Occasion::Presence { words } = occasion {
-        out.extend(daily_candidates(conn, now, words, seed)?);
+        out.extend(daily_candidates(conn, now, words, pace)?);
     }
     order(&mut out);
     Ok(out)
@@ -501,6 +503,30 @@ impl Slots {
         let to = from + i64::from(end - self.part * i) * clock::MINUTE_MS;
         (from, to, self.at(i) <= self.since)
     }
+
+    /// The instant the waking day (the one `now` is in) began.
+    fn start(&self, now: Now) -> i64 {
+        now.ms - now.ms.rem_euclid(clock::MINUTE_MS) - i64::from(self.since) * clock::MINUTE_MS
+    }
+
+    /// How many slots came after `since` and by now: what a stretch away spent.
+    pub fn passed_since(&self, now: Now, since: i64) -> u32 {
+        let start = self.start(now);
+        (0..self.total)
+            .filter(|i| {
+                self.at(*i) <= self.since
+                    && start + i64::from(self.at(*i)) * clock::MINUTE_MS > since
+            })
+            .count() as u32
+    }
+
+    /// The end of the part now is in, when its slot came after `since`: that part's slot
+    /// was spent away.
+    pub fn part_spent_since(&self, now: Now, since: i64) -> Option<i64> {
+        let i = (self.since / self.part).min(self.total - 1);
+        let came = self.start(now) + i64::from(self.at(i)) * clock::MINUTE_MS;
+        (self.at(i) <= self.since && came > since).then(|| self.current(now).1)
+    }
 }
 
 /// Unprompted openings delivered in `[since, now]`, optionally for one person.
@@ -545,6 +571,8 @@ fn place(conn: &Connection, c: &Candidate, topic: &dyn TopicMatch) -> Result<Opt
 /// Everything [`plan`] needs besides the database.
 pub struct Limits<'a> {
     pub seed: &'a SeedParams,
+    /// What the user's tier sets of the pacing ([`Pacing::get`](crate::params::Pacing::get)).
+    pub pace: &'a Pace,
     pub session: &'a SessionParams,
     /// The current quota status ([`quota::status`]); on the tier without windows it is
     /// always open, so only the experience limits apply.
@@ -559,7 +587,10 @@ pub fn plan(
     limits: &Limits<'_>,
     topic: &dyn TopicMatch,
 ) -> Result<Planned> {
-    let all = candidates(conn, occasion, now, limits.seed)?;
+    if away::is_away(conn)? {
+        return Ok(Planned::Held(Held::Away));
+    }
+    let all = candidates(conn, occasion, now, limits.pace)?;
     if all.is_empty() {
         return Ok(Planned::Held(Held::NoSeed));
     }
@@ -573,16 +604,17 @@ pub fn plan(
         return Ok(Planned::Held(Held::InConversation));
     }
     let day = now.local_day_start();
-    let today = delivered_count(conn, None, day, now.ms)?;
-    if today >= limits.seed.daily_total {
+    // Slots that passed while he was away count as used.
+    let today = delivered_count(conn, None, day, now.ms)? + away::spent_slots(conn, now)?;
+    if today >= limits.pace.daily_total {
         return Ok(Planned::Held(Held::DailyTotal));
     }
     if matches!(occasion, Occasion::Presence { .. }) {
-        if clock::too_soon(last_opening(conn)?, now.ms, limits.seed.gap_min) {
+        if clock::too_soon(last_opening(conn)?, now.ms, limits.pace.gap_min) {
             return Ok(Planned::Held(Held::TooSoon));
         }
         let quiet = settings::quiet_hours(conn, limits.seed)?;
-        if Slots::new(quiet.as_ref(), now, limits.seed.daily_total, 0).due() <= today {
+        if Slots::new(quiet.as_ref(), now, limits.pace.daily_total, 0).due() <= today {
             return Ok(Planned::Held(Held::NotYet));
         }
     }
@@ -683,12 +715,13 @@ pub fn unread_visits(conn: &Connection) -> Result<Vec<Visit>> {
 mod tests {
     use super::*;
     use crate::fact::NewFact;
-    use crate::params::Quota;
+    use crate::params::{Params, Quota};
     use crate::testing::*;
     use crate::types::{Actor, Origin, Tier};
 
     struct Env {
         seed: SeedParams,
+        pace: Pace,
         session: SessionParams,
         quota: quota::Status,
     }
@@ -697,6 +730,7 @@ mod tests {
         fn new(w: &Connection) -> Self {
             Self {
                 seed: SeedParams::default(),
+                pace: Pace::default(),
                 session: SessionParams::default(),
                 quota: quota::status(w, Tier::Middle, T0, &Quota::default()).unwrap(),
             }
@@ -705,6 +739,7 @@ mod tests {
         fn limits(&self) -> Limits<'_> {
             Limits {
                 seed: &self.seed,
+                pace: &self.pace,
                 session: &self.session,
                 quota: &self.quota,
             }
@@ -832,11 +867,11 @@ mod tests {
         ];
         assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 1).unwrap(), 1);
         assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 2).unwrap(), 0);
-        let cands = candidates(&w, &Occasion::Event, at(T0), &SeedParams::default()).unwrap();
+        let cands = candidates(&w, &Occasion::Event, at(T0), &Pace::default()).unwrap();
         assert_eq!(cands.len(), 1);
         task::set_pinned(&w, case, false).unwrap();
         assert!(
-            candidates(&w, &Occasion::Event, at(T0), &SeedParams::default())
+            candidates(&w, &Occasion::Event, at(T0), &Pace::default())
                 .unwrap()
                 .is_empty()
         );
@@ -925,7 +960,7 @@ mod tests {
         env.quota.band = Band::Quiet;
         assert_eq!(presence(&w, &env, at(T0 + DAY)), Planned::Held(Held::Quota));
         env.quota.band = Band::Open;
-        env.seed.daily_total = 0;
+        env.pace.daily_total = 0;
         assert_eq!(
             presence(&w, &env, at(T0 + DAY)),
             Planned::Held(Held::DailyTotal)
@@ -942,7 +977,7 @@ mod tests {
             &w,
             &Occasion::Presence { words: &[] },
             at(T0),
-            &SeedParams::default(),
+            &Pace::default(),
         )
         .unwrap();
         assert_eq!(
@@ -953,7 +988,7 @@ mod tests {
             2
         );
         assert!(
-            candidates(&w, &Occasion::Event, at(T0), &SeedParams::default())
+            candidates(&w, &Occasion::Event, at(T0), &Pace::default())
                 .unwrap()
                 .is_empty(),
             "daily seeds only on presence"
@@ -962,7 +997,7 @@ mod tests {
             &w,
             &Occasion::Presence { words: &[] },
             at(T0 + DAY),
-            &SeedParams::default(),
+            &Pace::default(),
         )
         .unwrap();
         assert!(
@@ -989,7 +1024,7 @@ mod tests {
             &w,
             &Occasion::Presence { words: &words },
             at(T0 + DAY),
-            &SeedParams::default(),
+            &Pace::default(),
         )
         .unwrap();
         let said: Vec<_> = cands
@@ -1075,7 +1110,7 @@ mod tests {
         assert_eq!(o.channel, channel::direct(&w, &p("a")).unwrap());
         deliver(&w, &o, T0);
         // Not again within `visit_days`, however many occasions come.
-        let gap = i64::from(env.seed.visit_days) * DAY;
+        let gap = i64::from(env.pace.visit_days) * DAY;
         assert_eq!(
             presence(&w, &env, at(T0 + gap - HOUR)),
             Planned::Held(Held::NoSeed)
@@ -1111,9 +1146,9 @@ mod tests {
             }
             t += step;
         }
-        let gap = i64::from(env.seed.gap_min) * 60_000;
+        let gap = i64::from(env.pace.gap_min) * 60_000;
         let quiet = env.seed.quiet_hours.clone();
-        assert_eq!(opened.len(), 2 * env.seed.daily_total as usize);
+        assert_eq!(opened.len(), 2 * env.pace.daily_total as usize);
         for pair in opened.windows(2) {
             assert!(pair[1] - pair[0] >= gap, "{pair:?} closer than the gap");
         }
@@ -1125,6 +1160,77 @@ mod tests {
         for (i, ms) in opened.iter().take(5).enumerate() {
             let since = ms - midnight - 8 * HOUR;
             assert!((i as i64 * part..(i as i64 + 1) * part).contains(&since));
+        }
+    }
+
+    #[test]
+    fn slots_that_pass_while_away_are_spent_and_nothing_is_released_on_return() {
+        let w = world();
+        let env = Env::new(&w);
+        enable(&w, &["a", "b", "c", "d", "e", "f", "g", "h"]);
+        let midnight = T0 - 12 * HOUR;
+        let step = 10 * 60_000;
+        // Away from 08:00 to 13:59: the first two parts of the day go by.
+        let params = Params::default();
+        away::begin(&w, midnight + 8 * HOUR).unwrap();
+        let mut t = midnight + 8 * HOUR;
+        while t < midnight + 14 * HOUR - 60_000 {
+            assert_eq!(presence(&w, &env, at(t)), Planned::Held(Held::Away));
+            t += step;
+        }
+        away::end(&w, at(midnight + 14 * HOUR - 60_000), &params)
+            .unwrap()
+            .unwrap();
+        // The rest of the day gives the three parts left, one each, and never two at once.
+        let mut opened: Vec<i64> = Vec::new();
+        let mut t = midnight + 14 * HOUR;
+        while t < midnight + DAY {
+            if let Planned::Open(o) = presence(&w, &env, at(t)) {
+                deliver(&w, &o, t);
+                opened.push(t);
+            }
+            t += step;
+        }
+        assert_eq!(opened.len(), 3, "{opened:?}");
+        let gap = i64::from(env.pace.gap_min) * 60_000;
+        assert!(opened.windows(2).all(|p| p[1] - p[0] >= gap));
+        // The next day is whole again.
+        let mut next = 0;
+        let mut t = midnight + DAY;
+        while t < midnight + 2 * DAY {
+            if let Planned::Open(o) = presence(&w, &env, at(t)) {
+                deliver(&w, &o, t);
+                next += 1;
+            }
+            t += step;
+        }
+        assert_eq!(next, env.pace.daily_total);
+    }
+
+    #[test]
+    fn the_lowest_and_the_unlimited_tier_open_as_tabled_and_keep_the_ceilings() {
+        let table = crate::params::Pacing::default();
+        for (tier, per_day, gap) in [(Tier::Low, 2, 30), (Tier::Ultra, 10, 10)] {
+            let w = world();
+            let mut env = Env::new(&w);
+            env.pace = table.get(tier);
+            let names: Vec<String> = (0..14).map(|i| format!("p{i}")).collect();
+            enable(&w, &names.iter().map(String::as_str).collect::<Vec<_>>());
+            let midnight = T0 - 12 * HOUR;
+            let mut opened: Vec<i64> = Vec::new();
+            let mut t = midnight;
+            while t < midnight + 2 * DAY {
+                if let Planned::Open(o) = presence(&w, &env, at(t)) {
+                    deliver(&w, &o, t);
+                    opened.push(t);
+                }
+                t += 5 * 60_000;
+            }
+            assert_eq!(opened.len(), 2 * per_day, "{tier:?}");
+            assert!(opened.len() <= 2 * crate::params::VISITS_CEILING as usize);
+            for pair in opened.windows(2) {
+                assert!(pair[1] - pair[0] >= gap * 60_000, "{tier:?}: {pair:?}");
+            }
         }
     }
 
@@ -1149,7 +1255,7 @@ mod tests {
         enable(&w, &["a", "b"]);
         let g = channel::create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
         channel::set_mode(&w, g, Mode::Enabled).unwrap();
-        let quiet = i64::from(env.seed.group_quiet_hours) * HOUR;
+        let quiet = i64::from(env.pace.group_quiet_hours) * HOUR;
         message::append(&w, g, &Actor::User, "hi all", None, None, T0 - quiet + HOUR).unwrap();
         // Spoken in lately; the people's own chats are ignored here by their bond.
         bond::touch_user(&w, &p("a"), T0).unwrap();

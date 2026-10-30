@@ -254,6 +254,12 @@ commands! {
 
     fn quota() -> QuotaStatus;
     fn set_tier(tier: Tier) -> ();
+    /// Whether away mode is on: nothing unprompted comes to the user and no notification
+    /// is sent. Per save.
+    fn away() -> bool = Ok(false);
+    /// Turn away mode on or off. Turning it off says in the host's channel, in one line,
+    /// what fell due meanwhile; the user's own message turns it off too (`AwayChanged`).
+    fn set_away(away: bool) -> ();
     fn settings() -> Settings = Ok(Settings::default());
     /// The daily events the host told of, today's and the last few, newest first.
     fn daily_events() -> Vec<DailyEvent> = Ok(Vec::new());

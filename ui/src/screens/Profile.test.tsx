@@ -37,6 +37,20 @@ test("night mode switches the theme and the choice is kept", async () => {
   expect(JSON.parse(localStorage.getItem("ui.prefs")!).theme).toBe("light");
 });
 
+test("away mode: the switch turns it on, a marker shows, writing turns it off", async () => {
+  const user = userEvent.setup();
+  const { store, api } = renderApp();
+  const drawer = await openMenu(user);
+  const away = within(drawer).getByRole("switch", { name: "Away" }) as HTMLInputElement;
+  expect(away.checked).toBe(false);
+  await user.click(away);
+  await waitFor(() => expect(store.getState().away).toBe(true));
+  expect(within(drawer).getByText("Away: nobody comes to you")).toBeDefined();
+  // The mock ends it when a message is sent, as the engine does.
+  await api.commands.sendMessage("host", "back", null);
+  await waitFor(() => expect(store.getState().away).toBe(false));
+});
+
 test("the rail carries the menu button on top and no settings tab", async () => {
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });

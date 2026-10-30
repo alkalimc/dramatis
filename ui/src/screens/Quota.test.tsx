@@ -13,6 +13,8 @@ function status(band: QuotaBand, tier: Tier = "middle"): QuotaStatus {
       { shape: "direct", calls: 75 },
       { shape: "ask", calls: 25 },
     ],
+    visits_per_day: 5,
+    events_max: 4,
   };
 }
 
@@ -53,4 +55,9 @@ test("the intensity is a labelled choice that shows the tier and picks another",
   expect((within(group).getByRole("radio", { name: "Middle" }) as HTMLInputElement).checked).toBe(true);
   fireEvent.click(within(group).getByRole("radio", { name: "Ultra" }));
   expect(picked).toEqual(["ultra"]);
+});
+
+test("says what the intensity also sets", () => {
+  renderWith(<QuotaPanel quota={status("open")} onTier={() => undefined} />);
+  expect(screen.getByText(/up to 5 visits and 4 daily happenings a day/)).toBeDefined();
 });

@@ -48,6 +48,14 @@ export function createActions(api: Api, store: Store) {
     const quota = await attempt(c.quota(), "quota");
     if (quota) d({ type: "quota", quota });
   }
+  async function refreshAway() {
+    const away = await attempt(c.away(), "away");
+    if (away !== undefined) d({ type: "away", away });
+  }
+  async function setAway(on: boolean) {
+    if ((await attempt(c.setAway(on))) === undefined) return;
+    d({ type: "away", away: on });
+  }
   async function refreshEndpoints() {
     const endpoints = await attempt(c.endpoints(), "endpoints");
     if (endpoints) d({ type: "endpoints", endpoints });
@@ -124,7 +132,7 @@ export function createActions(api: Api, store: Store) {
     if (coldstart) d({ type: "coldstart", candidates: coldstart });
     const prefs = loadPrefs();
     d({ type: "prefs", pinned: prefs.pinned, theme: prefs.theme });
-    await Promise.all([refreshEndpoints(), refreshRoster(), refreshChannels(), refreshQuota(), refreshClock(), refreshUserAvatar()]);
+    await Promise.all([refreshEndpoints(), refreshRoster(), refreshChannels(), refreshQuota(), refreshAway(), refreshClock(), refreshUserAvatar()]);
     await refreshStatus();
     void loadAbout();
   }
@@ -325,6 +333,8 @@ export function createActions(api: Api, store: Store) {
     refreshRoster,
     refreshChannels,
     refreshQuota,
+    refreshAway,
+    setAway,
     refreshEndpoints,
     refreshUserAvatar,
     refreshClock,
@@ -396,6 +406,11 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
       void actions.refreshRoster();
     }),
     e.quotaChanged.listen(({ payload }) => d({ type: "quota", quota: payload.status })),
+    e.awayChanged.listen(({ payload }) => {
+      d({ type: "away", away: payload.away });
+      // Turning it off may have written the host's one line.
+      if (!payload.away) void actions.refreshDigest();
+    }),
     e.worldChanged.listen(({ payload }) => {
       d({ type: "worldChanged", event: payload });
       const kinds = new Set(payload.changes.map((ch) => ch.kind));

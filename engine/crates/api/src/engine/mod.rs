@@ -31,7 +31,7 @@ use crate::corpus::{self, Corpus};
 use crate::display::{self, Namer};
 use crate::endpoints::{Endpoints, Profile, Role};
 use crate::error::{ApiError, ApiResult};
-use crate::events::{QuotaChanged, WorldChange, WorldChanged};
+use crate::events::{AwayChanged, QuotaChanged, WorldChange, WorldChanged};
 use crate::home::{Home, Start};
 use crate::lock::SaveLock;
 use crate::media::MediaCache;
@@ -252,11 +252,15 @@ impl Engine {
         up
     }
 
-    /// Quiet hours and the notification switch, for whoever raises a system notification.
+    /// Quiet hours, away mode and the notification switch, for whoever raises a system
+    /// notification.
     pub fn may_notify(&self) -> ApiResult<bool> {
         let now = self.now();
         let w = self.w();
         if !world::settings::notifications(&w).map_err(world_err)? {
+            return Ok(false);
+        }
+        if world::away::is_away(&w).map_err(world_err)? {
             return Ok(false);
         }
         let quiet = world::settings::quiet_hours(&w, &self.params.world.seed).map_err(world_err)?;
@@ -429,7 +433,7 @@ impl Engine {
         let tier = world::settings::intensity(&w).map_err(world_err)?;
         let status =
             world::quota::status(&w, tier, now.ms, &self.params.world.quota).map_err(world_err)?;
-        convert::quota_status(&w, &status, now, &self.params.world.quota).map_err(world_err)
+        convert::quota_status(&w, &status, now, &self.params.world).map_err(world_err)
     }
 
     fn set_tier_impl(&self, tier: Tier) -> ApiResult<()> {
@@ -444,8 +448,43 @@ impl Engine {
         Ok(())
     }
 
+    async fn set_away_impl(&self, away: bool) -> ApiResult<()> {
+        if away {
+            let began = {
+                let w = self.w();
+                world::away::begin(&w, self.now().ms).map_err(world_err)?
+            };
+            if began {
+                self.emit(Event::AwayChanged(AwayChanged {
+                    away: true,
+                    by_message: false,
+                }));
+            }
+            return Ok(());
+        }
+        if self.ports.agent.wired() {
+            return self.ports.agent.end_away().await;
+        }
+        let ended = {
+            let w = self.w();
+            world::away::end(&w, self.now(), &self.params.world).map_err(world_err)?
+        };
+        if ended.is_some() {
+            self.emit(Event::AwayChanged(AwayChanged {
+                away: false,
+                by_message: false,
+            }));
+        }
+        Ok(())
+    }
+
     fn settings_impl(&self) -> ApiResult<Settings> {
         let w = self.w();
+        let pace = self
+            .params
+            .world
+            .pacing
+            .get(world::settings::intensity(&w).map_err(world_err)?);
         Ok(Settings {
             user_name: world::settings::user_name(&w).map_err(world_err)?,
             birthday: world::settings::user_birthday(&w)
@@ -462,8 +501,7 @@ impl Engine {
                     to: q.to,
                 }),
             notifications: world::settings::notifications(&w).map_err(world_err)?,
-            events_per_day: world::settings::events_per_day(&w, &self.params.world.events)
-                .map_err(world_err)?,
+            events_per_day: world::settings::events_per_day(&w, &pace).map_err(world_err)?,
         })
     }
 
@@ -489,7 +527,7 @@ impl Engine {
         {
             return Err(invalid("bio"));
         }
-        let events = s.events_per_day.min(self.params.world.events.max_per_day);
+        let events = s.events_per_day;
         let renamed = {
             let w = self.w();
             // Both sit in the cached prefix, so a change of either starts new segments.
@@ -508,8 +546,15 @@ impl Engine {
             world::settings::set(&w, world::settings::QUIET_HOURS, &quiet).map_err(world_err)?;
             world::settings::set(&w, world::settings::NOTIFICATIONS, &s.notifications)
                 .map_err(world_err)?;
-            world::settings::set(&w, world::settings::EVENTS_PER_DAY, &events)
-                .map_err(world_err)?;
+            // The tier's cap holds; a number that is only the current one is no choice, so
+            // the tier's default keeps following the tier until the user picks another.
+            let tier = world::settings::intensity(&w).map_err(world_err)?;
+            let pace = self.params.world.pacing.get(tier);
+            let events = events.min(pace.events_max);
+            if events != world::settings::events_per_day(&w, &pace).map_err(world_err)? {
+                world::settings::set(&w, world::settings::EVENTS_PER_DAY, &events)
+                    .map_err(world_err)?;
+            }
             world::settings::set(&w, world::settings::USER_INTRODUCED, &true).map_err(world_err)?;
             renamed || rebio
         };
@@ -773,6 +818,12 @@ impl Api for Engine {
     }
     async fn set_tier(&self, tier: Tier) -> ApiResult<()> {
         self.set_tier_impl(tier)
+    }
+    async fn away(&self) -> ApiResult<bool> {
+        world::away::is_away(&self.w()).map_err(world_err)
+    }
+    async fn set_away(&self, away: bool) -> ApiResult<()> {
+        self.set_away_impl(away).await
     }
     async fn daily_events(&self) -> ApiResult<Vec<DailyEvent>> {
         self.daily_events_impl()

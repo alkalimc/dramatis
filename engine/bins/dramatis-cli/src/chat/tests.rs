@@ -242,7 +242,11 @@ async fn rig_setup(
         .unwrap();
     }
     // The scripted endpoint streams only: no daily event, which is a whole reply.
-    std::fs::write(home.0.join("params.toml"), "[events]\nper_day = 0\n").unwrap();
+    std::fs::write(
+        home.0.join("params.toml"),
+        "[pacing.middle]\nevents_default = 0\n",
+    )
+    .unwrap();
     if with_save {
         // A save to open, as a first run leaves the home after the user picks one.
         let h = Home::new(&home.0);
@@ -925,7 +929,17 @@ async fn memories_are_numbered_and_can_be_forgotten_restored_and_edited() {
 async fn tier_and_quiet_hours_show_and_set() {
     let mut r = rig().await;
     assert!(r.run("/tier").await.contains("tier middle"));
-    assert!(r.run("/tier extra-high").await.contains("tier extra_high"));
+    let out = r.run("/tier extra-high").await;
+    assert!(out.contains("tier extra_high"), "{out}");
+    assert!(
+        out.contains("up to 7 visits and 6 daily events a day"),
+        "{out}"
+    );
+    assert!(
+        r.run("/tier low")
+            .await
+            .contains("up to 2 visits and 2 daily events a day")
+    );
     assert!(
         r.run("/tier nonsense")
             .await
@@ -1871,6 +1885,37 @@ async fn a_save_changed_in_another_window_is_reopened_or_the_list_comes_back() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn away_shows_in_the_prompt_and_writing_ends_it() {
+    let mut r = rig().await;
+    assert!(r.run("/away").await.contains("away mode off"));
+    assert!(!r.session.prompt().contains("away"));
+    assert!(r.run("/away on").await.contains("away mode on"));
+    assert!(r.run("/away").await.contains("away mode on"));
+    assert!(
+        r.session.prompt().contains("away"),
+        "{}",
+        r.session.prompt()
+    );
+    assert!(r.run("/away soon").await.contains("usage: /away"));
+    assert!(r.run("/away off").await.contains("away mode off"));
+    assert!(!r.session.prompt().contains("away"));
+
+    // Writing turns it off, with a note.
+    r.run("/talk ann").await;
+    r.run("/away on").await;
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("Welcome back."));
+    let out = r.run("hello").await;
+    assert!(out.contains("away mode off, since you wrote"), "{out}");
+    assert!(out.contains("Welcome back."), "{out}");
+    assert!(!r.session.prompt().contains("away"));
+    assert!(r.run("/away").await.contains("away mode off"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn events_are_listed_and_switched() {
     let mut r = rig().await;
     let out = r.run("/events").await;
@@ -1883,6 +1928,14 @@ async fn events_are_listed_and_switched() {
     assert!(r.run("/events off").await.contains("daily events off"));
     assert!(r.run("/events").await.contains("daily events off"));
     assert!(r.run("/events on").await.contains("1 a day"));
+    // The tier's cap: the middle tier allows four, the top ones six.
+    assert!(
+        r.run("/events 5")
+            .await
+            .contains("usage: /events [on|off|0 to 4]")
+    );
+    assert!(r.run("/events 4").await.contains("4 a day"));
+    r.run("/tier ultra").await;
     assert!(r.run("/events 6").await.contains("6 a day"));
     assert!(r.run("/events 7").await.contains("usage"));
     assert!(r.run("/events many").await.contains("usage"));

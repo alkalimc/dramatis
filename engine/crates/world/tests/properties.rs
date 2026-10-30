@@ -98,7 +98,8 @@ proptest! {
         steps in prop::collection::vec((0i64..6 * HOUR, any::<bool>()), 1..30),
     ) {
         let w = World::in_memory().unwrap();
-        let mut seed_p = params::Seed { per_agent_day: per_agent, daily_total: total, ..params::Seed::default() };
+        let mut seed_p = params::Seed { per_agent_day: per_agent, ..params::Seed::default() };
+        let pace = params::Pace { daily_total: total, ..params::Pace::default() };
         seed_p.quiet_hours = params::QuietHours { from: "23:00".into(), to: "08:00".into() };
         let session_p = params::Session::default();
         let status = quota::status(&w, Tier::Middle, T0, &Quota::default()).unwrap();
@@ -123,7 +124,7 @@ proptest! {
                 message::append(&w, other, &Actor::User, "hey", None, None, now).unwrap();
             }
             let at = Now::utc(now);
-            let limits = Limits { seed: &seed_p, session: &session_p, quota: &status };
+            let limits = Limits { seed: &seed_p, pace: &pace, session: &session_p, quota: &status };
             if let Planned::Open(o) = seed::plan(&w, &Occasion::Presence { words: &[] }, at, &limits, &NoTopic).unwrap() {
                 prop_assert!(!world::clock::in_quiet_hours(&seed_p.quiet_hours, at));
                 prop_assert!(!seed::in_conversation(&w, now, &session_p).unwrap());

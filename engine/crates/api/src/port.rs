@@ -22,8 +22,8 @@ use world::clock::Now;
 use crate::endpoints::{Endpoints, Profile};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{
-    MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, Rewound, RosterChanged,
-    ToolCalled, TurnActivity, WorldChanged,
+    AwayChanged, MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, Rewound,
+    RosterChanged, ToolCalled, TurnActivity, WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId, TaskId};
 use crate::views::ImagePart;
@@ -76,6 +76,12 @@ pub trait AgentPort: Send + Sync + 'static {
 
     /// The user's name changed: every session rolls over so no log keeps the old one.
     async fn on_rename(&self) -> ApiResult<()>;
+
+    /// Away mode is being turned off: settle the time away and say, in one fixed line in
+    /// the host's channel, what fell due meanwhile. Emits `AwayChanged`.
+    async fn end_away(&self) -> ApiResult<()> {
+        Ok(())
+    }
 
     /// A group was made from a suggestion, or by the host, for `purpose`: write the
     /// group's first line saying why it exists and who suggested it (`by`, or the host
@@ -178,6 +184,7 @@ pub enum Event {
     WorldChanged(WorldChanged),
     ModeChanged(ModeChanged),
     RosterChanged(RosterChanged),
+    AwayChanged(AwayChanged),
     QuotaChanged(QuotaChanged),
     Rewound(Rewound),
     Notification(Notification),

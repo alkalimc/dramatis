@@ -237,6 +237,7 @@ function Rail() {
     for (const c of s.channels) if (unreadOf(c, s.unread) > 0) n += 1;
     return n;
   });
+  const away = useStore((s) => s.away);
   const library = useStore((s) => s.library);
   const libOn = useStore(inLibrary);
   const key = drawerKey(drawer);
@@ -248,6 +249,7 @@ function Rail() {
       <h1 className="sr-only">{t("host.name")}</h1>
       <button type="button" className="rail-menu" aria-label={t("menu.open")} title={t("menu.open")} aria-haspopup="dialog" onClick={() => dispatch({ type: "menu", open: true })}>
         <Icon name="menu" size={26} />
+        {away && <span className="rail-away" aria-hidden="true" />}
       </button>
       <nav aria-label={t("nav.label")}>
         <ul>

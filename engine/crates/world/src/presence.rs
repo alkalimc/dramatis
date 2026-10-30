@@ -15,7 +15,7 @@ use crate::params::Params;
 use crate::quota::{self, CallKind};
 use crate::seed::{self, Held, Limits, Occasion, Planned, TopicMatch, WordsHit};
 use crate::types::{ChannelId, FactId, MessageId, MonthDay, PersonId, TaskId, Tier};
-use crate::{Call, Result, bond, channel, fact, message, session, settings, task};
+use crate::{Call, Result, away, bond, channel, fact, message, session, settings, task};
 
 /// Something that is waiting for the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,11 +318,17 @@ pub fn on_presence(
     // user, and the panel lists them.
     let mut news = digest.unannounced(conn, now.local_date())?;
     news.items.retain(|w| !w.activity.is_arrival());
-    if !news.is_empty() && quota::decide(&status, CallKind::HostLine).allowed() {
+    // Away, the host's line waits like everything unprompted.
+    if !news.is_empty()
+        && !away::is_away(conn)?
+        && quota::decide(&status, CallKind::HostLine).allowed()
+    {
         calls.push(Call::HostLine(news));
     }
+    let pace = params.pacing.get(tier);
     let limits = Limits {
         seed: &params.seed,
+        pace: &pace,
         session: &params.session,
         quota: &status,
     };

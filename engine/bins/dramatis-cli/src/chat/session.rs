@@ -218,6 +218,9 @@ impl Session {
             .await
             .is_ok_and(|s| s.save.is_none());
         session.refresh_completions().await;
+        if let Ok(away) = session.engine.away().await {
+            session.show.set_away(away);
+        }
         session
     }
 
@@ -240,8 +243,13 @@ impl Session {
             .current
             .as_ref()
             .map_or(idle.as_str(), |c| c.label.as_str());
+        let away = if self.show.is_away() {
+            format!(" {}", style.dim(&self.msg("cli.prompt.away")))
+        } else {
+            String::new()
+        };
         format!(
-            "{} {}> ",
+            "{}{away} {}> ",
             style.dim(&format!("[{channel}]")),
             style.bold(&self.names.user())
         )
@@ -407,6 +415,7 @@ impl Session {
             Command::Tier(level) => self.tier(level.as_deref()).await,
             Command::Quiet(arg) => self.quiet(arg.as_deref()).await,
             Command::Events(arg) => self.events(arg.as_deref()).await,
+            Command::Away(on) => self.away(on).await,
             Command::Save(cmd) => {
                 self.save(cmd).await;
                 self.refresh_completions().await;
@@ -2134,14 +2143,42 @@ impl Session {
             }
         }
         match self.engine.quota().await {
-            Ok(q) => self.term.note(&self.names.say(
-                "cli.tier.status",
-                &[
-                    ("tier", &name(q.tier)),
-                    ("band", &format!("{:?}", q.band).to_lowercase()),
-                ],
-            )),
+            Ok(q) => {
+                self.term.note(&self.names.say(
+                    "cli.tier.status",
+                    &[
+                        ("tier", &name(q.tier)),
+                        ("band", &format!("{:?}", q.band).to_lowercase()),
+                    ],
+                ));
+                self.term.note(&self.names.say(
+                    "cli.tier.pacing",
+                    &[
+                        ("visits", &q.visits_per_day.to_string()),
+                        ("events", &q.events_max.to_string()),
+                    ],
+                ));
+            }
             Err(e) => self.fail(&e),
+        }
+    }
+
+    /// Away mode: show it, or turn it on or off. The engine's `AwayChanged` event prints
+    /// the change, so a change made by writing a message is announced the same way.
+    async fn away(&self, on: Option<bool>) {
+        match on {
+            Some(on) => {
+                if let Err(e) = self.engine.set_away(on).await {
+                    self.fail(&e);
+                }
+            }
+            None => match self.engine.away().await {
+                Ok(on) => {
+                    self.term
+                        .note(&self.msg(if on { "cli.away.on" } else { "cli.away.off" }))
+                }
+                Err(e) => self.fail(&e),
+            },
         }
     }
 
@@ -2195,15 +2232,24 @@ impl Session {
             Ok(s) => s,
             Err(e) => return self.fail(&e),
         };
-        let params = &self.engine.params().world.events;
+        let max = match self.engine.quota().await {
+            Ok(q) => q.events_max,
+            Err(e) => return self.fail(&e),
+        };
         let n = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
             None => settings.events_per_day,
             Some("off") => 0,
             Some("on") if settings.events_per_day > 0 => settings.events_per_day,
-            Some("on") => params.per_day.max(1),
+            Some("on") => 1.min(max),
             Some(n) => match n.parse::<u32>() {
-                Ok(n) if n <= params.max_per_day => n,
-                _ => return self.term.line(&self.msg("cli.usage.events")),
+                Ok(n) if n <= max => n,
+                _ => {
+                    return self.term.line(
+                        &self
+                            .names
+                            .say("cli.usage.events", &[("max", &max.to_string())]),
+                    );
+                }
             },
         };
         if arg.is_some() && n != settings.events_per_day {

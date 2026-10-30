@@ -97,6 +97,7 @@ pub fn emit<H: tauri::Emitter<tauri::Wry> + tauri::Manager<tauri::Wry>>(
         WorldChanged(e) => e.emit(app),
         ModeChanged(e) => e.emit(app),
         RosterChanged(e) => e.emit(app),
+        AwayChanged(e) => e.emit(app),
         QuotaChanged(e) => e.emit(app),
         Rewound(e) => e.emit(app),
         Notification(e) => e.emit(app),

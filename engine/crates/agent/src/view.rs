@@ -142,11 +142,12 @@ pub fn quota_status(
     conn: &Connection,
     status: &quota::Status,
     now: world::clock::Now,
-    params: &world::params::Quota,
+    params: &world::params::Params,
 ) -> Result<v::QuotaStatus> {
     let ts = |ms: i64| timestamp(ms, now.offset_min);
+    let pace = params.pacing.get(status.tier);
     let mut spent: Vec<v::ShapeSpend> = Vec::new();
-    for (shape, calls) in quota::spent_by_shape(conn, now.ms, params)? {
+    for (shape, calls) in quota::spent_by_shape(conn, now.ms, &params.quota)? {
         let shape = call_shape(shape);
         match spent.iter_mut().find(|s| s.shape == shape) {
             Some(s) => s.calls += calls,
@@ -165,6 +166,8 @@ pub fn quota_status(
             release_at: w.release_at.map(ts),
         }),
         spent,
+        visits_per_day: pace.daily_total,
+        events_max: pace.events_max,
     })
 }
 

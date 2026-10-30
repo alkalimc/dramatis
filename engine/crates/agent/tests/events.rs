@@ -34,7 +34,7 @@ fn emulated() -> api::endpoints::Endpoints {
 
 /// One event a day, and a user who has said something.
 fn setup(ep: api::endpoints::Endpoints) -> Env {
-    let e = env_with(ep, |c| c.world.events.per_day = 1);
+    let e = env_with(ep, |c| c.world.pacing.middle.events_default = 1);
     speak(&e);
     to_slot(&e, 1, 0);
     e
@@ -156,7 +156,7 @@ async fn nothing_is_made_unless_the_user_is_present_and_the_moment_is_open() {
     assert_eq!(requests(&e), 0);
     // Quiet hours.
     let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
-        c.world.events.per_day = 1
+        c.world.pacing.middle.events_default = 1
     });
     speak(&e);
     e.clock.advance(11 * HOUR_MS + 30 * MINUTE_MS);
@@ -164,7 +164,7 @@ async fn nothing_is_made_unless_the_user_is_present_and_the_moment_is_open() {
     assert_eq!(requests(&e), 0);
     // The quiet quota band.
     let q = env_with(endpoints(WireApi::Chat, true, None), |c| {
-        c.world.events.per_day = 1;
+        c.world.pacing.middle.events_default = 1;
         c.world.quota.quiet_at = 0.0;
     });
     speak(&q);
@@ -172,14 +172,14 @@ async fn nothing_is_made_unless_the_user_is_present_and_the_moment_is_open() {
     assert_eq!(requests(&q), 0);
     // Library mode: no endpoint at all.
     let l = env_with(api::endpoints::Endpoints::default(), |c| {
-        c.world.events.per_day = 1
+        c.world.pacing.middle.events_default = 1
     });
     speak(&l);
     l.agent.tick(true).await.unwrap();
     assert_eq!(requests(&l), 0);
     // A world where the user has not yet said anything keeps to the welcome.
     let n = env_with(endpoints(WireApi::Chat, true, None), |c| {
-        c.world.events.per_day = 1
+        c.world.pacing.middle.events_default = 1
     });
     n.agent.tick(true).await.unwrap();
     assert_eq!(requests(&n), 0);

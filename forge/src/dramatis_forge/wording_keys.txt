@@ -155,6 +155,9 @@ cli.ask.sent
 cli.audience.channel
 cli.audience.own
 cli.audience.world
+cli.away.off
+cli.away.off_message
+cli.away.on
 cli.banner
 cli.bio.cleared
 cli.bio.none
@@ -278,6 +281,7 @@ cli.picker.none
 cli.picker.reminder
 cli.picture
 cli.picture.lost
+cli.prompt.away
 cli.prompt.library
 cli.prompt.save
 cli.quiet.invalid
@@ -373,6 +377,7 @@ cli.talk.group
 cli.talk.host
 cli.talk.person
 cli.tier.levels
+cli.tier.pacing
 cli.tier.status
 cli.typing
 cli.typing.more
@@ -383,6 +388,7 @@ cli.update.off
 cli.update.on
 cli.usage.about
 cli.usage.ask
+cli.usage.away
 cli.usage.birthday
 cli.usage.chat
 cli.usage.chats
@@ -731,6 +737,7 @@ harness.wrapup
 harness.wrapup.shape
 harness.wrapup.summary
 host.alias
+host.away_back
 host.can
 host.can.ask
 host.can.explain
@@ -772,6 +779,9 @@ logout
 logout.hint
 menu.app
 menu.archived.count
+menu.away
+menu.away.hint
+menu.away.on
 menu.contacts
 menu.label
 menu.night
@@ -910,6 +920,7 @@ quiet.to
 quota.band.exhausted
 quota.band.open
 quota.band.quiet
+quota.pacing
 quota.release
 quota.release.unknown
 quota.shape.ask

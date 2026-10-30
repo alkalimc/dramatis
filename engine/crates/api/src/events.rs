@@ -75,6 +75,12 @@ events! {
         pub persons: Vec<PersonId>,
     }
 
+    /// Away mode was turned on or off. `by_message`: the user's own message ended it.
+    AwayChanged {
+        pub away: bool,
+        pub by_message: bool,
+    }
+
     /// Quota use, band or release time changed.
     QuotaChanged {
         pub status: QuotaStatus,

@@ -103,6 +103,7 @@ export type LoadKey =
   | "coldstart"
   | "roster"
   | "quota"
+  | "away"
   | "channels"
   | "host"
   | "events"
@@ -127,6 +128,8 @@ export interface State {
   /** The roster's quick filters, kept while the window lives. */
   rosterFilter: RosterFilter;
   quota: QuotaStatus | null;
+  /** Away mode: nothing comes to the user while it is on. */
+  away: boolean;
   hostChannel: ChannelId | null;
   channels: ChannelSummary[];
   /** Per channel, oldest first. */
@@ -208,6 +211,7 @@ export function initialState(): State {
     roster: null,
     rosterFilter: NO_FILTER,
     quota: null,
+    away: false,
     hostChannel: null,
     channels: [],
     messages: {},
@@ -263,6 +267,7 @@ export type Action =
   | { type: "roster"; roster: Roster }
   | { type: "rosterFilter"; filter: RosterFilter }
   | { type: "quota"; quota: QuotaStatus }
+  | { type: "away"; away: boolean }
   | { type: "hostChannel"; id: ChannelId }
   | { type: "channels"; channels: ChannelSummary[] }
   /** A page of history: `older` pages go in front of what is loaded. */

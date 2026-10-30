@@ -957,7 +957,7 @@ impl Agent {
         let conn = self.db();
         let tier = world::settings::intensity(&conn)?;
         let status = quota::status(&conn, tier, now.ms, &self.config.world.quota)?;
-        let view = crate::view::quota_status(&conn, &status, now, &self.config.world.quota)?;
+        let view = crate::view::quota_status(&conn, &status, now, &self.config.world)?;
         drop(conn);
         self.emit(Event::QuotaChanged(QuotaChanged { status: view }));
         Ok(())

@@ -5,8 +5,8 @@ import { when } from "../lib/format";
 import { quotaExhaustedLine } from "../lib/quota";
 import { useActions, useApi, useStore } from "../store";
 
-/** The choices for happenings a day, 0 to the register's `events.max_per_day`. */
-const EVENT_COUNTS = [0, 1, 2, 3, 4, 5, 6];
+/** The choices for happenings a day: 0 up to what the intensity allows. */
+const eventCounts = (max: number) => Array.from({ length: max + 1 }, (_, n) => n);
 
 function eventCount(n: number, t: ReturnType<typeof useT>): string {
   if (n === 0) return t("events.count.0");
@@ -36,6 +36,8 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
           ))}
         </div>
       </fieldset>
+
+      <p className="muted small">{t("quota.pacing", { visits: quota.visits_per_day, events: quota.events_max })}</p>
 
       {quota.tier === "ultra" ? (
         <p className="band">{t("quota.ultra")}</p>
@@ -107,6 +109,8 @@ function TimeInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings) => void }) {
   const t = useT();
+  // The most happenings a day the intensity allows (the choice itself is cut to it by the engine).
+  const eventsMax = Math.max(useStore((s) => s.quota?.events_max ?? 6), settings.events_per_day);
   const id = useId();
   // The engine fills the default hours on first run; re-enabling restores the last ones.
   const [last, setLast] = useState<QuietHours>(settings.quiet_hours ?? { from: "", to: "" });
@@ -164,7 +168,7 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
           aria-describedby={`${id}-e`}
           onChange={(e) => save({ ...settings, events_per_day: Number(e.target.value) })}
         >
-          {EVENT_COUNTS.map((n) => (
+          {eventCounts(eventsMax).map((n) => (
             <option key={n} value={n}>
               {eventCount(n, t)}
             </option>

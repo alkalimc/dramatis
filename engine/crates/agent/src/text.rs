@@ -27,6 +27,7 @@ const DEFAULTS: &[(&str, &str)] = &[
         "host.reminder_done",
         "A reminder of mine fell due, and I have dealt with it: {text}",
     ),
+    ("host.away_back", "While you were away: {items}"),
     (
         "host.rate_limited",
         "The language model service is rate limited right now. Your message is kept; \
