@@ -1,21 +1,29 @@
 import { useEffect, useId, useState } from "react";
-import { settle, type ApiError, type CorpusState, type Failure, type SaveInfo, type WireApi } from "../api";
+import { settle, type ApiError, type CorpusState, type Failure, type WireApi } from "../api";
 import { useT } from "../i18n";
 import type { Key } from "../i18n";
-import { when } from "../lib/format";
 import { useActions, useApi, useStore } from "../store";
 import { readAvatar } from "../lib/image";
 import { UserAvatar } from "../ui/Avatar";
 import { Credit } from "../ui/Credit";
-import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
+import { ErrorBar, InlineError } from "../ui/ErrorBar";
 import { PictureButtons } from "./Profile";
-import { FolderNote, useOpenSave } from "./Saves";
-import { PasswordDialog } from "./Unlock";
+import { FolderNote, SavesPage } from "./Saves";
 
 /** The first-run screens: the corpus, the save, the model. Each says what it needs and checks the answer. */
 
 const reload = () => window.location.reload();
+
+/** Top left of a first-run card: one step back. */
+export function StepBack({ onBack }: { onBack: () => void }) {
+  const t = useT();
+  return (
+    <button type="button" className="icon step-back" aria-label={t("chatlist.back")} title={t("chatlist.back")} onClick={onBack}>
+      <Icon name="back" size={22} />
+    </button>
+  );
+}
 
 /** No corpus is open: choose its file (a dialog where there is one, else a typed path). */
 export function CorpusSetup({ corpus }: { corpus: CorpusState }) {
@@ -89,49 +97,12 @@ export function CorpusSetup({ corpus }: { corpus: CorpusState }) {
   );
 }
 
-/** No save is open: pick one, create the first, or import a file. Opening reloads the window onto it. */
+/** No save is open: the saves page (pick, create, rename, copy, delete, export, import). Opening reloads the window onto it. */
 export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void }) {
   const t = useT();
-  const api = useApi();
-  const actions = useActions();
   const status = useStore((s) => s.status);
-  const id = useId();
-  const [saves, setSaves] = useState<SaveInfo[] | null>(null);
-  const [fresh, setFresh] = useState("");
-  const [source, setSource] = useState("");
-  const [importName, setImportName] = useState("");
-  const [error, setError] = useState<Failure | null>(null);
-  const { open, prompt, setPrompt } = useOpenSave(onSwitched);
-
-  // Loaded once; the list does not change while nothing is open.
-  useEffect(() => {
-    void actions.attempt(api.commands.saves()).then((list) => setSaves(list ?? []));
-  }, [actions, api]);
-
-  const create = async () => {
-    const name = (fresh.trim() || t("picker.new.default")).trim();
-    setError(null);
-    const r = await settle(api.commands.newSave(name));
-    if (!r.ok) return setError(r.error);
-    await open(name);
-  };
-
-  const importFile = async (password: string | null): Promise<Failure | null> => {
-    const r = await settle(api.commands.importSave(source.trim(), importName.trim() || null, password));
-    if (r.ok) {
-      setPrompt(null);
-      await open(r.data);
-      return null;
-    }
-    if (r.error.code === "locked" && password === null) {
-      setPrompt({ title: t("saves.import.password"), submit: importFile });
-      return null;
-    }
-    if (password === null) setError(r.error);
-    return r.error;
-  };
-
-  const first = saves !== null && saves.length === 0;
+  const [count, setCount] = useState<number | null>(null);
+  const first = count === 0;
   const missing = status?.missing_save;
 
   return (
@@ -141,70 +112,15 @@ export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void })
         <Credit />
         {missing && <p role="alert">{t("picker.missing", { name: missing })}</p>}
         {first && <p>{t("picker.first.hint")}</p>}
-        {saves && saves.length > 0 && (
-          <>
-            <h2 className="small">{t("picker.pick")}</h2>
-            <ul className="save-list">
-              {saves.map((s) => (
-                <li key={s.name} className="save">
-                  <div className="save-main">
-                    <strong>{s.name}</strong>{" "}
-                    {s.encrypted && (
-                      <span className="badge lock-badge">
-                        <Icon name="lock" size={12} /> {t("saves.encrypted")}
-                      </span>
-                    )}
-                    <div className="muted small">
-                      {t("saves.size", { kb: s.size_kb })}
-                      {s.played_at && <> · {t("saves.played", { when: when(s.played_at, t) })}</>}
-                    </div>
-                  </div>
-                  <button type="button" onClick={() => void open(s.name)} aria-label={`${t("saves.switch")} ${s.name}`}>
-                    {t("saves.switch")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        <form
-          className="stack"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void create();
-          }}
-        >
-          <div className="underline-field">
-            <label htmlFor={`${id}-new`}>{t("picker.new.name")}</label>
-            <input id={`${id}-new`} value={fresh} placeholder={t("picker.new.default")} autoComplete="off" onChange={(e) => setFresh(e.target.value)} />
-          </div>
-          <p className="row end">
-            <button type="submit">{t("picker.new.go")}</button>
-          </p>
-        </form>
-        <form
-          className="row wrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (source.trim()) void importFile(null);
-          }}
-        >
-          <input aria-label={t("saves.import.path")} placeholder={t("saves.import.path")} value={source} onChange={(e) => setSource(e.target.value)} />
-          <input aria-label={t("saves.import.name")} placeholder={t("saves.import.name")} value={importName} onChange={(e) => setImportName(e.target.value)} />
-          <button type="submit" className="ghost" disabled={!source.trim()}>
-            {t("saves.import.go")}
-          </button>
-        </form>
-        {error && <InlineError error={error} />}
-        {status && <FolderNote text={t("picker.folder")} path={status.saves_dir} />}
+        <SavesPage picker onSwitched={onSwitched} onCount={setCount} />
       </div>
-      {prompt && <PasswordDialog title={prompt.title} submit={prompt.submit} onClose={() => setPrompt(null)} />}
+      <ErrorBar />
     </main>
   );
 }
 
 /** Asked once, when the home has no answer yet: whether to check for a newer version by itself. */
-export function UpdateStep() {
+export function UpdateStep({ onBack }: { onBack?: () => void }) {
   const t = useT();
   const actions = useActions();
   const [busy, setBusy] = useState(false);
@@ -216,6 +132,7 @@ export function UpdateStep() {
   return (
     <main className="first-open setup">
       <div className="card">
+        {onBack && <StepBack onBack={onBack} />}
         <h1>{t("update.ask.title")}</h1>
         <Credit />
         <p>{t("update.ask.hint")}</p>
@@ -235,7 +152,7 @@ export function UpdateStep() {
 const WIRES: WireApi[] = ["chat", "responses", "messages"];
 
 /** After the name on a first run: a picture to upload, or the default portrait. Skippable. */
-export function AvatarStep({ onDone }: { onDone: () => void }) {
+export function AvatarStep({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const t = useT();
   const actions = useActions();
   const avatar = useStore((s) => s.userAvatar);
@@ -246,6 +163,7 @@ export function AvatarStep({ onDone }: { onDone: () => void }) {
   return (
     <main className="first-open setup">
       <div className="card">
+        {onBack && <StepBack onBack={onBack} />}
         <h1>{t("first.avatar.title")}</h1>
         <Credit />
         <p>{t("first.avatar.hint")}</p>
@@ -272,7 +190,7 @@ export function AvatarStep({ onDone }: { onDone: () => void }) {
 }
 
 /** The last first-run step: one endpoint form (or just the key), skippable. */
-export function ModelStep({ onDone }: { onDone: () => void }) {
+export function ModelStep({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const t = useT();
   const api = useApi();
   const endpoints = useStore((s) => s.endpoints);
@@ -321,6 +239,7 @@ export function ModelStep({ onDone }: { onDone: () => void }) {
           void submit();
         }}
       >
+        {onBack && <StepBack onBack={onBack} />}
         <h1>{t("model.title")}</h1>
         <Credit />
         {keyless ? <p>{t("model.key.only", { name: keyless.profile.name })}</p> : <p>{t("model.intro")}</p>}

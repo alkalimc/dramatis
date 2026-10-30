@@ -127,6 +127,27 @@ test("a host message that found people or made a group offers them, and a click 
   expect(taken).toEqual([["m1", 0, "mira"]]);
 });
 
+test("a message with no text and no picture draws no bubble; its offers stand alone under a plain line", () => {
+  const empty = { ...base, channel: "host", author: { kind: "host" } as const, text: "  \n " };
+  const plain = renderWith(<MessageView showPlay={false} message={empty} />);
+  expect(plain.container.querySelector(".bubble")).toBeNull();
+  expect(plain.container.querySelector("article")).toBeNull();
+  expect(plain.container.querySelector(".service-line")).toBeNull();
+  plain.unmount();
+
+  const offers = renderWith(
+    <MessageView showPlay={false} message={{ ...empty, actions: [{ tool: "find_people", topic: "ledgers", persons: [{ id: "mira", name: "Mira" }] }] }} />,
+  );
+  expect(offers.container.querySelector(".bubble")).toBeNull();
+  expect(offers.container.querySelector(".service-line")?.textContent).toBe("Here are some suggestions.");
+  expect(screen.getByRole("button", { name: "Talk to Mira" })).toBeDefined();
+  offers.unmount();
+
+  // A picture alone is still a bubble.
+  const picture = renderWith(<MessageView showPlay={false} message={{ ...empty, picture_lost: true }} />);
+  expect(picture.container.querySelectorAll(".bubble").length).toBe(1);
+});
+
 test("a service line is a quiet note, not a bubble", () => {
   const { container } = renderWith(<MessageView showPlay={false} message={{ ...base, author: { kind: "user" }, service: true, text: "Amia suggested you could help the Doctor with: ledgers" }} />);
   expect(container.querySelector(".service-line")?.textContent).toBe("Amia suggested you could help the Doctor with: ledgers");
@@ -242,8 +263,8 @@ test("a failed turn is shown inline, with its reason, until the next send", asyn
 });
 
 test("consecutive messages by one speaker form a run: one name, one avatar slot filled, at the end", () => {
-  const first = { ...base, id: "a" };
-  const last = { ...base, id: "b" };
+  const first = { ...base, id: "a", text: "One." };
+  const last = { ...base, id: "b", text: "Two." };
   const { container } = renderWith(
     <>
       <MessageView message={first} showPlay={false} first last={false} />

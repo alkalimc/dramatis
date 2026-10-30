@@ -3,19 +3,21 @@ import { useT } from "../i18n";
 import { useActions, useStore } from "../store";
 import { Credit } from "../ui/Credit";
 import { LanguageChoice } from "./Language";
+import { StepBack } from "./Welcome";
 import { BIO_MAX } from "./Profile";
 import { birthday, NameAndBirthday } from "./Quota";
 
 /** First open: the language, then a name, a birthday and a bio, each optional, and straight into the app. */
-export function FirstOpen() {
+export function FirstOpen({ onBack, onDone }: { onBack?: () => void; onDone?: () => void }) {
   const t = useT();
   const actions = useActions();
   const settings = useStore((s) => s.settings);
   const id = useId();
-  const [name, setName] = useState("");
-  const [month, setMonth] = useState("");
-  const [day, setDay] = useState("");
-  const [bio, setBio] = useState("");
+  // Coming back from a later step shows what was answered.
+  const [name, setName] = useState(settings?.user_name ?? "");
+  const [month, setMonth] = useState(settings?.birthday ? String(settings.birthday.month) : "");
+  const [day, setDay] = useState(settings?.birthday ? String(settings.birthday.day) : "");
+  const [bio, setBio] = useState(settings?.bio ?? "");
   const [busy, setBusy] = useState(false);
 
   return (
@@ -28,8 +30,10 @@ export function FirstOpen() {
           setBusy(true);
           await actions.saveSettings({ ...settings, user_name: name.trim() || null, birthday: birthday(month, day), bio: bio.trim() || null });
           setBusy(false);
+          onDone?.();
         }}
       >
+        {onBack && <StepBack onBack={onBack} />}
         <h1>{t("first.title")}</h1>
         <Credit />
         <LanguageChoice legend={t("first.language")} />

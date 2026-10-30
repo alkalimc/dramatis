@@ -1,4 +1,5 @@
 import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ImagePart, type InterfaceLanguage, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
+import { clearFresh, type Fresh } from "../lib/fresh";
 import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Store } from ".";
 import type { LoadKey, Theme } from "./state";
@@ -294,9 +295,27 @@ export function createActions(api: Api, store: Store) {
     return true;
   }
 
+  /**
+   * Undo the new-save flow from its first step: leave the new save (for the one the user
+   * came from, else the picker), then delete it, since nothing was put in it. Resolves
+   * "switched" when another save is open and the window must reload, "closed" when the
+   * picker is showing, `false` when it could not leave.
+   */
+  async function cancelFresh(fresh: Fresh) {
+    const back = fresh.from ? await settle(c.switchSave(fresh.from)) : null;
+    if (!back?.ok && (await attempt(c.logOut())) === undefined) return false;
+    await attempt(c.deleteSave(fresh.name));
+    clearFresh();
+    if (back?.ok) return "switched" as const;
+    d({ type: "reset" });
+    await boot();
+    return "closed" as const;
+  }
+
   return {
     attempt,
     boot,
+    cancelFresh,
     checkUpdateNow,
     setAutoUpdate,
     logOut,

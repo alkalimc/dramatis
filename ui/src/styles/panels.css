@@ -454,6 +454,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .first-open .card {
   width: min(28rem, 100%);
 }
+.first-open .step-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-bottom: var(--s-2);
+}
 .notice {
   margin-top: var(--s-4);
 }

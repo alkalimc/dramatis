@@ -732,6 +732,9 @@ async fn roster_groups_by_contact_and_collapses_the_disabled() {
     );
     let never = &roster.groups[1].rows;
     assert_eq!(never[0].person.id.0, "amy");
+    // Talked is about contact, not the band: the disabled never talked here are not marked.
+    assert!(roster.groups[0].rows[0].talked && !never[0].talked);
+    assert!(!roster.groups[2].rows[0].talked);
     // Companions never include the disabled.
     assert!(never[0].companions.iter().all(|c| c.id.0 != "zed"));
     assert_eq!(never[0].companions[0].id.0, "kal");
@@ -2357,6 +2360,36 @@ async fn log_out_closes_the_save_clears_the_record_and_the_next_start_picks() {
         reopen(&r, None).app_status().await.unwrap().save.as_deref(),
         Some("default")
     );
+}
+
+#[tokio::test]
+async fn saves_are_managed_with_none_open() {
+    let r = rig();
+    let e = &r.engine;
+    e.log_out().await.unwrap();
+    e.new_save("a".into()).await.unwrap();
+    e.copy_save("a".into(), "b".into()).await.unwrap();
+    e.rename_save("b".into(), "c".into()).await.unwrap();
+    let out = e.home.root().join("nosave.sqlite");
+    e.export_save("a".into(), out.display().to_string())
+        .await
+        .unwrap();
+    let name = e
+        .import_save(out.display().to_string(), Some("d".into()), None)
+        .await
+        .unwrap();
+    assert_eq!(name, "d");
+    e.delete_save("c".into()).await.unwrap();
+    let names: Vec<String> = e
+        .saves()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert!(names.contains(&"a".to_string()) && names.contains(&"d".to_string()));
+    assert!(!names.contains(&"b".to_string()) && !names.contains(&"c".to_string()));
+    assert_eq!(e.app_status().await.unwrap().save, None);
 }
 
 #[tokio::test]

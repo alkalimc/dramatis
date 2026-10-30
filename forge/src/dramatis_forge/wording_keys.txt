@@ -767,6 +767,7 @@ message.author
 message.awaiting
 message.copy
 message.note
+message.offers
 message.person.open
 message.picture
 message.picture.lost
@@ -919,6 +920,13 @@ roster.band.never_talked
 roster.companions
 roster.counts
 roster.empty
+roster.filter.all
+roster.filter.mode
+roster.filter.never
+roster.filter.none
+roster.filter.persona
+roster.filter.talk
+roster.filter.talked
 roster.find
 roster.find.placeholder
 roster.find.submit

@@ -961,6 +961,8 @@ export type RosterRow = {
 	 *  not talked to, asked, relayed to or put in a group.
 	 */
 	has_persona: boolean,
+	/**  Whether the user has talked with them before, whatever their mode is now. */
+	talked: boolean,
 	recent: Activity | null,
 	/**  People they often appear with in the corpus. */
 	companions: PersonRef[],

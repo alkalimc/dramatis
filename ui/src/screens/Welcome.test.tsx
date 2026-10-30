@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
+import { createActions } from "../store";
+import { clearFresh, markFresh, readFresh } from "../lib/fresh";
 import { renderApp, renderWith } from "../test/render";
 import { SavePicker } from "./Welcome";
 
@@ -177,4 +179,109 @@ test("first run: every question is optional, and skipping them does not bring th
   await user.click(go);
   await waitFor(() => expect(store.getState().status?.needs_setup).toBe(false));
   expect(store.getState().settings?.user_name).toBeNull();
+});
+
+const row = (name: string) => screen.getByText(name, { selector: "strong" }).closest("li") as HTMLElement;
+
+test("the picker manages saves like the settings page: copy, rename, delete with a confirmation, export, import", async () => {
+  const user = userEvent.setup();
+  const onSwitched = vi.fn();
+  renderWith(<SavePicker onSwitched={onSwitched} />, { query: "nosave=1" });
+  await screen.findByText("second try", { selector: "strong" });
+  // Nothing is in use, so nothing is marked so and every row can be deleted.
+  expect(screen.queryByText("In use")).toBeNull();
+  expect(screen.queryByText("Log out of this save")).toBeNull();
+
+  await user.click(within(row("second try")).getByRole("button", { name: "Copy" }));
+  await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "OK" }));
+  await screen.findByText("second try 2", { selector: "strong" });
+
+  await user.click(within(row("second try 2")).getByRole("button", { name: "Rename" }));
+  const rename = await screen.findByRole("dialog");
+  const field = within(rename).getByLabelText("New name");
+  await user.clear(field);
+  await user.type(field, "kept");
+  await user.click(within(rename).getByRole("button", { name: "OK" }));
+  await screen.findByText("kept", { selector: "strong" });
+
+  const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await user.click(within(row("kept")).getByRole("button", { name: "Delete" }));
+  expect(screen.getByText("kept", { selector: "strong" })).toBeDefined();
+  await user.click(within(row("kept")).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(screen.queryByText("kept", { selector: "strong" })).toBeNull());
+  ask.mockRestore();
+
+  await user.click(within(row("default")).getByRole("button", { name: "Export" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.type(within(dialog).getByLabelText("Write to this file"), "/tmp/default.sqlite");
+  await user.click(within(dialog).getByRole("button", { name: "OK" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+  // An imported file is opened, as a created save is.
+  await user.type(screen.getByPlaceholderText("Path of the file"), "/tmp/old story.sqlite");
+  await user.click(screen.getByRole("button", { name: "Import" }));
+  await waitFor(() => expect(onSwitched).toHaveBeenCalledOnce());
+});
+
+test("new save: back on the first step returns to the picker and leaves no empty save", async () => {
+  sessionStorage.clear();
+  const user = userEvent.setup();
+  const { api, store } = renderApp("nosave=1&first=1");
+  await user.type(await screen.findByLabelText("Name of the new save"), "fresh");
+  await user.click(screen.getByRole("button", { name: "Create and open" }));
+  await waitFor(() => expect(readFresh()).toEqual({ name: "fresh", from: null }));
+  // The window reloads onto the new save; here the status is read again instead.
+  await createActions(api, store).boot();
+  await screen.findByLabelText("What should they call you?");
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  expect(await screen.findByRole("heading", { name: "Choose a save" })).toBeDefined();
+  expect(screen.queryByText("fresh", { selector: "strong" })).toBeNull();
+  const list = await api.commands.saves();
+  expect(list.status === "ok" && list.data.some((x) => x.name === "fresh")).toBe(false);
+  expect(readFresh()).toBeNull();
+});
+
+test("without a new-save flow the first step has no back", async () => {
+  sessionStorage.clear();
+  renderApp("first=1&form=library");
+  await screen.findByLabelText("What should they call you?");
+  expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+});
+
+test("every first-run step after the first goes back one step, keeping the answers", async () => {
+  sessionStorage.clear();
+  const user = userEvent.setup();
+  renderApp("first=1&form=library");
+  await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("heading", { name: "Your picture" });
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  const name = (await screen.findByLabelText("What should they call you?")) as HTMLInputElement;
+  expect(name.value).toBe("Rowan");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(await screen.findByRole("button", { name: "Keep the default" }));
+  await screen.findByRole("heading", { name: "Connect a language model" });
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByRole("heading", { name: "Your picture" });
+  await user.click(screen.getByRole("button", { name: "Keep the default" }));
+  await user.click(await screen.findByRole("button", { name: "Skip for now" }));
+  await screen.findByRole("heading", { name: "Check for updates?" });
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByRole("heading", { name: "Connect a language model" });
+});
+
+test("cancelling a save made from another one goes back to that one and deletes the empty save", async () => {
+  sessionStorage.clear();
+  const { api, store } = renderApp("first=1");
+  const c = api.commands;
+  await c.newSave("x");
+  await c.switchSave("x");
+  markFresh({ name: "x", from: "second try" });
+  expect(await createActions(api, store).cancelFresh({ name: "x", from: "second try" })).toBe("switched");
+  const status = await c.appStatus();
+  expect(status.status === "ok" && status.data.save).toBe("second try");
+  const list = await c.saves();
+  expect(list.status === "ok" && list.data.some((x) => x.name === "x")).toBe(false);
+  expect(readFresh()).toBeNull();
+  clearFresh();
 });

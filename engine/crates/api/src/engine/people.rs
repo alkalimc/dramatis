@@ -182,6 +182,7 @@ impl Engine {
                     person: self.person_ref(&p.id),
                     mode: convert::mode(mode),
                     has_persona: c.has_persona(&p.id),
+                    talked: seen.is_some(),
                     recent: recent.get(&p.id).cloned(),
                     companions,
                 },

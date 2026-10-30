@@ -264,6 +264,8 @@ pub struct RosterRow {
     /// Whether the corpus has a persona for them. Without one they can be read about but
     /// not talked to, asked, relayed to or put in a group.
     pub has_persona: bool,
+    /// Whether the user has talked with them before, whatever their mode is now.
+    pub talked: bool,
     pub recent: Option<Activity>,
     /// People they often appear with in the corpus.
     pub companions: Vec<PersonRef>,
