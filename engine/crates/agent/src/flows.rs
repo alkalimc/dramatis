@@ -39,6 +39,17 @@ use llm::ToolChoice;
 /// Most characters of the user's earlier message that join the automatic search's query.
 const EARLIER_QUERY_CHARS: usize = 300;
 
+/// Most characters of a quoted message the model is told.
+const REPLY_SNIPPET_CHARS: usize = 40;
+
+/// Where a message is forwarded to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Forward {
+    Person(PersonId),
+    Host,
+    Favorites,
+}
+
 /// Most of a group's answers, in characters, the host is shown when it reports back.
 const REPORT_CHARS: usize = 3000;
 
@@ -51,6 +62,8 @@ pub struct Posted {
     pub image: Option<Image>,
     /// The user wrote this turn: the host may change modes and memories in it.
     pub authorized: bool,
+    /// The earlier message this one answers.
+    pub reply_to: Option<MessageId>,
 }
 
 /// A line a person was asked to post in a group: who, where, and the words.
@@ -73,18 +86,109 @@ impl Agent {
 
     /// Store the user's message and echo it. Nothing is sent to a model yet.
     pub fn post(&self, channel: ChannelId, text: &str, image: Option<Image>) -> Result<Posted> {
-        self.post_with(channel, text, image, &api::meta::MessageMeta::default())
+        self.post_reply(channel, text, image, None)
     }
 
-    /// Pass a quoted excerpt to someone: it is posted in his direct channel as the
-    /// user's message, marked as a retelling. Run [`Agent::respond`] on the result.
-    pub fn relay(&self, excerpt: &str, to: &PersonId) -> Result<Posted> {
-        let ch = self.open_direct(to)?;
-        let meta = api::meta::MessageMeta {
-            relayed: true,
+    /// [`Agent::post`] as the answer to an earlier message of the same channel.
+    pub fn post_reply(
+        &self,
+        channel: ChannelId,
+        text: &str,
+        image: Option<Image>,
+        reply_to: Option<MessageId>,
+    ) -> Result<Posted> {
+        let meta = api::meta::MessageMeta::default();
+        self.post_with(channel, text, image, &meta, reply_to)
+    }
+
+    /// Forward a stored message. To a person or the host it is posted in their direct
+    /// channel as the user's message, marked as a forwarded copy of the original author's
+    /// words; the posted message's `text` is what the model is told, and the result is
+    /// to be answered with [`Agent::respond`]. To the favorites it is kept as its original
+    /// author wrote it, and there is nothing to answer (`None`).
+    pub fn forward(&self, id: MessageId, to: &Forward) -> Result<(ChannelId, Option<Posted>)> {
+        let (stored, meta) = {
+            let conn = self.db();
+            let stored = message::get(&conn, id)?;
+            let meta = api::meta::MessageMeta::of(stored.attachment.as_ref());
+            (stored, meta)
+        };
+        if meta.service {
+            return Err(Error::Invalid("not someone's words".into()));
+        }
+        // A forwarded copy keeps its first author.
+        let origin = meta
+            .forwarded_from
+            .as_deref()
+            .map_or_else(|| stored.author.clone(), Actor::parse);
+        let text = api::cites::strip(&stored.text);
+        let kept = api::meta::MessageMeta {
+            picture: meta.picture.clone(),
+            picture_lost: meta.picture_lost,
             ..api::meta::MessageMeta::default()
         };
-        self.post_with(ch, excerpt, None, &meta)
+        if matches!(to, Forward::Favorites) {
+            let now = self.now();
+            let conn = self.db();
+            let fav = channel::favorites(&conn)?;
+            let saved = api::meta::MessageMeta {
+                cites: meta.cites.clone(),
+                confidence: meta.confidence,
+                // A copy of a copy still says when the words were first written.
+                original_at: Some(meta.original_at.unwrap_or(stored.at)),
+                ..kept
+            };
+            let attachment = (!saved.is_empty())
+                .then(|| serde_json::to_value(&saved))
+                .transpose()?;
+            let new = message::append_saved(
+                &conn,
+                fav,
+                &origin,
+                &stored.text,
+                attachment.as_ref(),
+                now.ms,
+            )?;
+            let shown = view::message(&conn, &message::get(&conn, new)?, now.offset_min);
+            drop(conn);
+            self.emit(Event::MessageAdded(MessageAdded { message: shown }));
+            self.changed(vec![WorldChange::Channel {
+                id: view::channel_id(fav),
+            }]);
+            return Ok((fav, None));
+        }
+        let ch = match to {
+            Forward::Person(p) => self.open_direct(p)?,
+            _ => channel::host(&self.db())?,
+        };
+        let image = kept
+            .picture
+            .as_deref()
+            .and_then(|hash| world::picture::get(&self.db(), hash).ok().flatten())
+            .map(|(mime, bytes)| Image {
+                mime,
+                data_base64: api::media::base64_encode(&bytes),
+            });
+        let meta = api::meta::MessageMeta {
+            forwarded_from: Some(origin.as_str().to_owned()),
+            ..kept
+        };
+        let mut posted = self.post_with(ch, &text, image, &meta, None)?;
+        // The model gets the sentence, not the bare words.
+        let names = self.names()?;
+        let author = match &origin {
+            Actor::User => names.user().to_owned(),
+            Actor::Host => self.corpus.host_name.clone(),
+            Actor::Person(p) => self.display(p.as_str())?,
+        };
+        posted.text = self.corpus.wording.fill(
+            "harness.forwarded",
+            &names,
+            &[("author", &author), ("text", &text)],
+        );
+        // What someone else said is not the user's order to the host.
+        posted.authorized = false;
+        Ok((ch, Some(posted)))
     }
 
     fn post_with(
@@ -93,12 +197,16 @@ impl Agent {
         text: &str,
         image: Option<Image>,
         meta: &api::meta::MessageMeta,
+        reply_to: Option<MessageId>,
     ) -> Result<Posted> {
         if text.trim().is_empty() && image.is_none() {
             return Err(Error::Invalid("empty message".into()));
         }
-        // Writing to anyone means he is back.
-        self.end_away(true)?;
+        let favorites = channel::get(&self.db(), channel)?.is_favorites();
+        // Writing to anyone means he is back; a note to himself is to no one.
+        if !favorites {
+            self.end_away(true)?;
+        }
         let now = self.now();
         // Before the world is locked: decoding a picture takes a moment.
         let kind = self.log_kind(&self.db(), channel)?;
@@ -121,7 +229,7 @@ impl Agent {
                 .then(|| serde_json::to_value(&meta))
                 .transpose()
                 .map_err(|e| world::Error::Invalid(e.to_string()))?;
-            message::append(
+            let id = message::append(
                 conn,
                 channel,
                 &Actor::User,
@@ -129,7 +237,11 @@ impl Agent {
                 None,
                 attachment.as_ref(),
                 now.ms,
-            )
+            )?;
+            if let Some(r) = reply_to {
+                message::set_reply_to(conn, id, r)?;
+            }
+            Ok(id)
         })?;
         session::touch_channel(&conn, channel, now.ms)?;
         let stored = message::get(&conn, id)?;
@@ -143,6 +255,7 @@ impl Agent {
             text: text.to_owned(),
             image,
             authorized: host,
+            reply_to,
         })
     }
 
@@ -170,6 +283,10 @@ impl Agent {
     }
 
     async fn respond_inner(&self, posted: Posted) -> Result<()> {
+        // Nobody answers a note in the favorites.
+        if channel::get(&self.db(), posted.channel)?.is_favorites() {
+            return Ok(());
+        }
         let mut said = None;
         let first = {
             let _turn = self.lock_channel(posted.channel).await;
@@ -288,11 +405,44 @@ impl Agent {
             .find(|m| m.author == Actor::User)
             .map(|m| m.at);
         let context = self.context_line(seg, since)?;
-        let mut parts: Vec<&str> = vec![&posted.text];
+        // The id a later reply may quote this message by.
+        let tag = assemble::message_tag(posted.message);
+        let words = match self.reply_line(seg, posted)? {
+            Some(quote) => format!("{quote}\n{}", posted.text),
+            None => posted.text.clone(),
+        };
+        let mut parts: Vec<&str> = vec![&words, &tag];
         parts.extend(lines.iter().map(String::as_str));
         parts.push(&context);
         let text = assemble::entry(&parts);
         self.append_user(seg, &text, posted.image.as_ref())
+    }
+
+    /// The sentence that says which earlier message a user turn answers.
+    fn reply_line(&self, seg: world::SegmentId, posted: &Posted) -> Result<Option<String>> {
+        let Some(target) = posted.reply_to else {
+            return Ok(None);
+        };
+        let Ok(quoted) = message::get(&self.db(), target) else {
+            return Ok(None);
+        };
+        let names = self.segment_names(seg)?;
+        let who = match &quoted.author {
+            Actor::User => names.user().to_owned(),
+            Actor::Host => self.corpus.host_name.clone(),
+            Actor::Person(p) => self.display(p.as_str())?,
+        };
+        let w = &self.corpus.wording;
+        let ctx = self.ctx(&names);
+        let mut snippet = assemble::snippet(&quoted.text, ctx.scene, REPLY_SNIPPET_CHARS);
+        if snippet.is_empty() {
+            snippet = w.fill("harness.reply_to.picture", &names, &[]);
+        }
+        Ok(Some(w.fill(
+            "harness.reply_to",
+            &names,
+            &[("name", &who), ("text", &snippet)],
+        )))
     }
 
     async fn host_turn(&self, posted: &Posted) -> Result<()> {
@@ -714,11 +864,22 @@ impl Agent {
         Ok(())
     }
 
+    /// The person whose message `posted` answers.
+    fn replied_author(&self, posted: &Posted) -> Option<PersonId> {
+        let quoted = message::get(&self.db(), posted.reply_to?).ok()?;
+        quoted.author.person().cloned()
+    }
+
     /// Whether the host is a member of the group and the message calls it by name (its
-    /// name or an alias the corpus gives, case aside).
+    /// name or an alias the corpus gives, case aside), or answers one of its messages.
     fn host_called(&self, posted: &Posted) -> Result<bool> {
         if !channel::get(&self.db(), posted.channel)?.has(&Actor::Host) {
             return Ok(false);
+        }
+        if let Some(r) = posted.reply_to
+            && message::get(&self.db(), r).is_ok_and(|m| m.author == Actor::Host)
+        {
+            return Ok(true);
         }
         let w = &self.corpus.wording;
         let text = posted.text.to_lowercase();
@@ -787,7 +948,11 @@ impl Agent {
                 .personas
                 .filter(bond::filter_disabled(&conn, ch.persons())?);
             drop(conn);
-            let named = self.named_in(&posted.text, &members)?;
+            // Answering someone's message speaks to them, as in any chat app.
+            let named = match self.named_in(&posted.text, &members)? {
+                Some(n) => Some(n),
+                None => self.replied_author(posted).filter(|a| members.contains(a)),
+            };
             (members, named)
         };
         if members.is_empty() {
@@ -1067,7 +1232,7 @@ impl Agent {
     /// each reply passes the quota band, and `group.collective_max` bounds the round.
     /// Those the line names answer first.
     async fn say_in_group(&self, from: &PersonId, group: ChannelId, words: &str) -> Result<()> {
-        self.post_in_group(&Actor::Person(from.clone()), group, words)
+        self.post_in_group(&Actor::Person(from.clone()), group, words, None)
             .await
             .map(|_| ())
     }
@@ -1080,6 +1245,7 @@ impl Agent {
         from: &Actor,
         group: ChannelId,
         words: &str,
+        reply_to: Option<MessageId>,
     ) -> Result<Option<MessageId>> {
         let _turn = self.lock_channel(group).await;
         let (members, id) = {
@@ -1094,6 +1260,9 @@ impl Agent {
             }
             let now = self.now();
             let id = message::append(&conn, group, from, words, None, None, now.ms)?;
+            if let Some(r) = reply_to {
+                message::set_reply_to(&conn, id, r)?;
+            }
             session::touch_channel(&conn, group, now.ms)?;
             let stored = message::get(&conn, id)?;
             let shown = view::message(&conn, &stored, now.offset_min);
@@ -1159,7 +1328,7 @@ impl Agent {
 
     async fn host_post(&self, post: &crate::agent::HostPost) -> Result<()> {
         let Some(id) = self
-            .post_in_group(&Actor::Host, post.group, &post.text)
+            .post_in_group(&Actor::Host, post.group, &post.text, post.reply_to)
             .await?
         else {
             return Ok(());

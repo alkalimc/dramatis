@@ -19,7 +19,7 @@ use api::home::Home;
 use api::params::Params;
 use api::port::AgentPort;
 use api::types::{ChannelId, MessageId, PersonId};
-use api::views::ImagePart;
+use api::views::{ForwardTo, ImagePart};
 use async_trait::async_trait;
 use tokio::sync::watch;
 use tokio::task::AbortHandle;
@@ -240,7 +240,7 @@ impl AgentBridge {
         self.busy.send_replace(tasks.live.len());
     }
 
-    /// Wait until no background work is running: every reply, relay and request started
+    /// Wait until no background work is running: every reply, forward and request started
     /// so far has ended.
     pub async fn idle(&self) {
         let _ = self.busy.subscribe().wait_for(|n| *n == 0).await;
@@ -306,23 +306,34 @@ impl AgentPort for Port {
         channel: ChannelId,
         text: String,
         image: Option<ImagePart>,
+        reply_to: Option<MessageId>,
     ) -> ApiResult<MessageId> {
         let agent = self.0.agent().await?;
         let ch = world::ChannelId(parse(&channel.0)?);
-        let posted = agent.post(ch, &text, image.map(Into::into))?;
+        let reply_to = reply_to
+            .map(|r| parse(&r.0).map(world::MessageId))
+            .transpose()?;
+        let posted = agent.post_reply(ch, &text, image.map(Into::into), reply_to)?;
         let id = MessageId(posted.message.0.to_string());
         self.0
             .spawn("reply", move |a| async move { a.respond(posted).await });
         Ok(id)
     }
 
-    async fn relay(&self, excerpt: String, _from: MessageId, to: PersonId) -> ApiResult<ChannelId> {
+    async fn forward(&self, message: MessageId, to: ForwardTo) -> ApiResult<ChannelId> {
         let agent = self.0.agent().await?;
-        let posted = agent.relay(&excerpt, &world::PersonId(to.0))?;
-        let ch = ChannelId(posted.channel.0.to_string());
-        self.0
-            .spawn("relay", move |a| async move { a.respond(posted).await });
-        Ok(ch)
+        let id = world::MessageId(parse(&message.0)?);
+        let to = match to {
+            ForwardTo::Person { id } => agent::Forward::Person(world::PersonId(id.0)),
+            ForwardTo::Host => agent::Forward::Host,
+            ForwardTo::Favorites => agent::Forward::Favorites,
+        };
+        let (ch, posted) = agent.forward(id, &to)?;
+        if let Some(posted) = posted {
+            self.0
+                .spawn("forward", move |a| async move { a.respond(posted).await });
+        }
+        Ok(ChannelId(ch.0.to_string()))
     }
 
     async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String> {

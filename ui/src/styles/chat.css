@@ -655,3 +655,191 @@ button.pinned-first {
 .author-name:hover {
   text-decoration: underline;
 }
+
+/* ---- reply, forward, mention, favorites: built in the existing palette; styling is the polish pass's ---- */
+.quote {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  margin: var(--s-1) 0;
+  padding: 0 var(--s-2);
+  border: none;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-xs);
+  background: var(--hover);
+  color: var(--ink);
+  font: inherit;
+  font-weight: var(--fw);
+  text-align: left;
+  cursor: pointer;
+}
+.quote-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-strong);
+}
+.quote-text {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+.from-user .quote .quote-name {
+  color: var(--stamp-own);
+}
+.forwarded {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-strong);
+  font-style: italic;
+  color: var(--muted);
+}
+.from-user .forwarded {
+  color: var(--stamp-own);
+}
+.quote.hue-0,
+.reply-quote.hue-0 { border-left-color: var(--hue-0); }
+.quote.hue-0 .quote-name,
+.reply-quote.hue-0 .quote-name { color: var(--hue-0); }
+.forwarded.hue-0 { color: var(--hue-0); }
+.quote.hue-1,
+.reply-quote.hue-1 { border-left-color: var(--hue-1); }
+.quote.hue-1 .quote-name,
+.reply-quote.hue-1 .quote-name { color: var(--hue-1); }
+.forwarded.hue-1 { color: var(--hue-1); }
+.quote.hue-2,
+.reply-quote.hue-2 { border-left-color: var(--hue-2); }
+.quote.hue-2 .quote-name,
+.reply-quote.hue-2 .quote-name { color: var(--hue-2); }
+.forwarded.hue-2 { color: var(--hue-2); }
+.quote.hue-3,
+.reply-quote.hue-3 { border-left-color: var(--hue-3); }
+.quote.hue-3 .quote-name,
+.reply-quote.hue-3 .quote-name { color: var(--hue-3); }
+.forwarded.hue-3 { color: var(--hue-3); }
+.quote.hue-4,
+.reply-quote.hue-4 { border-left-color: var(--hue-4); }
+.quote.hue-4 .quote-name,
+.reply-quote.hue-4 .quote-name { color: var(--hue-4); }
+.forwarded.hue-4 { color: var(--hue-4); }
+.quote.hue-5,
+.reply-quote.hue-5 { border-left-color: var(--hue-5); }
+.quote.hue-5 .quote-name,
+.reply-quote.hue-5 .quote-name { color: var(--hue-5); }
+.forwarded.hue-5 { color: var(--hue-5); }
+.quote.hue-6,
+.reply-quote.hue-6 { border-left-color: var(--hue-6); }
+.quote.hue-6 .quote-name,
+.reply-quote.hue-6 .quote-name { color: var(--hue-6); }
+.forwarded.hue-6 { color: var(--hue-6); }
+.quote.hue-7,
+.reply-quote.hue-7 { border-left-color: var(--hue-7); }
+.quote.hue-7 .quote-name,
+.reply-quote.hue-7 .quote-name { color: var(--hue-7); }
+.forwarded.hue-7 { color: var(--hue-7); }
+.message:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-md);
+}
+.speech .mention {
+  color: var(--accent);
+  font-weight: var(--fw-strong);
+}
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--muted);
+}
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--s-2);
+  border-left: 3px solid var(--accent);
+  color: var(--ink);
+}
+.composer-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.composer-field textarea {
+  width: 100%;
+}
+.mention-pop {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 40;
+  min-width: 14rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  margin: 0 0 var(--s-1);
+  padding: var(--s-1) 0;
+  list-style: none;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-menu);
+}
+.mention-pop button {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  height: var(--ctl-lg);
+  padding: 0 var(--s-3);
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-weight: var(--fw);
+  text-align: left;
+}
+.mention-pop li.on button,
+.mention-pop button:hover {
+  background: var(--hover);
+}
+.avatar-favorites {
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+}
+.forward-card .forward-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 22rem;
+  overflow-y: auto;
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.forward-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-2) var(--s-1);
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-weight: var(--fw);
+  text-align: left;
+}
+.forward-row:hover,
+.forward-row:focus-visible {
+  background: var(--hover);
+}
+.about-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.about-form textarea {
+  width: 100%;
+  resize: vertical;
+}

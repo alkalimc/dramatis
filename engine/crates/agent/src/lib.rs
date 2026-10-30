@@ -28,4 +28,4 @@ mod wrapup_json;
 
 pub use agent::{Agent, Clock, Config, Event, Frontend, NoSink, Parts, Sink};
 pub use error::{Error, Result};
-pub use flows::{Posted, PresenceOutcome};
+pub use flows::{Forward, Posted, PresenceOutcome};

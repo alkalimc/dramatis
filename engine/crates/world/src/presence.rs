@@ -199,6 +199,10 @@ pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<
     // Other unread messages, one row per person and channel.
     let mut newest: BTreeMap<(PersonId, ChannelId), i64> = BTreeMap::new();
     for ch in channel::list(conn)? {
+        // What the user saved for themselves is not waiting for them.
+        if ch.is_favorites() {
+            continue;
+        }
         for m in message::since(conn, ch.id, ch.read_up_to)? {
             let Some(p) = m.author.person() else { continue };
             if visit_msgs.contains(&m.id) {
@@ -350,6 +354,14 @@ mod tests {
         assert!(pres.digest.is_empty());
         assert!(pres.calls.is_empty());
         assert_eq!(pres.held, Some(Held::NoSeed));
+    }
+
+    #[test]
+    fn what_the_user_saved_is_not_waiting_for_them() {
+        let w = world();
+        let fav = channel::favorites(&w).unwrap();
+        message::append_saved(&w, fav, &Actor::Person(p("b")), "kept", None, T0).unwrap();
+        assert!(digest(&w, at(T0 + 10), &none()).unwrap().items.is_empty());
     }
 
     #[test]

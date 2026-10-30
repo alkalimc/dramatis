@@ -161,6 +161,10 @@ export interface State {
   restore: { channel: ChannelId; text: string } | null;
   /** Unsent text per channel, kept while the user is elsewhere; cleared on send. */
   drafts: Record<ChannelId, string>;
+  /** The message each channel's composer is about to answer; cleared on send. */
+  replies: Record<ChannelId, Message>;
+  /** The message the forward picker is open for; `null` = closed. */
+  forwarding: Message | null;
   /** Bumped on each `WorldChanged`: screens holding fetched facts refetch. */
   worldVersion: number;
   /** Bumped on roster or mode changes: person pages refetch. */
@@ -224,6 +228,8 @@ export function initialState(): State {
     sourcesOpen: {},
     restore: null,
     drafts: {},
+    replies: {},
+    forwarding: null,
     worldVersion: 0,
     peopleVersion: 0,
     loading: {},
@@ -284,6 +290,11 @@ export type Action =
   | { type: "rewound"; event: Rewound }
   | { type: "restore"; restore: { channel: ChannelId; text: string } | null }
   | { type: "draft"; channel: ChannelId; text: string }
+  /** The composer of `channel` answers `message` (`null`: no longer). */
+  | { type: "reply"; channel: ChannelId; message: Message | null }
+  | { type: "forwarding"; message: Message | null }
+  /** One message left the channel (taken out of the favorites). */
+  | { type: "removed"; channel: ChannelId; message: MessageId }
   | { type: "sources"; message: MessageId }
   | { type: "awaiting"; channel: ChannelId; on: boolean }
   | { type: "loading"; key: LoadKey }

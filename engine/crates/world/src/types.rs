@@ -187,6 +187,8 @@ text_enum! {
     ChannelKind {
         Direct = "direct",
         Group = "group",
+        /// The user's own bookmarks: saved messages and notes, nobody answers.
+        Favorites = "favorites",
     }
 }
 

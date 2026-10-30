@@ -50,7 +50,7 @@ test("Send again takes a message and what followed back, and puts its text in th
   const { api, store, actions } = await mounted();
   // The echo and the take-back arrive as events, as they do in the app.
   await subscribe(api, store, actions);
-  const sent = await api.commands.sendMessage("host", "Who can help with ledgers?", null);
+  const sent = await api.commands.sendMessage("host", "Who can help with ledgers?", null, null);
   expect(sent.status).toBe("ok");
   const log = await screen.findByRole("log");
   await within(log).findByText("Who can help with ledgers?");
@@ -147,4 +147,112 @@ test("the tray is reachable from the keyboard: focus shows it, the item opens th
   await user.tab();
   await user.keyboard("{Enter}");
   expect(picker).toHaveBeenCalledTimes(1);
+});
+
+test("a reply shows who and what it answers above the box, goes with the send, and ends there", async () => {
+  const user = userEvent.setup();
+  const { api, store } = await mounted();
+  const sent = vi.spyOn(api.commands, "sendMessage");
+  const quoted = store.getState().messages.host.find((m) => m.author.kind === "host")!;
+  act(() => store.dispatch({ type: "reply", channel: "host", message: quoted }));
+  const bar = screen.getByRole("group", { name: /Replying to/ });
+  expect(bar.textContent).toContain(quoted.text.split("\n")[0].slice(0, 20));
+  await user.type(box(), "and then?");
+  await user.keyboard("{Control>}{Enter}{/Control}");
+  await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+  expect(sent.mock.calls[0][3]).toBe(quoted.id);
+  await waitFor(() => expect(screen.queryByRole("group", { name: /Replying to/ })).toBeNull());
+  expect(store.getState().replies.host).toBeUndefined();
+  // The next one answers nothing.
+  await user.type(box(), "plain");
+  await user.keyboard("{Control>}{Enter}{/Control}");
+  await waitFor(() => expect(sent).toHaveBeenCalledTimes(2));
+  expect(sent.mock.calls[1][3]).toBeNull();
+});
+
+test("the close button and Escape drop the reply", async () => {
+  const user = userEvent.setup();
+  const { store } = await mounted();
+  const quoted = store.getState().messages.host[0];
+  act(() => store.dispatch({ type: "reply", channel: "host", message: quoted }));
+  await user.click(screen.getByRole("button", { name: "Cancel the reply" }));
+  expect(screen.queryByRole("group", { name: /Replying to/ })).toBeNull();
+  act(() => store.dispatch({ type: "reply", channel: "host", message: quoted }));
+  box().focus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("group", { name: /Replying to/ })).toBeNull();
+});
+
+test("a failed send keeps the reply and the draft", async () => {
+  const user = userEvent.setup();
+  const { api, store } = await mounted();
+  vi.spyOn(api.commands, "sendMessage").mockResolvedValue({ status: "error", error: { code: "no_endpoint" } });
+  const quoted = store.getState().messages.host[0];
+  act(() => store.dispatch({ type: "reply", channel: "host", message: quoted }));
+  await user.type(box(), "hello");
+  await user.keyboard("{Control>}{Enter}{/Control}");
+  await waitFor(() => expect(store.getState().error?.code).toBe("no_endpoint"));
+  expect(store.getState().replies.host?.id).toBe(quoted.id);
+});
+
+async function inGroup() {
+  const r = renderWith(<ChannelView channel="g-rota" />);
+  await act(() => r.actions.refreshChannels());
+  await act(() => r.actions.loadHistory("g-rota"));
+  return r;
+}
+
+test("typing @ in a group lists its members, filtered as you type; Enter puts @name in the text", async () => {
+  const user = userEvent.setup();
+  const { api } = await inGroup();
+  const sent = vi.spyOn(api.commands, "sendMessage");
+  await user.type(box(), "hi @");
+  const list = await screen.findByRole("listbox", { name: "Members to mention" });
+  const shown = () => within(list).getAllByRole("option").map((o) => o.querySelector("button > span:last-child")!.textContent);
+  expect(shown()).toEqual(["Oren Lark", "Mira Vale", "Tess Arden"]);
+  await user.type(box(), "mi");
+  expect(shown()).toEqual(["Mira Vale"]);
+  await user.keyboard("{Enter}");
+  expect(box().value).toBe("hi @Mira Vale ");
+  expect(screen.queryByRole("listbox")).toBeNull();
+  // The text goes as typed: the engine finds the member's name in it.
+  await user.keyboard("are you there?{Control>}{Enter}{/Control}");
+  await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+  expect(sent.mock.calls[0][1]).toBe("hi @Mira Vale are you there?");
+});
+
+test("arrows move through the members, a click picks one, Escape closes the list", async () => {
+  const user = userEvent.setup();
+  await inGroup();
+  await user.type(box(), "@");
+  const list = await screen.findByRole("listbox");
+  await user.keyboard("{ArrowDown}");
+  expect(within(list).getAllByRole("option").map((o) => o.getAttribute("aria-selected"))).toEqual(["false", "true", "false"]);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(box().value).toBe("@");
+  await user.type(box(), "t");
+  await user.click(within(await screen.findByRole("listbox")).getByRole("button", { name: "Tess Arden" }));
+  expect(box().value).toBe("@Tess Arden ");
+});
+
+test("a direct chat has no member list", async () => {
+  const user = userEvent.setup();
+  await mounted();
+  await user.type(box(), "@");
+  expect(screen.queryByRole("listbox")).toBeNull();
+});
+
+test("the favorites take notes: a different prompt, and nothing is awaited", async () => {
+  const user = userEvent.setup();
+  const r = renderWith(<ChannelView channel="favorites" />);
+  await subscribe(r.api, r.store, r.actions);
+  await act(() => r.actions.refreshChannels());
+  await act(() => r.actions.loadHistory("favorites"));
+  const field = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  expect(field.placeholder).toBe("Write a note...");
+  await user.type(field, "remember the stairs");
+  await user.keyboard("{Control>}{Enter}{/Control}");
+  await waitFor(() => expect(r.store.getState().messages.favorites.some((m) => m.text === "remember the stairs")).toBe(true));
+  expect(r.store.getState().awaiting.favorites).toBeUndefined();
 });

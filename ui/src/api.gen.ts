@@ -66,12 +66,17 @@ export const commands = {
 	openDirect: (person: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_direct", { person })),
 	/**  The host's channel. */
 	hostChannel: () => typedError<ChannelId, ApiError>(__TAURI_INVOKE("host_channel")),
-	/**  Append a user turn. The reply streams back as events. */
+	/**
+	 *  Append a user turn. The reply streams back as events. `reply_to` is an earlier
+	 *  message of the same channel that this one answers (`Invalid` for another channel's);
+	 *  the model is told what it quotes. In the favorites it is a note: stored, nobody
+	 *  answers, and no endpoint is needed.
+	 */
 	sendMessage: (channel: ChannelId, text: string, image: {
 	/**  `image/png`, `image/jpeg`, ... */
 	mime: string,
 	data_base64: string,
-} | null) => typedError<MessageId, ApiError>(__TAURI_INVOKE("send_message", { channel, text, image })),
+} | null, replyTo: string | null) => typedError<MessageId, ApiError>(__TAURI_INVOKE("send_message", { channel, text, image, replyTo })),
 	/**
 	 *  End the channel's conversation now: the next message starts a new one, and what is
 	 *  worth keeping from this one is written as facts (`WorldChanged`). Returns at once;
@@ -86,8 +91,17 @@ export const commands = {
 	 *  user's. `Rewound` follows.
 	 */
 	rewind: (channel: ChannelId, message: MessageId) => typedError<string, ApiError>(__TAURI_INVOKE("rewind", { channel, message })),
-	/**  Pass a quoted excerpt to someone else; their answer lands in their direct channel. */
-	relay: (excerpt: string, from: MessageId, to: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("relay", { excerpt, from, to })),
+	/**
+	 *  Forward a message, with its picture, to a person, the host or the favorites. To a
+	 *  person or the host it lands in their direct channel as a forwarded copy and they
+	 *  answer it as they would a message; to the favorites it is kept as its original
+	 *  author wrote it and nobody answers. Returns the channel it landed in.
+	 */
+	forward: (message: MessageId, to: ForwardTo) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("forward", { message, to })),
+	/**  The user's favorites channel, created on first use. */
+	favoritesChannel: () => typedError<ChannelId, ApiError>(__TAURI_INVOKE("favorites_channel")),
+	/**  Remove one message from the favorites; `Invalid` for a message anywhere else. */
+	deleteSaved: (message: MessageId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_saved", { message })),
 	/**  Everything before this message has been seen. */
 	markRead: (channel: ChannelId, upTo: MessageId) => typedError<null, ApiError>(__TAURI_INVOKE("mark_read", { channel, upTo })),
 	createGroup: (members: PersonId[], topic: string | null) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("create_group", { members, topic })),
@@ -127,6 +141,12 @@ export const commands = {
 	removeMember: (channel: ChannelId, person: PersonId) => typedError<null, ApiError>(__TAURI_INVOKE("remove_member", { channel, person })),
 	/**  Title a channel. `None` or blank returns to the derived title. */
 	renameChannel: (channel: ChannelId, name: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("rename_channel", { channel, name })),
+	/**
+	 *  Describe a group (its `topic`). `None` or blank clears it. A changed description
+	 *  leaves a service line in the group (no model call). `Invalid` for a channel that is
+	 *  not a group.
+	 */
+	setTopic: (channel: ChannelId, topic: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("set_topic", { channel, topic })),
 	/**  Set (or, with `None`, clear) a channel's picture. Returns the stored file. */
 	setChannelAvatar: (channel: ChannelId, image: {
 	/**  `image/png`, `image/jpeg`, ... */
@@ -481,7 +501,9 @@ export type ChannelId = string;
 
 export type ChannelKind = "direct" | "group" | 
 /**  The host's own channel. */
-"host";
+"host" | 
+/**  The user's favorites. */
+"favorites";
 
 /**  A conversation named in a tool call. */
 export type ChannelRef = {
@@ -655,6 +677,15 @@ export type FactView = {
 	created_at: Timestamp,
 };
 
+/**  Where a message is forwarded to. */
+export type ForwardTo = 
+/**  The person's direct channel; they answer it. */
+{ kind: "person"; id: PersonId } | 
+/**  The host's channel; it answers. */
+{ kind: "host" } | 
+/**  The user's favorites: kept, nobody answers. */
+{ kind: "favorites" };
+
 /**  An image the user attaches; sent to the model as a multimodal part. */
 export type ImagePart = {
 	/**  `image/png`, `image/jpeg`, ... */
@@ -699,8 +730,19 @@ export type Message = {
 	cites: Citation[],
 	/**  Low: render the thin-archive marker. */
 	confidence: Confidence | null,
-	/**  A retelling of something said elsewhere. */
-	relayed: boolean,
+	/**
+	 *  Who wrote the original, when this is a forwarded copy in a person's or the host's
+	 *  direct channel. Copies kept in the favorites carry no mark: they show their
+	 *  original author as the author.
+	 */
+	forwarded_from?: Author | null,
+	/**  The earlier message in this channel this one answers. */
+	reply?: Quote | null,
+	/**
+	 *  In the favorites, when the saved message was first written; `at` is when it was
+	 *  saved.
+	 */
+	original_at?: Timestamp | null,
 	/**
 	 *  A line from the harness that gives context (why someone was found); shown as a
 	 *  quiet note between the bubbles, not as something the user said.
@@ -890,6 +932,19 @@ export type QuotaWindow = {
 };
 
 /**
+ *  What a reply quotes: the original's author and the start of its text. The original
+ *  may lie outside the loaded history, so the quote carries what it shows.
+ */
+export type Quote = {
+	id: MessageId,
+	author: Author,
+	/**  The original's text, cut to `QUOTE_CHARS`; scene lines are still in it. */
+	text: string,
+	/**  The original carried a picture. */
+	has_picture: boolean,
+};
+
+/**
  *  The user took a message back: it and every later message of the channel are gone
  *  (and so is what the engine wrote because of them). A UI drops them from the view
  *  and refetches what it shows of the narrative state.
@@ -953,7 +1008,7 @@ export type RosterRow = {
 	mode: Mode,
 	/**
 	 *  Whether the corpus has a persona for them. Without one they can be read about but
-	 *  not talked to, asked, relayed to or put in a group.
+	 *  not talked to, asked, forwarded to or put in a group.
 	 */
 	has_persona: boolean,
 	/**  Whether the user has talked with them before, whatever their mode is now. */

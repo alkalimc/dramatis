@@ -128,12 +128,20 @@ impl AgentPort for Spy {
         c: ChannelId,
         t: String,
         _: Option<ImagePart>,
+        r: Option<MessageId>,
     ) -> ApiResult<MessageId> {
-        self.calls.lock().unwrap().push(format!("send {} {t}", c.0));
+        let reply = r.map_or(String::new(), |r| format!(" reply {}", r.0));
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("send {} {t}{reply}", c.0));
         Ok(MessageId("1".into()))
     }
-    async fn relay(&self, _: String, _: MessageId, to: PersonId) -> ApiResult<ChannelId> {
-        self.calls.lock().unwrap().push(format!("relay {}", to.0));
+    async fn forward(&self, m: MessageId, to: ForwardTo) -> ApiResult<ChannelId> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("forward {} {to:?}", m.0));
         Ok(ChannelId("1".into()))
     }
     async fn rewind(&self, c: ChannelId, m: MessageId) -> ApiResult<String> {
@@ -611,7 +619,8 @@ async fn people_without_a_persona_are_visible_but_cannot_be_reached() {
     let none = ApiError::NoPersona { person: id("zed") };
     assert_eq!(e.open_direct(id("zed")).await, Err(none.clone()));
     assert_eq!(
-        e.relay("x".into(), MessageId("1".into()), id("zed")).await,
+        e.forward(MessageId("1".into()), ForwardTo::Person { id: id("zed") })
+            .await,
         Err(ApiError::NotFound)
     );
     assert_eq!(
@@ -649,7 +658,9 @@ async fn people_without_a_persona_are_visible_but_cannot_be_reached() {
 
     // Chatting with someone who can be reached goes to the agent.
     let ch = e.open_direct(id("amy")).await.unwrap();
-    e.send_message(ch.clone(), "hi".into(), None).await.unwrap();
+    e.send_message(ch.clone(), "hi".into(), None, None)
+        .await
+        .unwrap();
     assert_eq!(
         r.spy.calls.lock().unwrap().last().unwrap(),
         &format!("send {} hi", ch.0)
@@ -674,12 +685,12 @@ async fn no_chat_role_means_no_model_commands() {
     let e = &r.engine;
     let ch = e.open_direct(id("amy")).await.unwrap();
     assert_eq!(
-        e.send_message(ch.clone(), "hi".into(), None).await,
+        e.send_message(ch.clone(), "hi".into(), None, None).await,
         Err(ApiError::NoEndpoint)
     );
     assert_eq!(e.wrapup(ch).await, Err(ApiError::NoEndpoint));
     assert_eq!(
-        e.send_message(ChannelId("1".into()), " ".into(), None)
+        e.send_message(ChannelId("1".into()), " ".into(), None, None)
             .await,
         Err(ApiError::Invalid {
             field: "text".into()
@@ -750,8 +761,10 @@ async fn channels_history_groups_and_read_marks() {
     assert_eq!(e.open_direct(id("amy")).await.unwrap(), direct);
     // An empty direct channel is not a conversation yet; the host's own always is.
     let list = e.channels().await.unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].kind, ChannelKind::Host);
+    // The host's channel and the pinned favorites, and nothing else yet.
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().any(|c| c.kind == ChannelKind::Host));
+    assert!(list.iter().any(|c| c.kind == ChannelKind::Favorites));
 
     let first = {
         let w = e.w();
@@ -764,7 +777,7 @@ async fn channels_history_groups_and_read_marks() {
             &world::Actor::Person("amy".into()),
             "two",
             None,
-            Some(&serde_json::json!({"relayed": true, "confidence": "low"})),
+            Some(&serde_json::json!({"forwarded_from": "host", "confidence": "low"})),
             2_000,
         )
         .unwrap();
@@ -775,7 +788,9 @@ async fn channels_history_groups_and_read_marks() {
         msgs.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
         ["one", "two"]
     );
-    assert!(msgs[1].relayed && msgs[1].confidence == Some(Confidence::Low));
+    assert!(
+        msgs[1].forwarded_from == Some(Author::Host) && msgs[1].confidence == Some(Confidence::Low)
+    );
     let older = e
         .history(direct.clone(), Some(msgs[1].id.clone()), 10)
         .await
@@ -1273,6 +1288,157 @@ fn person_ref(p: &str) -> PersonRef {
         name: p.into(),
         pronoun: None,
     }
+}
+
+#[tokio::test]
+async fn a_reply_must_quote_a_message_of_its_own_channel_and_reaches_the_agent() {
+    let r = rig();
+    let e = &r.engine;
+    e.add_profile(profile("p")).await.unwrap();
+    e.set_role(RoleKind::Chat, Some(chat_role("p")))
+        .await
+        .unwrap();
+    let amy = e.open_direct(id("amy")).await.unwrap();
+    let kal = e.open_direct(id("kal")).await.unwrap();
+    let (a, k) = {
+        let w = e.w();
+        let user = world::Actor::User;
+        let a = world::message::append(
+            &w,
+            convert::world_channel(&amy).unwrap(),
+            &user,
+            "one",
+            None,
+            None,
+            1,
+        )
+        .unwrap();
+        let k = world::message::append(
+            &w,
+            convert::world_channel(&kal).unwrap(),
+            &user,
+            "two",
+            None,
+            None,
+            2,
+        )
+        .unwrap();
+        (convert::message_id(a), convert::message_id(k))
+    };
+    assert_eq!(
+        e.send_message(amy.clone(), "x".into(), None, Some(k)).await,
+        Err(ApiError::Invalid {
+            field: "reply_to".into()
+        })
+    );
+    assert_eq!(
+        e.send_message(amy.clone(), "x".into(), None, Some(MessageId("99".into())))
+            .await,
+        Err(ApiError::NotFound)
+    );
+    e.send_message(amy.clone(), "x".into(), None, Some(a.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        &format!("send {} x reply {}", amy.0, a.0)
+    );
+}
+
+#[tokio::test]
+async fn the_favorites_are_pinned_need_no_model_and_only_they_lose_messages() {
+    let r = rig();
+    let e = &r.engine;
+    // No chat endpoint: a note in the favorites still goes through, a chat does not.
+    let fav = e.favorites_channel().await.unwrap();
+    assert_eq!(e.favorites_channel().await.unwrap(), fav);
+    let listed = e.channels().await.unwrap();
+    let row = listed.iter().find(|c| c.id == fav).unwrap();
+    assert_eq!((row.kind, row.unread), (ChannelKind::Favorites, 0));
+    e.send_message(fav.clone(), "note".into(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        &format!("send {} note", fav.0)
+    );
+    let amy = e.open_direct(id("amy")).await.unwrap();
+    assert_eq!(
+        e.send_message(amy.clone(), "hi".into(), None, None).await,
+        Err(ApiError::NoEndpoint)
+    );
+
+    // A message anywhere else cannot be removed; a saved one can.
+    let (kept, elsewhere) = {
+        let w = e.w();
+        let fav_id = convert::world_channel(&fav).unwrap();
+        let author = world::Actor::Person(world::PersonId("amy".into()));
+        let kept = world::message::append_saved(&w, fav_id, &author, "saved", None, 5).unwrap();
+        let other = world::message::append(
+            &w,
+            convert::world_channel(&amy).unwrap(),
+            &world::Actor::User,
+            "plain",
+            None,
+            None,
+            6,
+        )
+        .unwrap();
+        (convert::message_id(kept), convert::message_id(other))
+    };
+    assert_eq!(
+        e.delete_saved(elsewhere).await,
+        Err(ApiError::Invalid {
+            field: "request".into()
+        })
+    );
+    e.delete_saved(kept).await.unwrap();
+    let texts: Vec<String> = e
+        .history(fav, None, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    // Only the note was not stored here (the spy keeps no messages); the saved one is gone.
+    assert!(texts.is_empty(), "{texts:?}");
+}
+
+#[tokio::test]
+async fn a_description_is_saved_once_and_the_group_change_hook_hears_of_it() {
+    let r = rig();
+    let e = &r.engine;
+    let calls = || r.spy.calls.lock().unwrap().clone();
+    let group = e.create_group(vec![id("amy")], None).await.unwrap();
+    e.set_topic(group.clone(), Some("  night shift  ".into()))
+        .await
+        .unwrap();
+    let topic = |e: &Engine| {
+        world::channel::get(&e.w(), convert::world_channel(&group).unwrap())
+            .unwrap()
+            .topic
+    };
+    assert_eq!(topic(e).as_deref(), Some("night shift"));
+    assert_eq!(
+        calls(),
+        [format!(
+            "changed {} Described(Some(\"night shift\"))",
+            group.0
+        )]
+    );
+    // The same text again changes nothing and says nothing.
+    e.set_topic(group.clone(), Some("night shift".into()))
+        .await
+        .unwrap();
+    assert_eq!(calls().len(), 1);
+    e.set_topic(group.clone(), Some("   ".into()))
+        .await
+        .unwrap();
+    assert_eq!(topic(e), None);
+    assert_eq!(calls().len(), 2);
+    // A direct chat has no description.
+    let direct = e.open_direct(id("amy")).await.unwrap();
+    assert!(e.set_topic(direct, Some("x".into())).await.is_err());
 }
 
 #[tokio::test]

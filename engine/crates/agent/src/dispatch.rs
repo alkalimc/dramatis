@@ -946,7 +946,8 @@ impl Agent {
             let Some(last) = world::message::last(&self.db(), ch.id)? else {
                 continue;
             };
-            if ch.is_host_channel() {
+            // The favorites are the user's own.
+            if ch.is_host_channel() || ch.is_favorites() {
                 continue;
             }
             let members = ch
@@ -962,6 +963,7 @@ impl Agent {
                     (ChannelKind::Group, "harness.channels.group_named")
                 }
                 world::ChannelKind::Group => (ChannelKind::Group, "harness.channels.group"),
+                world::ChannelKind::Favorites => continue,
             };
             let when = self.when(last.at);
             let who = members
@@ -1119,8 +1121,15 @@ impl Agent {
             return Ok(Err(self.refuse(names, "harness.error.once", "")));
         }
         let report_back = p.report_back.unwrap_or(true);
+        // The line it answers: an id `recent` showed, from this group.
+        let reply_to = p
+            .reply_to
+            .as_deref()
+            .and_then(assemble::reply_id)
+            .filter(|m| world::message::get(&self.db(), *m).is_ok_and(|q| q.channel == ch.id));
         queue.push(crate::agent::HostPost {
             group: ch.id,
+            reply_to,
             text: text.chars().take(crate::flows::SAY_MAX).collect(),
             report_back,
             prompted: turn.authorized,
@@ -1205,7 +1214,7 @@ impl Agent {
                 )));
             }
         };
-        let Some(ch) = found.filter(|c| c.deleted_at.is_none()) else {
+        let Some(ch) = found.filter(|c| c.deleted_at.is_none() && !c.is_favorites()) else {
             return Ok(Err(self.refuse(names, "harness.error.not_found", id)));
         };
         if ch.is_host_channel() || ch.id == turn.channel {
@@ -1234,7 +1243,12 @@ impl Agent {
             lines.push(self.say(
                 names,
                 "harness.read_recent.line",
-                &[("when", &self.when(m.at)), ("name", &who), ("text", &text)],
+                &[
+                    ("when", &self.when(m.at)),
+                    ("tag", &assemble::message_tag(m.id)),
+                    ("name", &who),
+                    ("text", &text),
+                ],
             ));
         }
         let skip = lines.len().saturating_sub(RECENT_MESSAGES as usize);

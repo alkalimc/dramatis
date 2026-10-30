@@ -1,6 +1,6 @@
 //! Everything the engine reaches outside its own files, behind traits the app supplies.
 //!
-//! * [`AgentPort`]: whatever needs a model call (a user turn and its replies, a relay, a
+//! * [`AgentPort`]: whatever needs a model call (a user turn and its replies, a forward, a
 //!   request, a forced wrap-up, the host's line and the openings on presence, event seeds,
 //!   the rollover after a rename). The `runtime` crate implements it over the `agent`
 //!   crate, which depends on this crate for the seam types, so this crate never names it.
@@ -26,7 +26,7 @@ use crate::events::{
     RosterChanged, ToolCalled, TurnActivity, WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId};
-use crate::views::ImagePart;
+use crate::views::{ForwardTo, ImagePart};
 
 /// What changed about a group, with the new value (`None`: it was cleared).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,11 +49,13 @@ pub trait AgentPort: Send + Sync + 'static {
         channel: ChannelId,
         text: String,
         image: Option<ImagePart>,
+        reply_to: Option<MessageId>,
     ) -> ApiResult<MessageId>;
 
-    /// Retell an excerpt to someone else; their answer lands in their direct channel,
-    /// which is returned at once.
-    async fn relay(&self, excerpt: String, from: MessageId, to: PersonId) -> ApiResult<ChannelId>;
+    /// Forward a message. To a person or the host it is posted as a forwarded copy in their
+    /// direct channel and answered in the background; to the favorites it is kept as its
+    /// author wrote it, with no model call. Returns the channel it landed in at once.
+    async fn forward(&self, message: MessageId, to: ForwardTo) -> ApiResult<ChannelId>;
 
     /// Take back the user's message `message` and everything after it in `channel`;
     /// returns its text. Refused while a turn is running in the channel. Emits `Rewound`.
@@ -340,11 +342,12 @@ impl AgentPort for Unwired {
         _: ChannelId,
         _: String,
         _: Option<ImagePart>,
+        _: Option<MessageId>,
     ) -> ApiResult<MessageId> {
         Err(ApiError::NotImplemented)
     }
 
-    async fn relay(&self, _: String, _: MessageId, _: PersonId) -> ApiResult<ChannelId> {
+    async fn forward(&self, _: MessageId, _: ForwardTo) -> ApiResult<ChannelId> {
         Err(ApiError::NotImplemented)
     }
 

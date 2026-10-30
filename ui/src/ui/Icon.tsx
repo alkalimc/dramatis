@@ -43,6 +43,8 @@ const PATHS = {
   unread: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.01",
   copy: "M9 8h11v12H9zM5 16V4h11",
+  reply: "M10 6L4 11.5 10 17M4 11.5h9a7 7 0 0 1 7 7",
+  forward: "M14 6l6 5.5-6 5.5M20 11.5h-9a7 7 0 0 0-7 7",
 } as const;
 
 export type IconName = keyof typeof PATHS;

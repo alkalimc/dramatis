@@ -13,7 +13,7 @@ function message(id: string, at: string, extra: Partial<Message> = {}): Message 
     picture_lost: false,
     cites: [],
     confidence: null,
-    relayed: false,
+   
     at,
     ...extra,
   };
@@ -328,4 +328,46 @@ test("a draft is kept per channel and an empty one is dropped", () => {
   expect(s.drafts).toEqual({ c1: "hi" });
   s = reduce(s, { type: "draft", channel: "c1", text: "" });
   expect(s.drafts).toEqual({});
+});
+
+const FAV: ChannelSummary = { id: "fav", kind: "favorites", origin: "user", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 };
+
+test("a reply is kept per channel until it is sent, taken back with its message, or dropped", () => {
+  let s: State = initialState();
+  const first = message("m1", "2026-01-01T00:00:01Z");
+  const second = message("m2", "2026-01-01T00:00:02Z");
+  s = reduce(s, { type: "history", channel: "c1", messages: [first, second], older: false, done: true });
+  s = reduce(s, { type: "reply", channel: "c1", message: second });
+  expect(s.replies.c1.id).toBe("m2");
+  // Taking back a message before the one answered leaves it gone with it.
+  const gone = reduce(s, { type: "rewound", event: { channel: "c1", from: "m1" } });
+  expect(gone.replies.c1).toBeUndefined();
+  const kept = reduce(s, { type: "rewound", event: { channel: "c1", from: "m2" } });
+  expect(kept.replies.c1).toBeUndefined();
+  s = reduce(s, { type: "reply", channel: "c1", message: null });
+  expect(s.replies.c1).toBeUndefined();
+});
+
+test("what lands in the favorites is not news, and a removed message goes with its reply and sources", () => {
+  let s: State = initialState();
+  s = reduce(s, { type: "channels", channels: [FAV] });
+  const saved = message("k1", "2026-01-01T00:00:01Z", { channel: "fav" });
+  s = reduce(s, { type: "messageAdded", event: { message: saved } });
+  expect(s.unread.fav).toBeUndefined();
+  expect(s.messages.fav).toHaveLength(1);
+  s = reduce(s, { type: "reply", channel: "fav", message: saved });
+  s = reduce(s, { type: "sources", message: "k1" });
+  s = reduce(s, { type: "removed", channel: "fav", message: "k1" });
+  expect(s.messages.fav).toEqual([]);
+  expect(s.replies.fav).toBeUndefined();
+  expect(s.sourcesOpen.k1).toBeUndefined();
+});
+
+test("the forward picker opens for one message and closes", () => {
+  let s: State = initialState();
+  const m = message("m1", "2026-01-01T00:00:01Z");
+  s = reduce(s, { type: "forwarding", message: m });
+  expect(s.forwarding?.id).toBe("m1");
+  s = reduce(s, { type: "forwarding", message: null });
+  expect(s.forwarding).toBeNull();
 });

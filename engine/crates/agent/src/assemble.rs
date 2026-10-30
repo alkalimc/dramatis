@@ -48,11 +48,20 @@ fn block_a_with(ctx: &Ctx<'_>, rules: &str, group: bool, proposing: bool) -> Str
         &[("open", ctx.scene.0), ("close", ctx.scene.1)],
     ));
     parts.push(ctx.fill("harness.citation", &[]));
+    // Only a person quotes; the host's own turns have no such line.
+    if rules == "harness.rules" {
+        let mark = closing_marks(ctx.wording, false, true).reply;
+        let example = format!("{mark} #msg7");
+        parts.push(ctx.fill(
+            "harness.reply",
+            &[("mark", mark), ("tag", "[#msg7]"), ("example", &example)],
+        ));
+    }
     if group {
         parts.push(ctx.fill("harness.next", &[("mark", hand_off_mark(ctx.wording))]));
     }
     if proposing {
-        let marks = closing_marks(ctx.wording, false);
+        let marks = closing_marks(ctx.wording, false, false);
         parts.push(ctx.fill(
             "harness.propose",
             &[("find", marks.find), ("group", marks.group)],
@@ -66,9 +75,10 @@ fn block_a_with(ctx: &Ctx<'_>, rules: &str, group: bool, proposing: bool) -> Str
 }
 
 /// What the host's usage guide covers, in the order it is written.
-const GUIDE_TOPICS: [&str; 9] = [
+const GUIDE_TOPICS: [&str; 10] = [
     "channels",
     "group",
+    "forward",
     "resend",
     "sources",
     "name",
@@ -407,6 +417,26 @@ pub fn units(ctx: &Ctx<'_>, units: &[Unit], seen: &mut HashSet<String>) -> Mater
     out
 }
 
+/// The start of a message as a quote shows it: the first line that is speech (not a scene
+/// line, not a citation line), cut to `max` characters with an ellipsis.
+pub fn snippet(text: &str, scene: (&str, &str), max: usize) -> String {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| {
+            !l.is_empty()
+                && !api::cites::is_cite_line(l)
+                && api::cites::scene_inner(l, scene.0, scene.1).is_none()
+        })
+        .unwrap_or_default();
+    let line = api::cites::strip(line);
+    if line.chars().count() <= max {
+        return line;
+    }
+    let cut: String = line.chars().take(max).collect();
+    format!("{}\u{2026}", cut.trim_end())
+}
+
 /// A user entry: the user's words (verbatim) or harness lines, then the attachment.
 pub fn entry(parts: &[&str]) -> String {
     parts
@@ -434,23 +464,30 @@ pub struct Marks<'a> {
     /// A line to post in a group the person is in (`harness.say_mark`), written in a
     /// direct chat where tools are emulated.
     pub say: &'a str,
+    /// The earlier message of the user this reply answers (`harness.reply_mark`).
+    pub reply: &'a str,
 }
 
 impl<'a> Marks<'a> {
     pub fn list(&self) -> Vec<&'a str> {
-        [self.hand_off, self.find, self.group, self.say]
+        [self.hand_off, self.find, self.group, self.say, self.reply]
             .into_iter()
             .filter(|m| !m.is_empty())
             .collect()
     }
 }
 
-/// The marks for a turn: the hand-off mark in a group, the proposal marks, and in a direct
-/// chat the say mark. They are recognised whether or not this turn's endpoint emulates
-/// tools, since a log opened on one may be continued on another and a line written is
-/// never speech.
-pub fn closing_marks(wording: &Wording, group: bool) -> Marks<'_> {
+/// The marks for a turn: the hand-off mark in a group, the proposal marks, in a direct
+/// chat the say mark, and on a person's turn (`person`) the reply mark. They are recognised
+/// whether or not this turn's endpoint emulates tools, since a log opened on one may be
+/// continued on another and a line written is never speech.
+pub fn closing_marks(wording: &Wording, group: bool, person: bool) -> Marks<'_> {
     Marks {
+        reply: if person {
+            wording.get("harness.reply_mark").trim()
+        } else {
+            ""
+        },
         hand_off: if group { hand_off_mark(wording) } else { "" },
         find: wording.get("harness.find_mark").trim(),
         group: wording.get("harness.group_mark").trim(),
@@ -572,6 +609,25 @@ pub struct Closing {
     pub purpose: Option<String>,
     /// A line to post in a group: which group, as the person wrote it, and the words.
     pub say: Option<(String, String)>,
+    /// The message of the user this reply quotes, as the reply's last line named it.
+    pub reply: Option<world::MessageId>,
+}
+
+/// The tag that ends a user entry in a log: the id a person quotes the message by. It has
+/// its own prefix because `m` ids already name memories.
+pub fn message_tag(id: world::MessageId) -> String {
+    format!("[#msg{}]", id.0)
+}
+
+/// The message id in a reply line's text after its mark: the first run of digits, as in
+/// `#msg12`, `msg12` or `12`.
+pub fn reply_id(rest: &str) -> Option<world::MessageId> {
+    let digits: String = rest
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok().map(world::MessageId)
 }
 
 /// Separators between a group line's names and its purpose: ASCII or full-width bar.
@@ -630,6 +686,11 @@ pub fn split_closing(text: &str, marks: Marks<'_>) -> Closing {
     {
         out.text = kept;
         out.say = Some((group, words));
+    }
+    let (kept, rest) = split_line(&out.text, marks.reply, &others(marks.reply));
+    if let Some(id) = rest.as_deref().and_then(reply_id) {
+        out.text = kept;
+        out.reply = Some(id);
     }
     out
 }
@@ -939,7 +1000,7 @@ mod tests {
     #[test]
     fn closing_proposal_lines_are_split_off() {
         let w = Wording::new(&BTreeMap::new());
-        let marks = closing_marks(&w, true);
+        let marks = closing_marks(&w, true, false);
         let (find, group, hand) = (marks.find, marks.group, marks.hand_off);
         let c = split_closing(&format!("Hi.\n{find} forge steel\n"), marks);
         assert_eq!(c.text, "Hi.");
@@ -992,7 +1053,7 @@ mod tests {
             );
         }
         // The find line is recognised in a direct chat too; the say line only there.
-        let direct = closing_marks(&w, false);
+        let direct = closing_marks(&w, false, false);
         assert_eq!(
             split_closing(&format!("a\n{find} x"), direct).find,
             Some(vec!["x".to_owned()])
@@ -1008,6 +1069,7 @@ mod tests {
             find: "\u{21d2} \u{627e}\u{4eba}\u{ff1a}",
             group: "\u{21d2} \u{62c9}\u{7fa4}\u{ff1a}",
             say: "",
+            reply: "",
         };
         let owner = "\u{21d2}\u{627e}\u{4eba}\u{ff1a}A,B\u{ff5c}plan the menu";
         let c = split_closing(&format!("Hi.\n{owner}"), marks);
@@ -1040,7 +1102,7 @@ mod tests {
     #[test]
     fn the_stream_holds_back_proposal_lines_too() {
         let w = Wording::new(&BTreeMap::new());
-        let marks = closing_marks(&w, true).list();
+        let marks = closing_marks(&w, true, false).list();
         let (find, hand) = (marks[1], marks[0]);
         let body = format!("Hello\n{hand} Ann\n{find} x");
         assert_eq!(shown_len(&body, &marks), 6);

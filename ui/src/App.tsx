@@ -11,6 +11,7 @@ import { Icon, type IconName } from "./ui/Icon";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { ChatList } from "./screens/ChatList";
 import { FirstOpen } from "./screens/FirstOpen";
+import { ForwardDialog } from "./screens/Forward";
 import { GroupDialog } from "./screens/Group";
 import { Badge } from "./ui/Badge";
 import { GroupInfo } from "./screens/GroupInfo";
@@ -70,6 +71,7 @@ function Shell() {
   const hostCard = useStore((s) => s.hostCard);
   const update = useStore((s) => s.update);
   const group = useStore((s) => s.groupDialog);
+  const forwarding = useStore((s) => s.forwarding);
   const drawer = useStore((s) => s.drawer);
   const statusError = useStore((s) => s.loadErrors.status);
   const wordingError = useStore((s) => s.loadErrors.wording);
@@ -173,6 +175,7 @@ function Shell() {
       {personCard && <PersonCard id={personCard} />}
       {hostCard && <HostCard />}
       {group && <GroupDialog />}
+      {forwarding && <ForwardDialog message={forwarding} />}
     </div>
   );
 }

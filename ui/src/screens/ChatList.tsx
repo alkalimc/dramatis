@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { ChannelSummary } from "../api";
 import { useT, useUserName } from "../i18n";
 import { activityText, authorName, typingText, when } from "../lib/format";
+import { jumpTo } from "../lib/jump";
 import { byActivity, channelTitle, lastActivity, previewOf, unreadOf } from "../lib/chats";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { ChannelAvatar } from "../ui/Avatar";
@@ -64,13 +65,7 @@ function SearchPanel({ query }: { query: string }) {
   const stand = summary ?? ({ id: channel ?? "", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary);
   const close = () => dispatch({ type: "find", query: null });
 
-  const jump = (mid: string) => {
-    const el = document.getElementById(`m-${mid}`);
-    if (!el) return;
-    el.scrollIntoView({ block: "center" });
-    el.classList.add("flash");
-    setTimeout(() => el.classList.remove("flash"), 1600);
-  };
+  const jump = (mid: string) => void jumpTo(mid);
 
   return (
     <nav className="chat-list search-panel" aria-label={t("channel.find")}>
@@ -150,9 +145,12 @@ export function ChatList() {
   const q = query.trim().toLowerCase();
   const rows = useMemo(() => {
     // Searching looks everywhere, archived chats included; otherwise one list at a time.
-    const scope = q ? all.filter((c) => channelTitle(c, t, me).toLowerCase().includes(q)) : all.filter((c) => c.archived === (view === "archived"));
+    const scope = q ? all.filter((c) => channelTitle(c, t, me).toLowerCase().includes(q)) : all.filter((c) => c.archived === (view === "archived") && (view !== "archived" || c.kind !== "favorites"));
     const sorted = byActivity(scope, messages);
-    return [...sorted.filter((c) => pinned.includes(c.id)), ...sorted.filter((c) => !pinned.includes(c.id))];
+    // The favorites stay at the very top of the main list, ahead of the pinned chats.
+    const kept = sorted.filter((c) => c.kind === "favorites");
+    const rest = sorted.filter((c) => c.kind !== "favorites");
+    return [...kept, ...rest.filter((c) => pinned.includes(c.id)), ...rest.filter((c) => !pinned.includes(c.id))];
   }, [all, messages, pinned, view, q, t, me]);
 
   // Previews need the newest message of each channel; this loads it once per channel.
@@ -219,6 +217,7 @@ export function ChatList() {
             ))}
           </ul>
         )}
+        {rows.length > 0 && !q && !archivedView && rows.every((c) => c.kind === "favorites") && <p className="muted pad">{t("chatlist.empty")}</p>}
       </div>
       <ClockLine />
       {menu.menu}
@@ -239,6 +238,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
   const who = useStore((s) => s.typing[channel.id]);
 
   const host = channel.kind === "host";
+  const favorites = channel.kind === "favorites";
   const title = channelTitle(channel, t, useUserName());
   const last = list?.[list.length - 1];
   const at = lastActivity(channel, list);
@@ -253,7 +253,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
     preview =
       last.author.kind === "user"
         ? t("chatlist.preview.you", { text })
-        : channel.kind === "group"
+        : channel.kind === "group" || favorites
           ? t("chatlist.preview.author", { name: authorName(last.author, t, names, user), text })
           : text;
   } else if (waiting) {
@@ -269,7 +269,8 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
         onClick={() => void actions.open(host ? null : channel.id)}
         onContextMenu={(e) => {
           e.preventDefault();
-          onMenu(channel, e.clientX, e.clientY);
+          // The favorites are always on top and always read: there is nothing to do to the row.
+          if (!favorites) onMenu(channel, e.clientX, e.clientY);
         }}
       >
         <ChannelAvatar channel={channel} size="l" />
@@ -279,7 +280,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
               {channel.kind === "group" && <Icon name="people" size={18} />}
               <span className="chat-title" title={title}>{title}</span>
             </span>
-            {pinned && (
+            {(pinned || favorites) && (
               <span className="chat-pin" role="img" aria-label={t("chatlist.pinned")}>
                 <Icon name="pin" size={14} />
               </span>

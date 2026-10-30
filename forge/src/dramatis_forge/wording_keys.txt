@@ -132,6 +132,7 @@ cli.chat.no_list
 cli.chat.no_such
 cli.chats.hint
 cli.chats.kind.direct
+cli.chats.kind.favorites
 cli.chats.kind.group
 cli.chats.kind.host
 cli.chats.none
@@ -147,6 +148,8 @@ cli.events.off
 cli.events.on
 cli.export.replace
 cli.export.wrote
+cli.fav.open
+cli.favorites.title
 cli.find.none
 cli.first.avatar
 cli.first.avatar.invalid
@@ -158,6 +161,8 @@ cli.first.language_prompt
 cli.first.name
 cli.footer
 cli.footer.one
+cli.forward.done
+cli.forwarded
 cli.go.hint
 cli.go.no_such
 cli.go.nothing
@@ -173,6 +178,8 @@ cli.help.other
 cli.help.people
 cli.help.saves
 cli.help.settings
+cli.history.no_list
+cli.history.no_such
 cli.history.none
 cli.host.commands
 cli.host.none
@@ -254,6 +261,7 @@ cli.remove.last
 cli.remove.not_member
 cli.rename.cleared
 cli.rename.done
+cli.reply.quote
 cli.resend.busy
 cli.resend.done
 cli.resend.done.one
@@ -334,10 +342,14 @@ cli.talk.person
 cli.tier.levels
 cli.tier.pacing
 cli.tier.status
+cli.topic.cleared
+cli.topic.done
 cli.typing
 cli.typing.more
 cli.unknown_command
 cli.unread.header
+cli.unsave.done
+cli.unsave.only_fav
 cli.update.ask
 cli.update.off
 cli.update.on
@@ -346,10 +358,13 @@ cli.usage.away
 cli.usage.birthday
 cli.usage.chat
 cli.usage.chats
+cli.usage.delete
 cli.usage.edit
 cli.usage.events
+cli.usage.fav
 cli.usage.find
 cli.usage.forget
+cli.usage.forward
 cli.usage.go
 cli.usage.group
 cli.usage.history
@@ -362,6 +377,7 @@ cli.usage.name
 cli.usage.password
 cli.usage.quiet
 cli.usage.remove
+cli.usage.reply
 cli.usage.resend
 cli.usage.restore
 cli.usage.save
@@ -393,7 +409,11 @@ composer.image
 composer.image.preview
 composer.image.remove
 composer.label
+composer.mention
+composer.note
 composer.placeholder
+composer.reply
+composer.reply.cancel
 composer.send
 confidence.low
 credit.by
@@ -511,6 +531,9 @@ events.label.text
 events.label.title
 events.per_day
 events.topics
+favorites.empty
+favorites.subtitle
+favorites.title
 first.avatar.hint
 first.avatar.next
 first.avatar.skip
@@ -521,8 +544,14 @@ first.language
 first.name
 first.submit
 first.title
+forward.empty
+forward.search
+forward.title
 group.cancel
 group.description
+group.description.edit
+group.description.empty
+group.description.placeholder
 group.list
 group.list.empty
 group.members
@@ -532,6 +561,7 @@ group.members.add.title
 group.members.count
 group.members.remove
 group.members.remove.confirm
+group.members.you
 group.mode
 group.name.label
 group.name.more
@@ -592,6 +622,7 @@ harness.event.ask
 harness.event.recent
 harness.event.tool
 harness.find_mark
+harness.forwarded
 harness.found_for
 harness.group.described
 harness.group.renamed
@@ -608,6 +639,7 @@ harness.groups.line_named
 harness.guide.app
 harness.guide.app.channels
 harness.guide.app.forget
+harness.guide.app.forward
 harness.guide.app.group
 harness.guide.app.intensity
 harness.guide.app.memories
@@ -624,6 +656,7 @@ harness.guide.recent
 harness.guide.terminal
 harness.guide.terminal.channels
 harness.guide.terminal.forget
+harness.guide.terminal.forward
 harness.guide.terminal.group
 harness.guide.terminal.intensity
 harness.guide.terminal.memories
@@ -669,6 +702,10 @@ harness.read_recent.none
 harness.recent
 harness.remembered
 harness.reminder
+harness.reply
+harness.reply_mark
+harness.reply_to
+harness.reply_to.picture
 harness.report_back
 harness.report_back.line
 harness.report_back.none
@@ -746,6 +783,10 @@ message.actions
 message.author
 message.awaiting
 message.copy
+message.delete
+message.delete.confirm
+message.forward
+message.forwarded
 message.offers
 message.person.open
 message.picture
@@ -753,7 +794,9 @@ message.picture.lost
 message.picture.open
 message.play
 message.playing
-message.relayed
+message.quote.open
+message.quote.picture
+message.reply
 message.resend
 message.resend.confirm
 message.sources
@@ -1026,6 +1069,7 @@ tool.host.get_chunk.neighbours
 tool.host.list_channels
 tool.host.post
 tool.host.post.channel
+tool.host.post.reply_to
 tool.host.post.report_back
 tool.host.post.text
 tool.host.promise

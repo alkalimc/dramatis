@@ -163,6 +163,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.find_mark", "⇒ find:"),
     ("harness.group_mark", "⇒ group:"),
     ("harness.say_mark", "⇒ say:"),
+    ("harness.reply_mark", "↩"),
     (
         "harness.propose",
         "You help {user} yourself first: you answer, offer to do the thing, and take it on \
@@ -191,6 +192,20 @@ const DEFAULTS: &[(&str, &str)] = &[
          in the reply that you will ask, and never that they have answered.",
     ),
     ("harness.said", "{name} says in the group: {text}"),
+    (
+        "harness.reply",
+        "Each of {user}'s messages ends with its id in brackets, such as {tag}. Most replies \
+         quote nothing. Only when you answer one particular earlier message of {user}, not \
+         the latest, end the reply with one final line that starts with {mark} followed by \
+         that id, for example {example}, and nothing else on that line. If a citation line \
+         is also written, this line comes before it.",
+    ),
+    ("harness.reply_to", "{user} replies to {name}'s \"{text}\":"),
+    ("harness.reply_to.picture", "a picture"),
+    (
+        "harness.forwarded",
+        "{user} forwards you this message to look at. {author} said: \"{text}\"",
+    ),
     (
         "harness.next",
         "In a group, a member may hand the turn on. Only if the reply really calls for one \
@@ -413,7 +428,7 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.read_recent.none",
         "Nothing has been said there yet.",
     ),
-    ("harness.read_recent.line", "- {when} {name}: {text}"),
+    ("harness.read_recent.line", "- {when} {tag} {name}: {text}"),
     (
         "harness.promised",
         "Reminder set: {name} will bring it up when it is due ({due}).",
@@ -484,6 +499,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "A group: /group <p1> <p2> ... with two or more people.",
     ),
     (
+        "harness.guide.terminal.forward",
+        "Answering and passing on a message: /history numbers the messages; /reply <n> <text> answers one, /forward <n> <person|host|fav> passes one on, /fav opens the favorites.",
+    ),
+    (
         "harness.guide.terminal.resend",
         "Say it again: /resend [n] takes back {user}'s n-th last message and puts its text back to edit.",
     ),
@@ -520,6 +539,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Switching conversation: open it from Home, or press the choice you offer.",
     ),
     ("harness.guide.app.group", "A group: New group in the Menu."),
+    (
+        "harness.guide.app.forward",
+        "Answering and passing on a message: right-click it, then Reply, or Forward to a person, {host} or Favorites. Favorites is the chat pinned at the top of the list.",
+    ),
     (
         "harness.guide.app.resend",
         "Say it again: right-click {user}'s own message, then Send again.",

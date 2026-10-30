@@ -257,7 +257,7 @@ pub struct RosterRow {
     pub person: PersonRef,
     pub mode: Mode,
     /// Whether the corpus has a persona for them. Without one they can be read about but
-    /// not talked to, asked, relayed to or put in a group.
+    /// not talked to, asked, forwarded to or put in a group.
     pub has_persona: bool,
     /// Whether the user has talked with them before, whatever their mode is now.
     pub talked: bool,
@@ -291,6 +291,8 @@ pub enum ChannelKind {
     Group,
     /// The host's own channel.
     Host,
+    /// The user's favorites.
+    Favorites,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -336,13 +338,50 @@ pub struct Message {
     pub cites: Vec<Citation>,
     /// Low: render the thin-archive marker.
     pub confidence: Option<Confidence>,
-    /// A retelling of something said elsewhere.
-    pub relayed: bool,
+    /// Who wrote the original, when this is a forwarded copy in a person's or the host's
+    /// direct channel. Copies kept in the favorites carry no mark: they show their
+    /// original author as the author.
+    #[serde(default)]
+    pub forwarded_from: Option<Author>,
+    /// The earlier message in this channel this one answers.
+    #[serde(default)]
+    pub reply: Option<Quote>,
+    /// In the favorites, when the saved message was first written; `at` is when it was
+    /// saved.
+    #[serde(default)]
+    pub original_at: Option<Timestamp>,
     /// A line from the harness that gives context (why someone was found); shown as a
     /// quiet note between the bubbles, not as something the user said.
     #[serde(default)]
     pub service: bool,
     pub at: Timestamp,
+}
+
+/// What a reply quotes: the original's author and the start of its text. The original
+/// may lie outside the loaded history, so the quote carries what it shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Quote {
+    pub id: MessageId,
+    pub author: Author,
+    /// The original's text, cut to `QUOTE_CHARS`; scene lines are still in it.
+    pub text: String,
+    /// The original carried a picture.
+    pub has_picture: bool,
+}
+
+/// Most characters of the original a [`Quote`] carries.
+pub const QUOTE_CHARS: usize = 300;
+
+/// Where a message is forwarded to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ForwardTo {
+    /// The person's direct channel; they answer it.
+    Person { id: PersonId },
+    /// The host's channel; it answers.
+    Host,
+    /// The user's favorites: kept, nobody answers.
+    Favorites,
 }
 
 /// An image the user attaches; sent to the model as a multimodal part.

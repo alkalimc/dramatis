@@ -34,7 +34,12 @@ pub const DEFAULTS: &[(&str, &str)] = &[
         "Conversation
 anything else       send it to the current channel
 //text              send a message that starts with a slash
-/history [n]        reprint the last n messages of this channel (default 10)
+/history [n]        reprint the last n messages of this channel (default 10), numbered
+/reply <n> <text>   answer message n of that list; the people see what it answers
+/forward <n> <to>   pass message n on to a person, {host} or fav (the favorites); a person
+                    or {host} answers it
+/fav                open the favorites, your own place for saved messages and notes
+/delete <n>         remove message n of that list from the favorites
 /resend [n]         take back your n-th last message (default 1) and everything after it,
                     and put its text back in the input line to edit and send again
 /sources [n]        list the sources of the n-th last reply that has any (default 1), numbered
@@ -54,7 +59,8 @@ anything else       send it to the current channel
 /go <n>             take choice n from the list {host} just offered
 /chats [archived]   your conversations, newest first, with what is unread; /chat <n> opens one
 /rename [title]     title this conversation; no title returns to the members' names
-/members            who is in this group
+/members            who is in this group, you first
+/topic [text]       describe this group; no text clears the description
 /invite <p1>, <p2>  bring persons into this group
 /remove <person>    take a person out of this group; what they said stays
 /archive, /unarchive  take this conversation out of the list, or put it back
@@ -196,6 +202,7 @@ line is one message.",
     ("cli.chats.kind.host", "host"),
     ("cli.chats.kind.direct", "direct"),
     ("cli.chats.kind.group", "group"),
+    ("cli.chats.kind.favorites", "favorites"),
     ("cli.chats.unread", "{n} unread"),
     ("cli.chats.hint", "/chat <n> opens one"),
     (
@@ -275,6 +282,29 @@ line is one message.",
     ("cli.memory.restored", "restored; /memories lists again"),
     ("cli.memory.rewritten", "rewritten; /memories lists again"),
     ("cli.history.none", "nothing said yet"),
+    (
+        "cli.history.no_list",
+        "list the messages first with /history, then use their numbers",
+    ),
+    (
+        "cli.history.no_such",
+        "no such message in the last /history list",
+    ),
+    ("cli.favorites.title", "Favorites"),
+    (
+        "cli.fav.open",
+        "the favorites: type a note, or /history to see what is saved",
+    ),
+    ("cli.forwarded", "forwarded from {name}"),
+    ("cli.reply.quote", "↩ {name}: {text}"),
+    ("cli.forward.done", "forwarded to {name}"),
+    ("cli.unsave.done", "removed from the favorites"),
+    (
+        "cli.unsave.only_fav",
+        "only a message in the favorites can be removed; /fav opens them",
+    ),
+    ("cli.topic.done", "description saved"),
+    ("cli.topic.cleared", "description cleared"),
     ("cli.resend.none", "no message of yours to send again"),
     (
         "cli.resend.done.one",
@@ -522,6 +552,19 @@ line is one message.",
     ),
     ("cli.usage.logout", "usage: /logout"),
     ("cli.usage.history", "usage: /history [n]"),
+    (
+        "cli.usage.reply",
+        "usage: /reply <n> <text>, n a number from /history",
+    ),
+    (
+        "cli.usage.forward",
+        "usage: /forward <n> <person|host|fav>, n a number from /history",
+    ),
+    ("cli.usage.fav", "usage: /fav"),
+    (
+        "cli.usage.delete",
+        "usage: /delete <n>, n a number from /history",
+    ),
     ("cli.usage.resend", "usage: /resend [n]"),
     ("cli.usage.sources", "usage: /sources [n] [entry]"),
     (

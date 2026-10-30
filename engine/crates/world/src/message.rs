@@ -15,9 +15,11 @@ pub struct Message {
     pub tool_calls: Option<Value>,
     pub attachment: Option<Value>,
     pub at: i64,
+    /// The earlier message this one answers.
+    pub reply_to: Option<MessageId>,
 }
 
-const COLUMNS: &str = "id, channel, author, text, tool_calls, attachment, at";
+const COLUMNS: &str = "id, channel, author, text, tool_calls, attachment, at, reply_to";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Message> {
     let json = |col: &str| -> rusqlite::Result<Option<Value>> {
@@ -40,6 +42,7 @@ fn read(row: &Row<'_>) -> rusqlite::Result<Message> {
         tool_calls: json("tool_calls")?,
         attachment: json("attachment")?,
         at: row.get("at")?,
+        reply_to: row.get("reply_to")?,
     })
 }
 
@@ -102,6 +105,56 @@ pub fn append(
         }
         Ok(id)
     })
+}
+
+/// Store a copy of a message in the favorites channel: the author stays the original
+/// author, `at` is when it is saved. Nothing else moves: not `last_seen`, not the
+/// archive flag. Anyone may be the author, the user's own notes included.
+pub fn append_saved(
+    conn: &Connection,
+    channel: ChannelId,
+    author: &Actor,
+    text: &str,
+    attachment: Option<&Value>,
+    at: i64,
+) -> Result<MessageId> {
+    let ch = channel::get(conn, channel)?;
+    if ch.kind != ChannelKind::Favorites {
+        return Err(Error::Invalid(format!(
+            "channel {channel} is not the favorites"
+        )));
+    }
+    conn.execute(
+        "INSERT INTO message(channel, author, text, attachment, at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        (channel, author, text, attachment.map(Value::to_string), at),
+    )?;
+    Ok(MessageId(conn.last_insert_rowid()))
+}
+
+/// Mark a stored message as the answer to `reply_to`, which must be in the same channel.
+pub fn set_reply_to(conn: &Connection, id: MessageId, reply_to: MessageId) -> Result<()> {
+    let (own, theirs): (ChannelId, ChannelId) =
+        (get(conn, id)?.channel, get(conn, reply_to)?.channel);
+    if own != theirs {
+        return Err(Error::Invalid(
+            "the quoted message is in another channel".into(),
+        ));
+    }
+    conn.execute(
+        "UPDATE message SET reply_to = ?2 WHERE id = ?1",
+        (id, reply_to),
+    )?;
+    Ok(())
+}
+
+/// Remove one message from the favorites channel; anywhere else it is refused.
+pub fn delete_saved(conn: &Connection, id: MessageId) -> Result<()> {
+    let m = get(conn, id)?;
+    if channel::get(conn, m.channel)?.kind != ChannelKind::Favorites {
+        return Err(Error::Invalid("only a saved message can be removed".into()));
+    }
+    conn.execute("DELETE FROM message WHERE id = ?1", [id])?;
+    Ok(())
 }
 
 /// Fill in a message written empty: a streamed reply needs its id before its text is
@@ -218,10 +271,11 @@ pub fn last(conn: &Connection, channel: ChannelId) -> Result<Option<Message>> {
     Ok(history(conn, channel, None, 1)?.pop())
 }
 
-/// When the user last wrote anywhere.
+/// When the user last wrote to anyone: a note kept in the favorites is to nobody.
 pub fn last_user_message_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn.query_row(
-        "SELECT max(at) FROM message WHERE author = 'user'",
+        "SELECT max(at) FROM message
+         WHERE author = 'user' AND channel NOT IN (SELECT id FROM channel WHERE kind = 'favorites')",
         [],
         |r| r.get(0),
     )?)
@@ -321,5 +375,46 @@ mod tests {
 
         append(&w, c, &Actor::Person(a), "yo", None, None, 3).unwrap();
         assert!(!channel::get(&w, c).unwrap().archived);
+    }
+
+    #[test]
+    fn a_reply_points_at_a_message_of_its_own_channel_and_loses_it_with_the_message() {
+        let w = world();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let other = channel::direct(&w, &p("b")).unwrap();
+        let first = append(&w, c, &Actor::User, "one", None, None, 1).unwrap();
+        let second = append(&w, c, &Actor::User, "two", None, None, 2).unwrap();
+        let elsewhere = append(&w, other, &Actor::User, "x", None, None, 3).unwrap();
+        assert_eq!(get(&w, second).unwrap().reply_to, None);
+        set_reply_to(&w, second, first).unwrap();
+        assert_eq!(get(&w, second).unwrap().reply_to, Some(first));
+        assert!(set_reply_to(&w, second, elsewhere).is_err());
+        // The quoted message going away leaves the reply standing, with nothing quoted.
+        discard(&w, first).unwrap();
+        assert_eq!(get(&w, second).unwrap().reply_to, None);
+    }
+
+    #[test]
+    fn the_favorites_keep_any_author_and_time_and_move_nothing_else() {
+        let w = world();
+        let fav = channel::favorites(&w).unwrap();
+        assert_eq!(channel::favorites(&w).unwrap(), fav);
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let said = append(&w, c, &Actor::Person(p("a")), "hello", None, None, 5).unwrap();
+        let before = bond::user_bond(&w, &p("a")).unwrap().last_seen;
+        let kept = append_saved(&w, fav, &Actor::Person(p("a")), "hello", None, 5).unwrap();
+        assert_ne!(kept, said);
+        let m = get(&w, kept).unwrap();
+        assert_eq!((m.author, m.at), (Actor::Person(p("a")), 5));
+        assert_eq!(bond::user_bond(&w, &p("a")).unwrap().last_seen, before);
+        // Only the favorites take a saved copy, and only they let one be removed.
+        assert!(append_saved(&w, c, &Actor::User, "x", None, 1).is_err());
+        assert!(delete_saved(&w, said).is_err());
+        // A note is not the user writing to someone.
+        append(&w, fav, &Actor::User, "note", None, None, 99).unwrap();
+        assert_eq!(last_user_message_at(&w).unwrap(), None);
+        delete_saved(&w, kept).unwrap();
+        assert!(get(&w, kept).is_err());
+        assert!(channel::set_archived(&w, fav, true).is_err());
     }
 }

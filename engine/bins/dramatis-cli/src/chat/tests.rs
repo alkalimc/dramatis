@@ -648,9 +648,9 @@ async fn the_hosts_channel_list_becomes_choices_that_switch_to_existing_conversa
 
 /// Every command the host's terminal guide names. The pack's own guide test keeps the same
 /// list; the parser must know them all.
-const GUIDE_COMMANDS: [&str; 15] = [
-    "talk", "group", "host", "go", "resend", "sources", "name", "memories", "forget", "edit",
-    "restore", "tier", "save", "wrapup", "help",
+const GUIDE_COMMANDS: [&str; 19] = [
+    "talk", "group", "host", "go", "history", "reply", "forward", "fav", "resend", "sources",
+    "name", "memories", "forget", "edit", "restore", "tier", "save", "wrapup", "help",
 ];
 
 #[test]
@@ -751,7 +751,7 @@ async fn wrapup_ends_the_conversation_and_a_hung_turn_can_be_abandoned() {
         .await
         .unwrap();
     r.engine
-        .send_message(channel, "hello?".into(), None)
+        .send_message(channel, "hello?".into(), None, None)
         .await
         .unwrap();
     let waiting = tokio::time::timeout(std::time::Duration::from_millis(300), r.bridge.idle());
@@ -990,7 +990,8 @@ async fn saves_list_switch_and_ask_before_deleting() {
     assert!(r.run("n").await.contains("cancelled"));
     assert!(r.run("/save").await.contains("default"));
     r.run("/save delete default").await;
-    assert!(r.run("y").await.contains("deleted default"));
+    let del = r.run("y").await;
+    assert!(del.contains("deleted default"), "{del}");
     assert!(!r.run("/save").await.contains("default"));
     assert!(r.run("/save switch default").await.contains("no such save"));
 }
@@ -1717,10 +1718,128 @@ async fn conversations_are_listed_opened_archived_and_titled() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn history_numbers_feed_reply_forward_and_the_favorites() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    // Numbers come from /history; without one there is nothing to point at.
+    assert!(
+        r.run("/reply 1 hi")
+            .await
+            .contains("list the messages first")
+    );
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("Cooler water."));
+    r.run("how do I brew it?").await;
+    let listed = r.run("/history").await;
+    assert!(
+        listed.contains("  1 Doc: how do I brew it?") && listed.contains("  2 ann: Cooler water."),
+        "{listed}"
+    );
+    assert!(r.run("/reply 9 hi").await.contains("no such message"));
+
+    // A reply shows what it answers as a dim line above it.
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("Eighty degrees."));
+    r.run("/reply 1 and how hot?").await;
+    let listed = r.run("/history").await;
+    assert!(
+        listed.contains("\u{21a9} Doc: how do I brew it?\n  3 Doc: and how hot?"),
+        "{listed}"
+    );
+
+    // Forwarding to the favorites keeps the words with their author; nothing answers.
+    assert!(
+        r.run("/forward 2 fav")
+            .await
+            .contains("forwarded to Favorites")
+    );
+    assert!(r.run("/forward 2 nobody").await.contains("nobody matches"));
+    r.run("/fav").await;
+    assert!(r.session.prompt().contains("Favorites"));
+    let saved = r.run("/history").await;
+    assert!(saved.contains("  1 ann: Cooler water."), "{saved}");
+    assert!(!saved.contains("forwarded from"), "{saved}");
+    // A note there is stored and nobody is asked.
+    r.run("remember this").await;
+    let saved = r.run("/history").await;
+    assert!(saved.contains("  2 Doc: remember this"), "{saved}");
+    assert!(
+        r.run("/delete 2")
+            .await
+            .contains("removed from the favorites")
+    );
+    assert!(
+        !r.run("/history").await.contains("remember this"),
+        "gone from the favorites"
+    );
+    r.run("/talk ann").await;
+    assert!(
+        r.run("/delete 1")
+            .await
+            .contains("only a message in the favorites")
+    );
+
+    // Forwarding to a person posts a copy in their channel, and they answer it.
+    r.run("/history").await;
+    r.script.0.lock().unwrap().push_back(Reply::Say("Noted."));
+    assert!(r.run("/forward 2 ann").await.contains("forwarded to ann"));
+    let listed = r.run("/history 3").await;
+    assert!(listed.contains("forwarded from ann"), "{listed}");
+    assert!(listed.contains("Noted."), "{listed}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_description_is_edited_and_a_mention_picks_who_answers() {
+    let mut r = rig().await;
+    assert!(r.run("/topic x").await.contains("no channel yet"));
+    r.run("/group ann cy").await;
+    // A group with nothing said is not in the list yet.
+    r.script.0.lock().unwrap().push_back(Reply::Say("Hello."));
+    r.run("ann, hello").await;
+    assert!(
+        r.run("/topic a pot of tea")
+            .await
+            .contains("description saved")
+    );
+    let topic = |r: &Rig| {
+        let engine = r.engine.clone();
+        async move {
+            engine
+                .channels()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|c| c.kind == api::views::ChannelKind::Group)
+                .and_then(|c| c.topic)
+        }
+    };
+    assert_eq!(topic(&r).await.as_deref(), Some("a pot of tea"));
+    assert!(r.run("/topic").await.contains("description cleared"));
+    assert_eq!(topic(&r).await, None);
+
+    // `@name` addresses that member, as the bare name does.
+    r.script.0.lock().unwrap().push_back(Reply::Say("Here."));
+    let said = r.run("@cy are you there?").await;
+    assert!(said.contains("cy: Here."), "{said}");
+    r.script.0.lock().unwrap().push_back(Reply::Say("Me too."));
+    let said = r.run("@ann and you?").await;
+    assert!(said.contains("ann: Me too."), "{said}");
+    r.run("/talk ann").await;
+    assert!(r.run("/topic x").await.contains("not a group"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_group_can_be_listed_and_deleted_after_asking() {
     let mut r = rig().await;
     r.run("/group ann cy").await;
-    assert!(r.run("/members").await.contains("ann, cy"));
+    // The user is a member too, and the first.
+    assert!(r.run("/members").await.contains("Doc, ann, cy"));
     r.run("/leave").await;
     assert!(r.session.prompt().contains("(y/n)"));
     assert!(r.run("n").await.contains("cancelled"));
@@ -1974,7 +2093,9 @@ async fn a_message_posted_whole_offers_what_it_carries() {
         picture_lost: false,
         cites: Vec::new(),
         confidence: None,
-        relayed: false,
+        forwarded_from: None,
+        reply: None,
+        original_at: None,
         service: false,
         at: api::types::Timestamp("2026-03-10T12:00:00+00:00".into()),
     });
@@ -2017,11 +2138,11 @@ async fn people_come_into_a_group_and_leave_it_by_command() {
     r.run("/invite host").await;
     let listed = r.run("/members").await;
     assert!(
-        !listed.contains("host") && listed.matches(", ").count() == 2,
+        !listed.contains("host") && listed.matches(", ").count() == 3,
         "{listed}"
     );
     r.run("/remove host").await;
-    assert_eq!(r.run("/members").await.matches(", ").count(), 1);
+    assert_eq!(r.run("/members").await.matches(", ").count(), 2);
     assert!(r.run("/invite").await.contains("usage: /invite"));
     assert!(r.run("/remove").await.contains("usage: /remove"));
     r.run("/talk ann").await;

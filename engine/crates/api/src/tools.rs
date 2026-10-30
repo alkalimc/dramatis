@@ -241,6 +241,10 @@ pub struct Post {
     pub channel: String,
     /// What you say there, as one short message.
     pub text: String,
+    /// To answer one particular earlier line there: its id as `recent` showed it, such as
+    /// msg12. Leave out for a plain message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
     /// Whether you get a turn to tell the user what the members answered. Defaults to yes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_back: Option<bool>,

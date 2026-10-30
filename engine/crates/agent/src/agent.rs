@@ -139,6 +139,8 @@ fn llm_model(p: &api::endpoints::Profile) -> api::endpoints::Model {
 #[derive(Debug, Clone)]
 pub(crate) struct HostPost {
     pub group: ChannelId,
+    /// The group's line the post answers.
+    pub reply_to: Option<world::MessageId>,
     pub text: String,
     /// The host gets a turn in its own channel with the members' answers.
     pub report_back: bool,

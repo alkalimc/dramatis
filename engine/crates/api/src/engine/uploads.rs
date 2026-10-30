@@ -9,6 +9,7 @@ use crate::convert::{self, world_err};
 use crate::error::{ApiError, ApiResult};
 use crate::events::WorldChange;
 use crate::media;
+use crate::port::GroupChange;
 use crate::types::*;
 use crate::views::ImagePart;
 
@@ -109,6 +110,24 @@ impl Engine {
             self.ports
                 .agent
                 .group_changed(ch.clone(), crate::port::GroupChange::Renamed(after))
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn set_topic_impl(
+        &self,
+        ch: &ChannelId,
+        topic: Option<String>,
+    ) -> ApiResult<()> {
+        let id = convert::world_channel(ch)?;
+        let changed = channel::set_topic(&self.w(), id, topic.as_deref()).map_err(world_err)?;
+        if changed {
+            self.changed(vec![WorldChange::Channel { id: ch.clone() }]);
+            let after = channel::get(&self.w(), id).map_err(world_err)?.topic;
+            self.ports
+                .agent
+                .group_changed(ch.clone(), GroupChange::Described(after))
                 .await?;
         }
         Ok(())

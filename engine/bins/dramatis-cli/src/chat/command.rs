@@ -25,6 +25,8 @@ pub enum Command {
     /// Title the current channel; empty text returns to the derived title.
     Rename(String),
     Members,
+    /// Describe the current group; empty text clears the description.
+    Topic(String),
     /// Bring people into the current group.
     Invite(Vec<String>),
     /// Take a person out of the current group.
@@ -71,6 +73,14 @@ pub enum Command {
     Away(Option<bool>),
     Save(Save),
     History(usize),
+    /// Answer message n of the last `/history` list with the text.
+    Reply(usize, String),
+    /// Forward message n of the last `/history` list to a person, the host or the favorites.
+    Forward(usize, String),
+    /// Open the favorites.
+    Fav,
+    /// Remove message n of the last `/history` list from the favorites.
+    Delete(usize),
     /// Take back the n-th last message of the user in this channel (1 = the last) and
     /// put its text in the input line.
     Resend(usize),
@@ -242,6 +252,7 @@ pub fn parse(line: &str) -> Command {
         "unarchive" => Command::Archive(false),
         "rename" => Command::Rename(args.to_owned()),
         "members" => Command::Members,
+        "topic" => Command::Topic(args.to_owned()),
         "invite" => {
             // Commas separate names (a name may hold spaces); without one, spaces do.
             let split = |sep: &dyn Fn(char) -> bool| -> Vec<String> {
@@ -337,6 +348,26 @@ pub fn parse(line: &str) -> Command {
                 _ => Command::Invalid("cli.usage.history"),
             },
         },
+        "reply" => match args.split_once(char::is_whitespace) {
+            Some((n, text))
+                if n.parse::<usize>().is_ok_and(|n| n > 0) && !text.trim().is_empty() =>
+            {
+                Command::Reply(n.parse().unwrap_or(1), text.trim().to_owned())
+            }
+            _ => Command::Invalid("cli.usage.reply"),
+        },
+        "forward" | "fwd" => match args.split_once(char::is_whitespace) {
+            Some((n, to)) if n.parse::<usize>().is_ok_and(|n| n > 0) && !to.trim().is_empty() => {
+                Command::Forward(n.parse().unwrap_or(1), to.trim().to_owned())
+            }
+            _ => Command::Invalid("cli.usage.forward"),
+        },
+        "fav" | "favorites" if args.is_empty() => Command::Fav,
+        "fav" | "favorites" => Command::Invalid("cli.usage.fav"),
+        "delete" | "del" => match args.parse::<usize>() {
+            Ok(n) if n > 0 => Command::Delete(n),
+            _ => Command::Invalid("cli.usage.delete"),
+        },
         "resend" | "r" => match args {
             "" => Command::Resend(1),
             n => match n.parse::<usize>() {
@@ -403,6 +434,26 @@ mod tests {
             Command::Search("two words".into())
         );
         assert_eq!(parse("/memories x"), Command::Memories(Some("x".into())));
+        assert_eq!(
+            parse("/reply 2 and then?"),
+            Command::Reply(2, "and then?".into())
+        );
+        assert_eq!(parse("/reply 2"), Command::Invalid("cli.usage.reply"));
+        assert_eq!(parse("/reply x hi"), Command::Invalid("cli.usage.reply"));
+        assert_eq!(parse("/forward 3 fav"), Command::Forward(3, "fav".into()));
+        assert_eq!(
+            parse("/forward 3 Some Name"),
+            Command::Forward(3, "Some Name".into())
+        );
+        assert_eq!(parse("/forward 3"), Command::Invalid("cli.usage.forward"));
+        assert_eq!(parse("/fav"), Command::Fav);
+        assert_eq!(parse("/delete 4"), Command::Delete(4));
+        assert_eq!(parse("/delete"), Command::Invalid("cli.usage.delete"));
+        assert_eq!(
+            parse("/topic a pot of tea"),
+            Command::Topic("a pot of tea".into())
+        );
+        assert_eq!(parse("/topic"), Command::Topic(String::new()));
         assert_eq!(parse("/resend"), Command::Resend(1));
         assert_eq!(parse("/resend 3"), Command::Resend(3));
         assert_eq!(parse("/sources"), Command::Sources(1, None));

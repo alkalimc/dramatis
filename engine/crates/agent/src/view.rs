@@ -84,6 +84,7 @@ pub fn message(
 ) -> v::Message {
     let meta = api::meta::MessageMeta::of(m.attachment.as_ref());
     let (attachment, picture_lost) = api::meta::picture_of(conn, m);
+    let (forwarded_from, reply) = api::meta::links_of(conn, m, &meta);
     let actions: Vec<ToolAction> = m
         .tool_calls
         .as_ref()
@@ -99,7 +100,9 @@ pub fn message(
         picture_lost,
         cites: meta.cites.iter().map(citation).collect(),
         confidence: meta.confidence.map(confidence),
-        relayed: meta.relayed,
+        forwarded_from,
+        reply,
+        original_at: meta.original_at.map(|ms| timestamp(ms, offset_min)),
         service: meta.service,
         at: timestamp(m.at, offset_min),
     }

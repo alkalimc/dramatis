@@ -47,7 +47,7 @@ test("away mode: the switch turns it on, a marker shows, writing turns it off", 
   await waitFor(() => expect(store.getState().away).toBe(true));
   expect(within(drawer).getByText("Away: nobody comes to you")).toBeDefined();
   // The mock ends it when a message is sent, as the engine does.
-  await api.commands.sendMessage("host", "back", null);
+  await api.commands.sendMessage("host", "back", null, null);
   await waitFor(() => expect(store.getState().away).toBe(false));
 });
 

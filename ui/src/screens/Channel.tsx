@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChannelId, ChannelSummary, ImagePart, Message } from "../api";
+import type { ChannelId, ChannelSummary, ImagePart, Message, PersonRef } from "../api";
 import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
-import { isBlank } from "../lib/scene";
 import { authorName, dayKey, dayLabel, sameAuthor, typingText } from "../lib/format";
 import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
+import { filterMembers, insertMention, mentionAt } from "../lib/mention";
+import { isBlank, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
+import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
-import { ActionLines, MessageView, StreamView } from "./Message";
+import { ActionLines, MessageView, StreamView, hueOf } from "./Message";
 import { useChatMenu } from "./chatMenu";
 
 const NO_MESSAGES: Message[] = [];
@@ -49,6 +51,7 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
   const typing = useStore((s) => Boolean(s.typing[channel]));
   const waiting = useStore((s) => Boolean(s.awaiting[channel]));
   const isHost = useStore((s) => s.hostChannel === channel);
+  const favorites = useStore((s) => s.channels.find((c) => c.id === channel)?.kind === "favorites");
   const quota = useStore((s) => s.quota);
   const exhausted = isHost ? quotaExhaustedLine(quota, t) : null;
   const lastMessage = messages[messages.length - 1];
@@ -121,7 +124,7 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
             {t("channel.earlier")}
           </button>
         )}
-        {messages.length === 0 && streams.length === 0 && <p className="muted empty">{t("channel.empty")}</p>}
+        {messages.length === 0 && streams.length === 0 && <p className="muted empty">{t(favorites ? "favorites.empty" : "channel.empty")}</p>}
         {shown.map((m, i) => (
           <div key={m.id} className="log-item">
             {(i === 0 || dayKey(m.at) !== dayKey(shown[i - 1].at)) && (
@@ -191,6 +194,15 @@ function PendingActions({ id, channel, last, onGrow }: { id: string; channel: Ch
   );
 }
 
+/** What the reply bar and a quote show of a message: its first spoken line. */
+function snippetOf(m: Message, marker: { open: string; close: string }, picture: string): string {
+  const line = speechOnly(m.text, marker)
+    .split("\n")
+    .map((l) => l.trim())
+    .find(Boolean);
+  return line ?? (m.attachment || m.picture_lost ? picture : "");
+}
+
 export function Composer({ channel }: { channel: ChannelId }) {
   const t = useT();
   const api = useApi();
@@ -205,6 +217,23 @@ export function Composer({ channel }: { channel: ChannelId }) {
   const file = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const restore = useStore((s) => (s.restore?.channel === channel ? s.restore : null));
+  const kind = useStore((s) => s.channels.find((c) => c.id === channel)?.kind);
+  const members = useStore((s) => (s.channels.find((c) => c.id === channel)?.kind === "group" ? s.channels.find((c) => c.id === channel)?.participants : undefined));
+  const replyTo = useStore((s) => s.replies[channel]);
+  const names = useStore((s) => s.names);
+  const user = useStore((s) => s.settings?.user_name ?? null);
+  const marker = useStore((s) => s.wording.scene_marker);
+  const note = kind === "favorites";
+
+  // `@` in a group opens the members; the caret says which word is being typed.
+  const [caret, setCaret] = useState(0);
+  const [pick, setPick] = useState(0);
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const typed = members ? mentionAt(text, caret) : null;
+  const options = useMemo(() => (typed && members ? filterMembers(members, typed.query) : []), [typed?.query, members]);
+  const listing = typed !== null && typed.start !== dismissed && options.length > 0;
+  const chosen = Math.min(pick, Math.max(0, options.length - 1));
+  const after = useRef<number | null>(null);
 
   // A message taken back returns here: ahead of whatever was already being typed.
   useEffect(() => {
@@ -227,18 +256,44 @@ export function Composer({ channel }: { channel: ChannelId }) {
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  // A reply asked for from a message: write straight away.
+  useEffect(() => {
+    if (replyTo) box.current?.focus();
+  }, [replyTo]);
+
+  // The caret goes after an inserted `@name`.
+  useLayoutEffect(() => {
+    if (after.current === null || !box.current) return;
+    box.current.setSelectionRange(after.current, after.current);
+    setCaret(after.current);
+    after.current = null;
+  }, [text]);
+
+  const take = (m: PersonRef) => {
+    if (!typed) return;
+    const next = insertMention(text, typed, caret, m.name);
+    after.current = next.caret;
+    setText(next.text);
+    setPick(0);
+    box.current?.focus();
+  };
+
   const send = async () => {
     if (busy || (!text.trim() && !image)) return;
     setBusy(true);
     // Replies arrive as events; until the first one, say so. Set before the call so an
-    // early event cannot be overtaken, and undone if the send itself fails.
-    dispatch({ type: "awaiting", channel, on: true });
-    const ok = await actions.attempt(api.commands.sendMessage(channel, text.trim(), image));
+    // early event cannot be overtaken, and undone if the send itself fails. A note in
+    // the favorites is answered by no one.
+    if (!note) dispatch({ type: "awaiting", channel, on: true });
+    const ok = await actions.attempt(api.commands.sendMessage(channel, text.trim(), image, replyTo?.id ?? null));
     setBusy(false);
-    if (ok === undefined) return dispatch({ type: "awaiting", channel, on: false });
+    if (ok === undefined) return note ? undefined : dispatch({ type: "awaiting", channel, on: false });
     setText("");
     setImage(null);
+    if (replyTo) dispatch({ type: "reply", channel, message: null });
   };
+
+  const replyName = replyTo ? authorName(replyTo.author, t, names, user) : "";
 
   return (
     <form
@@ -248,6 +303,18 @@ export function Composer({ channel }: { channel: ChannelId }) {
         void send();
       }}
     >
+      {replyTo && (
+        <div className="reply-bar" role="group" aria-label={t("composer.reply", { name: replyName })}>
+          <Icon name="reply" size={20} />
+          <div className={`reply-quote hue-${hueOf(replyTo.author)}`}>
+            <span className="quote-name">{replyName}</span>
+            <span className="quote-text">{snippetOf(replyTo, marker, t("message.quote.picture"))}</span>
+          </div>
+          <button type="button" className="round small" aria-label={t("composer.reply.cancel")} title={t("composer.reply.cancel")} onClick={() => dispatch({ type: "reply", channel, message: null })}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+      )}
       {image && (
         <div className="attached chip-attached">
           <img src={`data:${image.mime};base64,${image.data_base64}`} alt={t("composer.image.preview")} />
@@ -319,29 +386,72 @@ export function Composer({ channel }: { channel: ChannelId }) {
         <label htmlFor={id} className="sr-only">
           {t("composer.label")}
         </label>
-        <textarea
-          ref={box}
-          id={id}
-          rows={1}
-          aria-describedby={`${id}-hint`}
-          aria-keyshortcuts={isMac() ? "Meta+Enter" : "Control+Enter"}
-          value={text}
-          placeholder={t("composer.placeholder")}
-          onChange={(e) => setText(e.target.value)}
-          onPaste={(e) => {
-            // A picture on the clipboard becomes the attachment; plain text pastes as usual.
-            const f = pastedImage(e.clipboardData);
-            if (!f) return;
-            e.preventDefault();
-            void readImage(f).then(setImage, () => undefined);
-          }}
-          onKeyDown={(e) => {
-            if (isSendKey(e)) {
+        <div className="composer-field">
+          {listing && (
+            <ul className="mention-pop" role="listbox" aria-label={t("composer.mention")}>
+              {options.map((m, i) => (
+                <li key={m.id} id={`${id}-m${i}`} role="option" aria-selected={i === chosen} className={i === chosen ? "on" : undefined}>
+                  <button type="button" tabIndex={-1} onMouseDown={(e) => e.preventDefault()} onClick={() => take(m)}>
+                    <Avatar person={m} size="s" />
+                    <span>{m.name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <textarea
+            ref={box}
+            id={id}
+            rows={1}
+            aria-describedby={`${id}-hint`}
+            aria-keyshortcuts={isMac() ? "Meta+Enter" : "Control+Enter"}
+            aria-autocomplete={members ? "list" : undefined}
+            aria-activedescendant={listing ? `${id}-m${chosen}` : undefined}
+            value={text}
+            placeholder={t(note ? "composer.note" : "composer.placeholder")}
+            onChange={(e) => {
+              setText(e.target.value);
+              setCaret(e.target.selectionStart);
+              setPick(0);
+              setDismissed(null);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+            onPaste={(e) => {
+              // A picture on the clipboard becomes the attachment; plain text pastes as usual.
+              const f = pastedImage(e.clipboardData);
+              if (!f) return;
               e.preventDefault();
-              void send();
-            }
-          }}
-        />
+              void readImage(f).then(setImage, () => undefined);
+            }}
+            onKeyDown={(e) => {
+              if (isSendKey(e)) {
+                e.preventDefault();
+                void send();
+                return;
+              }
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (listing) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setPick((chosen + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length);
+                } else if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+                  e.preventDefault();
+                  take(options[chosen]);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDismissed(typed?.start ?? null);
+                }
+                return;
+              }
+              // Escape drops the reply being written.
+              if (e.key === "Escape" && replyTo) {
+                e.stopPropagation();
+                dispatch({ type: "reply", channel, message: null });
+              }
+            }}
+          />
+        </div>
         <button type="submit" className="round send" aria-label={t("composer.send")} title={t("composer.send")} disabled={busy || (!text.trim() && !image)} aria-busy={busy}>
           <Icon name="send" />
         </button>
@@ -375,7 +485,15 @@ export function ChannelHeader({ channel, finding = false, onFind }: { channel: C
     summary.kind === "group" ? ({ kind: "channel", id: channel } as const) : summary.kind === "host" ? ({ kind: "host" } as const) : person ? ({ kind: "person", id: person.id } as const) : null;
   // The same icon opens the info panel and closes it again.
   const infoOpen = Boolean(info && drawer && drawer.kind === info.kind && (info.kind === "host" || (drawer.kind !== "host" && drawer.id === info.id)));
-  const fallback = summary.kind === "host" ? t("host.role") : summary.kind === "group" ? t("group.members.count", { count: summary.participants.length }) : t(`mode.${summary.mode}`);
+  // The user is a member of every group they are in.
+  const fallback =
+    summary.kind === "host"
+      ? t("host.role")
+      : summary.kind === "favorites"
+        ? t("favorites.subtitle")
+        : summary.kind === "group"
+          ? t("group.members.count", { count: summary.participants.length + 1 })
+          : t(`mode.${summary.mode}`);
 
   return (
     <header className="channel-header">
@@ -402,19 +520,21 @@ export function ChannelHeader({ channel, finding = false, onFind }: { channel: C
           <Icon name="panel" />
         </button>
       )}
-      <button
-        type="button"
-        className="round"
-        aria-label={t("channel.more")}
-        title={t("channel.more")}
-        aria-haspopup="menu"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          menu.show(summary, r.right - 200, r.bottom + 4);
-        }}
-      >
-        <Icon name="more" />
-      </button>
+      {summary.kind !== "favorites" && (
+        <button
+          type="button"
+          className="round"
+          aria-label={t("channel.more")}
+          title={t("channel.more")}
+          aria-haspopup="menu"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            menu.show(summary, r.right - 200, r.bottom + 4);
+          }}
+        >
+          <Icon name="more" />
+        </button>
+      )}
       {menu.menu}
     </header>
   );

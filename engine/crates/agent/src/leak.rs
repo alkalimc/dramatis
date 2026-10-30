@@ -272,7 +272,7 @@ mod tests {
     fn the_owners_message_79_is_cut_before_the_copied_prompt() {
         let w = wording();
         let leaks = Leaks::new(&w, "");
-        let marks = closing_marks(&w, true);
+        let marks = closing_marks(&w, true, false);
         let at = leaks
             .find(MESSAGE_79, false, false, &marks.list())
             .expect("a cut");
@@ -291,7 +291,7 @@ mod tests {
     fn the_owners_message_118_loses_its_find_line() {
         let w = wording();
         let leaks = Leaks::new(&w, "");
-        let marks = closing_marks(&w, false);
+        let marks = closing_marks(&w, false, false);
         assert_eq!(leaks.find(MESSAGE_118, false, false, &marks.list()), None);
         let closing = split_closing(MESSAGE_118, marks);
         assert_eq!(
@@ -308,7 +308,7 @@ mod tests {
     fn every_kind_of_harness_line_is_found() {
         let w = wording();
         let leaks = Leaks::new(&w, "");
-        let marks = closing_marks(&w, true).list();
+        let marks = closing_marks(&w, true, false).list();
         let name = "\u{51ef}\u{5c14}\u{5e0c}";
         let speech = "\u{597d}\u{7684}\u{3002}";
         for line in [
@@ -341,7 +341,7 @@ mod tests {
     fn speech_that_only_resembles_a_harness_line_stays() {
         let w = wording();
         let leaks = Leaks::new(&w, "");
-        let marks = closing_marks(&w, false).list();
+        let marks = closing_marks(&w, false, false).list();
         // The reply opening with such a line is left alone: nothing came before it.
         let alone = "\u{6211}\u{56de}\u{7b54}\u{3002}\n\u{597d}\u{7684}";
         assert_eq!(leaks.find(alone, false, false, &marks), None);
@@ -358,7 +358,7 @@ mod tests {
     fn the_stream_holds_a_line_that_may_become_harness_text() {
         let w = wording();
         let leaks = Leaks::new(&w, "");
-        let marks = closing_marks(&w, true).list();
+        let marks = closing_marks(&w, true, false).list();
         let speech = "\u{597d}\u{7684}\u{3002}\n\n";
         let name = "\u{51ef}\u{5c14}\u{5e0c}";
         // A name alone on a new line, a name and the start of the instruction, and the

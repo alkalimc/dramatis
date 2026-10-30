@@ -1,4 +1,4 @@
-import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ImagePart, type InterfaceLanguage, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
+import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type ForwardTo, type ImagePart, type InterfaceLanguage, type Mode, type PersonRef, type Result, type Settings, type Target } from "../api";
 import { clearFresh, type Fresh } from "../lib/fresh";
 import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Store } from ".";
@@ -220,6 +220,47 @@ export function createActions(api: Api, store: Store) {
     d({ type: "restore", restore: { channel, text } });
   }
 
+  /** The favorites: their channel is looked up once, and opened like any other. */
+  async function openFavorites() {
+    const channel = await attempt(c.favoritesChannel());
+    if (!channel) return;
+    await open(channel);
+  }
+
+  /**
+   * Forward a message to a person, the host or the favorites. A person or the host answers
+   * it in their own chat, which opens so the answer can be read; the favorites stay out of
+   * the way, and only their row in the list moves.
+   */
+  async function forward(message: string, to: ForwardTo) {
+    const channel = await attempt(c.forward(message, to));
+    if (!channel) return false;
+    d({ type: "forwarding", message: null });
+    await refreshChannels();
+    if (to.kind === "favorites") {
+      await reloadHistory(channel);
+      return true;
+    }
+    if (store.getState().library) d({ type: "library", on: false });
+    await open(to.kind === "host" ? null : channel, to.kind === "person" ? personRef(to.id) : undefined);
+    return true;
+  }
+
+  /** Take one message out of the favorites. */
+  async function deleteSaved(channel: ChannelId, message: string) {
+    if ((await attempt(c.deleteSaved(message))) === undefined) return;
+    d({ type: "removed", channel, message });
+    await refreshChannels();
+  }
+
+  /** Describe a group (blank: none). */
+  async function setTopic(channel: ChannelId, topic: string | null) {
+    if ((await attempt(c.setTopic(channel, topic))) === undefined) return false;
+    patchTemp(channel, { topic });
+    await refreshChannels();
+    return true;
+  }
+
   /** Mark a channel read by hand (the badge, the context menu). */
   async function clearUnread(channel: ChannelId) {
     await loadHistory(channel);
@@ -353,6 +394,10 @@ export function createActions(api: Api, store: Store) {
     open,
     openDirect,
     openFound,
+    openFavorites,
+    forward,
+    deleteSaved,
+    setTopic,
     resend,
     setMode,
     saveSettings,
