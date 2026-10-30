@@ -1,4 +1,4 @@
-//! Triggered sessions. A frozen person never speaks first, but being addressed, asked,
+//! Triggered sessions. A frozen person never speaks first, but being addressed,
 //! pulled in or reaching a due commitment thaws him for one budgeted session; when it
 //! ends he is frozen again. Modes are never rewritten for this: "thawed" is having an
 //! open session, so ending one cannot leave anyone accidentally enabled.
@@ -6,7 +6,7 @@
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::params;
-use crate::types::{ChannelId, PersonId, TaskId};
+use crate::types::{Actor, ChannelId, PersonId};
 use crate::{Error, Result, bond, channel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -17,7 +17,6 @@ pub struct SessionId(pub i64);
 pub enum Cause {
     /// The user wrote to him or named him (in a group: he was the one addressed).
     Addressed,
-    Ask,
     /// Pulled in by a colleague.
     Join,
     /// A commitment with him fell due.
@@ -30,7 +29,6 @@ impl Cause {
     fn as_str(self) -> &'static str {
         match self {
             Self::Addressed => "addressed",
-            Self::Ask => "ask",
             Self::Join => "join",
             Self::Commitment => "commitment",
             Self::Opening => "opening",
@@ -39,7 +37,6 @@ impl Cause {
 
     fn parse(s: &str) -> Self {
         match s {
-            "ask" => Self::Ask,
             "join" => Self::Join,
             "commitment" => Self::Commitment,
             "opening" => Self::Opening,
@@ -51,8 +48,6 @@ impl Cause {
 /// What a session may spend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Budget {
-    /// A request's turns ([`crate::task`]); ends when the request is done.
-    Task(TaskId),
     /// A fixed number of replies (a colleague pulled into an ordinary conversation
     /// answers once); ends when they are used.
     Replies(u32),
@@ -73,20 +68,18 @@ pub struct Session {
 }
 
 const COLUMNS: &str =
-    "id, channel, person, cause, task, replies_left, opened_at, last_at, closed_at";
+    "id, channel, person, cause, replies_left, opened_at, last_at, closed_at";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Session> {
-    let task: Option<TaskId> = row.get("task")?;
     let replies: Option<u32> = row.get("replies_left")?;
     Ok(Session {
         id: SessionId(row.get("id")?),
         channel: row.get("channel")?,
         person: row.get("person")?,
         cause: Cause::parse(&row.get::<_, String>("cause")?),
-        budget: match (task, replies) {
-            (Some(t), _) => Budget::Task(t),
-            (None, Some(n)) => Budget::Replies(n),
-            (None, None) => Budget::User,
+        budget: match replies {
+            Some(n) => Budget::Replies(n),
+            None => Budget::User,
         },
         opened_at: row.get("opened_at")?,
         last_at: row.get("last_at")?,
@@ -128,9 +121,8 @@ pub fn open_sessions(conn: &Connection) -> Result<Vec<Session>> {
 }
 
 /// Open (or extend) a person's session in a channel. A disabled person cannot be
-/// triggered. If one is already open there it is kept and its budget replaced when the
-/// new one is narrower (a request), so a request opened mid-conversation is what the
-/// session spends from then on.
+/// triggered. If one is already open there it is kept; a reply budget is replaced by the
+/// user's own turns, never the other way round.
 pub fn open(
     conn: &Connection,
     channel: ChannelId,
@@ -144,20 +136,16 @@ pub fn open(
     if !ch.is_open() {
         return Err(Error::ChannelClosed(channel));
     }
-    let (task, replies) = match budget {
-        Budget::Task(t) => (Some(t), None),
-        Budget::Replies(n) => (None, Some(n)),
-        Budget::User => (None, None),
+    let replies = match budget {
+        Budget::Replies(n) => Some(n),
+        Budget::User => None,
     };
     if let Some(s) = current(conn, channel, person)? {
-        let replace = matches!(
-            (s.budget, budget),
-            (_, Budget::Task(_)) | (Budget::Replies(_), Budget::User)
-        );
+        let replace = matches!((s.budget, budget), (Budget::Replies(_), Budget::User));
         if replace {
             conn.execute(
-                "UPDATE session SET task = ?2, replies_left = ?3, cause = ?4, last_at = ?5 WHERE id = ?1",
-                (s.id.0, task, replies, cause.as_str(), now),
+                "UPDATE session SET replies_left = ?2, cause = ?3, last_at = ?4 WHERE id = ?1",
+                (s.id.0, replies, cause.as_str(), now),
             )?;
         } else {
             conn.execute(
@@ -168,9 +156,9 @@ pub fn open(
         return Ok(s.id);
     }
     conn.execute(
-        "INSERT INTO session(channel, person, cause, task, replies_left, opened_at, last_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        (channel, person, cause.as_str(), task, replies, now),
+        "INSERT INTO session(channel, person, cause, replies_left, opened_at, last_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        (channel, person, cause.as_str(), replies, now),
     )?;
     Ok(SessionId(conn.last_insert_rowid()))
 }
@@ -235,21 +223,6 @@ pub fn close(conn: &Connection, id: SessionId, now: i64) -> Result<Option<Channe
     Ok((open_in(conn, s.channel)? == 0).then_some(s.channel))
 }
 
-/// A request is done: its session ends.
-pub fn close_for_task(conn: &Connection, task: TaskId, now: i64) -> Result<Option<ChannelId>> {
-    let ids: Vec<i64> = {
-        let mut stmt =
-            conn.prepare("SELECT id FROM session WHERE task = ?1 AND closed_at IS NULL")?;
-        let rows = stmt.query_map([task], |r| r.get(0))?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
-    let mut ended = None;
-    for id in ids {
-        ended = close(conn, SessionId(id), now)?.or(ended);
-    }
-    Ok(ended)
-}
-
 /// The user closed the conversation: every session in it ends.
 pub fn close_channel(conn: &Connection, channel: ChannelId, now: i64) -> Result<Option<ChannelId>> {
     let open = query(conn, "channel = ?1 AND closed_at IS NULL", [channel])?;
@@ -281,6 +254,42 @@ pub fn expire_idle(
     ended.sort();
     ended.dedup();
     Ok(ended)
+}
+
+/// What `request_join` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Joined {
+    pub person: PersonId,
+}
+
+/// Pull a colleague into `channel`; he answers once, paid by the user's turn. `candidate`
+/// has already been chosen by the caller from the same retrieval as `find_people`
+/// (disabled people filtered out); here it is checked again.
+pub fn request_join(
+    conn: &Connection,
+    channel: ChannelId,
+    caller: &PersonId,
+    candidate: &PersonId,
+    now: i64,
+) -> Result<Joined> {
+    crate::atomic(conn, |conn| {
+        bond::ensure_available(conn, candidate)?;
+        if caller == candidate {
+            return Err(Error::Invalid("cannot pull oneself in".into()));
+        }
+        let ch = channel::get(conn, channel)?;
+        if !ch.has(&Actor::Person(caller.clone())) {
+            return Err(Error::NotParticipant {
+                person: caller.clone(),
+                channel,
+            });
+        }
+        channel::add_participant(conn, channel, &Actor::Person(candidate.clone()))?;
+        open(conn, channel, candidate, Budget::Replies(1), Cause::Join, now)?;
+        Ok(Joined {
+            person: candidate.clone(),
+        })
+    })
 }
 
 /// Whether he is thawed anywhere right now.
@@ -367,22 +376,15 @@ mod tests {
     }
 
     #[test]
-    fn a_request_session_ends_with_the_request() {
+    fn request_join_adds_the_colleague_for_one_reply() {
         let w = world();
-        let a = crate::task::ask(
-            &w,
-            &p("a"),
-            "q",
-            Some(2),
-            None,
-            crate::Tier::Middle,
-            &Default::default(),
-            T0,
-        )
-        .unwrap();
-        let s = current(&w, a.channel, &p("a")).unwrap().unwrap();
-        assert_eq!((s.budget, s.cause), (Budget::Task(a.task), Cause::Ask));
-        assert_eq!(close_for_task(&w, a.task, T0 + 1).unwrap(), Some(a.channel));
-        assert!(!is_thawed(&w, &p("a")).unwrap());
+        let g = channel::create_group(&w, &[p("a"), p("c")], None, Origin::User).unwrap();
+        let j = request_join(&w, g, &p("a"), &p("b"), T0).unwrap();
+        assert_eq!(j.person, p("b"));
+        let s = current(&w, g, &p("b")).unwrap().unwrap();
+        assert_eq!((s.budget, s.cause), (Budget::Replies(1), Cause::Join));
+        assert!(channel::get(&w, g).unwrap().has(&Actor::Person(p("b"))));
+        assert!(request_join(&w, g, &p("a"), &p("a"), T0).is_err());
+        assert!(request_join(&w, g, &p("d"), &p("c"), T0).is_err());
     }
 }

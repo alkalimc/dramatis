@@ -9,13 +9,13 @@ use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension, Row};
 
-use crate::types::{Actor, ChannelId, Citation, FactId, FactKind, PersonId, TaskId};
+use crate::types::{Actor, ChannelId, Citation, FactId, FactKind, PersonId};
 use crate::{Error, Result, channel, not_found, trust};
 
 /// Who may recall a fact.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Audience {
-    /// Everyone (the user's conclusions).
+    /// Everyone.
     World,
     /// Whoever takes part in the channel, now or later.
     Participants(ChannelId),
@@ -50,7 +50,6 @@ impl Audience {
 /// What a fact is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum About {
-    Task(TaskId),
     Fact(FactId),
     Person(PersonId),
     User,
@@ -60,7 +59,6 @@ pub enum About {
 impl About {
     fn encode(&self) -> Result<(&'static str, Option<String>)> {
         Ok(match self {
-            Self::Task(t) => ("task", Some(t.0.to_string())),
             Self::Fact(f) => ("fact", Some(f.0.to_string())),
             Self::Person(p) => ("person", Some(p.0.clone())),
             Self::User => ("user", None),
@@ -70,7 +68,6 @@ impl About {
 
     fn decode(kind: Option<String>, reference: Option<String>) -> Option<Self> {
         Some(match (kind?.as_str(), reference) {
-            ("task", Some(r)) => Self::Task(TaskId(r.parse().ok()?)),
             ("fact", Some(r)) => Self::Fact(FactId(r.parse().ok()?)),
             ("person", Some(r)) => Self::Person(PersonId(r)),
             ("user", None) => Self::User,
@@ -452,40 +449,6 @@ pub fn mark_delivered(conn: &Connection, id: FactId) -> Result<()> {
     Ok(())
 }
 
-/// The user's conclusion on a question, if any (live).
-pub fn conclusion_of(conn: &Connection, task: TaskId) -> Result<Option<Fact>> {
-    Ok(query(
-        conn,
-        "kind = 'conclusion' AND retracted = 0 AND about_kind = 'task' AND about_ref = ?1",
-        [task.0.to_string()],
-    )?
-    .pop())
-}
-
-/// Write or replace the user's conclusion on a question: visible to everyone; replacing
-/// retracts the old one.
-pub fn write_conclusion(conn: &Connection, task: TaskId, text: &str, now: i64) -> Result<FactId> {
-    crate::atomic(conn, |conn| {
-        crate::task::get(conn, task)?;
-        let old = conclusion_of(conn, task)?;
-        let new = NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, text)
-            .about(About::Task(task));
-        if let Some(old) = &old {
-            if normalize(&old.text) == normalize(text) {
-                return Ok(old.id);
-            }
-            retract(conn, old.id)?;
-        }
-        match write(conn, &new, now)? {
-            Written::New(id) => Ok(id),
-            Written::Duplicate { existing, .. } => {
-                restore(conn, existing)?;
-                Ok(existing)
-            }
-        }
-    })
-}
-
 /// The drawer's filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Scope {
@@ -499,12 +462,11 @@ pub enum Scope {
 }
 
 /// The drawer: all facts (live, or only deleted ones under [`Scope::Deleted`]) matching
-/// the scope, optionally only those about or recallable by a person, or about a request.
+/// the scope, optionally only those about or recallable by a person.
 pub fn list(
     conn: &Connection,
     scope: Scope,
     person: Option<&PersonId>,
-    task: Option<TaskId>,
 ) -> Result<Vec<Fact>> {
     let mut facts = all(conn, true)?;
     facts.retain(|f| match scope {
@@ -518,9 +480,6 @@ pub fn list(
         Scope::Commitment => f.kind == FactKind::Commitment,
         Scope::Hurt => f.kind == FactKind::Hurt,
     });
-    if let Some(t) = task {
-        facts.retain(|f| f.about == Some(About::Task(t)));
-    }
     if let Some(p) = person {
         let mut keep = Vec::with_capacity(facts.len());
         for f in facts {
@@ -658,22 +617,6 @@ mod tests {
             audience_persons(&w, &Audience::Participants(g)).unwrap(),
             Some(vec![p("a"), p("b"), p("c")])
         );
-    }
-
-    #[test]
-    fn conclusions_replace_and_drawer_filters() {
-        let w = world();
-        let t = crate::task::open_case(&w, "q", 1).unwrap();
-        let c1 = write_conclusion(&w, t, "first", 2).unwrap();
-        assert_eq!(write_conclusion(&w, t, "First!", 3).unwrap(), c1);
-        let c2 = write_conclusion(&w, t, "second", 4).unwrap();
-        assert!(get(&w, c1).unwrap().retracted);
-        assert_eq!(conclusion_of(&w, t).unwrap().unwrap().id, c2);
-        assert_eq!(get(&w, c2).unwrap().audience, Audience::World);
-        assert_eq!(list(&w, Scope::Deleted, None, None).unwrap().len(), 1);
-        assert_eq!(list(&w, Scope::World, None, Some(t)).unwrap().len(), 1);
-        assert_eq!(list(&w, Scope::All, Some(&p("x")), None).unwrap().len(), 1);
-        assert!(list(&w, Scope::Own, None, None).unwrap().is_empty());
     }
 
     #[test]

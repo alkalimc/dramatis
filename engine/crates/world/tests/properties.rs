@@ -1,13 +1,12 @@
-//! Property tests: the delegation-tree invariant, the seed caps, the quota bands.
+//! Property tests: the seed caps, the quota bands.
 
 use proptest::prelude::*;
 
 use world::clock::Now;
 use world::fact::{About, Audience, NewFact};
-use world::params::{self, Ask, Quota};
+use world::params::{self, Quota};
 use world::quota::{self, Band, CallKind, Decision, Usage};
 use world::seed::{self, Limits, NoTopic, Occasion, Planned};
-use world::task::{self, Harness};
 use world::{Actor, FactKind, Mode, PersonId, Shape, Tier, World, bond, channel, message};
 
 const T0: i64 = 1_773_144_000_000; // 2026-03-10 12:00 UTC
@@ -17,74 +16,8 @@ fn p(i: usize) -> PersonId {
     PersonId(format!("p{i}"))
 }
 
-#[derive(Debug, Clone)]
-enum Op {
-    /// Participant `from` (index into who is on the tree) pulls in a new colleague.
-    Join { from: usize, turns: u32 },
-    /// Participant spends one turn.
-    Spend { who: usize },
-    /// Participant reports.
-    Report { who: usize },
-}
-
-fn op() -> impl Strategy<Value = Op> {
-    prop_oneof![
-        (0usize..8, 0u32..6).prop_map(|(from, turns)| Op::Join { from, turns }),
-        (0usize..8).prop_map(|who| Op::Spend { who }),
-        (0usize..8).prop_map(|who| Op::Report { who }),
-    ]
-}
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
-
-    /// Whatever sequence of joins, spends and reports happens, the tree never holds more
-    /// turns than the root was given, and a refused split changes nothing.
-    #[test]
-    fn delegation_tree_never_exceeds_its_grant(grant in 1u32..30, ops in prop::collection::vec(op(), 0..40)) {
-        let w = World::in_memory().unwrap();
-        let office = std::env::temp_dir().join(format!("world-prop-{}", std::process::id()));
-        let root = task::ask(&w, &p(0), "q", Some(grant), None, Tier::Middle, &Ask::default(), T0).unwrap();
-        let mut on: Vec<(PersonId, world::TaskId)> = vec![(p(0), root.task)];
-        let mut next = 1;
-        for op in ops {
-            let before = task::tree_turns_left(&w, root.task).unwrap();
-            match op {
-                Op::Join { from, turns } => {
-                    let (caller, _) = on[from % on.len()].clone();
-                    let res = task::request_join(&w, root.channel, &caller, &p(next), Some(turns), T0);
-                    match res {
-                        Ok(j) => {
-                            // A caller whose request is done pulls someone in outside
-                            // any request: he answers once and the tree is untouched.
-                            if let Some(t) = j.task {
-                                on.push((p(next), t));
-                            }
-                            next += 1;
-                            prop_assert_eq!(task::tree_turns_left(&w, root.task).unwrap(), before);
-                        }
-                        Err(_) => prop_assert_eq!(task::tree_turns_left(&w, root.task).unwrap(), before),
-                    }
-                }
-                Op::Spend { who } => {
-                    let (_, t) = on[who % on.len()].clone();
-                    let h = task::spend_turn(&w, t).unwrap();
-                    let left = task::get(&w, t).unwrap().turns_left;
-                    prop_assert_eq!(h, task::harness(left));
-                    if h == Harness::ForceClose {
-                        prop_assert_eq!(left, 0);
-                    }
-                }
-                Op::Report { who } => {
-                    let (person, t) = on[who % on.len()].clone();
-                    let _ = task::report(&w, &person, t, "r", &[], None, &office, T0);
-                }
-            }
-            let sum = task::tree_turns_left(&w, root.task).unwrap();
-            prop_assert!(sum <= grant, "sum {} > grant {}", sum, grant);
-            prop_assert_eq!(task::tree_budget(&w, root.task).unwrap(), grant);
-        }
-    }
 
     /// Over any run of presence occasions, no one opens more than `seed.per_agent_day`
     /// times a local day, nobody more than `seed.daily_total` together, nothing opens in

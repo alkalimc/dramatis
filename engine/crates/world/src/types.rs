@@ -35,7 +35,6 @@ macro_rules! row_id {
 row_id! {
     ChannelId,
     MessageId,
-    TaskId,
     FactId,
     SegmentId,
 }
@@ -202,15 +201,7 @@ text_enum! {
     FactKind {
         Fact = "fact",
         Commitment = "commitment",
-        Conclusion = "conclusion",
         Hurt = "hurt",
-    }
-}
-
-text_enum! {
-    TaskStatus {
-        Active = "active",
-        Done = "done",
     }
 }
 
@@ -221,7 +212,6 @@ text_enum! {
         Group = "group",
         Interject = "interject",
         Opening = "opening",
-        Ask = "ask",
         Host = "host",
         Wrapup = "wrapup",
     }

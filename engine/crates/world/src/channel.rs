@@ -445,10 +445,6 @@ pub fn delete_group(conn: &Connection, channel: ChannelId, now: i64) -> Result<(
             (channel, now),
         )?;
         conn.execute("DELETE FROM log_segment WHERE channel = ?1", [channel])?;
-        conn.execute(
-        "UPDATE task SET reply = NULL WHERE reply IN (SELECT id FROM message WHERE channel = ?1)",
-        [channel],
-    )?;
         conn.execute("DELETE FROM message WHERE channel = ?1", [channel])?;
         conn.execute(
             "UPDATE session SET closed_at = ?2 WHERE channel = ?1 AND closed_at IS NULL",

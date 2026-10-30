@@ -1,6 +1,6 @@
 //! The world database: everything that changes with play.
 //!
-//! One SQLite file holds the narrative state (bonds, channels, messages, tasks, memory),
+//! One SQLite file holds the narrative state (bonds, channels, messages, memory),
 //! the agent's append-only session logs and the usage meter, so a turn's writes commit
 //! together. This crate never calls a model: where one is needed it returns a [`Call`]
 //! value for the caller to execute.
@@ -27,7 +27,6 @@ pub mod rewind;
 pub mod seed;
 pub mod session;
 pub mod settings;
-pub mod task;
 pub mod trust;
 pub mod types;
 pub mod wrapup;
@@ -49,8 +48,6 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005.sql"),
     include_str!("../migrations/0006.sql"),
     include_str!("../migrations/0007.sql"),
-    include_str!("../migrations/0008.sql"),
-    include_str!("../migrations/0009.sql"),
 ];
 
 /// The schema version a fully migrated database reports.
@@ -88,15 +85,6 @@ pub enum Error {
         person: PersonId,
         channel: ChannelId,
     },
-
-    /// `request_join` asked for more turns than the caller can hand over while keeping
-    /// the one it is spending now.
-    #[error("cannot hand over {asked} turns: only {spare} to spare")]
-    NotEnoughTurns { asked: u32, spare: u32 },
-
-    /// `report` (or a forced close) from someone with no such active request.
-    #[error("no active request {task} for `{person}`")]
-    NoTask { person: PersonId, task: TaskId },
 
     #[error("invalid: {0}")]
     Invalid(String),
@@ -239,7 +227,6 @@ const CORE_TABLES: &[&str] = &[
     "channel",
     "channel_participant",
     "message",
-    "task",
     "fact",
     "log_segment",
     "log_entry",
@@ -334,7 +321,6 @@ mod tests {
         "channel",
         "channel_participant",
         "message",
-        "task",
         "fact",
         "log_segment",
         "log_entry",
@@ -386,7 +372,6 @@ mod tests {
              INSERT INTO channel_participant VALUES (1, 'p1');
              INSERT INTO bond(a, b, trust, mode) VALUES ('user', 'p1', 120, 'enabled');
              INSERT INTO message(channel, author, text, at) VALUES (1, 'p1', 'hi', 5);
-             INSERT INTO task(question, assignee, turns_left, channel) VALUES ('q', 'p1', 3, 1);
              INSERT INTO fact(author, audience_kind, audience_ref, kind, text, created_at)
                  VALUES ('user', 'participants', '1', 'fact', 't', 0);
              INSERT INTO meter(at, shape, model, uncached, cached, output, points)
@@ -399,10 +384,6 @@ mod tests {
         let b = bond::user_bond(&conn, &PersonId::from("p1")).unwrap();
         assert_eq!((b.trust, b.mode, b.last_seen), (120, Mode::Enabled, None));
         assert_eq!(b.trust_exact, 120.0);
-        let t = task::get(&conn, TaskId(1)).unwrap();
-        assert_eq!((t.turns_left, t.granted, t.created_at), (3, None, None));
-        // An old task without a grant is its own tree; its budget is what it holds.
-        assert_eq!(task::tree_budget(&conn, TaskId(1)).unwrap(), 3);
         assert_eq!(fact::all(&conn, true).unwrap().len(), 1);
         let ch = channel::get(&conn, ChannelId(1)).unwrap();
         assert_eq!(ch.person(), Some(&PersonId::from("p1")));
@@ -469,8 +450,6 @@ mod tests {
                  INSERT INTO channel_participant VALUES (1, 'p1');
                  INSERT INTO bond(a, b, trust, mode) VALUES ('user', 'p1', 120, 'enabled');
                  INSERT INTO message(channel, author, text, at) VALUES (1, 'p1', 'hi', 5);
-                 INSERT INTO task(question, assignee, turns_left, channel)
-                     VALUES ('q', 'p1', 3, 1);
                  INSERT INTO fact(author, audience_kind, audience_ref, kind, text, created_at)
                      VALUES ('user', 'participants', '1', 'fact', 't', 0);
                  INSERT INTO meter(at, shape, model, uncached, cached, output, points)
@@ -494,7 +473,7 @@ mod tests {
                     .unwrap()
             };
             for t in [
-                "channel", "bond", "message", "task", "fact", "meter", "settings",
+                "channel", "bond", "message", "fact", "meter", "settings",
             ] {
                 assert_eq!(count(t), 1, "{t} from {from}");
             }
@@ -503,8 +482,6 @@ mod tests {
             }
             let ch = channel::get(&conn, ChannelId(1)).unwrap();
             assert_eq!((ch.name, ch.avatar, ch.archived), (None, None, false));
-            let t = task::get(&conn, TaskId(1)).unwrap();
-            assert_eq!((t.failure, t.failure_told), (None, false));
             let requests: i64 = conn
                 .query_row("SELECT requests FROM meter", [], |r| r.get(0))
                 .unwrap();
@@ -522,15 +499,15 @@ mod tests {
     #[test]
     fn a_failed_step_leaves_the_old_version() {
         let mut conn = Connection::open_in_memory().unwrap();
-        for m in &MIGRATIONS[..4] {
+        for m in &MIGRATIONS[..3] {
             conn.execute_batch(m).unwrap();
         }
-        conn.pragma_update(None, "user_version", 4).unwrap();
-        // Step 5 adds `name`; a clashing column makes it fail after the statement ran.
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        // Step 4 adds `name`; a clashing column makes it fail after the statement ran.
         conn.execute_batch("ALTER TABLE channel ADD COLUMN avatar TEXT;")
             .unwrap();
         assert!(migrate(&mut conn).is_err());
-        assert_eq!(version(&conn), 4);
+        assert_eq!(version(&conn), 3);
         let has_name: i64 = conn
             .query_row(
                 "SELECT count(*) FROM pragma_table_info('channel') WHERE name = 'name'",
@@ -657,7 +634,6 @@ mod tests {
                  VALUES ('user', 'self', 'fact', 't', 0)",
             "INSERT INTO fact(author, audience_kind, kind, text, created_at)
                  VALUES ('user', 'world', 'rumour', 't', 0)",
-            "INSERT INTO task(question, turns_left, cites) VALUES ('q', 1, '{}')",
             "INSERT INTO settings VALUES ('user.name', 'not json')",
             "INSERT INTO seed(person, kind, ref, created_at) VALUES ('p1', 'voice', '1', 0)",
             "INSERT INTO session(channel, person, cause, opened_at, last_at)

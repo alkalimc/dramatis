@@ -1,7 +1,7 @@
 //! Presence: the user opened the app or came back from idle. Only then is anything
 //! computed; nothing runs while he is away.
 //!
-//! First the digest (no model call): new messages, answered requests, due commitments,
+//! First the digest (no model call): new messages, due commitments,
 //! who came by, whose birthday it is. When it is non-empty and the quota band allows,
 //! the host says one in-world line about the items it has not announced yet (arrivals
 //! excluded). Then at most one person opens with a seed.
@@ -14,20 +14,14 @@ use crate::clock::{Date, Now, days_from_civil};
 use crate::params::Params;
 use crate::quota::{self, CallKind};
 use crate::seed::{self, Held, Limits, Occasion, Planned, TopicMatch, WordsHit};
-use crate::types::{ChannelId, FactId, MessageId, MonthDay, PersonId, TaskId, Tier};
-use crate::{Call, Result, away, bond, channel, fact, message, session, settings, task};
+use crate::types::{ChannelId, FactId, MessageId, MonthDay, PersonId, Tier};
+use crate::{Call, Result, away, bond, channel, fact, message, session, settings};
 
 /// Something that is waiting for the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Activity {
     /// Unread messages from him; `at` is the newest.
     Messaged { at: i64 },
-    /// He answered a request.
-    Replied {
-        task: TaskId,
-        question: String,
-        at: i64,
-    },
     /// A commitment with him is due and has not been brought up.
     CommitmentDue {
         fact: FactId,
@@ -96,12 +90,11 @@ impl Digest {
 }
 
 impl Waiting {
-    /// Stable identity of this item for as long as it is unchanged: a new message, reply
+    /// Stable identity of this item for as long as it is unchanged: a new message
     /// or due time makes a new key, and a birthday is new each local day.
     fn key(&self, today: Date) -> String {
         let (kind, id) = match &self.activity {
             Activity::Messaged { at } => ("messaged", at.to_string()),
-            Activity::Replied { task, at, .. } => ("replied", format!("{task:?}@{at}")),
             Activity::CommitmentDue { fact, due, .. } => ("due", format!("{fact:?}@{due}")),
             Activity::CameBy { message, at } => ("cameby", format!("{message:?}@{at}")),
             Activity::Birthday => (
@@ -160,29 +153,11 @@ impl Birthdays for Vec<(PersonId, MonthDay)> {
     }
 }
 
-/// The digest. Disabled people never appear in it. Order: activity kind (replies, due
+/// The digest. Disabled people never appear in it. Order: activity kind (due
 /// commitments, visits, messages, birthdays), then time.
 pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<Digest> {
     let off = bond::disabled(conn)?;
     let mut items = Vec::new();
-
-    let mut reply_msgs = Vec::new();
-    for t in task::replied_unread(conn)? {
-        let (Some(person), Some(reply)) = (t.assignee.clone(), t.reply) else {
-            continue;
-        };
-        reply_msgs.push(reply);
-        let at = message::get(conn, reply)?.at;
-        items.push(Waiting {
-            person,
-            channel: t.channel,
-            activity: Activity::Replied {
-                task: t.id,
-                question: t.question,
-                at,
-            },
-        });
-    }
 
     for f in fact::due_commitments(conn, now.ms)? {
         let reach = fact::audience_persons(conn, &f.audience)?.unwrap_or_default();
@@ -226,7 +201,7 @@ pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<
     for ch in channel::list(conn)? {
         for m in message::since(conn, ch.id, ch.read_up_to)? {
             let Some(p) = m.author.person() else { continue };
-            if reply_msgs.contains(&m.id) || visit_msgs.contains(&m.id) {
+            if visit_msgs.contains(&m.id) {
                 continue;
             }
             let e = newest.entry((p.clone(), ch.id)).or_insert(m.at);
@@ -258,11 +233,10 @@ pub fn digest(conn: &Connection, now: Now, birthdays: &dyn Birthdays) -> Result<
 
     items.retain(|w| !off.contains(&w.person));
     let rank = |a: &Activity| match a {
-        Activity::Replied { at, .. } => (0, *at),
-        Activity::CommitmentDue { due, .. } => (1, *due),
-        Activity::CameBy { at, .. } => (2, *at),
-        Activity::Messaged { at } => (3, *at),
-        Activity::Birthday => (4, 0),
+        Activity::CommitmentDue { due, .. } => (0, *due),
+        Activity::CameBy { at, .. } => (1, *at),
+        Activity::Messaged { at } => (2, *at),
+        Activity::Birthday => (3, 0),
     };
     items.sort_by(|a, b| {
         rank(&a.activity)
@@ -381,20 +355,6 @@ mod tests {
     #[test]
     fn digest_collects_every_kind_and_skips_disabled() {
         let w = world();
-        let office = std::env::temp_dir();
-        // A reply.
-        let a = task::ask(
-            &w,
-            &p("a"),
-            "q",
-            Some(3),
-            None,
-            Tier::Middle,
-            &Default::default(),
-            T0,
-        )
-        .unwrap();
-        task::report(&w, &p("a"), a.task, "answer", &[], None, &office, T0 + 1).unwrap();
         // A message.
         let cb = channel::direct(&w, &p("b")).unwrap();
         message::append(&w, cb, &Actor::Person(p("b")), "hi", None, None, T0 + 2).unwrap();
@@ -435,14 +395,6 @@ mod tests {
             kinds,
             vec![
                 (
-                    "a",
-                    &Activity::Replied {
-                        task: a.task,
-                        question: "q".into(),
-                        at: T0 + 1
-                    }
-                ),
-                (
                     "b",
                     &Activity::CommitmentDue {
                         fact: f,
@@ -458,7 +410,7 @@ mod tests {
         let last = message::last(&w, cb).unwrap().unwrap().id;
         channel::mark_read(&w, cb, last).unwrap();
         let d = digest(&w, at(T0 + 10), &born).unwrap();
-        assert_eq!(d.items.len(), 3);
+        assert_eq!(d.items.len(), 2);
     }
 
     #[test]

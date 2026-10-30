@@ -1,7 +1,8 @@
 -- World database, schema 4. Additive only.
 
--- failure: why a request ended without an answer ('failed': its run errored or never
--- started; 'interrupted': the app stopped while it was open). Such a request is 'done'
--- with no reply. failure_told: the host has been shown the failure once.
-ALTER TABLE task ADD COLUMN failure TEXT CHECK (failure IS NULL OR failure IN ('failed', 'interrupted'));
-ALTER TABLE task ADD COLUMN failure_told INTEGER NOT NULL DEFAULT 0 CHECK (failure_told IN (0, 1));
+-- name: a title the user gave the channel (NULL: shown from its members). avatar: file name
+-- of the user's picture for it, under the home's uploads directory (NULL: composed from the
+-- members). archived: kept out of the main list; a person's new message clears it.
+ALTER TABLE channel ADD COLUMN name TEXT;
+ALTER TABLE channel ADD COLUMN avatar TEXT;
+ALTER TABLE channel ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1));

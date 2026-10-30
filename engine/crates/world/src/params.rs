@@ -1,5 +1,5 @@
 //! Estimated values this crate reads, one serde struct per register group (`quota`,
-//! `cost`, `ask`, `seed`, `session`, `wrapup`, `trust`). `Default` carries the register's
+//! `cost`, `seed`, `session`, `wrapup`, `trust`). `Default` carries the register's
 //! current values and is the only place they are written; use sites take the struct as
 //! an argument. Missing keys in a loaded file fall back to these defaults.
 
@@ -84,51 +84,6 @@ pub struct Cost {
 impl Default for Cost {
     fn default() -> Self {
         Self { c: 0.25, o: 4.0 }
-    }
-}
-
-/// `ask.*`: default turn budget of a request, per tier.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Ask {
-    pub turns: AskTurns,
-}
-
-/// Unlike the quota windows, the tier without windows has a value here too.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct AskTurns {
-    pub low: u32,
-    pub middle: u32,
-    pub high: u32,
-    pub extra_high: u32,
-    pub max: u32,
-    pub ultra: u32,
-}
-
-impl AskTurns {
-    pub fn get(&self, tier: Tier) -> u32 {
-        match tier {
-            Tier::Low => self.low,
-            Tier::Middle => self.middle,
-            Tier::High => self.high,
-            Tier::ExtraHigh => self.extra_high,
-            Tier::Max => self.max,
-            Tier::Ultra => self.ultra,
-        }
-    }
-}
-
-impl Default for AskTurns {
-    fn default() -> Self {
-        Self {
-            low: 6,
-            middle: 10,
-            high: 16,
-            extra_high: 24,
-            max: 32,
-            ultra: 48,
-        }
     }
 }
 
@@ -341,8 +296,6 @@ impl Default for Events {
 pub struct Trust {
     /// Growth per shared turn, before the diminishing factor.
     pub g1: f64,
-    /// Growth per finished request, before the diminishing factor.
-    pub g2: f64,
     /// Loss per hurt.
     pub h: f64,
     /// Lower bounds of `normal`, `close` and `deep`; below the first is `guarded`.
@@ -353,7 +306,6 @@ impl Default for Trust {
     fn default() -> Self {
         Self {
             g1: 0.5,
-            g2: 2.0,
             h: 15.0,
             bands: [60, 100, 150],
         }
@@ -366,7 +318,6 @@ impl Default for Trust {
 pub struct Params {
     pub quota: Quota,
     pub cost: Cost,
-    pub ask: Ask,
     pub seed: Seed,
     pub pacing: Pacing,
     pub session: Session,
@@ -473,6 +424,5 @@ mod tests {
         assert_eq!(p.trust.g1, Trust::default().g1);
         assert_eq!(p.seed, Seed::default());
         assert_eq!(p.quota.window_1h.get(Tier::Ultra), None);
-        assert_eq!(p.ask.turns.get(Tier::Ultra), 48);
     }
 }

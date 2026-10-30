@@ -1,9 +1,10 @@
 -- World database, schema 6. Additive only.
 
--- The user's own picture, kept in the save so it travels with it and is encrypted with it.
--- One row at most.
-CREATE TABLE user_avatar (
-    id   INTEGER PRIMARY KEY CHECK (id = 1),
+-- Pictures the user attached to messages, kept in the save so they travel with it and are
+-- encrypted with it. Keyed by content hash: the same picture sent twice is stored once.
+-- A message names its picture in `message.attachment` (`picture`).
+CREATE TABLE picture (
+    hash TEXT PRIMARY KEY,
     mime TEXT NOT NULL,
     data BLOB NOT NULL
 ) STRICT;

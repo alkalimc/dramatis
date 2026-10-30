@@ -105,13 +105,6 @@ pub fn shared_turn(
     Ok(())
 }
 
-/// A request the user gave this person is done.
-pub fn task_done(conn: &Connection, person: &PersonId, params: &Trust) -> Result<()> {
-    bond::ensure_user_bond(conn, person)?;
-    let b = bond::user_bond(conn, person)?;
-    apply(conn, &b, grow(b.trust_exact, params.g2))
-}
-
 /// The person a hurt was aimed at: its subject, else the owner of the direct channel
 /// it was said in.
 fn hurt_target(conn: &Connection, fact: &Fact) -> Result<Option<PersonId>> {
@@ -221,8 +214,6 @@ mod tests {
         // 0.5 per turn with f shrinking a little above 100.
         assert!((b.trust_exact - 101.99).abs() < 0.01, "{}", b.trust_exact);
         assert_eq!(b.trust, 102);
-        task_done(&w, &p("a"), &params).unwrap();
-        assert!(bond::user_bond(&w, &p("a")).unwrap().trust_exact > 103.9);
     }
 
     #[test]

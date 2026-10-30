@@ -4,21 +4,21 @@
 //! What goes: the channel's later messages, the model log from that instant (entries
 //! after it, and any segment opened after it), the memories written in the channel since
 //! (a hurt gives its trust back), the seeds those memories or messages queued, the
-//! requests filed in the channel, and the sessions opened there, and the pictures only those messages carried. What stays: the meter
-//! (the calls were made), trust earned by shared turns, sessions that were open before
-//! the message and closed after it, and requests the host filed in other channels.
+//! sessions opened there, and the pictures only those messages carried. What stays: the
+//! meter (the calls were made), trust earned by shared turns, and sessions that were open
+//! before the message and closed after it.
 //!
 //! The log is append-only for the prefix cache: cutting its tail is allowed because the
 //! bytes before the cut are untouched, so the cached prefix is still valid.
 //!
-//! The cut is a time: the message's `at`. Log entries, segments, facts, sessions and
-//! tasks carry no link to the message that caused them, only a timestamp, and a person
+//! The cut is a time: the message's `at`. Log entries, segments, facts and
+//! sessions carry no link to the message that caused them, only a timestamp, and a person
 //! cannot send a message in the same millisecond as the end of the last reply.
 
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::fact::{self};
-use crate::types::{Actor, ChannelId, FactKind, MessageId, TaskId};
+use crate::types::{Actor, ChannelId, FactKind, MessageId};
 use crate::{Error, Result, channel, message};
 
 /// What a rewind did.
@@ -30,8 +30,6 @@ pub struct Rewound {
     pub removed: u32,
     /// Memories deleted.
     pub facts: Vec<crate::FactId>,
-    /// Requests deleted.
-    pub tasks: Vec<TaskId>,
 }
 
 /// Take back `message`, which must be the user's own in `channel`. The caller makes sure no
@@ -93,40 +91,6 @@ fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound>
     }
     drop(stmt);
 
-    // Requests filed in this channel since, unless a surviving request hangs under one.
-    let mut tasks: Vec<TaskId> = {
-        let mut stmt =
-            conn.prepare("SELECT id FROM task WHERE channel = ?1 AND created_at >= ?2")?;
-        stmt.query_map((ch, t), |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?
-    };
-    loop {
-        let keep: Vec<TaskId> = {
-            let mut stmt = conn.prepare("SELECT id, parent FROM task WHERE parent IS NOT NULL")?;
-            let rows: Vec<(TaskId, TaskId)> = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<rusqlite::Result<_>>()?;
-            rows.into_iter()
-                .filter(|(child, parent)| !tasks.contains(child) && tasks.contains(parent))
-                .map(|(_, parent)| parent)
-                .collect()
-        };
-        if keep.is_empty() {
-            break;
-        }
-        tasks.retain(|t| !keep.contains(t));
-    }
-    for task in &tasks {
-        let mut stmt =
-            conn.prepare("SELECT id FROM fact WHERE about_kind = 'task' AND about_ref = ?1")?;
-        for f in stmt.query_map([task.0.to_string()], |r| r.get::<_, crate::FactId>(0))? {
-            let f = f?;
-            if !facts.contains(&f) {
-                facts.push(f);
-            }
-        }
-    }
-
     // Seeds: those the dropped memories or messages queued, and the openings delivered
     // here since (a commitment brought up again may be brought up again).
     let removed_messages: Vec<MessageId> = {
@@ -136,14 +100,8 @@ fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound>
     };
     for f in &facts {
         conn.execute(
-            "DELETE FROM seed WHERE kind IN ('commitment', 'conclusion', 'memory') AND ref = ?1",
+            "DELETE FROM seed WHERE kind IN ('commitment', 'memory') AND ref = ?1",
             [f.0.to_string()],
-        )?;
-    }
-    for task in &tasks {
-        conn.execute(
-            "DELETE FROM seed WHERE kind = 'pinned' AND ref = ?1",
-            [task.0.to_string()],
         )?;
     }
     for m in &removed_messages {
@@ -171,21 +129,10 @@ fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound>
         conn.execute("DELETE FROM fact WHERE id = ?1", [f])?;
     }
 
-    // Sessions opened since, then requests (a session may cite one).
+    // Sessions opened since.
     conn.execute(
         "DELETE FROM session WHERE channel = ?1 AND opened_at >= ?2",
         (ch, t),
-    )?;
-    for task in &tasks {
-        conn.execute("UPDATE task SET parent = NULL WHERE parent = ?1", [task])?;
-    }
-    for task in tasks.iter().rev() {
-        conn.execute("DELETE FROM task WHERE id = ?1", [task])?;
-    }
-
-    conn.execute(
-        "UPDATE task SET reply = NULL WHERE reply IN (SELECT id FROM message WHERE channel = ?1 AND id >= ?2)",
-        (ch, id),
     )?;
     conn.execute(
         "DELETE FROM message WHERE channel = ?1 AND id >= ?2",
@@ -204,7 +151,6 @@ fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound>
         text: m.text,
         removed: removed_messages.len() as u32,
         facts,
-        tasks,
     })
 }
 
@@ -214,7 +160,7 @@ mod tests {
     use crate::fact::{About, Audience, NewFact};
     use crate::log::{self, Role};
     use crate::testing::*;
-    use crate::{bond, session, task};
+    use crate::{bond, session};
 
     fn say(w: &Connection, c: ChannelId, who: &Actor, text: &str, ms: i64) -> MessageId {
         message::append(w, c, who, text, None, None, ms).unwrap()
@@ -268,9 +214,6 @@ mod tests {
             206,
         )
         .unwrap();
-        let t = task::open_case(&w, "q", 207).unwrap();
-        w.execute("UPDATE task SET channel = ?2 WHERE id = ?1", (t, c))
-            .unwrap();
         w.execute(
             "INSERT INTO seed(person, kind, ref, created_at) VALUES ('a', 'commitment', ?1, 208)",
             [late.0.to_string()],
@@ -281,7 +224,6 @@ mod tests {
         assert_eq!(out.text, "two");
         assert_eq!(out.removed, 2);
         assert_eq!(out.facts, vec![late]);
-        assert_eq!(out.tasks, vec![t]);
 
         let left: Vec<_> = message::history(&w, c, None, 10)
             .unwrap()
@@ -301,7 +243,6 @@ mod tests {
         assert!(fact::get(&w, keep).is_ok());
         assert!(fact::get(&w, edited).is_ok());
         assert!(fact::get(&w, late).is_err());
-        assert!(task::get(&w, t).is_err());
         assert!(session::open_sessions(&w).unwrap().is_empty());
         let seeds: i64 = w
             .query_row("SELECT count(*) FROM seed", [], |r| r.get(0))
@@ -380,22 +321,17 @@ mod tests {
             .unwrap()
     }
 
-    /// Failed request, archived channel, announced items for removed messages: the
+    /// Archived channel, announced items for removed messages: the
     /// rewind removes whole rows only, and the announced record never blocks news.
     #[test]
-    fn rewinds_an_archived_channel_after_a_failed_request_with_announced_items() {
+    fn rewinds_an_archived_channel_with_announced_items() {
         use crate::presence::{self, Birthdays};
-        use crate::task::Failure;
         let w = world();
         let a = p("a");
         let c = channel::direct(&w, &a).unwrap();
         say(&w, c, &Actor::User, "one", 100);
         let m2 = say(&w, c, &Actor::User, "two", 200);
         say(&w, c, &Actor::Person(a.clone()), "reply", 210);
-        let t = task::open_case(&w, "q", 207).unwrap();
-        w.execute("UPDATE task SET channel = ?2 WHERE id = ?1", (t, c))
-            .unwrap();
-        task::fail(&w, t, Failure::Failed, 220).unwrap();
         channel::set_archived(&w, c, true).unwrap();
 
         let none: Vec<(crate::PersonId, crate::types::MonthDay)> = Vec::new();
@@ -405,9 +341,7 @@ mod tests {
         presence::mark_announced(&w, &before, &before, now.local_date()).unwrap();
 
         let out = rewind(&w, c, m2).unwrap();
-        assert_eq!((out.removed, out.tasks.clone()), (2, vec![t]));
-        assert!(task::get(&w, t).is_err());
-        assert!(task::untold_failures(&w).unwrap().is_empty());
+        assert_eq!(out.removed, 2);
         assert!(
             channel::get(&w, c).unwrap().archived,
             "rewind leaves the list as it was"
@@ -431,9 +365,6 @@ mod tests {
         let c = channel::direct(&w, &a).unwrap();
         let m = say(&w, c, &Actor::User, "one", 100);
         say(&w, c, &Actor::Person(a), "r", 101);
-        let t = task::open_case(&w, "q", 102).unwrap();
-        w.execute("UPDATE task SET channel = ?2 WHERE id = ?1", (t, c))
-            .unwrap();
         // The last step deletes messages; make it fail after the earlier steps ran.
         w.execute_batch(
             "CREATE TRIGGER stop BEFORE DELETE ON message BEGIN SELECT RAISE(ABORT, 'stop'); END;",
@@ -442,7 +373,6 @@ mod tests {
         assert!(rewind(&w, c, m).is_err());
         assert!(w.is_autocommit());
         assert_eq!(count(&w, "message"), 2);
-        assert_eq!(count(&w, "task"), 1);
     }
 
     #[test]

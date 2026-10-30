@@ -1,7 +1,6 @@
 //! Seeds: the only reason anyone speaks unprompted.
 //!
-//! Event seeds (a commitment falling due, a conclusion or pinned question that hit a
-//! person's own units) come before daily ones (the user's birthday, a memory about the
+//! Event seeds (a commitment falling due) come before daily ones (the user's birthday, a memory about the
 //! user worth asking after, the user's recent words hitting his units, a daily event of
 //! the day he is part of); within a class
 //! whoever has gone longest without talking with the user goes first. At most one person
@@ -19,18 +18,14 @@ use crate::fact::{self, About, Audience};
 use crate::params::{Pace, QuietHours, Seed as SeedParams, Session as SessionParams};
 use crate::quota::{self, Band};
 use crate::session::{self, Budget, Cause};
-use crate::types::{ChannelId, FactId, FactKind, MessageId, Mode, PersonId, TaskId};
-use crate::{Result, away, bond, message, settings, task};
+use crate::types::{ChannelId, FactId, FactKind, MessageId, Mode, PersonId};
+use crate::{Result, away, bond, message, settings};
 
 /// What a seed is, with what it points at.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SeedKind {
     /// A commitment fell due. Also thaws a frozen person.
     Commitment(FactId),
-    /// A new conclusion hit his units.
-    Conclusion(FactId),
-    /// A pinned question hit his units.
-    Pinned(TaskId),
     /// The user's birthday, in this local year.
     Birthday(i32),
     /// The newest memory about the user he can see, not yet used as a seed.
@@ -46,17 +41,12 @@ pub enum SeedKind {
 
 impl SeedKind {
     pub fn is_event(&self) -> bool {
-        matches!(
-            self,
-            Self::Commitment(_) | Self::Conclusion(_) | Self::Pinned(_)
-        )
+        matches!(self, Self::Commitment(_))
     }
 
     fn encode(&self) -> (&'static str, String) {
         match self {
             Self::Commitment(f) => ("commitment", f.0.to_string()),
-            Self::Conclusion(f) => ("conclusion", f.0.to_string()),
-            Self::Pinned(t) => ("pinned", t.0.to_string()),
             Self::Birthday(y) => ("birthday", y.to_string()),
             Self::Memory(f) => ("memory", f.0.to_string()),
             Self::Words(m) => ("words", m.0.to_string()),
@@ -64,35 +54,6 @@ impl SeedKind {
             Self::Visit(d) => ("visit", d.to_string()),
         }
     }
-
-    fn decode(kind: &str, reference: &str) -> Option<Self> {
-        let n: i64 = reference.parse().ok()?;
-        Some(match kind {
-            "commitment" => Self::Commitment(FactId(n)),
-            "conclusion" => Self::Conclusion(FactId(n)),
-            "pinned" => Self::Pinned(TaskId(n)),
-            "birthday" => Self::Birthday(i32::try_from(n).ok()?),
-            "memory" => Self::Memory(FactId(n)),
-            "words" => Self::Words(MessageId(n)),
-            "event" => Self::Happening(FactId(n)),
-            "visit" => Self::Visit(i32::try_from(n).ok()?),
-            _ => return None,
-        })
-    }
-}
-
-/// One person's retrieval hit: the chunk ids of his own units that matched.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hit {
-    pub person: PersonId,
-    pub material: Vec<String>,
-}
-
-/// An event that searched the roster: a conclusion written, a question pinned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Event {
-    Conclusion(FactId),
-    Pinned(TaskId),
 }
 
 /// The user's recent words hitting a person's units (daily seed), found by the caller's
@@ -102,28 +63,6 @@ pub struct WordsHit {
     pub person: PersonId,
     pub message: MessageId,
     pub material: Vec<String>,
-}
-
-/// Queue the persons an event's retrieval hit. Only enabled people get such seeds; the
-/// disabled are never evaluated. Returns how many were queued (a repeat is a no-op).
-pub fn queue_hits(conn: &Connection, event: Event, hits: &[Hit], now: i64) -> Result<u32> {
-    let kind = match event {
-        Event::Conclusion(f) => SeedKind::Conclusion(f),
-        Event::Pinned(t) => SeedKind::Pinned(t),
-    };
-    let (k, r) = kind.encode();
-    let mut n = 0;
-    for h in hits {
-        if bond::mode(conn, &h.person)? != Mode::Enabled {
-            continue;
-        }
-        n += conn.execute(
-            "INSERT INTO seed(person, kind, ref, created_at, material) VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT DO NOTHING",
-            (&h.person, k, &r, now, serde_json::to_string(&h.material)?),
-        )? as u32;
-    }
-    Ok(n)
 }
 
 /// A seed that could open, before the limits.
@@ -164,7 +103,7 @@ pub struct Opening {
     pub channel: ChannelId,
     pub kind: SeedKind,
     pub material: Vec<String>,
-    /// The fact the seed is about (commitment, conclusion, memory).
+    /// The fact the seed is about (commitment, memory).
     pub fact: Option<FactId>,
 }
 
@@ -248,41 +187,6 @@ fn commitment_candidates(conn: &Connection, now: i64) -> Result<Vec<Candidate>> 
             kind: SeedKind::Commitment(f.id),
             material: Vec::new(),
             origin,
-        });
-    }
-    Ok(out)
-}
-
-/// Queued event hits still valid: the conclusion is live, the question still pinned,
-/// the person enabled.
-fn queued_candidates(conn: &Connection) -> Result<Vec<Candidate>> {
-    let rows: Vec<(PersonId, String, String, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT person, kind, ref, material FROM seed WHERE delivered_at IS NULL ORDER BY id",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
-    let mut out = Vec::new();
-    for (person, k, r, material) in rows {
-        let Some(kind) = SeedKind::decode(&k, &r) else {
-            continue;
-        };
-        let valid = match &kind {
-            SeedKind::Conclusion(f) => !fact::get(conn, *f)?.retracted,
-            SeedKind::Pinned(t) => task::get(conn, *t)?.pinned,
-            _ => false,
-        };
-        if !valid || bond::mode(conn, &person)? != Mode::Enabled {
-            continue;
-        }
-        out.push(Candidate {
-            last_seen: last_seen(conn, &person)?,
-            person,
-            kind,
-            material: serde_json::from_str(&material)?,
-            involved: Vec::new(),
-            origin: None,
         });
     }
     Ok(out)
@@ -427,7 +331,6 @@ pub fn candidates(
     pace: &Pace,
 ) -> Result<Vec<Candidate>> {
     let mut out = commitment_candidates(conn, now.ms)?;
-    out.extend(queued_candidates(conn)?);
     if let Occasion::Presence { words } = occasion {
         out.extend(daily_candidates(conn, now, words, pace)?);
     }
@@ -627,7 +530,6 @@ pub fn plan(
         };
         let fact = match c.kind {
             SeedKind::Commitment(f)
-            | SeedKind::Conclusion(f)
             | SeedKind::Memory(f)
             | SeedKind::Happening(f) => Some(f),
             _ => None,
@@ -817,63 +719,27 @@ mod tests {
             panic!()
         };
         assert_eq!(o.person, p("b"), "b has gone longer without talking");
-        let conclusion = fact::write(
+        let cc = channel::direct(&w, &p("c")).unwrap();
+        let due = fact::write(
             &w,
-            &NewFact::new(Actor::User, Audience::World, FactKind::Conclusion, "x"),
+            &NewFact::new(
+                Actor::User,
+                Audience::Participants(cc),
+                FactKind::Commitment,
+                "call back",
+            )
+            .due(T0 - 1),
             2,
         )
         .unwrap()
         .id();
-        queue_hits(
-            &w,
-            Event::Conclusion(conclusion),
-            &[Hit {
-                person: p("c"),
-                material: vec!["u1".into()],
-            }],
-            3,
-        )
-        .unwrap();
         bond::touch_user(&w, &p("c"), 99).unwrap();
         let Planned::Open(o) = presence(&w, &env, at(T0)) else {
             panic!()
         };
         assert_eq!(
             (o.person.clone(), o.kind.clone()),
-            (p("c"), SeedKind::Conclusion(conclusion))
-        );
-        assert_eq!(o.material, vec!["u1".to_owned()]);
-    }
-
-    #[test]
-    fn queued_hits_skip_people_not_enabled() {
-        let w = world();
-        enable(&w, &["a"]);
-        bond::set_mode(&w, &p("off"), Mode::Disabled).unwrap();
-        let case = task::open_case(&w, "q", 1).unwrap();
-        let hits = [
-            Hit {
-                person: p("a"),
-                material: vec![],
-            },
-            Hit {
-                person: p("frozen"),
-                material: vec![],
-            },
-            Hit {
-                person: p("off"),
-                material: vec![],
-            },
-        ];
-        assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 1).unwrap(), 1);
-        assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 2).unwrap(), 0);
-        let cands = candidates(&w, &Occasion::Event, at(T0), &Pace::default()).unwrap();
-        assert_eq!(cands.len(), 1);
-        task::set_pinned(&w, case, false).unwrap();
-        assert!(
-            candidates(&w, &Occasion::Event, at(T0), &Pace::default())
-                .unwrap()
-                .is_empty()
+            (p("c"), SeedKind::Commitment(due))
         );
     }
 
