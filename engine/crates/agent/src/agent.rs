@@ -159,6 +159,9 @@ pub struct Agent {
     /// Models (`profile/model`) whose endpoint refused a picture. Their history is sent
     /// with the pictures described instead, until one is accepted again. Lost on restart.
     pub(crate) sightless: Mutex<HashSet<String>>,
+    /// When the daily seeds were last planned outside a return of the user (`tick`).
+    /// Lost on restart, which only makes the next planning earlier.
+    pub(crate) daily_planned: Mutex<Option<i64>>,
 }
 
 impl Agent {
@@ -205,6 +208,7 @@ impl Agent {
             quota_events: Mutex::new(()),
             filled: Mutex::new(HashMap::new()),
             sightless: Mutex::new(HashSet::new()),
+            daily_planned: Mutex::new(None),
         })
     }
 

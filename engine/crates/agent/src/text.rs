@@ -25,7 +25,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "host.intro.terminal",
-        "Welcome. You can talk to anyone here with /talk <name>, start a group with /group, \
+        "Welcome. The terminal is maintained by alkali. You can talk to anyone here with \
+         /talk <name>, start a group with /group, \
          and ask me for anything: finding someone who knows a subject, or a summary of what \
          changed. Requests, memories, saves and settings all have commands; /help lists them, \
          and I can explain any of them.",
@@ -38,7 +39,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "host.intro.app",
-        "Welcome. You can talk to anyone on the Roster, start a group, and ask me for anything: \
+        "Welcome. The terminal is maintained by alkali. You can talk to anyone on the \
+         Roster, start a group, and ask me for anything: \
          finding someone who knows a subject, or a summary of what changed. Requests, memories, \
          saves and settings each have a page; ask me and I will explain any of them.",
     ),
@@ -57,11 +59,23 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.picture_unseen",
-        "{user} attached a picture here, but this channel cannot show pictures, so it \
-         could not be seen.",
+        "{user} showed a picture here, but it could not be seen.",
     ),
     (
         "harness.rules",
+        "{user} is here in person with the people of this world: a direct chat is one person \
+         and {user} together, a group is its members gathered with {user}. What is said is \
+         said aloud to those present, not sent as a message. Each reply is spoken by one of \
+         them, as themselves. When a person does not know something, they react the way \
+         that person would: brush it off, ask back, go by impression or change the subject. \
+         They never talk about whether they have evidence, records or sources. A person acts \
+         only within this gathering. Other chats, groups and the host are out of reach \
+         except through the means given here, and so are removing someone from a group, \
+         changing a setting or taking {user} somewhere; what has no means is offered or left \
+         to {user}, never reported as done.",
+    ),
+    (
+        "harness.rules.host",
         "{user} talks with the people of this world through messages. Each reply is spoken \
          by one of them, as themselves. When a person does not know something, they react \
          the way that person would: brush it off, ask back, go by impression or change the \
@@ -107,11 +121,11 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.memories", "{name} remembers:"),
     ("harness.memories.shared", "Everyone here remembers:"),
     ("harness.summary", "Earlier in this conversation: {summary}"),
-    ("harness.recent", "The last messages:"),
+    ("harness.recent", "The last things said:"),
     ("harness.context", "[{date} {weekday} {time}, {part}]"),
     (
         "harness.context.gap",
-        "({user}'s previous message was {span} ago)",
+        "({user} last spoke {span} ago)",
     ),
     ("span.hours", "{n} hours"),
     ("span.days", "{n} days"),
@@ -170,9 +184,10 @@ const DEFAULTS: &[(&str, &str)] = &[
          a bar and what it is about in a few words, which the one {user} goes to is told. \
          Only the people on that line are offered; a colleague merely mentioned needs no \
          line. To offer a group with colleagues from the roster, end it with one final line \
-         that starts with {group} followed by their names, separated by commas, at most \
-         four, then a bar and the purpose in a few words (at most sixty characters), which \
-         every member is told. To continue a group you already have with those people, \
+         that starts with {group} followed by their names, separated by commas, a few people \
+         who matter for the matter to begin with (more can be invited later), then a bar \
+         and the purpose in a few words (at most sixty characters), which every member is \
+         told. To continue a group you already have with those people, \
          write its name as the purpose; any other purpose makes a new group. Such a line \
          comes at most once per reply, and after a citation line if there is one.",
     ),
@@ -220,17 +235,23 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.wrapup",
         "The conversation is closing. Step out of the scene and do not answer as the \
-         character. Give only the wrap-up: what happened that is worth remembering, and any \
-         promises with their dates. Use the wrapup call if it is available; otherwise reply \
+         character. Give only the wrap-up: write what is worth remembering as short \
+         memories, such as what {user} told you of their own life, what was decided or \
+         agreed, and what passed between you, even when small; anything either of you said \
+         you would do becomes a promise with its date. Write none only if nothing but \
+         greetings were exchanged. Use the wrapup call if it is available; otherwise reply \
          with just the JSON object the schema describes.",
     ),
     (
         "harness.wrapup.summary",
         "The conversation moves to a new log. Step out of the scene and do not answer as the \
-         character. Give only the wrap-up: what happened that is worth remembering, any \
-         promises with their dates, and a summary of the conversation so far. Use the wrapup \
-         call if it is available; otherwise reply with just the JSON object the schema \
-         describes.",
+         character. Give only the wrap-up: write what is worth remembering as short \
+         memories, such as what {user} told you of their own life, what was decided or \
+         agreed, and what passed between you, even when small; anything either of you said \
+         you would do becomes a promise with its date. Write none only if nothing but \
+         greetings were exchanged. Add a summary of the conversation so far. Use the \
+         wrapup call if it is available; otherwise reply with just the JSON object the \
+         schema describes.",
     ),
     (
         "harness.wrapup.shape",
@@ -244,6 +265,11 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.opening.pinned", "{user} pinned a question: {text}"),
     ("harness.opening.birthday", "Today is {user}'s birthday."),
+    (
+        "harness.opening.visit",
+        "Nothing in particular brings you here. Speak first with a short, natural line, as \
+         someone stopping by.",
+    ),
     (
         "harness.opening.memory",
         "Something {name} remembers about {user}: {text}",
@@ -310,10 +336,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.error.once",
         "One suggestion is enough for a reply.",
-    ),
-    (
-        "harness.error.too_many",
-        "At most {max} people can be named here.",
     ),
     ("harness.error.self", "Name colleagues other than yourself."),
     (
@@ -462,7 +484,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.guide.limits",
-        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due.",
+        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due. Removing someone from a group, renaming a group or deleting one is likewise {user}'s own, and you have no means for it.",
     ),
     (
         "harness.guide.promise",

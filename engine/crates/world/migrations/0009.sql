@@ -20,12 +20,12 @@ CREATE TABLE daily_event (
 ) STRICT;
 CREATE INDEX idx_daily_event_day ON daily_event(day);
 
--- Seeds gain the kind `event`. A CHECK cannot be altered, so the table is rebuilt.
+-- Seeds gain the kinds `event` and `visit`. A CHECK cannot be altered, so the table is rebuilt.
 CREATE TABLE seed_new (
     id           INTEGER PRIMARY KEY,
     person       TEXT    NOT NULL CHECK (person NOT IN ('user', 'host')),
     kind         TEXT    NOT NULL CHECK (kind IN (
-                     'commitment', 'conclusion', 'pinned', 'birthday', 'memory', 'words', 'event')),
+                     'commitment', 'conclusion', 'pinned', 'birthday', 'memory', 'words', 'event', 'visit')),
     ref          TEXT    NOT NULL,
     created_at   INTEGER NOT NULL,
     delivered_at INTEGER,

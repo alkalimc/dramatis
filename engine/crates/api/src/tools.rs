@@ -78,9 +78,10 @@ pub struct AskHost {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub find: Option<Vec<String>>,
-    /// Roster ids of colleagues for the host to propose a group with, at most four besides
-    /// you; you are included. To continue a group you already have with them, give its name
-    /// as the purpose; any other purpose makes a new group.
+    /// Roster ids of colleagues for the host to propose a group with, besides you; you are
+    /// included. Start small: a few people who matter for the matter at hand; more can be
+    /// invited later. To continue a group you already have with them, give its name as the
+    /// purpose; any other purpose makes a new group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub group: Option<Vec<String>>,
@@ -109,7 +110,9 @@ pub struct Report {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Wrapup {
-    /// Concrete things that happened or were promised. May be empty.
+    /// What is worth remembering: what the user said of their own life, what was decided or
+    /// agreed, what passed between you, one or two short lines. Empty only when nothing but
+    /// greetings were exchanged.
     #[serde(default)]
     pub facts: Vec<WrapupFact>,
     /// Only for clear cruelty, insult, humiliation or betrayal aimed at a person.
@@ -181,7 +184,8 @@ pub struct Ask {
     pub turns: Option<u32>,
 }
 
-/// Start a group conversation among two to six people. One person is never a group: the
+/// Start a group conversation among two or more people; start small, with a few people who
+/// matter for the matter at hand, and invite more later. One person is never a group: the
 /// user is then only shown a way to talk to them. The result gives the group id when one
 /// was made, and the user is shown a way to open it; you cannot move the user yourself.
 /// To continue a group you already have with the same people, give its name as the
@@ -189,7 +193,7 @@ pub struct Ask {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateGroup {
-    /// Roster ids, two to six.
+    /// Roster ids, at least two.
     #[schemars(length(min = 1))]
     pub members: Vec<String>,
     /// Why the group exists, in one short line (about sixty characters), for example

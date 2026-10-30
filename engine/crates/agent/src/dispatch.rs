@@ -23,12 +23,6 @@ use world::quota::CallKind;
 /// as buttons.
 const LISTED_CHANNELS_MAX: usize = 12;
 
-/// Most colleagues a person's group suggestion may name, apart from the person.
-const SUGGESTED_GROUP_MAX: usize = 4;
-
-/// Most people the host's `create_group` takes.
-const HOST_GROUP_MAX: usize = 6;
-
 /// Most reminders the host may have waiting at once.
 const PROMISES_MAX: usize = 20;
 
@@ -479,14 +473,6 @@ impl Agent {
                 let nothing_new = here
                     .as_ref()
                     .is_some_and(|h| members.iter().all(|m| h.contains(m)));
-                if members.len() > SUGGESTED_GROUP_MAX + 1 {
-                    let max = SUGGESTED_GROUP_MAX.to_string();
-                    return Ok(Err(self.refuse_with(
-                        names,
-                        "harness.error.too_many",
-                        &[("max", &max)],
-                    )));
-                }
                 if members.len() < 2 {
                     return Ok(Err(self.refuse(names, "harness.error.self", "")));
                 }
@@ -832,14 +818,6 @@ impl Agent {
                         return Ok(Err(self.not_offered(names, only.as_str())));
                     }
                     return self.talk_offer(turn, only.as_str(), names);
-                }
-                if members.len() > HOST_GROUP_MAX {
-                    let max = HOST_GROUP_MAX.to_string();
-                    return Ok(Err(self.refuse_with(
-                        names,
-                        "harness.error.too_many",
-                        &[("max", &max)],
-                    )));
                 }
                 for m in &members {
                     if self.available(&self.db(), m).is_err() {

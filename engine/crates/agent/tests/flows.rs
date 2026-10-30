@@ -2620,7 +2620,7 @@ async fn every_user_entry_carries_the_clock_and_a_long_silence() {
     );
     assert!(
         texts[2].ends_with(
-            "[2026-03-11 Wednesday 18:20, evening] (Doc's previous message was 30 hours ago)"
+            "[2026-03-11 Wednesday 18:20, evening] (Doc last spoke 30 hours ago)"
         ),
         "{}",
         texts[2]
@@ -2640,7 +2640,7 @@ async fn a_late_hour_reads_as_night_and_days_are_counted_from_two() {
     e.agent.send(ch, "still there?", None).await.unwrap();
     let last = user_texts(&e).pop().unwrap();
     assert!(
-        last.ends_with("[2026-03-13 Friday 23:30, night] (Doc's previous message was 3 days ago)"),
+        last.ends_with("[2026-03-13 Friday 23:30, night] (Doc last spoke 3 days ago)"),
         "{last}"
     );
 }
@@ -2863,15 +2863,16 @@ async fn a_suggestion_is_limited_to_the_roster_the_quota_and_once_per_reply() {
 
     // Each refusal has its own reason, so the model can correct itself.
     e.fake.push([
-        call(
-            "ask_host",
-            json!({"group": ["bo", "dee", "x1", "x2", "x3"]}),
-        ),
+        call("ask_host", json!({"group": ["bo", "x1", "x2", "x3"]})),
         say("1."),
     ]);
     e.agent.send(ch, "many", None).await.unwrap();
     let log = log_bytes(&e.agent, ch);
-    assert!(log.contains("At most 4 people can be named here."), "{log}");
+    assert!(
+        !log.contains("people can be named here"),
+        "no cap on the size of a suggested group: {log}"
+    );
+    assert!(log.contains("Nobody on the roster answers to x1."), "{log}");
     e.fake
         .push([call("ask_host", json!({"group": ["ann"]})), say("2.")]);
     e.agent.send(ch, "alone", None).await.unwrap();
@@ -3668,7 +3669,7 @@ async fn a_promise_is_a_due_commitment_for_a_named_person_with_limits() {
 }
 
 #[tokio::test]
-async fn the_hosts_groups_are_capped_named_by_purpose_and_reused_only_for_it() {
+async fn the_hosts_groups_have_no_size_cap_are_named_by_purpose_and_reused_only_for_it() {
     let e = long_host();
     let host = e.agent.with_world(|w| channel::host(w).unwrap());
     let names = |e: &Env| -> Vec<Option<String>> {
@@ -3705,7 +3706,10 @@ async fn the_hosts_groups_are_capped_named_by_purpose_and_reused_only_for_it() {
     ]);
     e.agent.send(host, "groups", None).await.unwrap();
     let log = log_bytes(&e.agent, host);
-    assert!(log.contains("At most 6 people can be named here."), "{log}");
+    assert!(
+        !log.contains("people can be named here"),
+        "no size cap; only unavailable people refuse: {log}"
+    );
     assert_eq!(
         log.matches("already has exactly these people").count(),
         2,
@@ -3718,7 +3722,7 @@ async fn the_hosts_groups_are_capped_named_by_purpose_and_reused_only_for_it() {
             Some("Plan a trip".to_owned())
         ],
         "{}",
-        log.rsplit("At most 6").next().unwrap()
+        log
     );
     // A group the user made by hand has no name: its title follows its members.
     let by_hand = e.agent.create_group(&[p("ann"), p("dee")], None).unwrap();
@@ -3787,5 +3791,173 @@ async fn a_say_line_for_no_group_of_hers_posts_nothing() {
     assert_eq!(
         e.agent.history(ch, None, 5).unwrap().last().unwrap().text,
         "Yes."
+    );
+}
+
+fn diagnostics(e: &Env) -> String {
+    std::fs::read_to_string(e._office.0.join("logs/dramatis.log")).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn an_idle_wrapup_that_fails_or_writes_nothing_leaves_a_line_and_stops_nothing() {
+    let e = env(WireApi::Responses);
+    let (ann, bo) = (direct(&e, "ann"), direct(&e, "bo"));
+    e.fake.push([say("hi"), say("hello")]);
+    e.agent.send(ann, "hello", None).await.unwrap();
+    e.agent.send(bo, "hello", None).await.unwrap();
+    e.clock.advance(31 * 60_000);
+    // The first wrap-up fails, the second finds nothing to keep; both are on record and
+    // the tick itself succeeds.
+    e.fake
+        .push([Reply::Fail("boom".into()), call("wrapup", json!({"facts": []}))]);
+    e.agent.tick(false).await.unwrap();
+    let log = diagnostics(&e);
+    assert!(log.contains("what=wrapup failed channel="), "{log}");
+    assert!(log.contains("what=wrapup wrote nothing channel="), "{log}");
+    assert_eq!(e.fake.left(), 0);
+}
+
+#[tokio::test]
+async fn the_wrapup_asks_for_memories_of_what_the_user_shared_and_agreed() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("hi")]);
+    e.agent.send(ch, "I start at dawn tomorrow", None).await.unwrap();
+    e.fake.push([call(
+        "wrapup",
+        json!({"facts": [{"kind": "fact", "text": "The user starts at dawn tomorrow."}]}),
+    )]);
+    e.agent.wrapup(ch).await.unwrap();
+    let ask = list(e.fake.json().last().unwrap()).last().unwrap().to_string();
+    assert!(
+        ask.contains("what Doc told you of their own life") && ask.contains("even when small"),
+        "{ask}"
+    );
+    assert_eq!(
+        e.agent.with_world(|w| fact::all(w, false).unwrap()).len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn an_enabled_person_opens_on_a_tick_once_the_user_is_idle_and_not_before() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
+    e.fake.push([say("hi")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    // The user is still in the conversation.
+    e.clock.advance(10 * 60_000);
+    assert_eq!(e.agent.tick(true).await.unwrap(), None);
+    // The window is hidden: the idle conversation is wrapped up, nobody opens.
+    e.clock.advance(25 * 60_000);
+    e.fake.push([call("wrapup", json!({"facts": []}))]);
+    assert_eq!(e.agent.tick(false).await.unwrap(), None);
+    // Talked with lately, he has no reason to drop by. After the days the settings give,
+    // idle and about, the enabled person drops by on the first tick.
+    assert_eq!(e.agent.tick(true).await.unwrap(), None);
+    e.clock.advance(2 * 86_400_000);
+    e.fake.push([say("Doc, have you a moment?")]);
+    let opened = e.agent.tick(true).await.unwrap();
+    assert_eq!(opened.map(|o| o.0), Some(p("ann")));
+    let said = e.agent.history(ch, None, 5).unwrap();
+    assert_eq!(said.last().unwrap().text, "Doc, have you a moment?");
+    // Once a day for one person, and not planned again within the interval.
+    e.clock.advance(2 * 3_600_000);
+    e.fake.push([call("wrapup", json!({"facts": []}))]);
+    assert_eq!(e.agent.tick(true).await.unwrap(), None);
+    assert_eq!(e.fake.left(), 0);
+}
+
+#[tokio::test]
+async fn an_enabled_group_that_fell_silent_gets_a_word_from_a_member() {
+    let e = env(WireApi::Responses);
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("plan the tea"))
+        .unwrap();
+    e.agent.with_world(|w| {
+        channel::set_mode(w, g, Mode::Enabled).unwrap();
+        for who in ["ann", "bo"] {
+            bond::set_mode(w, &p(who), Mode::Enabled).unwrap();
+        }
+        // The user spoke in it, so both have seen him lately: only the group is quiet.
+        world::message::append(w, g, &Actor::User, "hi all", None, None, T0 - 1000).unwrap();
+    });
+    // Quiet hours have not begun and the group has been silent for the usual time.
+    e.clock.advance(7 * 3_600_000);
+    e.fake.push([say("Has anyone seen the tea?")]);
+    let opened = e.agent.tick(true).await.unwrap();
+    let (who, ch) = opened.expect("a word in the group");
+    assert_eq!(ch, g);
+    assert!([p("ann"), p("bo")].contains(&who));
+    let last = e.agent.history(g, None, 5).unwrap().pop().unwrap();
+    assert_eq!(last.text, "Has anyone seen the tea?");
+}
+
+#[tokio::test]
+async fn a_deleted_group_is_not_listed_read_posted_into_or_offered_again() {
+    let e = env(WireApi::Chat);
+    let ann = direct(&e, "ann");
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("plan the tea"))
+        .unwrap();
+    e.agent.with_world(|w| {
+        world::message::append(w, g, &Actor::User, "tea at five", None, None, T0 - 1000).unwrap();
+    });
+    // A memory of what was said there stays with the people who were there.
+    e.agent.with_world(|w| {
+        fact::write(
+            w,
+            &NewFact::new(
+                Actor::Person(p("ann")),
+                Audience::Participants(g),
+                FactKind::Fact,
+                "Tea at five was agreed",
+            ),
+            T0,
+        )
+        .unwrap();
+        channel::delete_group(w, g, T0).unwrap();
+    });
+    // Her direct chat starts after the deletion: no group in the block, no line goes there.
+    e.fake.push([say("Of course.\n\u{21d2} say: plan the tea | Hello")]);
+    e.agent.send(ann, "tell the tea group hi", None).await.unwrap();
+    assert!(!log_bytes(&e.agent, ann).contains("also in these groups"));
+    assert!(e.agent.history(g, None, 5).unwrap().is_empty());
+    // The host neither lists nor reads it, and the same people and purpose make a new one.
+    e.fake.push([
+        call("list_channels", json!({})),
+        call("recent", json!({"channel": g.0.to_string()})),
+        call(
+            "create_group",
+            json!({"members": ["ann", "bo"], "purpose": "plan the tea"}),
+        ),
+        say("ok"),
+    ]);
+    e.agent.send(host, "what do I have", None).await.unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("Not found:"), "{log}");
+    assert!(!log.contains("already has exactly these people"), "{log}");
+    assert!(!log.contains(&format!("- {}: plan the tea", g.0)), "{log}");
+    let live = e.agent.with_world(|w| {
+        channel::list(w)
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.kind == world::ChannelKind::Group)
+            .count()
+    });
+    assert_eq!(live, 1);
+    // Her memory of the deleted group stays.
+    assert_eq!(
+        e.agent
+            .with_world(|w| fact::all(w, false).unwrap())
+            .iter()
+            .filter(|f| f.text.contains("Tea at five"))
+            .count(),
+        1
     );
 }

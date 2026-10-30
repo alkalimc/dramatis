@@ -32,7 +32,13 @@ impl Ctx<'_> {
 /// Block A: the global static text, identical for every person of this user. A group's
 /// log adds how a member hands the turn on.
 pub fn block_a(ctx: &Ctx<'_>, group: bool, proposing: bool) -> String {
-    let mut parts = vec![ctx.fill("harness.rules", &[])];
+    block_a_with(ctx, "harness.rules", group, proposing)
+}
+
+/// [`block_a`] with the key of the world's rules: the people meet the user in person, while
+/// the host is reached through the terminal.
+fn block_a_with(ctx: &Ctx<'_>, rules: &str, group: bool, proposing: bool) -> String {
+    let mut parts = vec![ctx.fill(rules, &[])];
     // The user's words go in as written, so the line is filled, never substituted into.
     if let Some(about) = ctx.names.about() {
         parts.push(ctx.fill("harness.about", &[("about", about)]));
@@ -100,7 +106,10 @@ pub fn block_a_host(
     layers: &HostLayers,
     frontend: Frontend,
 ) -> String {
-    let mut parts = vec![block_a(ctx, false, false), heading(ctx, host_name)];
+    let mut parts = vec![
+        block_a_with(ctx, "harness.rules.host", false, false),
+        heading(ctx, host_name),
+    ];
     for layer in [&layers.in_world, &layers.meta] {
         if !layer.trim().is_empty() {
             parts.push(ctx.names.sub(layer.trim()).into_owned());
@@ -1234,7 +1243,8 @@ mod tests {
             "{a}"
         );
         // After the rules, before the output format: a stable place in the cached block.
-        assert!(a.find("themselves").unwrap() > a.find("talks with").unwrap());
-        assert!(a.find("themselves").unwrap() < a.find("speech").unwrap());
+        let about = a.find("says this about themselves").unwrap();
+        assert!(about > a.find("is here in person").unwrap());
+        assert!(about < a.find("speech").unwrap());
     }
 }

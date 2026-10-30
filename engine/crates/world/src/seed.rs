@@ -39,6 +39,9 @@ pub enum SeedKind {
     Words(MessageId),
     /// A daily event of today that involves him (the fact that tells of it).
     Happening(FactId),
+    /// He has not talked with the user for a while, or the group has been silent: he
+    /// drops by with nothing in particular to say. Today's date as `yyyymmdd`.
+    Visit(i32),
 }
 
 impl SeedKind {
@@ -58,6 +61,7 @@ impl SeedKind {
             Self::Memory(f) => ("memory", f.0.to_string()),
             Self::Words(m) => ("words", m.0.to_string()),
             Self::Happening(f) => ("event", f.0.to_string()),
+            Self::Visit(d) => ("visit", d.to_string()),
         }
     }
 
@@ -71,6 +75,7 @@ impl SeedKind {
             "memory" => Self::Memory(FactId(n)),
             "words" => Self::Words(MessageId(n)),
             "event" => Self::Happening(FactId(n)),
+            "visit" => Self::Visit(i32::try_from(n).ok()?),
             _ => return None,
         })
     }
@@ -278,7 +283,12 @@ fn queued_candidates(conn: &Connection) -> Result<Vec<Candidate>> {
 }
 
 /// The three daily seeds for every enabled person.
-fn daily_candidates(conn: &Connection, now: Now, words: &[WordsHit]) -> Result<Vec<Candidate>> {
+fn daily_candidates(
+    conn: &Connection,
+    now: Now,
+    words: &[WordsHit],
+    seed: &SeedParams,
+) -> Result<Vec<Candidate>> {
     let enabled = bond::enabled(conn)?;
     let today = now.local_date();
     let birthday = settings::user_birthday(conn)?.filter(|b| *b == today.month_day());
@@ -321,6 +331,7 @@ fn daily_candidates(conn: &Connection, now: Now, words: &[WordsHit]) -> Result<V
             }
         }
     }
+    out.extend(visit_candidates(conn, &enabled, now, seed)?);
     for w in words {
         if !enabled.contains(&w.person) {
             continue;
@@ -344,31 +355,75 @@ fn daily_candidates(conn: &Connection, now: Now, words: &[WordsHit]) -> Result<V
     Ok(out)
 }
 
-/// The ordering rule: events first, then whoever has gone longest without talking with
-/// the user (never = longest). Ties break by person, then seed, for determinism.
+/// Visits: an enabled person the user has not talked with for `seed.visit_days` (and
+/// who has not opened for that long) may drop by; a member of an enabled group silent
+/// for `seed.group_quiet_hours` may speak in it. They have nothing to say, so they come
+/// after every seed that has.
+fn visit_candidates(
+    conn: &Connection,
+    enabled: &[PersonId],
+    now: Now,
+    seed: &SeedParams,
+) -> Result<Vec<Candidate>> {
+    let d = now.local_date();
+    let kind = SeedKind::Visit(d.year * 10_000 + i32::from(d.month) * 100 + i32::from(d.day));
+    let away = now.ms - i64::from(seed.visit_days) * clock::DAY_MS;
+    let quiet = now.ms - i64::from(seed.group_quiet_hours) * clock::HOUR_MS;
+    let mut out = Vec::new();
+    for p in enabled {
+        let seen = last_seen(conn, p)?;
+        let candidate = |origin: Option<ChannelId>| Candidate {
+            person: p.clone(),
+            kind: kind.clone(),
+            material: Vec::new(),
+            involved: Vec::new(),
+            origin,
+            last_seen: seen,
+        };
+        for g in channel::enabled_groups_of(conn, p)? {
+            let silent = message::last(conn, g.id)?.is_none_or(|m| m.at <= quiet);
+            if silent && !g.archived {
+                out.push(candidate(Some(g.id)));
+            }
+        }
+        if seen.is_none_or(|t| t <= away) && delivered_count(conn, Some(p), away, now.ms)? == 0 {
+            out.push(candidate(None));
+        }
+    }
+    Ok(out)
+}
+
+/// The ordering rule: events first, a visit last (one in a group before one in a direct
+/// chat), and within each whoever has gone longest without talking with the user (never =
+/// longest). Ties break by person, then
+/// seed, for determinism.
 pub fn order(candidates: &mut [Candidate]) {
-    candidates.sort_by(|a, b| {
+    let key = |c: &Candidate| {
         (
-            !a.kind.is_event(),
-            a.last_seen.unwrap_or(i64::MIN),
-            &a.person,
-            &a.kind,
+            !c.kind.is_event(),
+            matches!(c.kind, SeedKind::Visit(_)),
+            c.origin.is_none(),
+            c.last_seen.unwrap_or(i64::MIN),
         )
-            .cmp(&(
-                !b.kind.is_event(),
-                b.last_seen.unwrap_or(i64::MIN),
-                &b.person,
-                &b.kind,
-            ))
+    };
+    candidates.sort_by(|a, b| {
+        key(a)
+            .cmp(&key(b))
+            .then_with(|| (&a.person, &a.kind, a.origin).cmp(&(&b.person, &b.kind, b.origin)))
     });
 }
 
 /// Every candidate for the occasion, ordered.
-pub fn candidates(conn: &Connection, occasion: &Occasion<'_>, now: Now) -> Result<Vec<Candidate>> {
+pub fn candidates(
+    conn: &Connection,
+    occasion: &Occasion<'_>,
+    now: Now,
+    seed: &SeedParams,
+) -> Result<Vec<Candidate>> {
     let mut out = commitment_candidates(conn, now.ms)?;
     out.extend(queued_candidates(conn)?);
     if let Occasion::Presence { words } = occasion {
-        out.extend(daily_candidates(conn, now, words)?);
+        out.extend(daily_candidates(conn, now, words, seed)?);
     }
     order(&mut out);
     Ok(out)
@@ -430,7 +485,7 @@ pub fn plan(
     limits: &Limits<'_>,
     topic: &dyn TopicMatch,
 ) -> Result<Planned> {
-    let all = candidates(conn, occasion, now)?;
+    let all = candidates(conn, occasion, now, limits.seed)?;
     if all.is_empty() {
         return Ok(Planned::Held(Held::NoSeed));
     }
@@ -693,10 +748,14 @@ mod tests {
         ];
         assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 1).unwrap(), 1);
         assert_eq!(queue_hits(&w, Event::Pinned(case), &hits, 2).unwrap(), 0);
-        let cands = candidates(&w, &Occasion::Event, at(T0)).unwrap();
+        let cands = candidates(&w, &Occasion::Event, at(T0), &SeedParams::default()).unwrap();
         assert_eq!(cands.len(), 1);
         task::set_pinned(&w, case, false).unwrap();
-        assert!(candidates(&w, &Occasion::Event, at(T0)).unwrap().is_empty());
+        assert!(
+            candidates(&w, &Occasion::Event, at(T0), &SeedParams::default())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -795,7 +854,13 @@ mod tests {
         let env = Env::new(&w);
         enable(&w, &["a", "b"]);
         settings::set(&w, settings::USER_BIRTHDAY, "03-10").unwrap();
-        let cands = candidates(&w, &Occasion::Presence { words: &[] }, at(T0)).unwrap();
+        let cands = candidates(
+            &w,
+            &Occasion::Presence { words: &[] },
+            at(T0),
+            &SeedParams::default(),
+        )
+        .unwrap();
         assert_eq!(
             cands
                 .iter()
@@ -804,13 +869,21 @@ mod tests {
             2
         );
         assert!(
-            candidates(&w, &Occasion::Event, at(T0)).unwrap().is_empty(),
+            candidates(&w, &Occasion::Event, at(T0), &SeedParams::default())
+                .unwrap()
+                .is_empty(),
             "daily seeds only on presence"
         );
+        let next = candidates(
+            &w,
+            &Occasion::Presence { words: &[] },
+            at(T0 + DAY),
+            &SeedParams::default(),
+        )
+        .unwrap();
         assert!(
-            candidates(&w, &Occasion::Presence { words: &[] }, at(T0 + DAY))
-                .unwrap()
-                .is_empty()
+            next.iter().all(|c| matches!(c.kind, SeedKind::Visit(_))),
+            "no reason left but a visit"
         );
 
         let ca = channel::direct(&w, &p("a")).unwrap();
@@ -828,9 +901,19 @@ mod tests {
                 material: vec![],
             },
         ];
-        let cands = candidates(&w, &Occasion::Presence { words: &words }, at(T0 + DAY)).unwrap();
-        assert_eq!(cands.len(), 1);
-        assert_eq!(cands[0].person, p("a"));
+        let cands = candidates(
+            &w,
+            &Occasion::Presence { words: &words },
+            at(T0 + DAY),
+            &SeedParams::default(),
+        )
+        .unwrap();
+        let said: Vec<_> = cands
+            .iter()
+            .filter(|c| !matches!(c.kind, SeedKind::Visit(_)))
+            .collect();
+        assert_eq!(said.len(), 1);
+        assert_eq!(said[0].person, p("a"));
         let _ = env;
     }
 
@@ -892,5 +975,97 @@ mod tests {
             panic!()
         };
         assert_eq!(o.channel, g);
+    }
+
+    #[test]
+    fn an_enabled_person_with_no_other_reason_drops_by_after_days_of_silence() {
+        let w = world();
+        let env = Env::new(&w);
+        enable(&w, &["a"]);
+        // Never talked with: he may drop by in his own chat.
+        let Planned::Open(o) = presence(&w, &env, at(T0)) else {
+            panic!("a visit")
+        };
+        assert_eq!(o.person, p("a"));
+        assert!(matches!(o.kind, SeedKind::Visit(_)));
+        assert_eq!(o.channel, channel::direct(&w, &p("a")).unwrap());
+        deliver(&w, &o, T0);
+        // Not again within `visit_days`, however many occasions come.
+        let gap = i64::from(env.seed.visit_days) * DAY;
+        assert_eq!(
+            presence(&w, &env, at(T0 + gap - HOUR)),
+            Planned::Held(Held::NoSeed)
+        );
+        // Then he may come again.
+        assert!(matches!(
+            presence(&w, &env, at(T0 + gap + HOUR)),
+            Planned::Open(_)
+        ));
+        // Someone the user talked with lately has no reason to come by.
+        bond::touch_user(&w, &p("a"), T0 + gap).unwrap();
+        assert_eq!(
+            presence(&w, &env, at(T0 + gap + HOUR)),
+            Planned::Held(Held::NoSeed)
+        );
+    }
+
+    #[test]
+    fn a_visit_comes_after_every_seed_that_has_something_to_say() {
+        let w = world();
+        let env = Env::new(&w);
+        enable(&w, &["a", "b"]);
+        // `a` has gone longest unseen; `b` has a memory worth asking after.
+        bond::touch_user(&w, &p("b"), 1).unwrap();
+        let m = memory_about_user(&w, "b", "likes tea", 1);
+        let Planned::Open(o) = presence(&w, &env, at(T0 + 10 * DAY)) else {
+            panic!()
+        };
+        assert_eq!((o.person, o.kind), (p("b"), SeedKind::Memory(m)));
+    }
+
+    #[test]
+    fn a_silent_enabled_group_gets_a_word_from_a_member_and_a_busy_one_does_not() {
+        let w = world();
+        let env = Env::new(&w);
+        enable(&w, &["a", "b"]);
+        let g = channel::create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        channel::set_mode(&w, g, Mode::Enabled).unwrap();
+        let quiet = i64::from(env.seed.group_quiet_hours) * HOUR;
+        message::append(&w, g, &Actor::User, "hi all", None, None, T0 - quiet + HOUR).unwrap();
+        // Spoken in lately; the people's own chats are ignored here by their bond.
+        bond::touch_user(&w, &p("a"), T0).unwrap();
+        bond::touch_user(&w, &p("b"), T0).unwrap();
+        assert_eq!(
+            presence(&w, &env, at(T0 + 7 * HOUR)),
+            Planned::Open(Opening {
+                person: p("a"),
+                channel: g,
+                kind: SeedKind::Visit(20260310),
+                material: Vec::new(),
+                fact: None,
+            })
+        );
+        // Archived groups are left alone.
+        channel::set_archived(&w, g, true).unwrap();
+        assert_eq!(
+            presence(&w, &env, at(T0 + 7 * HOUR)),
+            Planned::Held(Held::NoSeed)
+        );
+        channel::set_archived(&w, g, false).unwrap();
+        // Spoken in again, it is no longer silent.
+        message::append(
+            &w,
+            g,
+            &Actor::User,
+            "more",
+            None,
+            None,
+            T0 + 7 * HOUR - 1000,
+        )
+        .unwrap();
+        assert_eq!(
+            presence(&w, &env, at(T0 + 7 * HOUR)),
+            Planned::Held(Held::NoSeed)
+        );
     }
 }

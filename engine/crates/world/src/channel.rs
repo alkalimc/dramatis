@@ -760,6 +760,30 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_group_is_listed_found_and_changed_nowhere() {
+        let w = world();
+        let who = [p("a"), p("b")];
+        let g = create_proposed_group(&w, &who, Some("tea"), Origin::User).unwrap();
+        set_mode(&w, g, Mode::Enabled).unwrap();
+        delete_group(&w, g, 7).unwrap();
+        assert!(list(&w).unwrap().iter().all(|c| c.id != g));
+        assert!(groups_of(&w, &p("a")).unwrap().is_empty());
+        assert!(enabled_groups_of(&w, &p("a")).unwrap().is_empty());
+        assert_eq!(find_group_with(&w, &who, None).unwrap(), None);
+        assert_eq!(find_group_with(&w, &who, Some("tea")).unwrap(), None);
+        assert!(add_members(&w, g, &[p("c")]).is_err());
+        assert!(remove_member(&w, g, &p("b")).is_err());
+        assert!(set_mode(&w, g, Mode::Frozen).is_err());
+        // The same people can start a new one: it is not mistaken for the old.
+        let again = create_proposed_group(&w, &who, Some("tea"), Origin::User).unwrap();
+        assert_ne!(again, g);
+        assert_eq!(
+            find_group_with(&w, &who, Some("tea")).unwrap().map(|c| c.id),
+            Some(again)
+        );
+    }
+
+    #[test]
     fn deleting_a_group_keeps_participation() {
         let w = world();
         let g = create_group(&w, &[p("a")], None, Origin::User).unwrap();

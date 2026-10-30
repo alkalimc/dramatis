@@ -140,6 +140,14 @@ pub struct Seed {
     pub per_agent_day: u32,
     /// Unprompted openings across everyone per local day.
     pub daily_total: u32,
+    /// Days without the user talking to an enabled person (and without an opening of
+    /// his) after which he may drop by with nothing in particular to say.
+    pub visit_days: u32,
+    /// Hours an enabled group may stay silent before one of its members speaks in it.
+    pub group_quiet_hours: u32,
+    /// Minutes between plannings of the daily seeds while the user is about and not in
+    /// a conversation, apart from his returns.
+    pub interval_min: u32,
     /// Default quiet hours (user local time) until the user sets their own.
     pub quiet_hours: QuietHours,
 }
@@ -155,7 +163,10 @@ impl Default for Seed {
     fn default() -> Self {
         Self {
             per_agent_day: 1,
-            daily_total: 3,
+            daily_total: 5,
+            visit_days: 2,
+            group_quiet_hours: 6,
+            interval_min: 90,
             quiet_hours: QuietHours {
                 from: "23:00".into(),
                 to: "08:00".into(),

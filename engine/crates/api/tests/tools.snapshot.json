@@ -68,13 +68,13 @@
       },
       {
         "function": {
-          "description": "Start a group conversation among two to six people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
+          "description": "Start a group conversation among two or more people; start small, with a few people who\nmatter for the matter at hand, and invite more later. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
           "name": "create_group",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "members": {
-                "description": "Roster ids, two to six.",
+                "description": "Roster ids, at least two.",
                 "items": {
                   "type": "string"
                 },
@@ -346,12 +346,12 @@
         "name": "ask"
       },
       {
-        "description": "Start a group conversation among two to six people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
+        "description": "Start a group conversation among two or more people; start small, with a few people who\nmatter for the matter at hand, and invite more later. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
             "members": {
-              "description": "Roster ids, two to six.",
+              "description": "Roster ids, at least two.",
               "items": {
                 "type": "string"
               },
@@ -604,13 +604,13 @@
         "type": "function"
       },
       {
-        "description": "Start a group conversation among two to six people. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
+        "description": "Start a group conversation among two or more people; start small, with a few people who\nmatter for the matter at hand, and invite more later. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
         "name": "create_group",
         "parameters": {
           "additionalProperties": false,
           "properties": {
             "members": {
-              "description": "Roster ids, two to six.",
+              "description": "Roster ids, at least two.",
               "items": {
                 "type": "string"
               },
@@ -950,7 +950,7 @@
             "properties": {
               "facts": {
                 "default": [],
-                "description": "Concrete things that happened or were promised. May be empty.",
+                "description": "What is worth remembering: what the user said of their own life, what was decided or\nagreed, what passed between you, one or two short lines. Empty only when nothing but\ngreetings were exchanged.",
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -1044,7 +1044,7 @@
                 ]
               },
               "group": {
-                "description": "Roster ids of colleagues for the host to propose a group with, at most four besides\nyou; you are included. To continue a group you already have with them, give its name\nas the purpose; any other purpose makes a new group.",
+                "description": "Roster ids of colleagues for the host to propose a group with, besides you; you are\nincluded. Start small: a few people who matter for the matter at hand; more can be\ninvited later. To continue a group you already have with them, give its name as the\npurpose; any other purpose makes a new group.",
                 "items": {
                   "type": "string"
                 },
@@ -1193,7 +1193,7 @@
           "properties": {
             "facts": {
               "default": [],
-              "description": "Concrete things that happened or were promised. May be empty.",
+              "description": "What is worth remembering: what the user said of their own life, what was decided or\nagreed, what passed between you, one or two short lines. Empty only when nothing but\ngreetings were exchanged.",
               "items": {
                 "additionalProperties": false,
                 "properties": {
@@ -1284,7 +1284,7 @@
               ]
             },
             "group": {
-              "description": "Roster ids of colleagues for the host to propose a group with, at most four besides\nyou; you are included. To continue a group you already have with them, give its name\nas the purpose; any other purpose makes a new group.",
+              "description": "Roster ids of colleagues for the host to propose a group with, besides you; you are\nincluded. Start small: a few people who matter for the matter at hand; more can be\ninvited later. To continue a group you already have with them, give its name as the\npurpose; any other purpose makes a new group.",
               "items": {
                 "type": "string"
               },
@@ -1437,7 +1437,7 @@
           "properties": {
             "facts": {
               "default": [],
-              "description": "Concrete things that happened or were promised. May be empty.",
+              "description": "What is worth remembering: what the user said of their own life, what was decided or\nagreed, what passed between you, one or two short lines. Empty only when nothing but\ngreetings were exchanged.",
               "items": {
                 "additionalProperties": false,
                 "properties": {
@@ -1529,7 +1529,7 @@
               ]
             },
             "group": {
-              "description": "Roster ids of colleagues for the host to propose a group with, at most four besides\nyou; you are included. To continue a group you already have with them, give its name\nas the purpose; any other purpose makes a new group.",
+              "description": "Roster ids of colleagues for the host to propose a group with, besides you; you are\nincluded. Start small: a few people who matter for the matter at hand; more can be\ninvited later. To continue a group you already have with them, give its name as the\npurpose; any other purpose makes a new group.",
               "items": {
                 "type": "string"
               },

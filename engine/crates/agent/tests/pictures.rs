@@ -135,7 +135,7 @@ async fn a_refused_picture_names_its_kind_and_does_not_poison_the_channel() {
         !body.contains(TINY) && !body.contains("image_url"),
         "{body}"
     );
-    assert!(body.contains("cannot show pictures"), "{body}");
+    assert!(body.contains("it could not be seen"), "{body}");
 }
 
 #[tokio::test]
@@ -162,7 +162,7 @@ async fn a_model_marked_blind_is_never_sent_a_picture() {
         !body.contains(TINY) && !body.contains("image_url"),
         "{body}"
     );
-    assert!(body.contains("cannot show pictures"), "{body}");
+    assert!(body.contains("it could not be seen"), "{body}");
 }
 
 #[tokio::test]

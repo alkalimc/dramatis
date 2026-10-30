@@ -25,6 +25,7 @@ use world::{
 use crate::address::Audience;
 use crate::agent::{Agent, Event};
 use crate::assemble::{self, Member};
+use crate::diag;
 use crate::error::{Error, Result, timestamp};
 use crate::persona;
 use crate::picture;
@@ -848,7 +849,9 @@ impl Agent {
             .agent
             .interject
             .min_confidence
-            .unwrap_or(self.ix().params().confidence.high_top1);
+            .unwrap_or(
+                self.ix().params().confidence.high_top1 * self.config.agent.interject.relax,
+            );
         let status = self.quota_status()?;
         let pick = channel::interjector(
             &self.db(),
@@ -1343,6 +1346,7 @@ impl Agent {
         let emulated = role.model.emulated_tools();
         let forced = !emulated && role.profile.wire_api.may_force_tool();
         if forced && !role.forced_tool() {
+            self.note_wrapup(ch, "wrapup skipped", "the model cannot be forced to the call");
             return Ok(None);
         }
         let Some(seg) = world::log::current(&self.db(), ch)? else {
@@ -1352,9 +1356,11 @@ impl Agent {
             return Ok(None);
         }
         if !self.decide(CallKind::UserInitiated)?.allowed() {
+            self.note_wrapup(ch, "wrapup skipped", "the quota is used up");
             return Ok(None);
         }
         let Some(author) = self.wrapup_author(ch)? else {
+            self.note_wrapup(ch, "wrapup skipped", "nobody to write it");
             return Ok(None);
         };
         let names = self.segment_names(seg.id)?;
@@ -1395,6 +1401,7 @@ impl Agent {
             self.append(seg.id, &request::tool_results(results))?;
         }
         let Some(mut args) = turn.wrapped else {
+            self.note_wrapup(ch, "wrapup without a call", &reply.text());
             return Ok(None);
         };
         wrapup_json::keep_undated(&mut args, self.now());
@@ -1420,8 +1427,22 @@ impl Agent {
                 person: view::person_id(&author),
             });
         }
+        if outcome.facts.is_empty() && outcome.hurt.is_none() {
+            self.note_wrapup(ch, "wrapup wrote nothing", &format!("{:?}", outcome.skipped));
+        }
         self.changed(changes);
         Ok(if summary { outcome.summary } else { None })
+    }
+
+    /// One line in the diagnostics log about a wrap-up that wrote no memory.
+    fn note_wrapup(&self, ch: ChannelId, what: &str, text: &str) {
+        let channel = ch.to_string();
+        diag::record(
+            &self.config.logs,
+            self.now().ms,
+            &[("what", what), ("channel", &channel)],
+            text,
+        );
     }
 
     /// Whose session runs the wrap-up: the owner of a direct channel, the last person
@@ -1512,6 +1533,11 @@ impl Agent {
         if let Some(out) = not_a_return(self)? {
             return Ok(out);
         }
+        // The user's return plans the daily seeds; the tick waits one interval after it.
+        *self
+            .daily_planned
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(now.ms);
         let words = self.words_hits(now)?;
         let birthdays = self.birthdays()?;
         let topic = TopicHits { agent: self };
@@ -1649,8 +1675,11 @@ impl Agent {
                 self.wrapup_ended(*ch).await?;
             }
         }
-        let opened = self.on_event().await?;
+        let mut opened = self.on_event().await?;
         if present && self.chat().is_ok() {
+            if opened.is_none() {
+                opened = self.on_daily().await?;
+            }
             let _plan = self.planner.lock().await;
             self.daily_event().await?;
         }
@@ -1658,6 +1687,63 @@ impl Agent {
             self.changed(vec![WorldChange::Digest]);
         }
         Ok(opened)
+    }
+
+    /// The daily seeds outside the user's returns, while he is about but not in a
+    /// conversation: at most one opening, planned at most every `seed.interval_min`
+    /// minutes, within every limit.
+    pub async fn on_daily(&self) -> Result<Option<(PersonId, ChannelId)>> {
+        let _plan = self.planner.lock().await;
+        if self.chat().is_err() {
+            return Ok(None);
+        }
+        let now = self.now();
+        // The moments that hold every opening back are checked first, and cost nothing.
+        let held = {
+            let conn = self.db();
+            let tier = settings::intensity(&conn)?;
+            let status = quota::status(&conn, tier, now.ms, &self.config.world.quota)?;
+            status.band != Band::Open
+                || settings::quiet_hours(&conn, &self.config.world.seed)?
+                    .is_some_and(|q| world::clock::in_quiet_hours(&q, now))
+                || seed::in_conversation(&conn, now.ms, &self.config.world.session)?
+        };
+        if held {
+            return Ok(None);
+        }
+        {
+            let mut last = self.daily_planned.lock().unwrap_or_else(|e| e.into_inner());
+            let wait = i64::from(self.config.world.seed.interval_min) * world::clock::MINUTE_MS;
+            if last.is_some_and(|t| now.ms - t < wait) {
+                return Ok(None);
+            }
+            *last = Some(now.ms);
+        }
+        let words = self.words_hits(now)?;
+        let topic = TopicHits { agent: self };
+        let planned = {
+            let conn = self.db();
+            let tier = settings::intensity(&conn)?;
+            let status = quota::status(&conn, tier, now.ms, &self.config.world.quota)?;
+            let limits = seed::Limits {
+                seed: &self.config.world.seed,
+                session: &self.config.world.session,
+                quota: &status,
+            };
+            seed::plan(
+                &conn,
+                &seed::Occasion::Presence { words: &words },
+                now,
+                &limits,
+                &topic,
+            )?
+        };
+        if let seed::Planned::Open(o) = planned
+            && self.opening(&o).await?
+        {
+            return Ok(Some((o.person, o.channel)));
+        }
+        Ok(None)
     }
 
     /// Wrap up a conversation that ended on its own (idle). Its channel may have been
@@ -1671,7 +1757,11 @@ impl Agent {
         {
             return Ok(());
         }
-        self.run_wrapup(ch, false).await?;
+        // The conversation is already closed, so a failure here would not be tried again;
+        // it is logged and the other conversations still get their wrap-up.
+        if let Err(e) = self.run_wrapup(ch, false).await {
+            self.note_wrapup(ch, "wrapup failed", &e.to_string());
+        }
         Ok(())
     }
 
@@ -1802,6 +1892,7 @@ impl Agent {
             SeedKind::Words(_) => detail("harness.opening.words", task_text.as_ref()),
             SeedKind::Birthday(_) => Some(w.fill("harness.opening.birthday", &names, &[])),
             SeedKind::Happening(_) => detail("harness.opening.event", fact_text.as_ref()),
+            SeedKind::Visit(_) => Some(w.fill("harness.opening.visit", &names, &[])),
         };
         lines.extend(line);
         let units: Vec<folio::Unit> = {
