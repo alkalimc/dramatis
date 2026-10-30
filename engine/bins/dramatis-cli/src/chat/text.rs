@@ -621,7 +621,7 @@ line is one message.",
         "folio {folio} | world {world} | chat {chat} | host {host_model}",
     ),
     ("cli.banner", "dramatis {version} · by {author} · {url}"),
-    ("cli.date", "{year}-{mm}-{dd}"),
+    ("cli.date", "{month}/{day}/{year}"),
     (
         "host.summary",
         "The assistant of this place. Ask it who to talk to, or hand it a question to look into.",
