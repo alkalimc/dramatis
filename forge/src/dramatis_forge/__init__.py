@@ -12,4 +12,4 @@ Everything domain-specific lives in a *pack* (`packs/<domain>/`). The code under
 mechanism, the pack owns rules. `pack.py` is the whole of that contract.
 """
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
