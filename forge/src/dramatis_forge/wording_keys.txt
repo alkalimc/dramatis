@@ -752,6 +752,7 @@ library.filter.person.any
 library.filter.template
 library.filter.template.any
 library.later
+library.more
 library.not_connected
 library.read
 library.reader
@@ -800,6 +801,8 @@ message.reply
 message.resend
 message.resend.confirm
 message.sources
+message.status.answered
+message.status.sent
 message.streaming
 mode.disabled
 mode.disabled.hint
@@ -837,6 +840,7 @@ nav.library
 nav.roster
 nav.world
 org.name
+page.top
 person.back
 person.last_seen
 person.mode

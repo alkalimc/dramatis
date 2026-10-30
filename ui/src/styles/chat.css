@@ -98,7 +98,7 @@
 }
 .turn-failed {
   align-self: center;
-  margin: var(--s-2) 0;
+  margin: var(--s-3) 0 var(--s-1);
   padding: var(--s-1) var(--s-3);
   border: 1px solid var(--danger);
   border-radius: var(--r-pill);
@@ -107,6 +107,7 @@
 }
 .awaiting {
   align-self: center;
+  margin: var(--s-3) 0 var(--s-1);
 }
 
 /* A message is a row: an avatar slot, a stack of bubbles, and for the user a slot on the right. */
@@ -204,6 +205,16 @@
   padding-left: 1.2rem;
   list-style: disc;
 }
+/* what is wider than the bubble scrolls inside it instead of widening the page */
+.speech table,
+.speech pre {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.speech img {
+  max-width: 100%;
+}
 /* Scene lines: description, not speech. Inside the bubble, italic and muted. */
 .scene {
   font-style: italic;
@@ -247,13 +258,15 @@
   font-size: var(--fs-xs);
   text-align: center;
 }
+/* The foot of a bubble: sources on the left; on the right the actions, the time and the ticks, one row on one baseline. */
 .message-foot {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
+  gap: var(--s-2);
   font-size: var(--fs-xs);
+  line-height: var(--foot-h);
   color: var(--stamp);
-  min-height: 1.2rem;
+  min-height: var(--foot-h);
 }
 .from-user .message-foot,
 .from-user .bubble .scene,
@@ -264,35 +277,51 @@
 .from-user .bubble button.link {
   color: var(--ink);
 }
-/* the hit area stays 32px high without making the bubble taller */
+/* a small icon button: as tall as the foot, so the bubble does not grow; the hit area is the foot's row */
 .message-foot button.icon {
-  margin: -0.5rem 0;
+  min-width: var(--foot-h);
+  min-height: var(--foot-h);
+  width: var(--foot-h);
+  height: var(--foot-h);
+  font-size: var(--fs-xs);
+  color: inherit;
 }
 .message-foot time {
-  margin-left: auto;
   flex: none;
 }
 .message-foot .spacer {
-  flex: 0 1 0;
+  flex: 1 1 0;
+  min-width: var(--s-2);
 }
 .sources-toggle {
   font-size: var(--fs-xs);
+  line-height: var(--foot-h);
 }
 /* Per-message actions show on hover or keyboard focus; always on where there is no hover. */
 .hover-actions {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--s-1);
   opacity: 0;
 }
 .message:hover .hover-actions,
-.message:focus-within .hover-actions {
+.message:focus-within .hover-actions,
+.hover-actions:has([aria-expanded="true"]) {
   opacity: 1;
 }
 @media (hover: none) {
   .hover-actions {
     opacity: 1;
   }
+}
+/* delivery ticks: AyuGram's, in the accent colour, at the end of the time */
+.ticks {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: var(--foot-h);
+  margin-left: calc(var(--s-1) * -1);
+  color: var(--accent);
 }
 .attachment {
   display: block;
@@ -339,29 +368,55 @@
   max-height: 88vh;
   border-radius: var(--r-sm);
 }
+/*
+ * Offers under a bubble, like an inline keyboard: rounded buttons of one width, in rows as
+ * wide as the bubble. `width: 0` with `min-width: 100%` keeps the keyboard from widening the
+ * bubble; the stack still has room for two columns.
+ */
+.message-stack:has(> .choices) {
+  min-width: min(18rem, 100%);
+}
 .choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+  gap: 2px;
+  width: 0;
+  min-width: 100%;
 }
-.message-offers {
+/* the keyboard of a message with no bubble stands alone, under its lead line */
+.log-item > .choices {
   align-self: flex-start;
-  max-width: min(66%, 56rem);
-  margin-top: 2px;
-  padding-left: calc(var(--avatar-m) + var(--s-2));
+  width: min(24rem, 66%);
+  margin-top: var(--s-1);
+  margin-left: calc(var(--avatar-m) + var(--s-2));
 }
-.choices button {
-  flex: 1 1 auto;
-  background: var(--other);
-  border-color: transparent;
-  color: var(--accent);
+.choices .service-line {
+  grid-column: 1 / -1;
+  align-self: center;
+  justify-self: start;
+  margin: 0 0 var(--s-1);
 }
 .choices button {
   min-height: var(--ctl);
+  padding: var(--s-1) var(--s-3);
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--other);
+  color: var(--accent);
+  font-weight: var(--fw-strong);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .choices button:hover:not(:disabled) {
   background: var(--field);
   color: var(--accent-hover);
+}
+.choices button:active:not(:disabled) {
+  background: var(--raised);
+  color: var(--accent-press);
 }
 
 /* ---- sources: a quote block inside the bubble, with the cited original text ---- */
@@ -577,7 +632,8 @@ button.source-line:hover:not(:disabled) {
   flex-direction: column;
   min-height: 0;
 }
-button.to-bottom {
+button.to-bottom,
+button.to-top {
   position: absolute;
   right: var(--s-4);
   bottom: var(--s-4);
@@ -588,7 +644,8 @@ button.to-bottom {
   color: var(--ink);
   box-shadow: var(--shadow-menu);
 }
-button.to-bottom:hover:not(:disabled) {
+button.to-bottom:hover:not(:disabled),
+button.to-top:hover:not(:disabled) {
   background: var(--field);
 }
 .to-bottom-count {

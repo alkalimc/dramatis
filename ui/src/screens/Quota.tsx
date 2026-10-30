@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { QuietHours, QuotaStatus, Settings, Tier } from "../api";
 import { useT } from "../i18n";
 import { when } from "../lib/format";
@@ -16,7 +16,7 @@ function eventCount(n: number, t: ReturnType<typeof useT>): string {
 export const TIERS: Tier[] = ["low", "middle", "high", "extra_high", "max", "ultra"];
 
 /** The one quota control, the rolling hour, and which band they put us in. */
-export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tier: Tier) => void }) {
+export function QuotaPanel({ quota, onTier, children }: { quota: QuotaStatus; onTier: (tier: Tier) => void; children?: ReactNode }) {
   const t = useT();
   const id = useId();
   const exhaustedLine = quotaExhaustedLine(quota, t);
@@ -38,6 +38,7 @@ export function QuotaPanel({ quota, onTier }: { quota: QuotaStatus; onTier: (tie
       </fieldset>
 
       <p className="muted small">{t("quota.pacing", { visits: quota.visits_per_day, events: quota.events_max })}</p>
+      {children}
 
       {quota.tier === "ultra" ? (
         <p className="band">{t("quota.ultra")}</p>
@@ -109,8 +110,6 @@ function TimeInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings) => void }) {
   const t = useT();
-  // The most happenings a day the intensity allows (the choice itself is cut to it by the engine).
-  const eventsMax = Math.max(useStore((s) => s.quota?.events_max ?? 6), settings.events_per_day);
   const id = useId();
   // The engine fills the default hours on first run; re-enabling restores the last ones.
   const [last, setLast] = useState<QuietHours>(settings.quiet_hours ?? { from: "", to: "" });
@@ -161,23 +160,6 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
       <p id={`${id}-n`} className="muted small">
         {t("quiet.notifications.hint")}
       </p>
-      <label className="field">
-        <span>{t("events.per_day")}</span>
-        <select
-          value={settings.events_per_day}
-          aria-describedby={`${id}-e`}
-          onChange={(e) => save({ ...settings, events_per_day: Number(e.target.value) })}
-        >
-          {eventCounts(eventsMax).map((n) => (
-            <option key={n} value={n}>
-              {eventCount(n, t)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p id={`${id}-e`} className="muted small">
-        {t("events.hint")}
-      </p>
     </section>
   );
 }
@@ -222,11 +204,35 @@ export function NameAndBirthday(p: {
   );
 }
 
+/** How many small happenings the host mentions a day; the tier sets the most. */
+function EventsControl({ settings, max, save }: { settings: Settings; max: number; save: (s: Settings) => void }) {
+  const t = useT();
+  const id = useId();
+  return (
+    <div className="field-group">
+      <label className="field">
+        <span>{t("events.per_day")}</span>
+        <select value={settings.events_per_day} aria-describedby={`${id}-e`} onChange={(e) => save({ ...settings, events_per_day: Number(e.target.value) })}>
+          {eventCounts(Math.max(max, settings.events_per_day)).map((n) => (
+            <option key={n} value={n}>
+              {eventCount(n, t)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p id={`${id}-e`} className="muted small">
+        {t("events.hint")}
+      </p>
+    </div>
+  );
+}
+
 /** The quota page of the settings card; loads the numbers when it opens. */
 export function QuotaSection() {
   const api = useApi();
   const actions = useActions();
   const quota = useStore((s) => s.quota);
+  const settings = useStore((s) => s.settings);
 
   useEffect(() => {
     void actions.refreshQuota();
@@ -238,7 +244,9 @@ export function QuotaSection() {
       onTier={async (tier) => {
         if ((await actions.attempt(api.commands.setTier(tier))) !== undefined) void actions.refreshQuota();
       }}
-    />
+    >
+      {settings && <EventsControl settings={settings} max={quota.events_max} save={(s) => void actions.saveSettings(s)} />}
+    </QuotaPanel>
   ) : null;
 }
 

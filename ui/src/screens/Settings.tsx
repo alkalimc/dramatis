@@ -12,15 +12,24 @@ import { SavesPage } from "./Saves";
 import { StoragePage } from "./Storage";
 import { statusLine, useCurrentSave } from "./Profile";
 
-const PAGES: { page: Exclude<SystemPage, "root">; icon: IconName }[] = [
-  { page: "quota", icon: "gauge" },
-  { page: "quiet", icon: "bell" },
-  { page: "language", icon: "language" },
-  { page: "endpoints", icon: "server" },
-  { page: "saves", icon: "bookmark" },
-  { page: "privacy", icon: "lock" },
-  { page: "storage", icon: "archive" },
-  { page: "about", icon: "info" },
+type PageDef = { page: Exclude<SystemPage, "root">; icon: IconName };
+
+// Grouped by what each page affects: who comes and when, the model, saves and data, the app itself.
+const GROUPS: PageDef[][] = [
+  [
+    { page: "quota", icon: "gauge" },
+    { page: "quiet", icon: "bell" },
+  ],
+  [{ page: "endpoints", icon: "server" }],
+  [
+    { page: "saves", icon: "bookmark" },
+    { page: "storage", icon: "archive" },
+    { page: "privacy", icon: "lock" },
+  ],
+  [
+    { page: "language", icon: "language" },
+    { page: "about", icon: "info" },
+  ],
 ];
 
 function Row({ icon, label, value, onClick }: { icon: IconName; label: string; value?: string; onClick: () => void }) {
@@ -49,6 +58,8 @@ export function SettingsCard({ page }: { page: SystemPage }) {
   const name = settings?.user_name?.trim() || t("user.you");
   const status = statusLine(t, settings?.user_name ?? null);
   const label = (p: Exclude<SystemPage, "root">) => t(`settings.page.${p}`);
+  const valueOf = (p: Exclude<SystemPage, "root">) =>
+    p === "quota" && tier ? t(`quota.tier.${tier}`) : p === "saves" ? (save ?? undefined) : p === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : p === "about" && newer ? t("menu.update") : undefined;
 
   return (
     <Dialog title={t("menu.settings")} onClose={close} className="settings-card" hideTitle>
@@ -74,11 +85,13 @@ export function SettingsCard({ page }: { page: SystemPage }) {
               {status && <span className="left-sub">{status}</span>}
             </span>
           </button>
-          <ul className="settings-list settings-gap">
-            {PAGES.map((p) => (
-              <Row key={p.page} icon={p.icon} label={label(p.page)} value={p.page === "quota" && tier ? t(`quota.tier.${tier}`) : p.page === "saves" ? (save ?? undefined) : p.page === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : p.page === "about" && newer ? t("menu.update") : undefined} onClick={() => go(p.page)} />
-            ))}
-          </ul>
+          {GROUPS.map((group, i) => (
+            <ul key={i} className="settings-list settings-gap">
+              {group.map((p) => (
+                <Row key={p.page} icon={p.icon} label={label(p.page)} value={valueOf(p.page)} onClick={() => go(p.page)} />
+              ))}
+            </ul>
+          ))}
         </div>
       ) : (
         <div className="settings-page" role="region" aria-label={label(page)}>

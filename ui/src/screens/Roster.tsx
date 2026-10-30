@@ -7,7 +7,7 @@ import { canTalk } from "../lib/library";
 import { hasPersona } from "../lib/persona";
 import { filtering, passes, type RosterFilter } from "../lib/roster";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { Avatar } from "../ui/Avatar";
+import { Avatar, ChannelAvatar } from "../ui/Avatar";
 import { ModeSwitch, modeHintKey } from "../ui/ModeSwitch";
 
 /** A small "typing" marker for a channel that is generating. */
@@ -48,16 +48,19 @@ function GroupList() {
       {groups.length === 0 ? (
         <p className="muted">{t("group.list.empty")}</p>
       ) : (
-        <ul>
+        <ul className="roster-rows">
           {groups.map((g) => (
-            <li key={g.id}>
-              <button type="button" className="link name" onClick={() => actions.open(g.id)}>
-                {groupTitle(g, t, me)}
-              </button>{" "}
-              {typingIn.has(g.id) && <TypingMark />}
-              <span className="muted small">
-                {g.participants.map((p) => p.name).join(" · ")} · {t(`mode.${g.mode}`)}
-              </span>
+            <li key={g.id} className="roster-row">
+              <ChannelAvatar channel={g} />
+              <div className="who">
+                <button type="button" className="link name" onClick={() => actions.open(g.id)}>
+                  {groupTitle(g, t, me)}
+                </button>
+                {typingIn.has(g.id) && <TypingMark />}
+                <span className="muted small">
+                  {g.participants.map((p) => p.name).join(" · ")} · {t(`mode.${g.mode}`)}
+                </span>
+              </div>
             </li>
           ))}
         </ul>

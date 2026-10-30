@@ -21,11 +21,16 @@ test("settings is a card with a list of sections; each opens its page and back r
   expect(within(page).getByRole("switch", { name: "Do not disturb" })).toBeDefined();
   expect(within(page).getByLabelText("From")).toBeDefined();
   expect(within(page).getByLabelText("To")).toBeDefined();
+  // The happenings moved to the quota page, where the intensity sets how many there can be.
+  expect(within(page).queryByLabelText("Happenings on board")).toBeNull();
+  await user.click(within(card).getByRole("button", { name: "Back" }));
+  await user.click(within(card).getByRole("button", { name: /^Quota and intensity/ }));
+  const quota = within(card).getByRole("region", { name: "Quota and intensity" });
   // Happenings on board: one a day until the user chooses another number.
-  const events = within(page).getByLabelText("Happenings on board") as HTMLSelectElement;
+  const events = (await within(quota).findByLabelText("Happenings on board")) as HTMLSelectElement;
   expect(events.value).toBe("1");
   await user.selectOptions(events, "0");
-  expect((within(page).getByLabelText("Happenings on board") as HTMLSelectElement).value).toBe("0");
+  expect((within(quota).getByLabelText("Happenings on board") as HTMLSelectElement).value).toBe("0");
   await user.click(within(card).getByRole("button", { name: "Back" }));
   expect(within(card).getByRole("button", { name: /^Saves/ })).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Close" }));

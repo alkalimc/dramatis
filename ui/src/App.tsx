@@ -8,6 +8,7 @@ import { inLibrary } from "./lib/library";
 import { readFresh } from "./lib/fresh";
 import { isDark } from "./lib/prefs";
 import { Icon, type IconName } from "./ui/Icon";
+import { BackToTop } from "./ui/BackToTop";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { ChatList } from "./screens/ChatList";
 import { FirstOpen } from "./screens/FirstOpen";
@@ -300,9 +301,11 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
   const t = useT();
   const dispatch = useDispatch();
   const ref = useRef<HTMLElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   const kind = drawer.kind;
   useEffect(() => {
-    ref.current?.focus();
+    ref.current?.focus({ preventScroll: true });
+    scroll.current?.scrollTo?.({ top: 0 });
   }, [kind]);
   return (
     <aside
@@ -315,11 +318,14 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       <button type="button" className="icon close" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={() => dispatch({ type: "drawer", drawer: null })}>
         <Icon name="close" size={20} />
       </button>
-      {drawer.kind === "roster" && <RosterDrawer />}
-      {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}
-      {drawer.kind === "host" && <HostDrawer />}
-      {drawer.kind === "channel" && <GroupInfo id={drawer.id} />}
-      {drawer.kind === "world" && <WorldDrawer />}
+      <div ref={scroll} className="drawer-scroll">
+        {drawer.kind === "roster" && <RosterDrawer />}
+        {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}
+        {drawer.kind === "host" && <HostDrawer />}
+        {drawer.kind === "channel" && <GroupInfo id={drawer.id} />}
+        {drawer.kind === "world" && <WorldDrawer />}
+      </div>
+      <BackToTop scroller={scroll} />
     </aside>
   );
 }

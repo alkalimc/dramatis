@@ -7,12 +7,14 @@ import { jumpTo } from "../lib/jump";
 import { renderMarkdown } from "../lib/markdown";
 import { highlightMentions } from "../lib/mention";
 import { bubbles, isBlank, speechOnly } from "../lib/scene";
+import { deliveryOf } from "../lib/ticks";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { SourcesPanel } from "./Citation";
 import { Avatar, HOST_ID, UserAvatar } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
+import { Ticks } from "../ui/Ticks";
 
 export function ActionLines({ author, actions }: { author: Author; actions: ToolAction[] }) {
   const t = useT();
@@ -47,7 +49,7 @@ function Choices({ actions, message, lead }: { actions: ToolAction[]; message: M
   );
   if (choices.length === 0) return null;
   return (
-    <div className="choices message-offers">
+    <div className="choices">
       {lead && <p className="service-line">{lead}</p>}
       {choices.map((c) =>
         c.kind === "invite" ? (
@@ -276,9 +278,12 @@ const BubbleMessage = memo(function BubbleMessage({
   const writing = useStore((s) => Boolean(s.typing[message.channel]) || Object.values(s.streams).some((v) => v.channel === message.channel));
   const [playing, setPlaying] = useState(false);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const wasOpen = useRef(false);
   const body = useRef<HTMLDivElement>(null);
 
   const mine = message.author.kind === "user";
+  // Ticks on the user's own messages: one once a reply is under way, two when the round is done.
+  const delivery = useStore((s) => (mine ? deliveryOf(s.messages[message.channel] ?? [], message.id, writing, Boolean(s.failures[message.channel])) : 0));
   const name = authorName(message.author, t, names, user);
   const speech = useMemo(() => speechOnly(message.text, marker).trim(), [message.text, marker]);
 
@@ -389,9 +394,35 @@ const BubbleMessage = memo(function BubbleMessage({
             ▷
           </button>
         )}
+        {(speech || (mine && !writing)) && (
+          <button
+            type="button"
+            className="icon more"
+            aria-label={t("message.actions")}
+            title={t("message.actions")}
+            aria-haspopup="menu"
+            aria-expanded={menuAt !== null}
+            // A press on the button while its menu is open closes the menu (as any press outside
+            // it does); the click that follows must not open it again.
+            onMouseDown={() => {
+              wasOpen.current = menuAt !== null;
+            }}
+            onClick={(e) => {
+              if (wasOpen.current) {
+                wasOpen.current = false;
+                return;
+              }
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenuAt({ x: r.left, y: r.bottom + 4 });
+            }}
+          >
+            <Icon name="more" size={16} />
+          </button>
+        )}
       </span>
       {/* A kept message shows when it was first said; the list is in the order it was kept. */}
       <time dateTime={message.original_at ?? message.at}>{when(message.original_at ?? message.at, t)}</time>
+      {mine && <Ticks delivery={delivery} />}
     </div>
   );
 
@@ -434,11 +465,11 @@ const BubbleMessage = memo(function BubbleMessage({
           {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} top={picture} foot={withSources(foot)} />}
         </div>
 
+        {message.author.kind !== "user" && <Choices actions={message.actions} message={message} />}
         {menuAt && <Menu at={menuAt} items={menuItems()} label={t("message.actions")} onClose={closeMenu} />}
       </div>
       {mine && <div className="message-avatar">{last && <UserAvatar />}</div>}
     </article>
-    {message.author.kind !== "user" && <Choices actions={message.actions} message={message} />}
     </>
   );
 });

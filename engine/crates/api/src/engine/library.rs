@@ -9,6 +9,9 @@ use crate::error::{ApiError, ApiResult};
 use crate::types::*;
 use crate::views::*;
 
+/// Hits the library asks the index for; the screen shows them a page at a time.
+const SEARCH_WINDOW: usize = 90;
+
 fn nonempty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
@@ -70,6 +73,7 @@ impl Engine {
         }
         let namer = self.namer()?;
         let mut request = index::SearchRequest::new(query);
+        request.top_k = SEARCH_WINDOW;
         request.filters.persons = persons.iter().map(|p| p.0.clone()).collect();
         request.filters.templates = templates.to_vec();
         let found = c.with_index(|ix| ix.search(&request))?;

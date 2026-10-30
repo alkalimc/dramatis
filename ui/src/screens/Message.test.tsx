@@ -293,14 +293,62 @@ test("right click on a message offers to copy it, and to send an own message aga
   expect(screen.getByRole("menuitem", { name: "Send again" })).toBeDefined();
 });
 
-test("Send again has no button under the message, and selecting text opens nothing", async () => {
+test("Send again has no button of its own, and selecting text opens nothing", async () => {
   const user = userEvent.setup();
   const { container } = renderWith(<MessageView message={{ ...base, author: { kind: "user" }, text: "Hello there" }} showPlay={false} />);
   expect(screen.queryByRole("button", { name: "Send again" })).toBeNull();
   const body = container.querySelector(".message-body")!;
   await user.pointer([{ keys: "[MouseLeft>]", target: body }, { keys: "[/MouseLeft]", target: body }]);
   expect(screen.queryByRole("region", { name: "About the selected text" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Actions for this message" })).toBeNull();
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+const cites: Message["cites"] = [{ page: "Ledger", revid: 1, span_from: 0, span_to: 5, chunk_id: "c-ledger-1" }];
+
+test("the small button in the foot opens the message menu, also with the sources open", async () => {
+  const user = userEvent.setup();
+  const { container } = renderWith(<MessageView message={{ ...base, text: "The corridor closed.[#c-ledger-1]", cites }} showPlay={false} />);
+  const foot = container.querySelector(".message-foot")!;
+  const more = foot.querySelector("button.more") as HTMLButtonElement;
+  // One row: sources, the button, the time.
+  expect(foot.querySelector(".sources-toggle")).not.toBeNull();
+  expect(more.compareDocumentPosition(foot.querySelector("time")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await user.click(more);
+  expect(await screen.findByRole("menuitem", { name: "Copy text" })).toBeDefined();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("menu")).toBeNull();
+  await user.click(foot.querySelector(".sources-toggle")!);
+  expect(container.querySelector(".sources-panel")).not.toBeNull();
+  await user.click(foot.querySelector("button.more")!);
+  expect(await screen.findByRole("menuitem", { name: "Copy text" })).toBeDefined();
+});
+
+test("the user's message shows one tick while a reply is under way and two when it is done", async () => {
+  const channel = "dm:ticks";
+  const mineMsg: Message = { ...base, id: "u1", channel, author: { kind: "user" }, text: "Hello there" };
+  const { store, container } = renderWith(<MessageView message={mineMsg} showPlay={false} />);
+  const ticks = () => container.querySelector(".ticks");
+  await act(async () => {
+    store.dispatch({ type: "messageAdded", event: { message: mineMsg } });
+  });
+  expect(ticks()).toBeNull();
+  const author = { kind: "person", id: "mira" } as const;
+  await act(async () => {
+    store.dispatch({ type: "turnActivity", event: { channel, author, state: { kind: "thinking" } } });
+  });
+  expect(screen.getByRole("img", { name: "Delivered, a reply is coming" })).toBeDefined();
+  await act(async () => {
+    store.dispatch({ type: "messageAdded", event: { message: { ...base, id: "a1", channel, text: "Hi." } } });
+    store.dispatch({ type: "turnActivity", event: { channel, author, state: { kind: "done" } } });
+  });
+  expect(screen.getByRole("img", { name: "Answered" })).toBeDefined();
+});
+
+test("offers sit under the bubble, inside its column", () => {
+  const actions: Message["actions"] = [{ tool: "find_people", topic: "", persons: [{ id: "oren", name: "Oren" }] }];
+  const { container } = renderWith(<MessageView message={{ ...base, text: "Try Oren.", actions }} showPlay={false} />);
+  const stack = container.querySelector(".message-stack")!;
+  expect(stack.querySelector(":scope > .choices")).not.toBeNull();
 });
 
 const mine: Message = { ...base, author: { kind: "user" }, text: "look at this" };

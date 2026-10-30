@@ -452,9 +452,10 @@ impl Index {
 
         // Unweighted, and before exclusion: having shown the answer already does not make
         // the corpus less sure of it.
+        // A wider window than the configured one asks for more hits, not for a flatter reading.
         let confidence = Confidence::of(
             &ranked.iter().map(|h| h.unweighted).collect::<Vec<_>>(),
-            top_k,
+            top_k.min(self.params.top_k),
             &self.params.confidence,
         );
 

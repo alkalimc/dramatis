@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ChannelSummary, PersonRef } from "../api";
+import type { Author, ChannelSummary, PersonRef } from "../api";
 import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
 import { useApi, useStore } from "../store";
@@ -98,4 +98,10 @@ export function ChannelAvatar({ channel, size = "m" }: { channel: ChannelSummary
   }
   if (channel.kind === "direct" && channel.participants[0]) return <Avatar person={channel.participants[0]} size={size} />;
   return <GroupAvatar channel={channel} size={size} />;
+}
+
+/** The picture of whoever wrote a message: the user's own, the host's portrait, or the person's. */
+export function AuthorAvatar({ author, name, size = "m" }: { author: Author; name: string; size?: Size }) {
+  if (author.kind === "user") return <UserAvatar size={size} />;
+  return <Avatar person={{ id: author.kind === "host" ? HOST_ID : author.id, name }} size={size} />;
 }
