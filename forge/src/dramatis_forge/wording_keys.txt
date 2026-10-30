@@ -613,7 +613,6 @@ harness.error.promises_full
 harness.error.quiet
 harness.error.refused
 harness.error.self
-harness.error.too_many
 harness.error.unavailable
 harness.error.wrapup_only
 harness.event
@@ -653,6 +652,7 @@ harness.guide.terminal.name
 harness.guide.terminal.resend
 harness.guide.terminal.saves
 harness.guide.terminal.sources
+harness.host.group
 harness.host.manner
 harness.host_offline
 harness.interject
@@ -673,6 +673,7 @@ harness.opening.conclusion
 harness.opening.event
 harness.opening.memory
 harness.opening.pinned
+harness.opening.visit
 harness.opening.words
 harness.output
 harness.persona
@@ -685,6 +686,7 @@ harness.read_recent.none
 harness.recent
 harness.remembered
 harness.rules
+harness.rules.host
 harness.said
 harness.say
 harness.say_mark
@@ -704,6 +706,7 @@ harness.topic
 harness.wrapup
 harness.wrapup.shape
 harness.wrapup.summary
+host.alias
 host.event.frame
 host.intro.app
 host.intro.terminal

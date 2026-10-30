@@ -74,7 +74,8 @@ pub struct RequestJoin {
 #[serde(deny_unknown_fields)]
 pub struct AskHost {
     /// Names or roster ids of the colleagues you suggest the user goes to, at most three:
-    /// the ones your reply names for this.
+    /// the ones your reply names for this. In a group, the host's name has the user invite
+    /// the host into it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1))]
     pub find: Option<Vec<String>>,
@@ -162,7 +163,8 @@ pub struct Digest {}
 
 /// Find people who know about a subject. When the subject is one person (a name, an alias,
 /// or a description that fits one person on the roster) only that person is offered. The
-/// user is shown a way to talk to them; you cannot move the user yourself.
+/// user is shown a way to talk to them (asked in a group, a way to invite them into it);
+/// you cannot move the user yourself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindPeople {

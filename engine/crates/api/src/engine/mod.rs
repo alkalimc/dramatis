@@ -294,6 +294,14 @@ impl Engine {
         }
     }
 
+    /// The host's name in the corpus's wording.
+    pub(crate) fn host_name(&self) -> String {
+        self.corpus
+            .as_ref()
+            .and_then(|c| c.manifest.wording.get("host.name").cloned())
+            .unwrap_or_else(|| HOST_MEMBER.to_owned())
+    }
+
     /// How the user is named in corpus text right now.
     pub(crate) fn namer(&self) -> ApiResult<Namer> {
         let name = world::settings::user_name(&self.w()).map_err(world_err)?;

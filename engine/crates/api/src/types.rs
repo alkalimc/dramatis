@@ -21,6 +21,11 @@ macro_rules! id {
     )*};
 }
 
+/// The id under which the host stands among a group's members: `add_members` and
+/// `remove_member` take it to bring the host into a group or out of it, and a group's
+/// participants list it while it is there. It is no roster person.
+pub const HOST_MEMBER: &str = "host";
+
 id! {
     /// A roster id from the corpus; stable across corpus versions.
     PersonId,

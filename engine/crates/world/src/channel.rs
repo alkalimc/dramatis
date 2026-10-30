@@ -275,6 +275,35 @@ pub fn add_members(
     })
 }
 
+/// Bring the host into a live group, as the user's own change of its roster (the host
+/// answers there when it is addressed). Returns whether it was not in it already.
+pub fn add_host(conn: &Connection, channel: ChannelId) -> Result<bool> {
+    crate::atomic(conn, |conn| {
+        let ch = live_group(conn, channel)?;
+        if ch.participants.contains(&Actor::Host) {
+            return Ok(false);
+        }
+        add_participant(conn, channel, &Actor::Host)?;
+        Ok(true)
+    })
+}
+
+/// Take the host out of a live group; what it said stays in its history. Returns
+/// whether it was in it.
+pub fn remove_host(conn: &Connection, channel: ChannelId) -> Result<bool> {
+    crate::atomic(conn, |conn| {
+        let ch = live_group(conn, channel)?;
+        if !ch.participants.contains(&Actor::Host) {
+            return Ok(false);
+        }
+        conn.execute(
+            "DELETE FROM channel_participant WHERE channel = ?1 AND participant = ?2",
+            (channel, Actor::Host),
+        )?;
+        Ok(true)
+    })
+}
+
 /// Take a person out of a live group. What they said stays in its history. A group keeps
 /// at least one person. Returns whether the person was in it.
 pub fn remove_member(conn: &Connection, channel: ChannelId, person: &PersonId) -> Result<bool> {
@@ -760,6 +789,26 @@ mod tests {
     }
 
     #[test]
+    fn the_host_joins_and_leaves_a_live_group_without_counting_as_a_person() {
+        let w = world();
+        let g = create_group(&w, &[p("a")], None, Origin::User).unwrap();
+        assert!(add_host(&w, g).unwrap());
+        assert!(!add_host(&w, g).unwrap());
+        let ch = get(&w, g).unwrap();
+        assert!(ch.has(&Actor::Host));
+        assert_eq!(ch.persons(), vec![p("a")]);
+        // The last person still cannot leave, with the host there.
+        assert!(remove_member(&w, g, &p("a")).is_err());
+        assert!(remove_host(&w, g).unwrap());
+        assert!(!remove_host(&w, g).unwrap());
+        assert!(!get(&w, g).unwrap().has(&Actor::Host));
+        let d = direct(&w, &p("a")).unwrap();
+        assert!(add_host(&w, d).is_err());
+        delete_group(&w, g, 1).unwrap();
+        assert!(add_host(&w, g).is_err());
+    }
+
+    #[test]
     fn a_deleted_group_is_listed_found_and_changed_nowhere() {
         let w = world();
         let who = [p("a"), p("b")];
@@ -778,7 +827,9 @@ mod tests {
         let again = create_proposed_group(&w, &who, Some("tea"), Origin::User).unwrap();
         assert_ne!(again, g);
         assert_eq!(
-            find_group_with(&w, &who, Some("tea")).unwrap().map(|c| c.id),
+            find_group_with(&w, &who, Some("tea"))
+                .unwrap()
+                .map(|c| c.id),
             Some(again)
         );
     }

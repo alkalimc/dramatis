@@ -2619,9 +2619,7 @@ async fn every_user_entry_carries_the_clock_and_a_long_silence() {
         texts[1]
     );
     assert!(
-        texts[2].ends_with(
-            "[2026-03-11 Wednesday 18:20, evening] (Doc last spoke 30 hours ago)"
-        ),
+        texts[2].ends_with("[2026-03-11 Wednesday 18:20, evening] (Doc last spoke 30 hours ago)"),
         "{}",
         texts[2]
     );
@@ -3808,8 +3806,10 @@ async fn an_idle_wrapup_that_fails_or_writes_nothing_leaves_a_line_and_stops_not
     e.clock.advance(31 * 60_000);
     // The first wrap-up fails, the second finds nothing to keep; both are on record and
     // the tick itself succeeds.
-    e.fake
-        .push([Reply::Fail("boom".into()), call("wrapup", json!({"facts": []}))]);
+    e.fake.push([
+        Reply::Fail("boom".into()),
+        call("wrapup", json!({"facts": []})),
+    ]);
     e.agent.tick(false).await.unwrap();
     let log = diagnostics(&e);
     assert!(log.contains("what=wrapup failed channel="), "{log}");
@@ -3822,13 +3822,19 @@ async fn the_wrapup_asks_for_memories_of_what_the_user_shared_and_agreed() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
     e.fake.push([say("hi")]);
-    e.agent.send(ch, "I start at dawn tomorrow", None).await.unwrap();
+    e.agent
+        .send(ch, "I start at dawn tomorrow", None)
+        .await
+        .unwrap();
     e.fake.push([call(
         "wrapup",
         json!({"facts": [{"kind": "fact", "text": "The user starts at dawn tomorrow."}]}),
     )]);
     e.agent.wrapup(ch).await.unwrap();
-    let ask = list(e.fake.json().last().unwrap()).last().unwrap().to_string();
+    let ask = list(e.fake.json().last().unwrap())
+        .last()
+        .unwrap()
+        .to_string();
     assert!(
         ask.contains("what Doc told you of their own life") && ask.contains("even when small"),
         "{ask}"
@@ -3924,8 +3930,12 @@ async fn a_deleted_group_is_not_listed_read_posted_into_or_offered_again() {
         channel::delete_group(w, g, T0).unwrap();
     });
     // Her direct chat starts after the deletion: no group in the block, no line goes there.
-    e.fake.push([say("Of course.\n\u{21d2} say: plan the tea | Hello")]);
-    e.agent.send(ann, "tell the tea group hi", None).await.unwrap();
+    e.fake
+        .push([say("Of course.\n\u{21d2} say: plan the tea | Hello")]);
+    e.agent
+        .send(ann, "tell the tea group hi", None)
+        .await
+        .unwrap();
     assert!(!log_bytes(&e.agent, ann).contains("also in these groups"));
     assert!(e.agent.history(g, None, 5).unwrap().is_empty());
     // The host neither lists nor reads it, and the same people and purpose make a new one.

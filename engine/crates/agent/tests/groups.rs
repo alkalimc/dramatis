@@ -204,3 +204,240 @@ async fn the_hosts_group_for_the_same_people_is_reused() {
     let body = body_text(e.fake.bodies().last().unwrap());
     assert!(body.contains("already has exactly these people"), "{body}");
 }
+
+fn host_joins(e: &Env, g: ChannelId) {
+    e.agent
+        .with_world(|w| assert!(channel::add_host(w, g).unwrap()));
+}
+
+async fn host_joined(e: &Env, g: ChannelId) {
+    host_joins(e, g);
+    e.agent
+        .members_changed(g, &[p(api::types::HOST_MEMBER)], &[])
+        .await
+        .unwrap();
+}
+
+fn tool_names(body: &serde_json::Value) -> Vec<String> {
+    body["tools"]
+        .as_array()
+        .map(|t| {
+            t.iter()
+                .filter_map(|x| x["function"]["name"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn authors(e: &Env, g: ChannelId) -> Vec<api::types::Author> {
+    e.agent
+        .history(g, None, 20)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.author)
+        .collect()
+}
+
+#[tokio::test]
+async fn the_host_is_invited_into_a_group_and_the_group_log_says_so() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    host_joined(&e, g).await;
+    let members = e.agent.with_world(|w| channel::get(w, g).unwrap());
+    assert!(members.has(&world::Actor::Host));
+    assert_eq!(members.persons(), [p("ann"), p("bo")], "no roster person");
+    let said: Vec<_> = e
+        .agent
+        .history(g, None, 5)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(said, ["Hostess joins the conversation."]);
+    // The first message of a segment shows the host as a member.
+    e.fake.push([say("Hi.")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert!(log_bytes(&e.agent, g).contains("## Hostess"));
+}
+
+#[tokio::test]
+async fn the_host_answers_in_a_group_when_called_by_name_with_its_own_tools() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    host_joined(&e, g).await;
+    e.fake.push([say("Here, Doc.")]);
+    e.agent
+        .send(g, "Hostess, are you there?", None)
+        .await
+        .unwrap();
+    // One call, answered by the host alone, and on the host's tools, not the people's.
+    let sent = e.fake.json();
+    assert_eq!(sent.len(), 1);
+    let tools = tool_names(&sent[0]);
+    assert!(
+        tools.contains(&"create_group".to_owned()) && tools.contains(&"list_channels".to_owned()),
+        "{tools:?}"
+    );
+    assert!(!tools.contains(&"ask_host".to_owned()), "{tools:?}");
+    let last = e.agent.history(g, None, 5).unwrap().pop().unwrap();
+    assert_eq!(
+        (last.author, last.text.as_str()),
+        (api::types::Author::Host, "Here, Doc.")
+    );
+    let body = body_text(&e.fake.bodies()[0]);
+    assert!(body.contains("(conversation"), "{body}");
+}
+
+#[tokio::test]
+async fn the_host_stays_silent_unless_called_and_after_it_is_removed() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    host_joined(&e, g).await;
+    // Nobody called it: a person answers, as in any group.
+    e.fake.push([say("Hello, Doc.")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    assert!(!authors(&e, g).contains(&api::types::Author::Host));
+    assert_eq!(e.fake.json().len(), 1);
+    // Called together with a person: the person first, then the host.
+    e.fake.push([say("Yes."), say("And I am here.")]);
+    e.agent
+        .send(g, "ann and Hostess, hello", None)
+        .await
+        .unwrap();
+    let last = e.agent.history(g, None, 1).unwrap().pop().unwrap();
+    assert_eq!(last.author, api::types::Author::Host);
+    let sent = e.fake.json();
+    assert!(!tool_names(&sent[1]).contains(&"create_group".to_owned()));
+    assert!(tool_names(&sent[2]).contains(&"create_group".to_owned()));
+    // Taken out of the group, it is not answered by.
+    e.agent
+        .with_world(|w| assert!(channel::remove_host(w, g).unwrap()));
+    e.agent
+        .members_changed(g, &[], &[p(api::types::HOST_MEMBER)])
+        .await
+        .unwrap();
+    e.fake.push([say("Ann here.")]);
+    e.agent
+        .send(g, "Hostess, are you there?", None)
+        .await
+        .unwrap();
+    let last = e.agent.history(g, None, 1).unwrap().pop().unwrap();
+    assert_eq!(
+        last.author,
+        agent::view::author(&world::Actor::Person(p("ann")))
+    );
+}
+
+#[tokio::test]
+async fn a_host_tool_runs_in_a_group_on_the_users_say_so() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    let other = e.agent.create_group(&[p("ann"), p("dee")], None).unwrap();
+    e.agent.with_world(|w| {
+        world::message::append(
+            w,
+            other,
+            &world::Actor::User,
+            "tea at five",
+            None,
+            None,
+            T0 - 5,
+        )
+        .unwrap();
+    });
+    host_joined(&e, g).await;
+    e.fake.push([
+        call(
+            "set_mode",
+            json!({"target_kind": "group", "target": g.0.to_string(), "mode": "enabled"}),
+        ),
+        call("recent", json!({"channel": other.0.to_string()})),
+        call("recent", json!({"channel": g.0.to_string()})),
+        say("Done."),
+    ]);
+    e.agent
+        .send(g, "Hostess, enable this group and read the other one", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        e.agent.with_world(|w| channel::get(w, g).unwrap().mode),
+        world::Mode::Enabled
+    );
+    let log = log_bytes(&e.agent, g);
+    assert!(log.contains("tea at five"), "{log}");
+    assert!(log.contains("That is this conversation"), "{log}");
+}
+
+#[tokio::test]
+async fn people_can_ask_for_the_host_to_be_invited_and_the_host_finds_people_for_the_group() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([
+        call("ask_host", json!({"find": ["Hostess", "dee"]})),
+        say("Let me ask for the Hostess."),
+    ]);
+    e.agent
+        .send(g, "ann, can the Hostess help?", None)
+        .await
+        .unwrap();
+    let invited: Vec<_> = tool_actions(&e)
+        .into_iter()
+        .filter_map(|(_, a)| match a {
+            ToolAction::InviteToGroup { persons, .. } => {
+                Some(persons.into_iter().map(|x| x.id.0).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(invited, [vec!["dee".to_owned(), "host".to_owned()]]);
+    // With the host there, a find that names only it has nothing new to offer.
+    host_joined(&e, g).await;
+    e.fake.push([
+        call("ask_host", json!({"find": ["Hostess"]})),
+        say("It is here."),
+    ]);
+    e.agent.send(g, "ann, anything?", None).await.unwrap();
+    assert!(tool_actions(&e).iter().all(|(_, a)| !matches!(
+        a,
+        ToolAction::InviteToGroup { .. } | ToolAction::FindPeople { .. }
+    )));
+    // The host asked in the group offers invitations into it, never talks elsewhere.
+    e.fake.push([
+        call("find_people", json!({"topic": "tea"})),
+        say("Some people."),
+    ]);
+    e.agent
+        .send(g, "Hostess, who knows tea?", None)
+        .await
+        .unwrap();
+    assert!(
+        tool_actions(&e)
+            .iter()
+            .all(|(_, a)| !matches!(a, ToolAction::FindPeople { .. }))
+    );
+}
+
+#[tokio::test]
+async fn an_emulated_host_in_a_group_still_calls_tools_by_fenced_block() {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    let e = env_with(ep, |_| {});
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    host_joined(&e, g).await;
+    let body = json!({"name": "set_mode", "arguments":
+        {"target_kind": "group", "target": g.0.to_string(), "mode": "enabled"}});
+    e.fake
+        .push([say(&format!("```tool_call\n{body}\n```")), say("Enabled.")]);
+    e.agent
+        .send(g, "Hostess, enable this group", None)
+        .await
+        .unwrap();
+    // Its tools are listed in the request even though the people's are left out.
+    assert!(tool_names(&e.fake.json()[0]).contains(&"set_mode".to_owned()));
+    assert_eq!(
+        e.agent.with_world(|w| channel::get(w, g).unwrap().mode),
+        world::Mode::Enabled
+    );
+    let last = e.agent.history(g, None, 1).unwrap().pop().unwrap();
+    assert_eq!(last.author, api::types::Author::Host);
+}

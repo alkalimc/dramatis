@@ -178,6 +178,15 @@ impl Agent {
         })
     }
 
+    /// Whose model and tools a turn runs on: the host's wherever it speaks (its own
+    /// channel, or a group it is in), else those of the channel's log.
+    pub(crate) fn turn_kind(&self, turn: &Turn) -> Result<LogKind> {
+        if turn.speaker == Actor::Host {
+            return Ok(LogKind::Host);
+        }
+        self.log_kind(&self.db(), turn.channel)
+    }
+
     /// The request shape for a log kind under the role of that kind.
     pub(crate) fn shape_for(
         &self,
@@ -638,7 +647,7 @@ impl Agent {
     /// One model call on the channel's current segment, streamed. The reply is appended
     /// verbatim and its usage metered before anything else happens.
     pub(crate) async fn call(&self, turn: &mut Turn, choice: ToolChoice) -> Result<Response> {
-        let kind = self.log_kind(&self.db(), turn.channel)?;
+        let kind = self.turn_kind(turn)?;
         let (role, ep) = self.role_for(kind)?;
         let seg = log::current(&self.db(), turn.channel)?
             .ok_or_else(|| Error::Invalid(format!("channel {} has no log", turn.channel)))?
@@ -931,8 +940,8 @@ impl Agent {
     /// Whether the protocol of the channel's role lets `tool_choice` differ between calls
     /// on one log. Where it does not, a different choice drops the cached history, so
     /// every call sends the same one and the harness asks in text instead.
-    pub(crate) fn may_vary_choice(&self, ch: ChannelId) -> Result<bool> {
-        let kind = self.log_kind(&self.db(), ch)?;
+    pub(crate) fn may_vary_choice(&self, turn: &Turn) -> Result<bool> {
+        let kind = self.turn_kind(turn)?;
         Ok(self.role_for(kind)?.0.profile.wire_api.may_force_tool())
     }
 
@@ -1053,7 +1062,7 @@ impl Agent {
                 drop(conn);
             }
             let last = step + 1 == max_steps;
-            let choice = if last && turn.task.is_none() && self.may_vary_choice(turn.channel)? {
+            let choice = if last && turn.task.is_none() && self.may_vary_choice(turn)? {
                 ToolChoice::None
             } else {
                 ToolChoice::Auto

@@ -15,7 +15,7 @@
       },
       {
         "function": {
-          "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them; you cannot move the user yourself.",
+          "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them (asked in a group, a way to invite them into it);\nyou cannot move the user yourself.",
           "name": "find_people",
           "parameters": {
             "additionalProperties": false,
@@ -299,7 +299,7 @@
         "name": "digest"
       },
       {
-        "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them; you cannot move the user yourself.",
+        "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them (asked in a group, a way to invite them into it);\nyou cannot move the user yourself.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -555,7 +555,7 @@
         "type": "function"
       },
       {
-        "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them; you cannot move the user yourself.",
+        "description": "Find people who know about a subject. When the subject is one person (a name, an alias,\nor a description that fits one person on the roster) only that person is offered. The\nuser is shown a way to talk to them (asked in a group, a way to invite them into it);\nyou cannot move the user yourself.",
         "name": "find_people",
         "parameters": {
           "additionalProperties": false,
@@ -1033,7 +1033,7 @@
             "additionalProperties": false,
             "properties": {
               "find": {
-                "description": "Names or roster ids of the colleagues you suggest the user goes to, at most three:\nthe ones your reply names for this.",
+                "description": "Names or roster ids of the colleagues you suggest the user goes to, at most three:\nthe ones your reply names for this. In a group, the host's name has the user invite\nthe host into it.",
                 "items": {
                   "type": "string"
                 },
@@ -1273,7 +1273,7 @@
           "additionalProperties": false,
           "properties": {
             "find": {
-              "description": "Names or roster ids of the colleagues you suggest the user goes to, at most three:\nthe ones your reply names for this.",
+              "description": "Names or roster ids of the colleagues you suggest the user goes to, at most three:\nthe ones your reply names for this. In a group, the host's name has the user invite\nthe host into it.",
               "items": {
                 "type": "string"
               },
@@ -1518,7 +1518,7 @@
           "additionalProperties": false,
           "properties": {
             "find": {
-              "description": "Names or roster ids of the colleagues you suggest the user goes to, at most three:\nthe ones your reply names for this.",
+              "description": "Names or roster ids of the colleagues you suggest the user goes to, at most three:\nthe ones your reply names for this. In a group, the host's name has the user invite\nthe host into it.",
               "items": {
                 "type": "string"
               },

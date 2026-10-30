@@ -87,6 +87,11 @@ impl Engine {
                     .persons()
                     .iter()
                     .map(|p| self.person_ref(p.as_str()))
+                    .chain(ch.has(&world::Actor::Host).then(|| PersonRef {
+                        id: PersonId::from(HOST_MEMBER),
+                        name: self.host_name(),
+                        pronoun: None,
+                    }))
                     .collect(),
                 topic: ch.topic.clone(),
                 name: ch.name.clone(),
@@ -384,11 +389,17 @@ impl Engine {
         persons: Vec<PersonId>,
     ) -> ApiResult<()> {
         let id = convert::world_channel(ch)?;
+        // The host is no roster person: it joins a group by its own id.
+        let (host, persons): (Vec<_>, Vec<_>) =
+            persons.into_iter().partition(|p| p.0 == HOST_MEMBER);
         for p in &persons {
             self.require_available(p)?;
         }
         let ids: Vec<world::PersonId> = persons.iter().map(world_person).collect();
-        let added = channel::add_members(&self.w(), id, &ids).map_err(world_err)?;
+        let mut added = channel::add_members(&self.w(), id, &ids).map_err(world_err)?;
+        if !host.is_empty() && channel::add_host(&self.w(), id).map_err(world_err)? {
+            added.push(world::PersonId::from(HOST_MEMBER));
+        }
         if added.is_empty() {
             return Ok(());
         }
@@ -406,8 +417,12 @@ impl Engine {
         person: &PersonId,
     ) -> ApiResult<()> {
         let id = convert::world_channel(ch)?;
-        let left =
-            channel::remove_member(&self.w(), id, &world_person(person)).map_err(world_err)?;
+        let left = if person.0 == HOST_MEMBER {
+            channel::remove_host(&self.w(), id)
+        } else {
+            channel::remove_member(&self.w(), id, &world_person(person))
+        }
+        .map_err(world_err)?;
         if !left {
             return Ok(());
         }

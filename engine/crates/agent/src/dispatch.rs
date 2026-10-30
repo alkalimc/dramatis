@@ -63,7 +63,7 @@ impl Agent {
     ) -> Result<String> {
         let seg = self.current_segment(turn.channel)?;
         let names = self.segment_names(seg)?;
-        let kind = self.log_kind(&self.db(), turn.channel)?;
+        let kind = self.turn_kind(turn)?;
         let out = match kind {
             LogKind::Person => match SharedCall::parse(name, arguments) {
                 Ok(c) => self.shared(turn, c, &names, seg)?,
@@ -411,9 +411,12 @@ impl Agent {
         let offer = self.offerable(&self.db())?;
         // In a group, the people already there are never offered again: a find becomes an
         // invitation into this group, and a group of nobody new is not offered at all.
-        let here = {
+        let (here, host_in) = {
             let ch = channel::get(&self.db(), turn.channel)?;
-            (ch.kind == world::ChannelKind::Group).then(|| ch.persons())
+            (
+                (ch.kind == world::ChannelKind::Group).then(|| ch.persons()),
+                ch.has(&Actor::Host),
+            )
         };
         match (a.find, a.group) {
             (Some(listed), None) => {
@@ -436,7 +439,17 @@ impl Agent {
                     }
                 }
                 found.truncate(SUGGESTED_FIND_MAX);
-                if found.is_empty() {
+                // In a group, the host's name asks for the host to be invited into it.
+                let host_named = here.is_some() && listed.iter().any(|n| self.is_host_name(n));
+                if host_named && host_in && found.is_empty() {
+                    return Ok(Err(self.refuse(names, "harness.error.nobody_new", "")));
+                }
+                let host_ref = (host_named && !host_in).then(|| api::types::PersonRef {
+                    id: api::types::PersonId::from(api::types::HOST_MEMBER),
+                    name: self.corpus.host_name.clone(),
+                    pronoun: None,
+                });
+                if found.is_empty() && host_ref.is_none() {
                     return Ok(Err(self.no_find(
                         names,
                         &listed,
@@ -445,10 +458,11 @@ impl Agent {
                         here.as_deref(),
                     )?));
                 }
-                let persons = found
+                let mut persons = found
                     .iter()
                     .map(|p| view::person_ref(self.ix().folio(), p.as_str()))
                     .collect::<Result<Vec<_>>>()?;
+                persons.extend(host_ref);
                 let action = if here.is_some() {
                     ToolAction::InviteToGroup {
                         channel: view::channel_id(turn.channel),
@@ -507,6 +521,16 @@ impl Agent {
             }
         }
         Ok(Ok(self.say(names, "harness.suggested", &[])))
+    }
+
+    /// Whether a name is the host's: its name or an alias the corpus gives, case aside.
+    pub(crate) fn is_host_name(&self, name: &str) -> bool {
+        let name = name.trim().to_lowercase();
+        !name.is_empty()
+            && std::iter::once(self.corpus.host_name.as_str())
+                .chain(self.corpus.wording.get("host.alias").split('|'))
+                .map(|n| n.trim().to_lowercase())
+                .any(|n| n == name)
     }
 
     /// Why a find named nobody who can be offered: yourself, people already in this group,
@@ -735,18 +759,35 @@ impl Agent {
                     self.config.find_people.k,
                     &[],
                 )?;
+                let here = {
+                    let ch = channel::get(&self.db(), turn.channel)?;
+                    (ch.kind == world::ChannelKind::Group).then(|| ch.persons())
+                };
                 let persons = people
                     .persons
                     .iter()
+                    .filter(|m| {
+                        here.as_ref()
+                            .is_none_or(|h| !h.iter().any(|p| p.as_str() == m.person))
+                    })
                     .map(|m| view::person_ref(self.ix().folio(), &m.person))
                     .collect::<Result<Vec<_>>>()?;
-                self.show_action(
-                    turn,
+                // Asked in a group, the people found are offered as invitations into it.
+                let action = if here.is_some() {
+                    ToolAction::InviteToGroup {
+                        channel: view::channel_id(turn.channel),
+                        persons,
+                    }
+                } else {
                     ToolAction::FindPeople {
                         topic: f.topic.clone(),
                         persons,
-                    },
-                )?;
+                    }
+                };
+                let nobody_new = matches!(&action, ToolAction::InviteToGroup { persons, .. } if persons.is_empty());
+                if !nobody_new {
+                    self.show_action(turn, action)?;
+                }
                 if people.persons.is_empty() {
                     return Ok(Ok(self.say(names, "harness.nothing_found", &[])));
                 }
@@ -1138,7 +1179,7 @@ impl Agent {
         else {
             return Ok(Err(self.refuse(names, "harness.error.not_found", id)));
         };
-        if ch.is_host_channel() {
+        if ch.is_host_channel() || ch.id == turn.channel {
             return Ok(Err(self.refuse(names, "harness.error.own_channel", "")));
         }
         self.show_action(turn, ToolAction::Recent)?;

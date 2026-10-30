@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 const DEFAULTS: &[(&str, &str)] = &[
     ("user.you", "you"),
     ("host.name", "Host"),
+    ("host.alias", ""),
     (
         "host.quota_exhausted",
         "The quota for this period is used up until {when}. The archive stays available.",
@@ -123,10 +124,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.summary", "Earlier in this conversation: {summary}"),
     ("harness.recent", "The last things said:"),
     ("harness.context", "[{date} {weekday} {time}, {part}]"),
-    (
-        "harness.context.gap",
-        "({user} last spoke {span} ago)",
-    ),
+    ("harness.context.gap", "({user} last spoke {span} ago)"),
     ("span.hours", "{n} hours"),
     ("span.days", "{n} days"),
     ("weekday.mon", "Monday"),
@@ -485,6 +483,12 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.guide.limits",
         "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due. Removing someone from a group, renaming a group or deleting one is likewise {user}'s own, and you have no means for it.",
+    ),
+    (
+        "harness.host.group",
+        "You are in a group (conversation {id}) with {user} and the people here, and {user} \
+         called you. Answer as the assistant, briefly. Everyone here hears what you say; what \
+         your tools offer appears under your reply and {user} decides.",
     ),
     (
         "harness.guide.promise",

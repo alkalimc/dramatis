@@ -182,7 +182,7 @@ impl Agent {
                 asks = made;
                 result
             } else if ch.kind == ChannelKind::Group {
-                self.group_turn(&posted).await
+                self.group_turn(&posted, &mut asks).await
             } else {
                 let person = ch.person().cloned().ok_or_else(|| {
                     Error::Invalid(format!("channel {} has no owner", posted.channel))
@@ -664,6 +664,32 @@ impl Agent {
         Ok(seg)
     }
 
+    /// Whether a member id stands for the host (see [`api::types::HOST_MEMBER`]).
+    fn is_host_member(&self, who: &PersonId) -> bool {
+        who.as_str() == api::types::HOST_MEMBER
+    }
+
+    /// A member's display name; the host's own name for the host.
+    fn member_name(&self, who: &PersonId) -> Result<String> {
+        if self.is_host_member(who) {
+            return Ok(self.corpus.host_name.clone());
+        }
+        self.display(who.as_str())
+    }
+
+    /// Append the host's in-world layer to a group's segment as an entry, as for a person.
+    fn introduce_host(&self, seg: world::SegmentId) -> Result<()> {
+        let names = self.segment_names(seg)?;
+        let section = assemble::persona_section(
+            &self.ctx(&names),
+            &Member::Host {
+                name: &self.corpus.host_name,
+                in_world: &self.corpus.host.in_world,
+            },
+        );
+        self.append_user(seg, &assemble::entry(&[section.as_str()]), None)
+    }
+
     /// Append a member's persona to a segment as an entry.
     fn introduce(&self, seg: world::SegmentId, person: &PersonId) -> Result<()> {
         let names = self.segment_names(seg)?;
@@ -702,7 +728,7 @@ impl Agent {
             .map(|p| (p, "harness.joined"))
             .chain(left.iter().map(|p| (p, "harness.left")))
         {
-            let name = self.display(who.as_str())?;
+            let name = self.member_name(who)?;
             said.push((
                 who,
                 key == "harness.joined",
@@ -713,9 +739,11 @@ impl Agent {
             let mut lines = Vec::new();
             for (who, joining, text) in &said {
                 if *joining {
-                    let name = self.display(who.as_str())?;
+                    let name = self.member_name(who)?;
                     let known = self.log_has_persona(seg, &names, &name)?;
-                    if !known && !self.hides_from(seg, who)? {
+                    if !known && self.is_host_member(who) {
+                        self.introduce_host(seg)?;
+                    } else if !known && !self.hides_from(seg, who)? {
                         self.introduce(seg, who)?;
                     }
                 }
@@ -758,7 +786,106 @@ impl Agent {
         Ok(())
     }
 
-    async fn group_turn(&self, posted: &Posted) -> Result<()> {
+    /// A message in a group: the people answer as they always did. The host, if it is a
+    /// member, answers only when the message calls it by name: alone when no person is
+    /// named or addressed as a whole, else after the people.
+    async fn group_turn(&self, posted: &Posted, asks: &mut Vec<world::task::Asked>) -> Result<()> {
+        let host_called = self.host_called(posted)?;
+        if host_called {
+            let members: Vec<PersonId> = {
+                let conn = self.db();
+                let ch = channel::get(&conn, posted.channel)?;
+                self.corpus
+                    .personas
+                    .filter(bond::filter_disabled(&conn, ch.persons())?)
+            };
+            if self.named_in(&posted.text, &members)?.is_none() && !self.is_collective(&posted.text)
+            {
+                return self
+                    .host_group_turn(posted.channel, Some(posted), asks)
+                    .await;
+            }
+        }
+        self.group_people_turn(posted).await?;
+        if host_called {
+            self.host_group_turn(posted.channel, None, asks).await?;
+        }
+        Ok(())
+    }
+
+    /// Whether the host is a member of the group and the message calls it by name (its
+    /// name or an alias the corpus gives, case aside).
+    fn host_called(&self, posted: &Posted) -> Result<bool> {
+        if !channel::get(&self.db(), posted.channel)?.has(&Actor::Host) {
+            return Ok(false);
+        }
+        let w = &self.corpus.wording;
+        let text = posted.text.to_lowercase();
+        Ok(std::iter::once(self.corpus.host_name.as_str())
+            .chain(w.get("host.alias").split('|'))
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .any(|n| text.contains(&n.to_lowercase())))
+    }
+
+    /// The host speaks in a group it is a member of, on the group's shared log but with its
+    /// own model, tools and manner. `posted` is the user's message it answers (the entry
+    /// that carries it); without one it speaks after the people have. Requests it makes are
+    /// handed back to run once the group's turn is over.
+    async fn host_group_turn(
+        &self,
+        ch: ChannelId,
+        posted: Option<&Posted>,
+        asks: &mut Vec<world::task::Asked>,
+    ) -> Result<()> {
+        let seg = self.ensure_segment(ch, posted.map(|p| p.message)).await?;
+        let names = self.segment_names(seg)?;
+        let host_name = self.corpus.host_name.clone();
+        if !self.log_has_persona(seg, &names, &host_name)? {
+            self.introduce_host(seg)?;
+        }
+        let w = &self.corpus.wording;
+        let key = if posted.is_some() {
+            "harness.speaker"
+        } else {
+            "harness.chorus"
+        };
+        let mut lines = vec![w.fill(key, &names, &[("name", &host_name)])];
+        lines.push(w.fill("harness.host.manner", &names, &[]));
+        lines.push(w.fill("harness.host.group", &names, &[("id", &ch.0.to_string())]));
+        // The usage guide once per segment, as the first thing it says here.
+        let guide = assemble::guide(&self.ctx(&names), self.config.frontend);
+        let first = guide.lines().next().unwrap_or_default();
+        let told = self
+            .log(seg)?
+            .items
+            .iter()
+            .flat_map(request::harness_texts)
+            .any(|t| t.contains(first));
+        if !told {
+            lines.push(guide);
+        }
+        let mut turn = Turn::new(ch, Actor::Host, Shape::Host);
+        turn.authorized = posted.is_some();
+        match posted {
+            Some(p) => self.user_entry(seg, p, &lines, None)?,
+            None => {
+                lines.push(self.context_line(seg, None, None)?);
+                self.append_user(
+                    seg,
+                    &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
+                    None,
+                )?;
+            }
+        }
+        let result = self
+            .run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await;
+        asks.append(&mut turn.asks);
+        result
+    }
+
+    async fn group_people_turn(&self, posted: &Posted) -> Result<()> {
         let now = self.now();
         let (members, named) = {
             let conn = self.db();
@@ -844,12 +971,8 @@ impl Agent {
             .iter()
             .map(|m| (PersonId::from(m.person.as_str()), m.score))
             .collect();
-        let min = self
-            .config
-            .agent
-            .interject
-            .min_confidence
-            .unwrap_or(
+        let min =
+            self.config.agent.interject.min_confidence.unwrap_or(
                 self.ix().params().confidence.high_top1 * self.config.agent.interject.relax,
             );
         let status = self.quota_status()?;
@@ -1135,8 +1258,15 @@ impl Agent {
         );
         let now = self.now();
         let conn = self.db();
+        // The host is in the group only for as long as it takes to write the line; it
+        // stays a member only if it already was, or the user invites it.
+        let was_in = channel::get(&conn, ch)?.has(&Actor::Host);
         channel::add_participant(&conn, ch, &Actor::Host)?;
-        let id = message::append(&conn, ch, &Actor::Host, &text, None, None, now.ms)?;
+        let id = message::append(&conn, ch, &Actor::Host, &text, None, None, now.ms);
+        if !was_in {
+            channel::remove_host(&conn, ch)?;
+        }
+        let id = id?;
         let stored = message::get(&conn, id)?;
         let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
         drop(conn);
@@ -1346,7 +1476,11 @@ impl Agent {
         let emulated = role.model.emulated_tools();
         let forced = !emulated && role.profile.wire_api.may_force_tool();
         if forced && !role.forced_tool() {
-            self.note_wrapup(ch, "wrapup skipped", "the model cannot be forced to the call");
+            self.note_wrapup(
+                ch,
+                "wrapup skipped",
+                "the model cannot be forced to the call",
+            );
             return Ok(None);
         }
         let Some(seg) = world::log::current(&self.db(), ch)? else {
@@ -1428,7 +1562,11 @@ impl Agent {
             });
         }
         if outcome.facts.is_empty() && outcome.hurt.is_none() {
-            self.note_wrapup(ch, "wrapup wrote nothing", &format!("{:?}", outcome.skipped));
+            self.note_wrapup(
+                ch,
+                "wrapup wrote nothing",
+                &format!("{:?}", outcome.skipped),
+            );
         }
         self.changed(changes);
         Ok(if summary { outcome.summary } else { None })
@@ -1534,10 +1672,7 @@ impl Agent {
             return Ok(out);
         }
         // The user's return plans the daily seeds; the tick waits one interval after it.
-        *self
-            .daily_planned
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(now.ms);
+        *self.daily_planned.lock().unwrap_or_else(|e| e.into_inner()) = Some(now.ms);
         let words = self.words_hits(now)?;
         let birthdays = self.birthdays()?;
         let topic = TopicHits { agent: self };

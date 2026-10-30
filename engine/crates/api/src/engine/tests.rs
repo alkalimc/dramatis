@@ -1345,6 +1345,65 @@ async fn members_join_and_leave_a_group_and_the_group_says_so() {
 }
 
 #[tokio::test]
+async fn the_host_joins_and_leaves_a_group_by_its_own_id_and_is_listed_there() {
+    let r = rig();
+    let e = &r.engine;
+    let calls = || r.spy.calls.lock().unwrap().clone();
+    let group = e.create_group(vec![id("amy")], None).await.unwrap();
+    let listed = |e: &Engine| -> Vec<String> {
+        let channels = e.channels_impl().unwrap();
+        channels
+            .iter()
+            .find(|c| c.id == group)
+            .map(|c| c.participants.iter().map(|p| p.id.0.clone()).collect())
+            .unwrap_or_default()
+    };
+    // Written to nothing yet, a group is not listed; give it a line.
+    world::message::append(
+        &e.w(),
+        convert::world_channel(&group).unwrap(),
+        &world::Actor::User,
+        "hi",
+        None,
+        None,
+        1,
+    )
+    .unwrap();
+    assert_eq!(listed(e), ["amy"]);
+    e.add_members(group.clone(), vec![id(HOST_MEMBER)])
+        .await
+        .unwrap();
+    assert_eq!(listed(e), ["amy", HOST_MEMBER]);
+    assert_eq!(calls(), [format!("members {} +{HOST_MEMBER} -", group.0)]);
+    // Again: nothing new. An invitation of the host works like one of a person.
+    e.add_members(group.clone(), vec![id(HOST_MEMBER)])
+        .await
+        .unwrap();
+    assert_eq!(calls().len(), 1);
+    e.remove_member(group.clone(), id(HOST_MEMBER))
+        .await
+        .unwrap();
+    assert_eq!(listed(e), ["amy"]);
+    assert_eq!(calls()[1], format!("members {} + -{HOST_MEMBER}", group.0));
+    let mid = offer_message(
+        e,
+        &group,
+        &[ToolAction::InviteToGroup {
+            channel: group.clone(),
+            persons: vec![person_ref(HOST_MEMBER)],
+        }],
+    );
+    assert_eq!(
+        e.open_invite(mid, 0, id(HOST_MEMBER)).await,
+        Ok(group.clone())
+    );
+    assert_eq!(listed(e), ["amy", HOST_MEMBER]);
+    // Never into a direct chat.
+    let direct = e.open_direct(id("amy")).await.unwrap();
+    assert!(e.add_members(direct, vec![id(HOST_MEMBER)]).await.is_err());
+}
+
+#[tokio::test]
 async fn an_invitation_adds_the_person_it_names_and_only_them() {
     let r = rig();
     let e = &r.engine;

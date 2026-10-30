@@ -114,13 +114,14 @@ export const commands = {
 	deleteGroup: (channel: ChannelId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_group", { channel })),
 	/**
 	 *  Bring people into a live group. Each must be available (`NoPersona`, `Disabled`);
-	 *  anyone already in it is left as is, so repeating is harmless. Each person who joins
+	 *  anyone already in it is left as is, so repeating is harmless. The host joins under
+	 *  the id `HOST_MEMBER`: it then answers there when a message calls it by name. Each person who joins
 	 *  leaves a service line in the group (no model call), and `WorldChanged` follows.
 	 */
 	addMembers: (channel: ChannelId, persons: PersonId[]) => typedError<null, ApiError>(__TAURI_INVOKE("add_members", { channel, persons })),
 	/**
-	 *  Take a person out of a live group; their messages stay in its history and a service
-	 *  line says so. Not in it: nothing happens. A group keeps at least one person
+	 *  Take a person (or the host, under `HOST_MEMBER`) out of a live group; their messages
+	 *  stay in its history and a service line says so. Not in it: nothing happens. A group keeps at least one person
 	 *  (`Invalid` for the last). `WorldChanged` follows.
 	 */
 	removeMember: (channel: ChannelId, person: PersonId) => typedError<null, ApiError>(__TAURI_INVOKE("remove_member", { channel, person })),

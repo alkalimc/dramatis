@@ -180,11 +180,12 @@ commands! {
     fn open_invite(message: MessageId, action: u32, person: PersonId) -> ChannelId;
     fn delete_group(channel: ChannelId) -> ();
     /// Bring people into a live group. Each must be available (`NoPersona`, `Disabled`);
-    /// anyone already in it is left as is, so repeating is harmless. Each person who joins
+    /// anyone already in it is left as is, so repeating is harmless. The host joins under
+    /// the id `HOST_MEMBER`: it then answers there when a message calls it by name. Each person who joins
     /// leaves a service line in the group (no model call), and `WorldChanged` follows.
     fn add_members(channel: ChannelId, persons: Vec<PersonId>) -> ();
-    /// Take a person out of a live group; their messages stay in its history and a service
-    /// line says so. Not in it: nothing happens. A group keeps at least one person
+    /// Take a person (or the host, under `HOST_MEMBER`) out of a live group; their messages
+    /// stay in its history and a service line says so. Not in it: nothing happens. A group keeps at least one person
     /// (`Invalid` for the last). `WorldChanged` follows.
     fn remove_member(channel: ChannelId, person: PersonId) -> ();
     /// Title a channel. `None` or blank returns to the derived title.
