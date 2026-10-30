@@ -272,12 +272,18 @@ sends. Saves are managed on the saves page (new, switch, copy, rename, delete, e
 setting is under privacy and security.
 
 Settings has an About page: the version, the author, links to the repository and the issue
-tracker, and an update check. The check asks the GitHub Releases API which version is the newest
-(`GET /repos/alkalimc/dramatis/releases/latest`), at most once a day after start-up and when you press
-Check now; the switch on that page turns the daily check off (`$DRAMATIS_HOME/update_check`, with
-the last result in `update_cache.json`). It only tells you and links the release page; nothing is
-downloaded or installed. The terminal has the same in `/about`, and `dramatis-cli --help` names the
-author and repository.
+tracker, and an update check. The automatic check is off until you say yes: the first run (and a
+home with no answer yet) asks once, in the app and in the terminal. When on, it asks the GitHub
+Releases API which version is the newest (`GET /repos/alkalimc/dramatis/releases/latest`) at most
+once a day, and also when you press Check now. The answer lives in `$DRAMATIS_HOME/update_check`
+and the last result in `update_cache.json`. It only tells you and links the release page; nothing
+is downloaded or installed. The terminal has the same in `/about`, which prints the release page when
+a newer version exists, and prints `dramatis <version> · by alkali · <repository>` at start.
+
+The host has a page like a person's: click its avatar or name in a chat, or use the panel button
+of its channel (`/who host` in the terminal). Each day in a conversation starts with a date line,
+and a group without a name of its own is titled and pictured with you first, then its members in
+the order they joined.
 
 The browser preview (`pnpm dev` without the app) shows the neutral English text. To preview a
 corpus's own wording, export it once and reload; the file is git-ignored:

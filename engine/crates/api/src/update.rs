@@ -43,7 +43,7 @@ pub fn fresh(at_ms: i64, now_ms: i64) -> bool {
 }
 
 /// The version (without a leading `v`) and release page out of a "latest release" reply.
-/// The page must be under this project; anything else falls back to the releases list.
+/// The page must be under this project; anything else falls back to the latest-release page.
 pub fn parse_release(body: &[u8]) -> Result<(String, String), String> {
     #[derive(Deserialize)]
     struct Release {
@@ -55,7 +55,7 @@ pub fn parse_release(body: &[u8]) -> Result<(String, String), String> {
     let url = release
         .html_url
         .filter(|u| u.starts_with(&format!("{REPOSITORY}/")))
-        .unwrap_or_else(|| format!("{REPOSITORY}/releases"));
+        .unwrap_or_else(|| format!("{REPOSITORY}/releases/latest"));
     Ok((
         release.tag_name.trim_start_matches(['v', 'V']).to_owned(),
         url,
@@ -98,7 +98,7 @@ mod tests {
         let body = br#"{"tag_name":"v1.2.3","html_url":"https://evil.example/x"}"#;
         assert_eq!(
             parse_release(body).unwrap().1,
-            "https://github.com/alkalimc/dramatis/releases"
+            "https://github.com/alkalimc/dramatis/releases/latest"
         );
         assert!(parse_release(br#"{"tag_name":"nightly"}"#).is_err());
         assert!(parse_release(br#"{"message":"Not Found"}"#).is_err());

@@ -236,6 +236,9 @@ commands! {
     /// The user's picture: the one they set, else the corpus's player portrait (fetched
     /// and cached like a person's avatar), else `None`.
     fn user_avatar() -> Option<MediaFile> = Ok(None);
+    /// The host's picture when the corpus names one (fetched and cached like a person's
+    /// avatar), else `None` and the host keeps a plain letter.
+    fn host_avatar() -> Option<MediaFile> = Ok(None);
     /// Set the user's picture; `None` returns to the default. Returns what `user_avatar`
     /// now answers. Per save.
     fn set_user_avatar(image: Option<ImagePart>) -> Option<MediaFile>;

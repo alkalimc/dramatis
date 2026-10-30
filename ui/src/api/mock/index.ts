@@ -151,8 +151,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     license: "Apache-2.0",
     corpus_credits: { by: "the demo team", url: "https://example.org/demo-team", project: "https://example.org/demo-corpus", licence: "CC BY-NC-SA 4.0" },
   };
-  const found = (auto: boolean): UpdateStatus => ({ current: version, latest: "99.0.0", url: `${repository}/releases/tag/v99.0.0`, newer: true, checked_at: iso(), auto });
-  let update: UpdateStatus = params.get("update") === "1" ? found(true) : { current: version, latest: null, url: null, newer: false, checked_at: null, auto: true };
+  const found = (auto: boolean): UpdateStatus => ({ current: version, latest: "99.0.0", url: `${repository}/releases/tag/v99.0.0`, newer: true, checked_at: iso(), auto, asked: true });
+  let update: UpdateStatus = params.get("update") === "1" ? found(true) : { current: version, latest: null, url: null, newer: false, checked_at: null, auto: false, asked: params.get("first") !== "1" && params.get("update") !== "ask" };
   let locked = params.get("locked") === "1";
   // `?changed=1` starts as if another window had replaced the open save's file.
   let changedElsewhere = params.get("changed") === "1";
@@ -586,7 +586,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(update);
     },
     setAutoUpdateCheck: (auto) => {
-      update = { ...update, auto };
+      update = { ...update, auto, asked: true };
       return ok(null);
     },
     // The preview opens links itself; the call exists so the app's path can be tested.
@@ -1063,6 +1063,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       });
     },
     avatar: () => ok(null),
+    hostAvatar: () => ok(null),
     userAvatar: () => ok(userAvatar),
     setUserAvatar: (image) => {
       userAvatar = image ? { path: `data:${image.mime};base64,${image.data_base64}` } : null;

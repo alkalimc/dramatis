@@ -19,6 +19,7 @@ use tauri::{Manager, RunEvent, WindowEvent};
 fn main() {
     let bindings = api::builder();
     tauri::Builder::default()
+        .menu(shell::app_menu)
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         // The placeholder until `shell::start` opens the real engine.

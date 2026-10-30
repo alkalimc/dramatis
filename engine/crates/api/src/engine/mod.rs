@@ -744,6 +744,9 @@ impl Api for Engine {
     async fn avatar(&self, person: PersonId) -> ApiResult<Option<MediaFile>> {
         self.avatar_impl(&person).await
     }
+    async fn host_avatar(&self) -> ApiResult<Option<MediaFile>> {
+        self.host_avatar_impl().await
+    }
     async fn user_avatar(&self) -> ApiResult<Option<MediaFile>> {
         self.user_avatar_impl().await
     }

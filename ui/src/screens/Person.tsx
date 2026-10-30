@@ -6,7 +6,7 @@ import { canTalk } from "../lib/library";
 import { hasPersona } from "../lib/persona";
 import { useQuery } from "../lib/useQuery";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { Avatar } from "../ui/Avatar";
+import { Avatar, HOST_ID } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
@@ -25,6 +25,84 @@ export function PersonCard({ id }: { id: PersonId }) {
       </button>
       <PersonDrawer id={id} card />
     </Dialog>
+  );
+}
+
+/** The host's page over the conversation, opened from its avatar or name in a chat. */
+export function HostCard() {
+  const t = useT();
+  const dispatch = useDispatch();
+  const close = () => dispatch({ type: "hostCard", open: false });
+  return (
+    <Dialog title={t("host.name")} onClose={close} className="person-card" hideTitle>
+      <button type="button" className="icon close" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={close}>
+        <Icon name="close" size={20} />
+      </button>
+      <HostDrawer card />
+    </Dialog>
+  );
+}
+
+const HOST_CAN = ["host.can.find", "host.can.group", "host.can.ask", "host.can.explain"] as const;
+
+/** The host's page, laid out like a person's: picture and name, one line about it, what it does, and the way to talk to it. */
+export function HostDrawer({ card = false }: { card?: boolean }) {
+  const t = useT();
+  const actions = useActions();
+  const dispatch = useDispatch();
+  const hosted = useStore((s) => s.hostChannel !== null);
+  const name = t("host.name");
+  // Leaving this page for another: the card (if that is what this is) goes first.
+  const leave = () => {
+    dispatch({ type: "hostCard", open: false });
+    dispatch({ type: "drawer", drawer: null });
+  };
+  const settings = (tab: "quota" | "about") => {
+    dispatch({ type: "hostCard", open: false });
+    dispatch({ type: "drawer", drawer: { kind: "system", tab } });
+  };
+
+  return (
+    <div className={`drawer-body info-panel person-page host-page${card ? " in-card" : ""}`}>
+      <header className="info-head">
+        <Avatar person={{ id: HOST_ID, name }} size="xl" />
+        {card ? <p className="info-name">{name}</p> : <h2 className="info-name">{name}</h2>}
+        <p className="muted">{t("host.summary")}</p>
+      </header>
+      {hosted && (
+        <p className="row info-buttons">
+          <button
+            type="button"
+            onClick={() => {
+              leave();
+              void actions.open(null);
+            }}
+          >
+            {t("person.talk")}
+          </button>
+        </p>
+      )}
+      <section className="info-section">
+        <h3>{t("host.can")}</h3>
+        <ul>
+          {HOST_CAN.map((k) => (
+            <li key={k}>{t(k)}</li>
+          ))}
+        </ul>
+      </section>
+      <section className="info-section">
+        <p>
+          <button type="button" className="link" onClick={() => settings("quota")}>
+            {t("events.per_day")}
+          </button>
+        </p>
+        <p>
+          <button type="button" className="link" onClick={() => settings("about")}>
+            {t("about.update.title")}
+          </button>
+        </p>
+      </section>
+    </div>
   );
 }
 

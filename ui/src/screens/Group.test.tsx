@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../test/render";
 
-const TITLE = "Oren Lark, Mira Vale, Tess Arden";
+const TITLE = "Rowan, Oren Lark (4 in all)";
 
 async function openGroup(user: ReturnType<typeof userEvent.setup>) {
   renderApp();
@@ -177,7 +177,7 @@ test("a member is taken out after asking, the title follows, and the group says 
   expect(confirm).toHaveBeenCalledTimes(2);
   await waitFor(() => expect(within(panel).getByText("2 members")).toBeDefined());
   // No custom name: the title is the remaining members' names, in the list and the header.
-  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Oren Lark, Mira Vale" }).length).toBeGreaterThan(0));
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Rowan, Oren Lark, Mira Vale" }).length).toBeGreaterThan(0));
   expect(await within(await screen.findByRole("log")).findByText("Tess Arden leaves the conversation.")).toBeDefined();
   expect(within(panel).queryByRole("button", { name: "Take Tess Arden out" })).toBeNull();
 });
@@ -195,7 +195,7 @@ test("people are added from a picker that leaves out the members, and the title 
   await user.type(search, "Juno");
   await user.click(await within(dialog).findByRole("button", { name: "Juno Reyes" }));
   await waitFor(() => expect(within(panel).getByText("4 members")).toBeDefined());
-  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Oren Lark, Mira Vale (4 in all)" }).length).toBeGreaterThan(0));
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Rowan, Oren Lark (5 in all)" }).length).toBeGreaterThan(0));
   expect(await within(await screen.findByRole("log")).findByText("Juno Reyes joins the conversation.")).toBeDefined();
 });
 

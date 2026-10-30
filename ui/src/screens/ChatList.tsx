@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { ChannelSummary } from "../api";
-import { useT } from "../i18n";
+import { useT, useUserName } from "../i18n";
 import { activityText, authorName, typingText, when } from "../lib/format";
 import { byActivity, channelTitle, lastActivity, previewOf, unreadOf } from "../lib/chats";
 import { useActions, useApi, useDispatch, useStore } from "../store";
@@ -58,6 +58,7 @@ function SearchPanel({ query }: { query: string }) {
   const summary = useStore((s) => s.channels.find((c) => c.id === channel));
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
+  const me = useUserName();
   const needle = query.trim().toLowerCase();
   const results = needle ? messages.filter((m) => m.text.toLowerCase().includes(needle)) : [];
   const stand = summary ?? ({ id: channel ?? "", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary);
@@ -85,7 +86,7 @@ function SearchPanel({ query }: { query: string }) {
       <p className="scope-title">{t("search.scope")}</p>
       <div className="scope-row">
         <ChannelAvatar channel={stand} size="s" />
-        <span className="scope-name" title={channelTitle(stand, t)}>{channelTitle(stand, t)}</span>
+        <span className="scope-name" title={channelTitle(stand, t, me)}>{channelTitle(stand, t, me)}</span>
         <button type="button" className="round small" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={close}>
           <Icon name="close" size={18} />
         </button>
@@ -137,6 +138,7 @@ export function ChatList() {
   const view = useStore((s) => s.listView);
   const [query, setQuery] = useState("");
   const find = useStore((s) => s.find);
+  const me = useUserName();
 
   const all = useMemo(() => {
     const list: ChannelSummary[] = host && !channels.some((c) => c.id === host) ? [{ id: host, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary, ...channels] : channels;
@@ -148,10 +150,10 @@ export function ChatList() {
   const q = query.trim().toLowerCase();
   const rows = useMemo(() => {
     // Searching looks everywhere, archived chats included; otherwise one list at a time.
-    const scope = q ? all.filter((c) => channelTitle(c, t).toLowerCase().includes(q)) : all.filter((c) => c.archived === (view === "archived"));
+    const scope = q ? all.filter((c) => channelTitle(c, t, me).toLowerCase().includes(q)) : all.filter((c) => c.archived === (view === "archived"));
     const sorted = byActivity(scope, messages);
     return [...sorted.filter((c) => pinned.includes(c.id)), ...sorted.filter((c) => !pinned.includes(c.id))];
-  }, [all, messages, pinned, view, q, t]);
+  }, [all, messages, pinned, view, q, t, me]);
 
   // Previews need the newest message of each channel; this loads it once per channel.
   // Keyed on the ids: loading changes `rows` (it re-sorts), and an empty log reloads.
@@ -237,7 +239,7 @@ function ChatRow({ channel, onMenu, pinned }: { channel: ChannelSummary; onMenu:
   const who = useStore((s) => s.typing[channel.id]);
 
   const host = channel.kind === "host";
-  const title = channelTitle(channel, t);
+  const title = channelTitle(channel, t, useUserName());
   const last = list?.[list.length - 1];
   const at = lastActivity(channel, list);
   const typing = typingText(who, t, names, user);

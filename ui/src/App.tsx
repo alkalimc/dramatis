@@ -16,14 +16,14 @@ import { GroupDialog } from "./screens/Group";
 import { Badge } from "./ui/Badge";
 import { GroupInfo } from "./screens/GroupInfo";
 import { Main } from "./screens/Home";
-import { PersonCard, PersonDrawer } from "./screens/Person";
+import { HostCard, HostDrawer, PersonCard, PersonDrawer } from "./screens/Person";
 import { LeftDrawer, ProfileCard } from "./screens/Profile";
 import { ContactsCard } from "./screens/Contacts";
 import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
 import { ChangedScreen } from "./screens/Changed";
 import { UnlockScreen } from "./screens/Unlock";
-import { AvatarStep, CorpusSetup, ModelStep, SavePicker } from "./screens/Welcome";
+import { AvatarStep, CorpusSetup, ModelStep, SavePicker, UpdateStep } from "./screens/Welcome";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -69,6 +69,8 @@ function Shell() {
   const status = useStore((s) => s.status);
   const ask = useStore((s) => s.ask);
   const personCard = useStore((s) => s.personCard);
+  const hostCard = useStore((s) => s.hostCard);
+  const update = useStore((s) => s.update);
   const group = useStore((s) => s.groupDialog);
   const drawer = useStore((s) => s.drawer);
   const statusError = useStore((s) => s.loadErrors.status);
@@ -123,6 +125,9 @@ function Shell() {
     );
   }
 
+  // The one question about checking for updates, asked once per home, after any first-run steps.
+  if (update && !update.asked) return <UpdateStep />;
+
   return (
     <div className="app">
       <Rail />
@@ -140,6 +145,7 @@ function Shell() {
       {drawer?.kind === "system" && <SettingsCard page={drawer.tab} />}
       {profile && <ProfileCard mode={profile} />}
       {personCard && <PersonCard id={personCard} />}
+      {hostCard && <HostCard />}
       {ask && <AskCard draft={ask} />}
       {group && <GroupDialog />}
     </div>
@@ -186,7 +192,7 @@ const NAV: { key: "roster" | "cases" | "world"; icon: IconName; drawer: Drawer }
 ];
 
 function drawerKey(d: Drawer | null): "roster" | "cases" | "world" | "system" | null {
-  if (!d || d.kind === "channel" || d.kind === "contacts") return null;
+  if (!d || d.kind === "channel" || d.kind === "contacts" || d.kind === "host") return null;
   if (d.kind === "person") return "roster";
   if (d.kind === "case") return "cases";
   return d.kind;
@@ -275,7 +281,7 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       ref={ref}
       className="drawer"
       tabIndex={-1}
-      aria-label={drawer.kind === "channel" ? t("channel.group_info") : t(`nav.${drawerKey(drawer) as "roster"}`)}
+      aria-label={drawer.kind === "channel" ? t("channel.group_info") : drawer.kind === "host" ? t("host.name") : t(`nav.${drawerKey(drawer) as "roster"}`)}
       onKeyDown={(e) => e.key === "Escape" && dispatch({ type: "drawer", drawer: null })}
     >
       <button type="button" className="icon close" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={() => dispatch({ type: "drawer", drawer: null })}>
@@ -283,6 +289,7 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       </button>
       {drawer.kind === "roster" && <RosterDrawer />}
       {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}
+      {drawer.kind === "host" && <HostDrawer />}
       {drawer.kind === "channel" && <GroupInfo id={drawer.id} />}
       {drawer.kind === "cases" && <CasesDrawer />}
       {drawer.kind === "case" && <CaseDrawer id={drawer.id} />}

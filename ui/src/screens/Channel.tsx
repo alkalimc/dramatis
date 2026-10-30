@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChannelId, ChannelSummary, ImagePart, Message } from "../api";
-import { useT } from "../i18n";
+import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
-import { authorName, sameAuthor, typingText } from "../lib/format";
+import { authorName, dayKey, dayLabel, sameAuthor, typingText } from "../lib/format";
 import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
 import { useActions, useApi, useDispatch, useStore } from "../store";
@@ -106,6 +106,11 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
         {messages.length === 0 && streams.length === 0 && <p className="muted empty">{t("channel.empty")}</p>}
         {shown.map((m, i) => (
           <div key={m.id} className="log-item">
+            {(i === 0 || dayKey(m.at) !== dayKey(shown[i - 1].at)) && (
+              <p className="date-pill" role="separator">
+                <time dateTime={m.at}>{dayLabel(m.at, t)}</time>
+              </p>
+            )}
             <MessageView
               message={m}
               showPlay={tts}
@@ -321,20 +326,22 @@ export function ChannelHeader({ channel, finding = false, onFind }: { channel: C
   const drawer = useStore((s) => s.drawer);
   const menu = useChatMenu();
   const typing = typingText(who, t, names, user);
+  const me = useUserName();
 
   const summary: ChannelSummary | undefined = listed ?? (isHost ? ({ id: channel, kind: "host", origin: "system", participants: [], topic: null, mode: "enabled", last_at: null, name: null, avatar: null, archived: false, unread: 0 } satisfies ChannelSummary) : undefined);
   if (!summary) return typing ? <header className="channel-header"><p className="subtitle typing" role="status">{typing}</p></header> : null;
 
   const person = summary.kind === "direct" ? summary.participants[0] : undefined;
-  const info = summary.kind === "group" ? ({ kind: "channel", id: channel } as const) : person ? ({ kind: "person", id: person.id } as const) : null;
+  const info =
+    summary.kind === "group" ? ({ kind: "channel", id: channel } as const) : summary.kind === "host" ? ({ kind: "host" } as const) : person ? ({ kind: "person", id: person.id } as const) : null;
   // The same icon opens the info panel and closes it again.
-  const infoOpen = Boolean(info && drawer && drawer.kind === info.kind && drawer.id === info.id);
+  const infoOpen = Boolean(info && drawer && drawer.kind === info.kind && (info.kind === "host" || (drawer.kind !== "host" && drawer.id === info.id)));
   const fallback = summary.kind === "host" ? t("host.role") : summary.kind === "group" ? t("group.members.count", { count: summary.participants.length }) : t(`mode.${summary.mode}`);
 
   return (
     <header className="channel-header">
       <div className="titles">
-        <h2 title={channelTitle(summary, t)}>{channelTitle(summary, t)}</h2>
+        <h2 title={channelTitle(summary, t, me)}>{channelTitle(summary, t, me)}</h2>
         <p className={`subtitle${typing ? " typing" : ""}`} role="status">
           {typing ?? fallback}
         </p>

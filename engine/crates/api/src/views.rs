@@ -95,6 +95,8 @@ pub struct UpdateStatus {
     pub checked_at: Option<Timestamp>,
     /// Whether the app checks by itself, at most once a day.
     pub auto: bool,
+    /// Whether the user has answered the question about checking by themselves.
+    pub asked: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]

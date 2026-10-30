@@ -38,6 +38,8 @@ export type Drawer =
   /** The contacts list, a card over the app. */
   | { kind: "contacts" }
   | { kind: "person"; id: PersonId }
+  /** The host's page, in the side panel of the host's channel. */
+  | { kind: "host" }
   | { kind: "cases" }
   | { kind: "case"; id: TaskId }
   | { kind: "world" }
@@ -176,6 +178,8 @@ export interface State {
   groupDialog: boolean;
   /** A person's page shown as a card over the conversation (from a name or avatar in a chat). */
   personCard: PersonId | null;
+  /** The host's page as a card, from its avatar or name in a chat. */
+  hostCard: boolean;
   libraryNoticeDismissed: boolean;
   /** The library is the main pane on purpose (the user chose it); without a model it is always. */
   library: boolean;
@@ -232,6 +236,7 @@ export function initialState(): State {
     ask: null,
     groupDialog: false,
     personCard: null,
+    hostCard: false,
     libraryNoticeDismissed: false,
     library: false,
     error: null,
@@ -289,6 +294,7 @@ export type Action =
   | { type: "drawer"; drawer: Drawer | null }
   | { type: "ask"; draft: AskDraft | null }
   | { type: "personCard"; person: PersonId | null }
+  | { type: "hostCard"; open: boolean }
   | { type: "groupDialog"; open: boolean }
   | { type: "dismissLibraryNotice" }
   | { type: "library"; on: boolean }

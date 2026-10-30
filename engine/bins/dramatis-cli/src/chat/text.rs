@@ -620,6 +620,42 @@ line is one message.",
         "cli.header",
         "folio {folio} | world {world} | chat {chat} | host {host_model}",
     ),
+    ("cli.banner", "dramatis {version} · by {author} · {url}"),
+    ("cli.date", "{year}-{mm}-{dd}"),
+    (
+        "host.summary",
+        "The assistant of this place. Ask it who to talk to, or hand it a question to look into.",
+    ),
+    ("host.can", "What it does:"),
+    (
+        "host.can.find",
+        "Finds the right people for what you want to know",
+    ),
+    (
+        "host.can.group",
+        "Brings several people together in a group",
+    ),
+    (
+        "host.can.ask",
+        "Passes a question on to someone and brings back the answer",
+    ),
+    ("host.can.explain", "Explains how things work here"),
+    (
+        "cli.host.commands",
+        "/host talks to it; /events sets the daily happenings; /about shows updates",
+    ),
+    (
+        "cli.update.ask",
+        "Check for a newer version once a day? It asks GitHub and downloads nothing. [y/N] ",
+    ),
+    (
+        "cli.update.on",
+        "daily update check on; /about shows the result",
+    ),
+    (
+        "cli.update.off",
+        "daily update check off; /about shows the last result",
+    ),
     ("cli.header.none", "none"),
     ("cli.header.throwaway", "throwaway"),
     ("cli.header.no_world", "none open"),

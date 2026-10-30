@@ -148,6 +148,18 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .scene_marker;
         show.bind(names.clone(), Marker::new(&(scene.open, scene.close)));
+        let info = api::views::AppInfo::current();
+        println!(
+            "{}",
+            names.say(
+                "cli.banner",
+                &[
+                    ("version", &info.version),
+                    ("author", &info.author),
+                    ("url", &info.repository),
+                ],
+            )
+        );
         println!(
             "{}",
             header(&engine, &names, &folio, &home, args.fresh).await
@@ -168,6 +180,7 @@ pub fn run(folio: Option<PathBuf>, args: Args) -> Result<()> {
             setup::first_run(&engine, &names, &mut setup::Terminal).await;
         }
         if interactive && !args.fresh {
+            setup::update_check(&engine, &names, &mut setup::Terminal).await;
             let gap = setup::gap(&engine).await;
             if setup::endpoints(&engine, &names, gap, &mut setup::Terminal).await {
                 println!(

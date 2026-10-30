@@ -7,7 +7,7 @@ import { renderMarkdown } from "../lib/markdown";
 import { bubbles, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { SourcesPanel } from "./Citation";
-import { Avatar, UserAvatar } from "../ui/Avatar";
+import { Avatar, HOST_ID, UserAvatar } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
@@ -109,7 +109,13 @@ function SpeakerAvatar({ author, name }: { author: Author; name: string }) {
   const t = useT();
   const dispatch = useDispatch();
   if (author.kind === "user") return null;
-  if (author.kind !== "person") return <Avatar person={{ id: "host", name }} size="m" plain />;
+  if (author.kind === "host") {
+    return (
+      <button type="button" className="avatar-button" aria-label={t("message.person.open", { name })} title={name} onClick={() => dispatch({ type: "hostCard", open: true })}>
+        <Avatar person={{ id: HOST_ID, name }} size="m" />
+      </button>
+    );
+  }
   return (
     <button type="button" className="avatar-button" aria-label={t("message.person.open", { name })} title={name} onClick={() => dispatch({ type: "personCard", person: author.id })}>
       <Avatar person={{ id: author.id, name }} size="m" />
@@ -122,9 +128,9 @@ function AuthorName({ author, name }: { author: Author; name: string }) {
   const t = useT();
   const dispatch = useDispatch();
   const text = t("message.author", { name });
-  if (author.kind !== "person") return <span>{text}</span>;
+  if (author.kind === "user") return <span>{text}</span>;
   return (
-    <button type="button" className="author-name" onClick={() => dispatch({ type: "personCard", person: author.id })}>
+    <button type="button" className="author-name" onClick={() => dispatch(author.kind === "host" ? { type: "hostCard", open: true } : { type: "personCard", person: author.id })}>
       {text}
     </button>
   );
@@ -350,6 +356,14 @@ const BubbleMessage = memo(function BubbleMessage({
     </div>
   );
 
+  // The sources unfold inside the bubble, above its foot.
+  const withSources = (f: ReactNode) => (
+    <>
+      {sourcesOpen && <SourcesPanel cites={message.cites} onClose={() => dispatch({ type: "sources", message: message.id })} />}
+      {f}
+    </>
+  );
+
   return (
     <>
     <ActionLines author={message.author} actions={message.actions} />
@@ -364,12 +378,11 @@ const BubbleMessage = memo(function BubbleMessage({
       <div className="message-stack">
         <div ref={body} className="message-body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
           {parts.map((b, i) => (
-            <BubbleView key={i} b={b} label={i === 0 ? label : null} top={i === 0 ? picture : null} foot={i === parts.length - 1 ? foot : null} />
+            <BubbleView key={i} b={b} label={i === 0 ? label : null} top={i === 0 ? picture : null} foot={i === parts.length - 1 ? withSources(foot) : null} />
           ))}
-          {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} top={picture} foot={foot} />}
+          {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} top={picture} foot={withSources(foot)} />}
         </div>
 
-        {sourcesOpen && <SourcesPanel cites={message.cites} onClose={() => dispatch({ type: "sources", message: message.id })} />}
         {selection !== null && <SelectionMenu excerpt={selection} message={message} onClose={() => setSelection(null)} />}
         {menuAt && <Menu at={menuAt} items={menuItems()} label={t("message.actions")} onClose={closeMenu} />}
       </div>

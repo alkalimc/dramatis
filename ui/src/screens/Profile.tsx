@@ -288,6 +288,7 @@ export function LeftDrawer() {
   const archivedCount = useStore((s) => s.channels.filter((c) => c.archived).length);
   const ref = useRef<HTMLElement>(null);
   const version = useStore((s) => s.about?.version);
+  const author = useStore((s) => s.about?.author);
   const newer = useStore((s) => s.update?.newer ?? false);
   const close = () => dispatch({ type: "menu", open: false });
   const go = (fn: () => void) => () => {
@@ -334,6 +335,7 @@ export function LeftDrawer() {
         <button type="button" className="left-foot" onClick={() => dispatch({ type: "drawer", drawer: { kind: "system", tab: "about" } })}>
           <span>{t("menu.app")}</span>
           {version && <span>{t("menu.version", { version })}</span>}
+          {author && <span>{t("credit.by")} {author}</span>}
           {newer && (
             <span className="update-note">
               <span className="update-dot" aria-hidden="true" />

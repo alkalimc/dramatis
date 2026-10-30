@@ -40,6 +40,7 @@ impl Engine {
             latest: checked.as_ref().map(|c| c.latest.clone()),
             url: checked.map(|c| c.url),
             auto: self.home.auto_update_check(),
+            asked: self.home.update_check_asked(),
         }
     }
 

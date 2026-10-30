@@ -52,15 +52,15 @@ test("a check that cannot be made is reported on this page only", async () => {
   expect(store.getState().error).toBeNull();
 });
 
-test("automatic checks are on by default and the switch turns them off", async () => {
+test("automatic checks are off until the person turns them on", async () => {
   const user = userEvent.setup();
   const { store } = renderApp();
   const page = await openAbout(user);
   const auto = within(page).getByRole("switch", { name: "Check for updates once a day" }) as HTMLInputElement;
-  expect(auto.checked).toBe(true);
+  expect(auto.checked).toBe(false);
   await user.click(auto);
-  await waitFor(() => expect(store.getState().update?.auto).toBe(false));
-  expect((within(page).getByRole("switch", { name: "Check for updates once a day" }) as HTMLInputElement).checked).toBe(false);
+  await waitFor(() => expect(store.getState().update?.auto).toBe(true));
+  expect((within(page).getByRole("switch", { name: "Check for updates once a day" }) as HTMLInputElement).checked).toBe(true);
 });
 
 test("a release found earlier shows in the drawer at once", async () => {
@@ -69,4 +69,14 @@ test("a release found earlier shows in the drawer at once", async () => {
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "Menu" }));
   expect(await screen.findByText("Update available")).toBeDefined();
+});
+
+test("a home that was never asked is asked once, and the answer is kept", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp("update=ask");
+  expect(await screen.findByRole("heading", { name: "Check for updates?" })).toBeDefined();
+  expect(screen.getByText(/Nothing is downloaded/)).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Turn on" }));
+  expect(await screen.findByRole("heading", { name: "Who's waiting" })).toBeDefined();
+  expect(store.getState().update).toMatchObject({ auto: true, asked: true });
 });

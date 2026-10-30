@@ -38,6 +38,17 @@ export function userTitle(t: T, name: string | null | undefined): string {
   return n ? t("user.title", { name: n }) : t("user.you");
 }
 
+/** The user's own name as a group lists it: the name as typed, else the corpus's word for "you". */
+export function userName(t: T, name: string | null | undefined): string {
+  return name?.trim() || t("user.you");
+}
+
+/** `userName` from settings; follows renames at once. */
+export function useUserName(): string {
+  const t = useT();
+  return userName(t, useStore((s) => s.settings?.user_name ?? null));
+}
+
 export function useT(): T {
   return useStore((s) => s.t);
 }

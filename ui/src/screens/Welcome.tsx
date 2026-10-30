@@ -6,6 +6,7 @@ import { when } from "../lib/format";
 import { useActions, useApi, useStore } from "../store";
 import { readAvatar } from "../lib/image";
 import { UserAvatar } from "../ui/Avatar";
+import { Credit } from "../ui/Credit";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
 import { PictureButtons } from "./Profile";
@@ -64,6 +65,7 @@ export function CorpusSetup({ corpus }: { corpus: CorpusState }) {
         }}
       >
         <h1>{t("setup.corpus.title")}</h1>
+        <Credit />
         {problem ? <p role="alert">{problem}</p> : <p>{t("setup.corpus.intro")}</p>}
         <p className="row">
           <button type="button" className="ghost" onClick={() => void choose()}>
@@ -136,6 +138,7 @@ export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void })
     <main className="first-open setup picker">
       <div className="card">
         <h1>{first ? t("picker.first") : t("picker.title")}</h1>
+        <Credit />
         {missing && <p role="alert">{t("picker.missing", { name: missing })}</p>}
         {first && <p>{t("picker.first.hint")}</p>}
         {saves && saves.length > 0 && (
@@ -200,6 +203,35 @@ export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void })
   );
 }
 
+/** Asked once, when the home has no answer yet: whether to check for a newer version by itself. */
+export function UpdateStep() {
+  const t = useT();
+  const actions = useActions();
+  const [busy, setBusy] = useState(false);
+  const answer = async (on: boolean) => {
+    setBusy(true);
+    await actions.setAutoUpdate(on);
+    setBusy(false);
+  };
+  return (
+    <main className="first-open setup">
+      <div className="card">
+        <h1>{t("update.ask.title")}</h1>
+        <Credit />
+        <p>{t("update.ask.hint")}</p>
+        <p className="row end">
+          <button type="button" className="ghost" disabled={busy} onClick={() => void answer(false)}>
+            {t("update.ask.no")}
+          </button>
+          <button type="button" disabled={busy} onClick={() => void answer(true)}>
+            {t("update.ask.yes")}
+          </button>
+        </p>
+      </div>
+    </main>
+  );
+}
+
 const WIRES: WireApi[] = ["chat", "responses", "messages"];
 
 /** After the name on a first run: a picture to upload, or the default portrait. Skippable. */
@@ -215,6 +247,7 @@ export function AvatarStep({ onDone }: { onDone: () => void }) {
     <main className="first-open setup">
       <div className="card">
         <h1>{t("first.avatar.title")}</h1>
+        <Credit />
         <p>{t("first.avatar.hint")}</p>
         <p className="avatar-pick">
           <UserAvatar size="xl" />
@@ -289,6 +322,7 @@ export function ModelStep({ onDone }: { onDone: () => void }) {
         }}
       >
         <h1>{t("model.title")}</h1>
+        <Credit />
         {keyless ? <p>{t("model.key.only", { name: keyless.profile.name })}</p> : <p>{t("model.intro")}</p>}
         {!keyless && (
           <>

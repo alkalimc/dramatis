@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { useT } from "../i18n";
 import { useActions, useStore } from "../store";
+import { Credit } from "../ui/Credit";
 import { LanguageChoice } from "./Language";
 import { BIO_MAX } from "./Profile";
 import { birthday, NameAndBirthday } from "./Quota";
@@ -30,6 +31,7 @@ export function FirstOpen() {
         }}
       >
         <h1>{t("first.title")}</h1>
+        <Credit />
         <LanguageChoice legend={t("first.language")} />
         <NameAndBirthday
           id={id}

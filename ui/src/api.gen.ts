@@ -183,6 +183,13 @@ export const commands = {
 	path: string,
 } | null, ApiError>(__TAURI_INVOKE("user_avatar")),
 	/**
+	 *  The host's picture when the corpus names one (fetched and cached like a person's
+	 *  avatar), else `None` and the host keeps a plain letter.
+	 */
+	hostAvatar: () => typedError<{
+	path: string,
+} | null, ApiError>(__TAURI_INVOKE("host_avatar")),
+	/**
 	 *  Set the user's picture; `None` returns to the default. Returns what `user_avatar`
 	 *  now answers. Per save.
 	 */
@@ -1146,6 +1153,8 @@ export type UpdateStatus = {
 	checked_at: Timestamp | null,
 	/**  Whether the app checks by itself, at most once a day. */
 	auto: boolean,
+	/**  Whether the user has answered the question about checking by themselves. */
+	asked: boolean,
 };
 
 export type Waiting = {

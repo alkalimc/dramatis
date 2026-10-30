@@ -227,6 +227,15 @@
   font-size: var(--fs-xs);
   text-align: center;
 }
+.date-pill {
+  align-self: center;
+  margin: var(--s-3) 0 var(--s-1);
+  padding: 0 var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  color: var(--stamp);
+  font-size: var(--fs-xs);
+}
 .service-line {
   align-self: center;
   max-width: 80%;
@@ -355,36 +364,32 @@
   color: var(--accent-hover);
 }
 
-/* ---- sources: a panel under the message with the cited original text ---- */
+/* ---- sources: a quote block inside the bubble, with the cited original text ---- */
 .sources-panel {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 5;
-  margin-top: var(--s-1);
-  width: min(30rem, 80vw);
-  max-height: 22rem;
-  overflow-y: auto;
-  padding: var(--s-3) var(--s-4);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow);
-}
-.from-user .sources-panel {
-  left: auto;
-  right: 0;
+  margin: var(--s-2) 0 var(--s-1);
+  padding: var(--s-1) 0 var(--s-1) var(--s-3);
+  border-left: 3px solid var(--accent);
+  font-size: var(--fs-sm);
 }
 .sources-panel:focus {
   outline: none;
 }
-.sources-head {
+button.sources-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: var(--ctl-sm);
+  padding: 0;
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+  font-weight: var(--fw-strong);
 }
-.sources-head h4 {
-  margin: 0;
+.sources-chevron {
+  display: inline-flex;
+  transform: rotate(180deg);
 }
 .sources-list {
   display: flex;
