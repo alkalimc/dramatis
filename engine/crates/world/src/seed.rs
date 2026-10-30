@@ -16,7 +16,7 @@ use crate::channel::{self, Channel};
 use crate::clock::{self, Now};
 use crate::event;
 use crate::fact::{self, About, Audience};
-use crate::params::{Seed as SeedParams, Session as SessionParams};
+use crate::params::{QuietHours, Seed as SeedParams, Session as SessionParams};
 use crate::quota::{self, Band};
 use crate::session::{self, Budget, Cause};
 use crate::types::{ChannelId, FactId, FactKind, MessageId, Mode, PersonId, TaskId};
@@ -182,6 +182,10 @@ pub enum Held {
     DailyTotal,
     /// Every candidate is at `seed.per_agent_day` or has nowhere to open.
     PerAgent,
+    /// The last opening, whoever's, was less than `seed.gap_min` ago.
+    TooSoon,
+    /// The day's openings so far are all the waking day has earned by now.
+    NotYet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -429,6 +433,76 @@ pub fn candidates(
     Ok(out)
 }
 
+/// When the newest unprompted opening was delivered, or the newest daily event made.
+pub fn last_opening(conn: &Connection) -> Result<Option<i64>> {
+    Ok(conn.query_row(
+        "SELECT nullif(max(coalesce((SELECT max(delivered_at) FROM seed), 0), \
+                coalesce((SELECT max(at) FROM daily_event), 0)), 0)",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
+/// The waking day cut into `total` equal parts, each holding one slot at a place drawn
+/// from the date (and `salt`, so two kinds of slot do not fall together), so what is
+/// spread over the day does not come together.
+pub struct Slots {
+    /// Minutes into the waking day.
+    since: u32,
+    part: u32,
+    total: u32,
+    len: u32,
+    day: u64,
+    salt: u64,
+}
+
+impl Slots {
+    pub fn new(quiet: Option<&QuietHours>, now: Now, total: u32, salt: u64) -> Self {
+        let (start, len) = clock::waking_window(quiet);
+        let total = total.max(1);
+        let d = now.local_date();
+        Self {
+            since: (now.local_minute() + 1440 - start) % 1440,
+            part: (len / total).max(1),
+            total,
+            len,
+            day: u64::from(d.year.unsigned_abs()) * 400
+                + u64::from(d.month) * 31
+                + u64::from(d.day),
+            salt,
+        }
+    }
+
+    /// Minutes into the waking day at which slot `i` comes.
+    pub fn at(&self, i: u32) -> u32 {
+        let mix = (self.day * 31 + u64::from(i) + 1 + self.salt * 1000)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        self.part * i + u32::try_from((mix >> 33) % u64::from(self.part)).unwrap_or(0)
+    }
+
+    /// How many slots have come by now.
+    pub fn due(&self) -> u32 {
+        (0..self.total)
+            .filter(|i| self.at(*i) <= self.since)
+            .count() as u32
+    }
+
+    /// The part of the day now is in, as `[from, to)` instants, and whether its slot has
+    /// come. The last part runs to the end of the waking day.
+    pub fn current(&self, now: Now) -> (i64, i64, bool) {
+        let i = (self.since / self.part).min(self.total - 1);
+        let minute = now.ms - now.ms.rem_euclid(clock::MINUTE_MS);
+        let from = minute - i64::from(self.since - self.part * i) * clock::MINUTE_MS;
+        let end = if i + 1 == self.total {
+            self.len
+        } else {
+            self.part * (i + 1)
+        };
+        let to = from + i64::from(end - self.part * i) * clock::MINUTE_MS;
+        (from, to, self.at(i) <= self.since)
+    }
+}
+
 /// Unprompted openings delivered in `[since, now]`, optionally for one person.
 pub fn delivered_count(
     conn: &Connection,
@@ -499,8 +573,18 @@ pub fn plan(
         return Ok(Planned::Held(Held::InConversation));
     }
     let day = now.local_day_start();
-    if delivered_count(conn, None, day, now.ms)? >= limits.seed.daily_total {
+    let today = delivered_count(conn, None, day, now.ms)?;
+    if today >= limits.seed.daily_total {
         return Ok(Planned::Held(Held::DailyTotal));
+    }
+    if matches!(occasion, Occasion::Presence { .. }) {
+        if clock::too_soon(last_opening(conn)?, now.ms, limits.seed.gap_min) {
+            return Ok(Planned::Held(Held::TooSoon));
+        }
+        let quiet = settings::quiet_hours(conn, limits.seed)?;
+        if Slots::new(quiet.as_ref(), now, limits.seed.daily_total, 0).due() <= today {
+            return Ok(Planned::Held(Held::NotYet));
+        }
     }
     for c in all {
         if delivered_count(conn, Some(&c.person), day, now.ms)? >= limits.seed.per_agent_day {
@@ -1007,6 +1091,41 @@ mod tests {
             presence(&w, &env, at(T0 + gap + HOUR)),
             Planned::Held(Held::NoSeed)
         );
+    }
+
+    #[test]
+    fn a_days_openings_spread_over_the_waking_day() {
+        let w = world();
+        let env = Env::new(&w);
+        let names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+        enable(&w, &names);
+        // A fake clock over two local days, ticking every ten minutes; every tick asks.
+        let midnight = T0 - 12 * HOUR;
+        let step = 10 * 60_000;
+        let mut opened: Vec<i64> = Vec::new();
+        let mut t = midnight;
+        while t < midnight + 2 * DAY {
+            if let Planned::Open(o) = presence(&w, &env, at(t)) {
+                deliver(&w, &o, t);
+                opened.push(t);
+            }
+            t += step;
+        }
+        let gap = i64::from(env.seed.gap_min) * 60_000;
+        let quiet = env.seed.quiet_hours.clone();
+        assert_eq!(opened.len(), 2 * env.seed.daily_total as usize);
+        for pair in opened.windows(2) {
+            assert!(pair[1] - pair[0] >= gap, "{pair:?} closer than the gap");
+        }
+        for ms in &opened {
+            assert!(!clock::in_quiet_hours(&quiet, at(*ms)), "{ms} is quiet");
+        }
+        // The first day: one opening in each fifth of the waking day (08:00 to 23:00).
+        let part = 3 * HOUR;
+        for (i, ms) in opened.iter().take(5).enumerate() {
+            let since = ms - midnight - 8 * HOUR;
+            assert!((i as i64 * part..(i as i64 + 1) * part).contains(&since));
+        }
     }
 
     #[test]

@@ -518,7 +518,7 @@ export const en = {
   "events.per_day": "Happenings on board",
   "events.count.0": "None",
   "events.count.1": "One a day",
-  "events.count.2": "Two a day",
+  "events.count.n": "{count} a day",
   "events.hint": "Now and then the host mentions something small that happened. It never needs an answer.",
   "you.name": "What should they call you?",
   "you.birthday": "Birthday (optional)",

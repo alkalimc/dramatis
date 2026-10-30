@@ -1883,7 +1883,8 @@ async fn events_are_listed_and_switched() {
     assert!(r.run("/events off").await.contains("daily events off"));
     assert!(r.run("/events").await.contains("daily events off"));
     assert!(r.run("/events on").await.contains("1 a day"));
-    assert!(r.run("/events 3").await.contains("usage"));
+    assert!(r.run("/events 6").await.contains("6 a day"));
+    assert!(r.run("/events 7").await.contains("usage"));
     assert!(r.run("/events many").await.contains("usage"));
 }
 

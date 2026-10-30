@@ -3,7 +3,8 @@
 //!
 //! First the digest (no model call): new messages, answered requests, due commitments,
 //! who came by, whose birthday it is. When it is non-empty and the quota band allows,
-//! the host says one in-world line about the items it has not announced yet. Then at most one person opens with a seed.
+//! the host says one in-world line about the items it has not announced yet (arrivals
+//! excluded). Then at most one person opens with a seed.
 
 use std::collections::BTreeMap;
 
@@ -38,6 +39,13 @@ pub enum Activity {
     /// It is his birthday today (his corpus profile's field). Only for someone the user
     /// has talked to: with hundreds of people, nearly every day has a birthday.
     Birthday,
+}
+
+impl Activity {
+    /// A person came by or wrote: routine, so the host has nothing to add.
+    pub fn is_arrival(&self) -> bool {
+        matches!(self, Self::Messaged { .. } | Self::CameBy { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,7 +314,10 @@ pub fn on_presence(
     }
     let digest = digest(conn, now, birthdays)?;
     // Only news: the same waiting items are not announced twice.
-    let news = digest.unannounced(conn, now.local_date())?;
+    // Arrivals are not the host's to announce: the badge and the notification tell the
+    // user, and the panel lists them.
+    let mut news = digest.unannounced(conn, now.local_date())?;
+    news.items.retain(|w| !w.activity.is_arrival());
     if !news.is_empty() && quota::decide(&status, CallKind::HostLine).allowed() {
         calls.push(Call::HostLine(news));
     }
@@ -460,7 +471,37 @@ mod tests {
             &NoTopic,
         )
         .unwrap();
-        assert!(matches!(pres.calls.as_slice(), [Call::HostLine(_)]));
+        assert!(!pres.digest.is_empty());
+        assert!(
+            pres.calls.is_empty(),
+            "a message alone is no news for the host"
+        );
+        // A due commitment is.
+        let f = fact::write(
+            &w,
+            &NewFact::new(
+                Actor::User,
+                Audience::Participants(cb),
+                FactKind::Commitment,
+                "call",
+            )
+            .due(T0),
+            0,
+        )
+        .unwrap()
+        .id();
+        let _ = f;
+        let pres = on_presence(
+            &w,
+            at(T0 + HOUR),
+            Tier::Middle,
+            &params,
+            &none(),
+            &[],
+            &NoTopic,
+        )
+        .unwrap();
+        assert!(matches!(pres.calls.first(), Some(Call::HostLine(_))));
 
         let mut quiet = params.clone();
         quiet.quota = Quota {
@@ -505,7 +546,10 @@ mod tests {
             &NoTopic,
         )
         .unwrap();
-        assert_eq!(pres.calls.len(), 1, "no bands without windows");
+        assert!(
+            matches!(pres.calls.first(), Some(Call::HostLine(_))),
+            "no bands without windows"
+        );
     }
 
     #[test]
@@ -523,12 +567,16 @@ mod tests {
         let [Call::HostLine(news)] = first.calls.as_slice() else {
             panic!("one line")
         };
-        assert_eq!(news.items.len(), 2);
+        assert_eq!(
+            news.items.len(),
+            1,
+            "the birthday; the message is an arrival"
+        );
         mark_announced(&w, &first.digest, news, at(T0 + HOUR).local_date()).unwrap();
         let again = run(T0 + HOUR + 1);
         assert!(again.calls.is_empty());
         assert_eq!(again.digest.items.len(), 2, "the panel still shows both");
-        // A new message is news; the birthday is not.
+        // A new message is an arrival, not news for the host; the birthday is not news.
         message::append(
             &w,
             cb,
@@ -540,11 +588,7 @@ mod tests {
         )
         .unwrap();
         let third = run(T0 + HOUR + 3);
-        let [Call::HostLine(news)] = third.calls.as_slice() else {
-            panic!("one line")
-        };
-        assert_eq!(news.items.len(), 1);
-        assert_eq!(news.items[0].person, p("b"));
+        assert!(third.calls.is_empty());
         // The birthday is a new item on another day.
         let b = &first.digest.items[1];
         assert_ne!(

@@ -36,7 +36,7 @@ from dramatis_forge.persona.endpoints import (
     persona_target,
 )
 from dramatis_forge.persona.gates import META, PRESCRIPTIVE, STRUCTURE, Lexicons, check
-from dramatis_forge.persona.generator import DEFAULT, Generator, HostSource
+from dramatis_forge.persona.generator import DEFAULT, Correction, Generator, HostSource
 from dramatis_forge.persona import stale as stale_mod
 from dramatis_forge.persona.material import (
     Example,
@@ -532,6 +532,47 @@ def test_resume_skips_current_rows_and_restores_from_the_cache(toy, paths, endpo
     assert [o.status for o in forced.report.outcomes] == [WRITTEN] and len(ep.requests) == 2
 
 
+def test_a_correction_wins_over_the_cached_reply_without_a_call(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    run(toy, paths, endpoints_file, ep, only=["Alice"])
+    cached = output_of("responses_ok.json")
+    fixed = {"system_prompt": "You are Alice, and a hand-written line replaces the rest.",
+             "tone_rules": ["Short.", "Dry.", "Warm underneath."]}
+    gen = replace(GEN, corrections={
+        "Alice": Correction(reason="the reply was too cold", fields=fixed,
+                            lines=("A line of her own.",))})
+
+    # Rows already in the folio get the correction without a call; the version is the same.
+    again = run(toy, paths, endpoints_file, ep, only=["Alice"], gen=gen,
+                lookup=key_lookup(None))
+    assert [o.status for o in again.report.outcomes] == [RESTORED]
+    r = rows(paths)
+    assert r[("Alice", "system")][0] == fixed["system_prompt"]
+    assert r[("Alice", "tone")][0] == "\n".join(fixed["tone_rules"])
+    assert r[("Alice", "capability")][0] == cached["capability_line"]
+    assert r[("Alice", "system")][1] == again.report.version
+    assert len(ep.requests) == 1
+
+    # A rebuilt folio is restored from the cache, which still holds the model's own text.
+    build_folio(paths.folio)
+    restored = run(toy, paths, endpoints_file, ep, only=["Alice"], gen=gen,
+                   lookup=key_lookup(None))
+    assert [o.status for o in restored.report.outcomes] == [RESTORED]
+    assert rows(paths)[("Alice", "system")][0] == fixed["system_prompt"]
+    assert RawCache(paths.pack_dir / "persona" / "raw").entry("Alice")["output"] == cached
+    assert len(ep.requests) == 1
+
+    # Once the rows carry it, the next run has nothing to do.
+    third = run(toy, paths, endpoints_file, ep, only=["Alice"], gen=gen, lookup=key_lookup(None))
+    assert [o.status for o in third.report.outcomes] == [RESUMED]
+
+    # A correction that fails the gates removes the rows like any reply that fails them.
+    bad = replace(GEN, corrections={"Alice": Correction(
+        reason="x", fields={"system_prompt": ""})})
+    run(toy, paths, endpoints_file, ep, only=["Alice"], gen=bad, lookup=key_lookup(None))
+    assert not any(sub == "Alice" for sub, _slot in rows(paths))
+
+
 def test_a_new_generator_version_regenerates(toy, paths, endpoints_file):
     ep = FakeEndpoint(recorded("responses_ok.json"))
     first = run(toy, paths, endpoints_file, ep, only=["Alice"]).report.version
@@ -539,6 +580,28 @@ def test_a_new_generator_version_regenerates(toy, paths, endpoints_file):
     second = run(toy, paths, endpoints_file, ep, only=["Alice"], gen=edited).report.version
     assert first != second and len(ep.requests) == 2
     assert {v for (s, _sl), (_b, v) in rows(paths).items() if s == "Alice"} == {second}
+
+
+def test_adopt_takes_earlier_replies_as_current_without_a_call(toy, paths, endpoints_file):
+    ep = FakeEndpoint(recorded("responses_ok.json"))
+    first = run(toy, paths, endpoints_file, ep, only=["Alice"]).report.version
+    # A change to the host's text moves every version; without --adopt that is a new call.
+    edited = replace(GEN, host_system=GEN.host_system + "\n")
+    adopted = run(toy, paths, endpoints_file, ep, only=["Alice"], gen=edited, adopt=first,
+                  lookup=key_lookup(None))
+    assert [o.status for o in adopted.report.outcomes] == [RESUMED]
+    assert adopted.report.version != first and len(ep.requests) == 1
+    assert {v for (s, _sl), (_b, v) in rows(paths).items() if s == "Alice"} == {
+        adopted.report.version}
+    cached = RawCache(paths.pack_dir / "persona" / "raw").entry("Alice")
+    assert cached["generator_version"] == adopted.report.version
+    # The host is never adopted: its own text is what changed.
+    hep = FakeEndpoint(recorded("responses_host.json"))
+    host = run(toy, paths, endpoints_file, hep, only=["host"], gen=GEN)
+    assert [o.status for o in host.report.outcomes] == [WRITTEN]
+    moved = run(toy, paths, endpoints_file, hep, only=["host"], gen=edited,
+                adopt=host.report.version)
+    assert [o.status for o in moved.report.outcomes] == [WRITTEN] and len(hep.requests) == 2
 
 
 def test_a_failing_regeneration_removes_the_old_rows(toy, paths, endpoints_file):

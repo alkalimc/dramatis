@@ -15,7 +15,7 @@ structure (what they know, how much they find, whether they come to you) must st
 and the prescriptive-phrasing gate is what enforces it.
 """
 
-from .generator import Generator
+from .generator import Correction, Generator
 from .params import Persona
 
-__all__ = ["Generator", "Persona"]
+__all__ = ["Correction", "Generator", "Persona"]

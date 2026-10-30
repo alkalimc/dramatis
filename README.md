@@ -77,6 +77,7 @@ written three ways: as fetched, as records, as archived text. Read it, then:
 ./forge persona --stale         # no network: list personas whose source material changed
 ./forge persona --stale --regenerate
 ./forge persona --only <name> --force
+./forge persona --adopt <version>  # no network: take replies of an older generator version as current
 ```
 
 Generation uses the `persona` role of `$DRAMATIS_HOME/endpoints.toml` (`--endpoints` for another

@@ -268,7 +268,12 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.wrapup.shape",
         "Reply with one JSON object only, no code fence, using exactly these keys: {shape}",
     ),
-    ("harness.opening", "{name} speaks first."),
+    (
+        "harness.opening",
+        "{name} speaks first. {name} is the one who goes to {user}, or the two happen to run \
+         into each other; {user} did not come looking for {name}. A scene line, if there is \
+         one, shows that.",
+    ),
     ("harness.opening.commitment", "A promise is due: {text}"),
     (
         "harness.opening.conclusion",
@@ -278,8 +283,9 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.opening.birthday", "Today is {user}'s birthday."),
     (
         "harness.opening.visit",
-        "Nothing in particular brings you here. Speak first with a short, natural line, as \
-         someone stopping by.",
+        "Nothing in particular brings you to {user}. You stop by where {user} is, or the two \
+         of you run into each other. Speak first with a short, natural line, as someone \
+         stopping by.",
     ),
     (
         "harness.opening.memory",

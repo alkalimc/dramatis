@@ -36,7 +36,29 @@ fn emulated() -> api::endpoints::Endpoints {
 fn setup(ep: api::endpoints::Endpoints) -> Env {
     let e = env_with(ep, |c| c.world.events.per_day = 1);
     speak(&e);
+    to_slot(&e, 1, 0);
     e
+}
+
+/// Move the clock to a minute after the start of event slot `k` of `per_day`, today or
+/// on the first day after that has it ahead.
+fn to_slot(e: &Env, per_day: u32, k: u32) {
+    let quiet = e
+        .agent
+        .with_world(|w| settings::quiet_hours(w, &world::params::Seed::default()).unwrap());
+    let (start, _) = world::clock::waking_window(quiet.as_ref());
+    let ms = e.clock.0.load(std::sync::atomic::Ordering::SeqCst);
+    for day in 0..3 {
+        let today = world::clock::Now::utc(ms + day * DAY_MS);
+        let slot = event::slots(quiet.as_ref(), today, per_day).at(k);
+        let minutes = i64::from(start) + i64::from(slot) + 1;
+        let target = today.local_day_start() + minutes * MINUTE_MS;
+        if target >= ms {
+            e.clock.advance(target - ms);
+            return;
+        }
+    }
+    panic!("no slot ahead");
 }
 
 fn speak(e: &Env) {
@@ -133,6 +155,10 @@ async fn nothing_is_made_unless_the_user_is_present_and_the_moment_is_open() {
     e.agent.tick(false).await.unwrap();
     assert_eq!(requests(&e), 0);
     // Quiet hours.
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.world.events.per_day = 1
+    });
+    speak(&e);
     e.clock.advance(11 * HOUR_MS + 30 * MINUTE_MS);
     e.agent.tick(true).await.unwrap();
     assert_eq!(requests(&e), 0);
@@ -195,12 +221,17 @@ async fn the_setting_chooses_how_many_and_zero_turns_them_off() {
     assert_eq!(requests(&e), 0);
     e.agent
         .with_world(|w| settings::set(w, settings::EVENTS_PER_DAY, &2).unwrap());
+    to_slot(&e, 2, 0);
     e.fake
         .push([say(&reply()), say(&reply().replace(TEA, "Later"))]);
     e.agent.tick(true).await.unwrap();
     e.agent.tick(true).await.unwrap();
     assert_eq!(requests(&e), 1, "a failed or finished try waits");
+    // One to a part of the day: the second waits for its own slot.
     e.clock.advance(61 * MINUTE_MS);
+    e.agent.tick(true).await.unwrap();
+    assert_eq!(requests(&e), 1, "the part of the day has its event");
+    to_slot(&e, 2, 1);
     e.agent.tick(true).await.unwrap();
     assert_eq!(requests(&e), 2);
     e.clock.advance(61 * MINUTE_MS);
@@ -233,6 +264,61 @@ async fn a_reply_that_is_not_an_event_is_skipped_quietly() {
     e.fake.push([agent_fail()]);
     e.agent.tick(true).await.unwrap();
     assert!(posts(&e).is_empty());
+}
+
+/// The diagnostics log of an environment.
+fn log(e: &Env) -> String {
+    std::fs::read_to_string(e._office.0.join("logs").join("dramatis.log")).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn every_dropped_draft_is_logged_with_its_reason_and_the_start_of_the_reply() {
+    let nobody =
+        json!({"title": "T", "text": "x", "persons": ["nobody"], "group": null, "talk": []});
+    let cases = [
+        ("Something nice happened.".to_owned(), "reply is not JSON"),
+        ("   ".to_owned(), "empty reply"),
+        (
+            r#"{"headline": "A headline"}"#.to_owned(),
+            "reply has no title or text",
+        ),
+        (nobody.to_string(), "no person resolved"),
+    ];
+    for (bad, reason) in cases {
+        let e = setup(emulated());
+        e.fake.push([say(&bad)]);
+        e.agent.tick(true).await.unwrap();
+        assert!(posts(&e).is_empty(), "{bad}");
+        let log = log(&e);
+        assert!(log.contains("what=event dropped"), "{log}");
+        assert!(log.contains(&format!("reason={reason}")), "{reason}: {log}");
+        if !bad.trim().is_empty() && reason != "no person resolved" {
+            let head = format!("{:?}", &bad[..10]);
+            assert!(log.contains(head.trim_matches('"')), "{log}");
+        }
+    }
+    let e = setup(endpoints(WireApi::Chat, true, None));
+    e.fake.push([agent_fail()]);
+    e.agent.tick(true).await.unwrap();
+    assert!(log(&e).contains("reason=call failed"), "{}", log(&e));
+}
+
+#[tokio::test]
+async fn a_draft_in_prose_fences_or_with_display_names_is_still_posted() {
+    for text in [
+        format!("Here is today's happening:\n{}", reply()),
+        format!("```json\n{}\n```", reply()),
+        reply().replace("\"ann\", \"bo\"", "\"ann: ann\", \"Bo\""),
+    ] {
+        let e = setup(emulated());
+        e.fake.push([say(&text)]);
+        e.agent.tick(true).await.unwrap();
+        let posted = posts(&e);
+        assert_eq!(posted.len(), 1, "{text}");
+        assert_eq!(posted[0].author, api::types::Author::Host);
+        assert!(posted[0].text.contains(TEA));
+        assert_eq!(e.agent.daily_events().unwrap().len(), 1);
+    }
 }
 
 fn agent_fail() -> Reply {
@@ -310,6 +396,12 @@ async fn one_of_them_may_bring_it_up_as_an_opening_within_the_usual_limits() {
         for who in ["ann", "bo"] {
             world::bond::set_mode(w, &p(who), world::Mode::Enabled).unwrap();
         }
+    });
+    // The user is mid-conversation when it happens, so only the event is made.
+    let now = e.clock.0.load(std::sync::atomic::Ordering::SeqCst);
+    e.agent.with_world(|w| {
+        let ch = channel::direct(w, &p("ann")).unwrap();
+        message::append(w, ch, &Actor::User, "again", None, None, now).unwrap();
     });
     e.fake.push_for(ASK, [say(&reply())]);
     e.agent.tick(true).await.unwrap();

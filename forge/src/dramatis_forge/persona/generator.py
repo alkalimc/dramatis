@@ -53,6 +53,25 @@ class HostSource:
 
 
 @dataclass(frozen=True)
+class Correction:
+    """A hand-written replacement for some of one subject's generated fields.
+
+    Applied over the reply whenever rows are written (a fresh call, a restore from the raw
+    cache, or rows already in the folio), so the cache keeps what the model said and the
+    correction is the pack's own, with its reason beside it. It is not part of the
+    generator version: adding or editing one never invalidates a reply. The corrected
+    output still goes through the gates.
+    """
+
+    #: Why the generated text is not used as it is.
+    reason: str
+    #: Output fields to replace, by field name; the rest of the reply is kept.
+    fields: Mapping[str, Any]
+    #: Replacement example lines; empty keeps the picked ones.
+    lines: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Generator:
     #: Human label prefixed to the derived version.
     label: str
@@ -91,6 +110,17 @@ class Generator:
     #: Regular expressions for other names for the user in generated text (a made-up
     #: name, a title followed by something other than the placeholder).
     user_name_patterns: tuple[str, ...] = ()
+    #: Hand-written corrections by subject.
+    corrections: Mapping[str, Correction] = field(default_factory=dict)
+
+    def corrected(self, subject: str, output: dict[str, Any]) -> dict[str, Any]:
+        """`output` with the subject's correction laid over it."""
+        fix = self.corrections.get(subject)
+        return {**output, **fix.fields} if fix else output
+
+    def corrected_lines(self, subject: str, lines: list[str]) -> list[str]:
+        fix = self.corrections.get(subject)
+        return list(fix.lines) if fix and fix.lines else lines
 
     def label_for(self, kind: str) -> str:
         return self.labels.get(kind) or DEFAULT_LABELS.get(kind, kind)

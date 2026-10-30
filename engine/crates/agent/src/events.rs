@@ -8,7 +8,6 @@
 //! segment already open when it happened. A seed lets one of them bring it up.
 
 use llm::{Message, Request};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use world::event::{self, Event as DailyEvent};
 use world::fact::{self, Audience, NewFact};
@@ -17,6 +16,7 @@ use world::{Actor, FactKind, PersonId, channel, message, settings};
 
 use crate::agent::{Agent, Event};
 use crate::assemble;
+use crate::diag;
 use crate::dispatch::clean_purpose;
 use crate::error::Result;
 use crate::session::{LogKind, Turn};
@@ -69,32 +69,128 @@ fn schema() -> Value {
     })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct Draft {
     title: String,
     text: String,
-    #[serde(default)]
     persons: Vec<String>,
-    #[serde(default)]
     group: Option<DraftGroup>,
-    #[serde(default)]
     talk: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct DraftGroup {
-    #[serde(default)]
     members: Vec<String>,
-    #[serde(default)]
     purpose: Option<String>,
 }
 
-/// The event in a reply (a JSON object, possibly fenced). Nothing readable, or a title
-/// or text left empty: `None`.
-fn parse(reply: &str) -> Option<Draft> {
-    let doc = wrapup_json::unfence(reply.trim());
-    let d: Draft = serde_json::from_str(doc).ok()?;
-    (!d.title.trim().is_empty() && !d.text.trim().is_empty()).then_some(d)
+/// Why a reply made no event, for the diagnostics log.
+#[derive(Debug, PartialEq, Eq)]
+enum Unreadable {
+    /// No text at all.
+    Empty,
+    /// Text, but no JSON object in it.
+    NoJson,
+    /// A JSON object without a title and text.
+    NoTitleOrText,
+}
+
+impl Unreadable {
+    fn reason(&self) -> &'static str {
+        match self {
+            Self::Empty => "empty reply",
+            Self::NoJson => "reply is not JSON",
+            Self::NoTitleOrText => "reply has no title or text",
+        }
+    }
+}
+
+/// The JSON object in a reply: the text itself, a fenced block, or the span from the
+/// first `{` to the last `}` (a line of prose before or after it).
+fn object(reply: &str) -> Option<Value> {
+    let text = reply.trim();
+    let whole = wrapup_json::unfence(text);
+    let fenced = text
+        .split_once("```")
+        .and_then(|(_, rest)| rest.split_once('\n'))
+        .and_then(|(_, rest)| rest.split_once("```"))
+        .map(|(inner, _)| inner.trim());
+    let span = text
+        .find('{')
+        .zip(text.rfind('}'))
+        .map(|(i, j)| &text[i..=j.max(i)]);
+    [Some(whole), fenced, span]
+        .into_iter()
+        .flatten()
+        .find_map(|c| {
+            serde_json::from_str::<Value>(c)
+                .ok()
+                .filter(Value::is_object)
+        })
+}
+
+/// Names a model listed: strings, or objects that carry an `id` or `name`.
+fn names(v: Option<&Value>) -> Vec<String> {
+    let one = |x: &Value| match x {
+        Value::String(s) => Some(s.clone()),
+        Value::Object(o) => ["id", "name"]
+            .iter()
+            .find_map(|k| o.get(*k).and_then(Value::as_str))
+            .map(str::to_owned),
+        _ => None,
+    };
+    match v {
+        Some(Value::Array(items)) => items.iter().filter_map(one).collect(),
+        Some(single) => one(single).into_iter().collect(),
+        None => Vec::new(),
+    }
+}
+
+/// The event in a reply. Extra fields are ignored and optional ones may be missing; only
+/// a title and a text are needed.
+fn parse(reply: &str) -> std::result::Result<Draft, Unreadable> {
+    if reply.trim().is_empty() {
+        return Err(Unreadable::Empty);
+    }
+    let doc = object(reply).ok_or(Unreadable::NoJson)?;
+    let field = |k: &str| doc.get(k).and_then(Value::as_str).map(str::trim);
+    let (Some(title), Some(text)) = (field("title"), field("text")) else {
+        return Err(Unreadable::NoTitleOrText);
+    };
+    if title.is_empty() || text.is_empty() {
+        return Err(Unreadable::NoTitleOrText);
+    }
+    let group = doc
+        .get("group")
+        .filter(|g| g.is_object())
+        .map(|g| DraftGroup {
+            members: names(g.get("members")),
+            purpose: g.get("purpose").and_then(Value::as_str).map(str::to_owned),
+        });
+    Ok(Draft {
+        title: title.to_owned(),
+        text: text.to_owned(),
+        persons: names(doc.get("persons")),
+        group,
+        talk: names(doc.get("talk")),
+    })
+}
+
+/// What the model wrote: its text, or, when an endpoint put the answer in a thinking
+/// block and left the text empty, the thinking.
+fn answer(reply: &llm::Response) -> String {
+    let text = reply.text();
+    if !text.trim().is_empty() {
+        return text;
+    }
+    reply
+        .parts
+        .iter()
+        .filter_map(|p| match p {
+            llm::Part::Native(v) if v["type"] == "thinking" => v["thinking"].as_str(),
+            _ => None,
+        })
+        .collect()
 }
 
 fn cut(s: &str, max: usize) -> String {
@@ -274,8 +370,12 @@ impl Agent {
     async fn event_draft(&self, request: Request) -> Result<Option<Draft>> {
         let names = self.names()?;
         let (role, ep) = self.role_for(LogKind::Host)?;
-        let Ok(reply) = self.llm.complete(&ep, &request).await else {
-            return Ok(None);
+        let reply = match self.llm.complete(&ep, &request).await {
+            Ok(r) => r,
+            Err(e) => {
+                self.drop_event("call failed", &e.to_string());
+                return Ok(None);
+            }
         };
         let host = channel::host(&self.db())?;
         let model = self.shape_for(&role, LogKind::Host, &names).model;
@@ -293,7 +393,24 @@ impl Agent {
             &self.config.agent.cost,
         )?;
         self.emit_quota()?;
-        Ok(parse(&reply.text()))
+        let text = answer(&reply);
+        match parse(&text) {
+            Ok(draft) => Ok(Some(draft)),
+            Err(why) => {
+                self.drop_event(why.reason(), &text);
+                Ok(None)
+            }
+        }
+    }
+
+    /// One line in the diagnostics log about an event that was not posted.
+    fn drop_event(&self, reason: &str, text: &str) {
+        diag::record(
+            &self.config.logs,
+            self.now().ms,
+            &[("what", "event dropped"), ("reason", reason)],
+            text,
+        );
     }
 
     /// The ids a model wrote, as people it may name: a person's id or display name.
@@ -307,7 +424,13 @@ impl Agent {
         let by_alias = |n: &str| Ok(ix.folio().persons_for_alias(n)?);
         let mut out: Vec<PersonId> = Vec::new();
         for n in listed {
-            if let Some(p) = crate::address::member_named(n.trim(), &roster, by_alias)?
+            // The roster is shown as `id: name`; a model may copy the whole line.
+            let head = n.split([':', '\u{ff1a}']).next().unwrap_or(n);
+            let found = match crate::address::member_named(n.trim(), &roster, by_alias)? {
+                Some(p) => Some(p),
+                None => crate::address::member_named(head.trim(), &roster, by_alias)?,
+            };
+            if let Some(p) = found
                 && !out.contains(&p)
             {
                 out.push(p);
@@ -323,6 +446,7 @@ impl Agent {
         let mut persons = self.event_people(&draft.persons)?;
         persons.truncate(max);
         if persons.is_empty() {
+            self.drop_event("no person resolved", &draft.persons.join(", "));
             return Ok(false);
         }
         let title = cut(&draft.title, TITLE_MAX);
@@ -450,13 +574,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_reply_is_read_strictly() {
+    fn an_answer_left_in_a_thinking_block_is_read() {
+        let doc = r#"{"title": "T", "text": "X"}"#;
+        let reply = |parts| llm::Response {
+            parts,
+            stop: llm::Stop::EndTurn,
+            usage: llm::Usage::default(),
+        };
+        let thinking = llm::Part::Native(json!({"type": "thinking", "thinking": doc}));
+        let only = reply(vec![thinking.clone()]);
+        assert!(parse(&answer(&only)).is_ok());
+        let both = reply(vec![thinking, llm::Part::Text("Done.".into())]);
+        assert_eq!(answer(&both), "Done.");
+    }
+
+    #[test]
+    fn a_reply_is_read_tolerantly() {
         let ok = r#"{"title": "T", "text": "X", "persons": ["a"], "group": null, "talk": []}"#;
-        assert!(parse(ok).is_some());
-        assert!(parse(&format!("```json\n{ok}\n```")).is_some());
-        assert!(parse(r#"{"title": " ", "text": "X", "persons": []}"#).is_none());
-        assert!(parse(r#"{"headline": "T"}"#).is_none());
-        assert!(parse("Something happened on deck.").is_none());
+        assert!(parse(ok).is_ok());
+        assert!(parse(&format!("```json\n{ok}\n```")).is_ok());
+        assert!(parse(&format!("Here is the event:\n{ok}")).is_ok());
+        assert!(parse(&format!("Here it is:\n```json\n{ok}\n```\nDone.")).is_ok());
+        assert!(parse(r#"{"title": "T", "text": "X", "extra": 1}"#).is_ok());
+        let objects = r#"{"title": "T", "text": "X", "persons": [{"id": "a"}, "b"]}"#;
+        assert_eq!(parse(objects).unwrap().persons, ["a", "b"]);
+        assert_eq!(parse(" ").unwrap_err(), Unreadable::Empty);
+        assert_eq!(
+            parse(r#"{"title": " ", "text": "X", "persons": []}"#).unwrap_err(),
+            Unreadable::NoTitleOrText
+        );
+        assert_eq!(
+            parse(r#"{"headline": "T"}"#).unwrap_err(),
+            Unreadable::NoTitleOrText
+        );
+        assert_eq!(
+            parse("Something happened on deck.").unwrap_err(),
+            Unreadable::NoJson
+        );
         let with_group = r#"{"title": "T", "text": "X", "persons": [], "talk": [],
             "group": {"members": ["a", "b"], "purpose": "tea"}}"#;
         assert_eq!(parse(with_group).unwrap().group.unwrap().members.len(), 2);

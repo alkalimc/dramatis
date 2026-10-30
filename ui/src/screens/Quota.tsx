@@ -5,6 +5,14 @@ import { when } from "../lib/format";
 import { quotaExhaustedLine } from "../lib/quota";
 import { useActions, useApi, useStore } from "../store";
 
+/** The choices for happenings a day, 0 to the register's `events.max_per_day`. */
+const EVENT_COUNTS = [0, 1, 2, 3, 4, 5, 6];
+
+function eventCount(n: number, t: ReturnType<typeof useT>): string {
+  if (n === 0) return t("events.count.0");
+  return n === 1 ? t("events.count.1") : t("events.count.n", { count: n });
+}
+
 export const TIERS: Tier[] = ["low", "middle", "high", "extra_high", "max", "ultra"];
 
 /** The one quota control, the rolling hour, and which band they put us in. */
@@ -156,9 +164,11 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
           aria-describedby={`${id}-e`}
           onChange={(e) => save({ ...settings, events_per_day: Number(e.target.value) })}
         >
-          <option value={0}>{t("events.count.0")}</option>
-          <option value={1}>{t("events.count.1")}</option>
-          <option value={2}>{t("events.count.2")}</option>
+          {EVENT_COUNTS.map((n) => (
+            <option key={n} value={n}>
+              {eventCount(n, t)}
+            </option>
+          ))}
         </select>
       </label>
       <p id={`${id}-e`} className="muted small">

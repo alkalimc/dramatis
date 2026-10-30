@@ -108,6 +108,21 @@ pub fn in_quiet_hours(quiet: &QuietHours, now: Now) -> bool {
     }
 }
 
+/// The waking day as local minutes: where it starts (the end of the quiet hours) and how
+/// long it lasts. No quiet hours, or ones that cannot be read, make the whole day.
+pub fn waking_window(quiet: Option<&QuietHours>) -> (u32, u32) {
+    let both = quiet.and_then(|q| Some((parse_hhmm(&q.from)?, parse_hhmm(&q.to)?)));
+    match both {
+        Some((from, to)) if from != to => (to, (from + 1440 - to) % 1440),
+        _ => (0, 1440),
+    }
+}
+
+/// Whether `now` is less than `gap_min` minutes after `last`.
+pub fn too_soon(last: Option<i64>, now: i64, gap_min: u32) -> bool {
+    last.is_some_and(|t| now - t < i64::from(gap_min) * MINUTE_MS)
+}
+
 fn parse_hhmm(s: &str) -> Option<u32> {
     let (h, m) = s.split_once(':')?;
     let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);

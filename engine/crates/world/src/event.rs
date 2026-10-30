@@ -5,15 +5,17 @@
 //! An event has a world-audience fact that ends with its day ([`fact::sweep_expired`]),
 //! so those it involves, and everyone else lightly, can mention it that day and no later.
 //! At most `settings::events_per_day` are made per local day, only while the user is
-//! about, and never where unprompted speech is held back. A day that passes without one
-//! is not made up for.
+//! about, and never where unprompted speech is held back. The waking day is cut into that
+//! many parts and each part gets one, so they spread; a part that passes without one is
+//! not made up for.
 
 use rusqlite::{Connection, Row};
 
 use crate::clock::{self, DAY_MS, Now};
 use crate::fact::{self, Fact};
-use crate::params::Params;
+use crate::params::{Params, QuietHours};
 use crate::quota::{Band, Status};
+use crate::seed::{self, Slots};
 use crate::types::{FactId, MessageId, PersonId};
 use crate::{Result, message, settings};
 
@@ -146,10 +148,33 @@ pub fn due(conn: &Connection, now: Now, params: &Params, status: &Status) -> Res
     if status.band != Band::Open {
         return Ok(false);
     }
-    if settings::quiet_hours(conn, &params.seed)?.is_some_and(|q| clock::in_quiet_hours(&q, now)) {
+    let quiet = settings::quiet_hours(conn, &params.seed)?;
+    if quiet
+        .as_ref()
+        .is_some_and(|q| clock::in_quiet_hours(q, now))
+    {
+        return Ok(false);
+    }
+    if clock::too_soon(seed::last_opening(conn)?, now.ms, params.seed.gap_min) {
+        return Ok(false);
+    }
+    // One event to a part of the waking day, from its slot on; a part that went by
+    // without one is not made up for.
+    let (from, to, come) = slots(quiet.as_ref(), now, per_day).current(now);
+    let made: u32 = conn.query_row(
+        "SELECT count(*) FROM daily_event WHERE at >= ?1 AND at < ?2",
+        [from, to],
+        |r| r.get(0),
+    )?;
+    if !come || made > 0 {
         return Ok(false);
     }
     Ok(message::last_user_message_at(conn)?.is_some())
+}
+
+/// The slots of `per_day` events over the waking day.
+pub fn slots(quiet: Option<&QuietHours>, now: Now, per_day: u32) -> Slots {
+    Slots::new(quiet, now, per_day, 1)
 }
 
 /// The facts of today's events that involve `person`, oldest first. What he may bring up
@@ -209,40 +234,121 @@ mod tests {
         .unwrap()
     }
 
+    /// Run a fake clock over `[from, to)` in ten-minute steps; an event is made whenever
+    /// one is due. The instants they were made at.
+    fn run_clock(w: &Connection, params: &Params, from: i64, to: i64) -> Vec<i64> {
+        let mut made = Vec::new();
+        let mut t = from;
+        while t < to {
+            let now = at(t);
+            if due(w, now, params, &status(w, now)).unwrap() {
+                make(w, now, &["a"]);
+                made.push(t);
+            }
+            t += 10 * 60_000;
+        }
+        made
+    }
+
+    fn user_spoke(w: &Connection) {
+        let c = crate::channel::direct(w, &p("a")).unwrap();
+        message::append(w, c, &Actor::User, "hi", None, None, 1).unwrap();
+    }
+
     #[test]
     fn due_once_a_day_after_the_user_spoke() {
         let w = world();
-        let now = at(T0);
         let params = Params::default();
-        assert!(!due(&w, now, &params, &status(&w, now)).unwrap());
-        let c = crate::channel::direct(&w, &p("a")).unwrap();
-        message::append(&w, c, &Actor::User, "hi", None, None, T0 - 1).unwrap();
-        assert!(due(&w, now, &params, &status(&w, now)).unwrap());
-        make(&w, now, &["a"]);
-        assert!(!due(&w, now, &params, &status(&w, now)).unwrap());
-        // The next day is a new count; the missed hours are not made up.
-        let next = at(T0 + DAY_MS);
-        assert!(due(&w, next, &params, &status(&w, next)).unwrap());
+        let midnight = T0 - 12 * clock::HOUR_MS;
+        assert!(run_clock(&w, &params, midnight, midnight + DAY_MS).is_empty());
+        user_spoke(&w);
+        // One a day, whenever in the waking day its slot falls; the next day is a new
+        // count and the missed hours are not made up.
+        let made = run_clock(&w, &params, midnight, midnight + 3 * DAY_MS);
+        assert_eq!(made.len(), 3);
+        for (i, t) in made.iter().enumerate() {
+            assert_eq!((t - midnight) / DAY_MS, i as i64);
+        }
+    }
+
+    #[test]
+    fn events_fall_in_distinct_slots_apart_and_outside_quiet_hours() {
+        for n in [1, 2, 4] {
+            let w = world();
+            let params = Params::default();
+            user_spoke(&w);
+            settings::set(&w, settings::EVENTS_PER_DAY, &n).unwrap();
+            let midnight = T0 - 12 * clock::HOUR_MS;
+            let made = run_clock(&w, &params, midnight, midnight + 2 * DAY_MS);
+            assert_eq!(made.len(), 2 * n as usize, "n = {n}");
+            let part = 15 * 60 / i64::from(n) * 60_000;
+            let gap = i64::from(params.seed.gap_min) * 60_000;
+            let quiet = params.seed.quiet_hours.clone();
+            for (i, t) in made.iter().enumerate() {
+                assert!(
+                    !clock::in_quiet_hours(&quiet, at(*t)),
+                    "n = {n}: {t} is quiet"
+                );
+                // The day's i-th event falls in the i-th part of the waking day.
+                let day = i as i64 / i64::from(n);
+                let k = i as i64 % i64::from(n);
+                let from = midnight + day * DAY_MS + 8 * clock::HOUR_MS + k * part;
+                assert!((from..from + part).contains(t), "n = {n}: event {i} at {t}");
+            }
+            for pair in made.windows(2) {
+                assert!(pair[1] - pair[0] >= gap, "n = {n}: {pair:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_missed_slot_is_not_made_up_in_a_burst() {
+        let w = world();
+        let params = Params::default();
+        user_spoke(&w);
+        settings::set(&w, settings::EVENTS_PER_DAY, &4).unwrap();
+        // The app was off until late evening: one event for the part it is in, not four.
+        let midnight = T0 - 12 * clock::HOUR_MS;
+        let made = run_clock(
+            &w,
+            &params,
+            midnight + 21 * clock::HOUR_MS,
+            midnight + DAY_MS,
+        );
+        assert!(made.len() <= 1, "{made:?}");
     }
 
     #[test]
     fn the_setting_decides_how_many() {
         let w = world();
-        let now = at(T0);
         let params = Params::default();
-        let c = crate::channel::direct(&w, &p("a")).unwrap();
-        message::append(&w, c, &Actor::User, "hi", None, None, T0 - 1).unwrap();
+        user_spoke(&w);
+        let midnight = T0 - 12 * clock::HOUR_MS;
         settings::set(&w, settings::EVENTS_PER_DAY, &2).unwrap();
-        make(&w, now, &["a"]);
-        assert!(due(&w, now, &params, &status(&w, now)).unwrap());
-        make(&w, now, &["a"]);
-        assert!(!due(&w, now, &params, &status(&w, now)).unwrap());
+        assert_eq!(run_clock(&w, &params, midnight, midnight + DAY_MS).len(), 2);
         settings::set(&w, settings::EVENTS_PER_DAY, &0).unwrap();
-        let next = at(T0 + DAY_MS);
-        assert!(!due(&w, next, &params, &status(&w, next)).unwrap());
+        assert!(run_clock(&w, &params, midnight + DAY_MS, midnight + 2 * DAY_MS).is_empty());
         // A larger number than the register allows is cut.
         settings::set(&w, settings::EVENTS_PER_DAY, &9).unwrap();
-        assert_eq!(settings::events_per_day(&w, &params.events).unwrap(), 2);
+        assert_eq!(settings::events_per_day(&w, &params.events).unwrap(), 6);
+    }
+
+    #[test]
+    fn a_visit_and_an_event_keep_the_gap() {
+        let w = world();
+        let params = Params::default();
+        user_spoke(&w);
+        let now = at(T0);
+        make(&w, now, &["a"]);
+        assert_eq!(seed::last_opening(&w).unwrap(), Some(T0));
+        let soon = T0 + 1000;
+        assert!(clock::too_soon(
+            seed::last_opening(&w).unwrap(),
+            soon,
+            params.seed.gap_min
+        ));
+        // Even once its slot has come, an event waits out the gap after a visit.
+        assert!(!due(&w, at(soon), &params, &status(&w, at(soon))).unwrap());
     }
 
     #[test]

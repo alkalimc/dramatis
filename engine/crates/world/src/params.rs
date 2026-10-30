@@ -148,6 +148,8 @@ pub struct Seed {
     /// Minutes between plannings of the daily seeds while the user is about and not in
     /// a conversation, apart from his returns.
     pub interval_min: u32,
+    /// Least minutes between two unprompted openings, whoever opens.
+    pub gap_min: u32,
     /// Default quiet hours (user local time) until the user sets their own.
     pub quiet_hours: QuietHours,
 }
@@ -166,7 +168,8 @@ impl Default for Seed {
             daily_total: 5,
             visit_days: 2,
             group_quiet_hours: 6,
-            interval_min: 90,
+            interval_min: 15,
+            gap_min: 60,
             quiet_hours: QuietHours {
                 from: "23:00".into(),
                 to: "08:00".into(),
@@ -231,7 +234,7 @@ impl Default for Events {
     fn default() -> Self {
         Self {
             per_day: 1,
-            max_per_day: 2,
+            max_per_day: 6,
             list: 5,
             pool: 8,
             max_persons: 3,

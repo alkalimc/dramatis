@@ -99,6 +99,13 @@ def remove(db: sqlite3.Connection, subject: str, fields: tuple[str, ...]) -> Non
                    (subject, *slots))
 
 
+def restamp(db: sqlite3.Connection, subject: str, old: str, new: str) -> int:
+    """Move a subject's rows of version `old` to version `new`; how many moved."""
+    with db:
+        return db.execute("UPDATE prompts SET generator_version=? "
+                          "WHERE subject=? AND generator_version=?", (new, subject, old)).rowcount
+
+
 def safe_name(subject: str) -> str:
     """A file name for any subject: readable where possible, unique always."""
     stem = re.sub(r'[\\/:*?"<>|\s]+', "_", subject).strip("._") or "subject"
@@ -150,6 +157,18 @@ class RawCache:
         except json.JSONDecodeError:
             return None
         return entry if isinstance(entry, dict) and entry.get("subject") == subject else None
+
+    def restamp(self, subject: str, old: str, new: str) -> bool:
+        """Give a stored reply of version `old` the version `new`, keeping everything else."""
+        entry = self.entry(subject)
+        if entry is None or entry.get("generator_version") != old:
+            return False
+        path = self.path(subject)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({**entry, "generator_version": new},
+                                  ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+        return True
 
     def save(self, subject: str, version: str, output: dict[str, Any],
              raw: dict[str, Any], usage: dict[str, int],

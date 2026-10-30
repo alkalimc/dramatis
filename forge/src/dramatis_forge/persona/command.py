@@ -27,6 +27,7 @@ from .material import HOST, estimate_tokens
 from .params import Persona
 from .run import Context, Report, ineligible, probe_set, resolve_subject, roster, run
 from .store import RawCache
+from .store import restamp as store_restamp
 
 
 class UsageError(Exception):
@@ -71,6 +72,7 @@ def execute(
     generator: generator_mod.Generator | None = None,
     progress: Callable[[str], None] | None = None,
     jobs: int | None = None,
+    adopt: str | None = None,
 ) -> Result:
     if jobs is not None and jobs < 1:
         raise UsageError("--jobs must be at least 1")
@@ -131,6 +133,10 @@ def execute(
                 return Result(report=Report(version=version, counter=counter_name),
                               written=listed, stale=found)
             subjects, force = found.to_regenerate, True
+        if adopt:
+            moved = _adopt(db, RawCache(root / "raw"), subjects, adopt, version)
+            if progress:
+                progress(f"adopted {moved} replies of {adopt} as {version}")
         ctx = Context(db=db, gen=gen, params=params, version=version, count=count,
                       sep=pack.chunking.sep("label"), cache=RawCache(root / "raw"),
                       connect=connect, placeholder=placeholder, force=force,
@@ -147,6 +153,21 @@ def execute(
     finally:
         db.close()
     return Result(report=rep, written=written, stale=found)
+
+
+def _adopt(db: sqlite3.Connection, cache: RawCache, subjects: list[str], old: str,
+           new: str) -> int:
+    """Take replies written under generator version `old` as current, without a call.
+    For when a change to the generator is known not to touch them (the host's text moves
+    every person's version). The host is never adopted: its own text is what changed."""
+    moved = 0
+    for subject in subjects:
+        if subject == HOST:
+            continue
+        stored = store_restamp(db, subject, old, new)
+        cached = cache.restamp(subject, old, new)
+        moved += bool(stored or cached)
+    return moved
 
 
 def user_placeholder(folio: Path) -> str:

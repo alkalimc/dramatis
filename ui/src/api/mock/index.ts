@@ -1102,7 +1102,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     updateSettings: (next) => {
       if (next.user_name !== null && !next.user_name.trim()) return fail({ code: "invalid", field: "user_name" });
       if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
-      if (next.events_per_day > 2) return fail({ code: "invalid", field: "events_per_day" });
+      if (next.events_per_day > 6) return fail({ code: "invalid", field: "events_per_day" });
       settings = { ...next, bio: next.bio?.trim() || null };
       introduced = true;
       return ok(null);

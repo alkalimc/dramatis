@@ -260,11 +260,17 @@ def prepare(ctx: Context, subject: str, lex: gates.Lexicons,
     if not ctx.force:
         stored = store.read(ctx.db, subject, fields)
         if stored is not None and stored[0] == ctx.version:
-            verdict = judge(stored[1])
+            lines = store.read_lines(ctx.db, subject)
+            verdict = judge(ctx.gen.corrected(subject, stored[1]))
             if verdict.passed:
-                return Outcome(subject, RESUMED, output=stored[1], verdict=verdict,
-                               raw_path=_existing(ctx.cache.path(subject)),
-                               lines=store.read_lines(ctx.db, subject))
+                out = Outcome(subject, RESUMED, output=stored[1], verdict=verdict,
+                              raw_path=_existing(ctx.cache.path(subject)), lines=lines)
+                if (ctx.gen.corrected(subject, stored[1]) == stored[1]
+                        and ctx.gen.corrected_lines(subject, lines) == lines):
+                    return out
+                # A correction the rows do not carry yet: written like a restore.
+                out.status = RESTORED
+                return _settle(ctx, out, judge, fields)
         cached = ctx.cache.load(subject, ctx.version)
         if cached is not None:
             return _settle(ctx, Outcome(subject, RESTORED, output=cached,
@@ -312,6 +318,8 @@ def _existing(path: Path) -> Path | None:
 def _settle(ctx: Context, out: Outcome, judge: Callable[[dict], gates.Verdict],
             fields: tuple[str, ...]) -> Outcome:
     assert out.output is not None
+    out.output = ctx.gen.corrected(out.subject, out.output)
+    out.lines = ctx.gen.corrected_lines(out.subject, out.lines)
     out.verdict = judge(out.output)
     if out.verdict.passed:
         store.write(ctx.db, out.subject, out.output, fields, ctx.version, out.lines)
