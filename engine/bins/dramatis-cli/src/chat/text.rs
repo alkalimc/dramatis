@@ -62,14 +62,11 @@ anything else       send it to the current channel
     ),
     (
         "cli.help.people",
-        "People and requests
-/who <person>       profile: mode, trust, last seen, requests done
+        "People
+/who <person>       profile: mode, trust, last seen
 /mode [person] <enabled|frozen|disabled>
                     enabled may speak first, frozen only answers, disabled is out of reach;
                     without a person, this conversation's (a group has its own)
-/ask <person> <question>
-                    ask a person to look into something; \"quotes\" hold a name with spaces
-/requests           the requests made so far and whether they are done
 /clock              the date in the world and the local time
 /find <topic>       who knows about it, with a line from their material
 /waiting            who has something waiting for you",
@@ -84,7 +81,7 @@ anything else       send it to the current channel
     ),
     (
         "cli.help.saves",
-        "Saves (one world each: channels, memories, bonds, requests, usage)
+        "Saves (one world each: channels, memories, bonds, usage)
 /save               list saves; * marks the one in use
 /save new <name>    an empty save
 /save switch <name> close this world and open another
@@ -131,10 +128,10 @@ anything else       send it to the current channel
                     check asks the release page now
 /storage [clear avatars|audio|all]  disk use by kind; empty the avatar or audio cache
 /help, /quit        this text; leave (Ctrl-D also works)
-Short forms: /ls /t /g /c /lib /req /time /mem /h /r /src /s /? /open /exit /q
+Short forms: /ls /t /g /c /lib /time /mem /h /r /src /s /? /open /exit /q
 Tab completes command names, their fixed words (/tier, /quiet, /events, /away, /lang, /library,
 /read, /chats, /storage, /password), person names (/talk, /group, /invite, /remove, /who,
-/mode, /ask, /memories) and save names (/save).
+/mode, /memories) and save names (/save).
 A line that starts with a slash is a command and Enter runs it. With --plain each input
 line is one message.",
     ),
@@ -212,7 +209,7 @@ line is one message.",
     ("cli.who.mode", "mode: {mode}  trust: {trust}"),
     ("cli.who.no_persona", "no persona, so cannot be talked to"),
     ("cli.who.never", "never"),
-    ("cli.who.seen", "last seen: {seen}  requests done: {done}"),
+    ("cli.who.seen", "last seen: {seen}"),
     ("cli.who.close", "close to: {names}"),
     ("cli.mode.host", "the host has no mode"),
     (
@@ -243,13 +240,6 @@ line is one message.",
     ("cli.leave.only_group", "only a group can be deleted"),
     ("cli.read.marked.one", "marked read: {n} conversation"),
     ("cli.read.marked", "marked read: {n} conversations"),
-    ("cli.ask.sent", "{name} answers in their own channel"),
-    (
-        "cli.requests.none",
-        "no requests yet; /ask <person> <question> makes one",
-    ),
-    ("cli.requests.nobody", "nobody yet"),
-    ("cli.requests.pinned", "(pinned)"),
     ("cli.find.none", "nobody on the roster matches"),
     ("cli.waiting.none", "nobody is waiting on you"),
     (
@@ -511,10 +501,6 @@ line is one message.",
         "usage: /mode [person] enabled|frozen|disabled",
     ),
     ("cli.usage.library", "usage: /library [off]"),
-    (
-        "cli.usage.ask",
-        "usage: /ask <person> <question>; \"quotes\" hold a name with spaces",
-    ),
     ("cli.usage.find", "usage: /find <topic>"),
     (
         "cli.usage.go",
@@ -644,7 +630,7 @@ line is one message.",
     ("cli.date", "{month}/{day}/{year}"),
     (
         "host.summary",
-        "The assistant of this place. Ask it who to talk to, or hand it a question to look into.",
+        "The assistant of this place. Ask it who to talk to.",
     ),
     ("host.can", "What it does:"),
     (
@@ -654,10 +640,6 @@ line is one message.",
     (
         "host.can.group",
         "Brings several people together in a group",
-    ),
-    (
-        "host.can.ask",
-        "Passes a question on to someone and brings back the answer",
     ),
     ("host.can.explain", "Explains how things work here"),
     (

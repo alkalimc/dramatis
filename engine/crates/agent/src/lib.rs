@@ -3,8 +3,7 @@
 //! `world` asks for.
 //!
 //! The app holds one [`Agent`] (behind an `Arc`) and calls its flows: [`Agent::post`] +
-//! [`Agent::respond`] for a user turn, [`Agent::ask`] + [`Agent::run_request`] for a
-//! request, [`Agent::wrapup`], [`Agent::presence`], [`Agent::on_event`] and
+//! [`Agent::respond`] for a user turn, [`Agent::wrapup`], [`Agent::presence`], [`Agent::on_event`] and
 //! [`Agent::on_rename`]. Everything the UI hears arrives through the [`Sink`].
 
 mod address;

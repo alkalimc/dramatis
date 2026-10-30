@@ -258,7 +258,6 @@ impl Names {
             ToolAction::Remember { text } => {
                 with("action.remember", "remembered: {text}", &[("text", text)])
             }
-            ToolAction::Report => self.word("action.report", "reported back"),
             ToolAction::Wrapup => self.text("cli.action.wrapup"),
             ToolAction::Digest => self.word("action.digest", "looked at the digest"),
             // A named person, not a subject: no reason to pass on.
@@ -271,11 +270,6 @@ impl Names {
                 "action.find_people",
                 "looked for people on: {topic}",
                 &[("topic", topic)],
-            ),
-            ToolAction::Ask { person, question } => with(
-                "action.ask",
-                "asked {name}: {question}",
-                &[("name", &person.name), ("question", question)],
             ),
             ToolAction::InviteToGroup { persons, .. } => with(
                 "action.invite",

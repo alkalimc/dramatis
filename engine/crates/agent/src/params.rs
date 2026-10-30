@@ -89,8 +89,7 @@ pub struct Reasoning {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Loop {
-    /// Model calls one ordinary turn may take (tool rounds included). A request's own
-    /// turn budget bounds it instead.
+    /// Model calls one ordinary turn may take (tool rounds included).
     pub max_steps: u32,
 }
 

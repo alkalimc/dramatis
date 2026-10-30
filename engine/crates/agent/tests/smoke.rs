@@ -111,14 +111,10 @@ async fn two_turns_and_a_wrapup_hit_the_cache() {
             .and_then(|p| p.models.iter().find(|m| m.id == chat.model))
             .is_some_and(|m| m.per_request())
     };
-    let office = std::env::temp_dir().join("dramatis-smoke-office");
     let agent = Agent::new(Parts {
         world: world::World::in_memory().unwrap(),
         index: index::Index::open(&folio, Default::default()).unwrap(),
-        config: Config {
-            office,
-            ..Config::default()
-        },
+        config: Config::default(),
         endpoints,
         keys: None,
         llm: if std::env::var_os("DRAMATIS_SMOKE_USAGE").is_some()

@@ -21,9 +21,7 @@ use llm::{Event as LlmEvent, Message, Part, Response, ToolChoice};
 use world::log::{self, Role};
 use world::quota;
 use world::wrapup::Summary;
-use world::{
-    Actor, ChannelId, ChannelKind, MessageId, SegmentId, Shape, TaskId, bond, channel, message,
-};
+use world::{Actor, ChannelId, ChannelKind, MessageId, SegmentId, Shape, bond, channel, message};
 
 use crate::agent::{Agent, Event};
 use crate::assemble::{self, Ctx, Member};
@@ -50,8 +48,6 @@ pub(crate) struct Turn {
     pub channel: ChannelId,
     pub speaker: Actor,
     pub shape: Shape,
-    /// The request this turn spends, if any.
-    pub task: Option<TaskId>,
     /// Host only: the user wrote this turn, so the actions that need the user's say-so
     /// may run.
     pub authorized: bool,
@@ -64,10 +60,8 @@ pub(crate) struct Turn {
     /// Ids shown to the model during this turn, what a reply may cite.
     pub shown: Vec<String>,
     /// A colleague pulled in, who answers after this turn.
-    pub joined: Option<world::task::Joined>,
-    /// Requests the host made, run after its turn.
-    pub asks: Vec<world::task::Asked>,
-    /// The turn's request was answered (`report`) or closed.
+    pub joined: Option<world::session::Joined>,
+    /// The turn is over: the wrap-up was written.
     pub closed: bool,
     /// Parsed `wrapup` arguments, in a wrap-up turn.
     pub wrapped: Option<world::wrapup::Args>,
@@ -96,7 +90,6 @@ impl Turn {
             channel,
             speaker,
             shape,
-            task: None,
             authorized: false,
             wrapup: false,
             message: None,
@@ -105,7 +98,6 @@ impl Turn {
             level: None,
             shown: Vec::new(),
             joined: None,
-            asks: Vec::new(),
             closed: false,
             wrapped: None,
             activity: None,
@@ -119,7 +111,7 @@ impl Turn {
     }
 
     /// Whether the user started this turn: a reply to their own message. Openings,
-    /// interjections and the work of a request are the harness's own initiative.
+    /// and interjections are the harness's own initiative.
     pub fn prompted(&self) -> bool {
         matches!(self.shape, Shape::Direct | Shape::Group)
     }
@@ -599,12 +591,7 @@ impl Agent {
     /// (`since`, the instant of that message). It goes in the user's entry, never in the
     /// cached prefix, and is written every turn: a clock quoted once would sit far back in
     /// the log by the time someone asks the time.
-    pub(crate) fn context_line(
-        &self,
-        seg: SegmentId,
-        turns: Option<u32>,
-        since: Option<i64>,
-    ) -> Result<String> {
+    pub(crate) fn context_line(&self, seg: SegmentId, since: Option<i64>) -> Result<String> {
         let now = self.now();
         let d = world::clock::in_world_date(now, self.corpus.year_offset);
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
@@ -628,15 +615,7 @@ impl Agent {
             ("time", time.as_str()),
             ("part", w.get(&part)),
         ];
-        let mut line = match turns {
-            Some(n) => {
-                let n = n.to_string();
-                let mut f = fields.to_vec();
-                f.push(("turns", &n));
-                w.fill("harness.context.turns", &names, &f)
-            }
-            None => w.fill("harness.context", &names, &fields),
-        };
+        let mut line = w.fill("harness.context", &names, &fields);
         let hours = since.map_or(0, |at| (now.ms - at).max(0) / world::clock::HOUR_MS);
         if hours >= i64::from(self.config.agent.context.gap_hours) {
             let span = if hours >= 48 {
@@ -1010,8 +989,7 @@ impl Agent {
         turn.activity = Some(state);
     }
 
-    /// Run the model on a turn until it answers in text, a request closes, or the step
-    /// budget is spent. The last allowed step offers no tool, so it ends in text.
+    /// Run the model on a turn until it answers in text, or the step budget is spent. The last allowed step offers no tool, so it ends in text.
     /// The turn's activity runs from here to the end, on every path out.
     pub(crate) async fn run(&self, turn: &mut Turn, max_steps: u32) -> Result<()> {
         let mut guard = ActivityGuard {
@@ -1042,33 +1020,9 @@ impl Agent {
 
     async fn run_steps(&self, turn: &mut Turn, max_steps: u32) -> Result<()> {
         let max_steps = max_steps.max(1);
-        let mut warned = false;
         for step in 0..max_steps {
-            if let Some(task) = turn.task {
-                let t = world::task::get(&self.db(), task)?;
-                if t.status == world::TaskStatus::Done {
-                    turn.closed = true;
-                    break;
-                }
-                match world::task::harness(t.turns_left) {
-                    world::task::Harness::ForceClose => break,
-                    world::task::Harness::MustReportThisTurn if !warned => {
-                        warned = true;
-                        let seg = self.current_segment(turn.channel)?;
-                        let names = self.segment_names(seg)?;
-                        let line = self.corpus.wording.fill("harness.must_report", &names, &[]);
-                        self.append_user(seg, &line, None)?;
-                    }
-                    _ => {}
-                }
-                let conn = self.db();
-                world::task::spend_turn(&conn, task)?;
-                // Tells another process that shares the save this request is alive.
-                world::task::touch(&conn, task, self.now().ms)?;
-                drop(conn);
-            }
             let last = step + 1 == max_steps;
-            let choice = if last && turn.task.is_none() && self.may_vary_choice(turn)? {
+            let choice = if last && self.may_vary_choice(turn)? {
                 ToolChoice::None
             } else {
                 ToolChoice::Auto
@@ -1118,54 +1072,10 @@ impl Agent {
         self.finish_message(turn)
     }
 
-    /// End of a request's run: still open means the turns ran out or the model answered
-    /// without `report`. Either way what it said is the reply.
-    pub(crate) fn close_open_task(&self, turn: &mut Turn) -> Result<()> {
-        let Some(task) = turn.task else {
-            return Ok(());
-        };
-        let active = world::task::get(&self.db(), task)?.status == world::TaskStatus::Active;
-        if active && !turn.closed {
-            self.force_close(turn, task)?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn current_segment(&self, ch: ChannelId) -> Result<SegmentId> {
         Ok(log::current(&self.db(), ch)?
             .ok_or_else(|| Error::Invalid(format!("channel {ch} has no log")))?
             .id)
-    }
-
-    /// Turns ran out: what was found goes out as the reply. A reply already streamed
-    /// under the turn's message becomes the request's answer as it is; otherwise the
-    /// plain "found nothing" line is sent.
-    fn force_close(&self, turn: &mut Turn, task: TaskId) -> Result<()> {
-        let now = self.now();
-        if let Some(id) = turn.message
-            && !turn.text.trim().is_empty()
-        {
-            let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
-            world::task::close_with(&self.db(), task, id, &cites, now.ms)?;
-            turn.closed = true;
-            let meta = MessageMeta {
-                cites,
-                confidence: turn.level,
-                task: Some(task),
-                ..MessageMeta::default()
-            };
-            self.complete(turn, id, &meta)?;
-            self.task_finished(task)?;
-            return Ok(());
-        }
-        let names = self.names_now(&self.db())?;
-        let text = self
-            .corpus
-            .wording
-            .fill("harness.nothing_found", &names, &[]);
-        let reported =
-            world::task::force_close(&self.db(), task, &text, &[], &self.config.office, now.ms)?;
-        self.after_report(turn, task, reported.message, None)
     }
 
     /// Store a turn's message with its text, actions and meta, and announce it.
@@ -1179,70 +1089,12 @@ impl Agent {
             .transpose()?;
         world::message::complete(&conn, id, &turn.text, actions.as_ref(), meta.as_ref())?;
         let stored = world::message::get(&conn, id)?;
-        let shown =
-            crate::view::message(&conn, &stored, self.now().offset_min, &self.config.office);
+        let shown = crate::view::message(&conn, &stored, self.now().offset_min);
         drop(conn);
         turn.message = None;
         turn.text.clear();
         turn.actions.clear();
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
-        Ok(())
-    }
-
-    /// A request was answered by `reply` (a new message). What the turn streamed before
-    /// it stays its own message; an empty placeholder is dropped and its actions move
-    /// onto the reply.
-    pub(crate) fn after_report(
-        &self,
-        turn: &mut Turn,
-        task: TaskId,
-        reply: MessageId,
-        note: Option<String>,
-    ) -> Result<()> {
-        turn.closed = true;
-        if let Some(x) = turn.message {
-            if turn.text.trim().is_empty() {
-                world::message::discard(&self.db(), x)?;
-                turn.message = None;
-            } else {
-                let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
-                let meta = MessageMeta {
-                    cites,
-                    confidence: turn.level,
-                    ..MessageMeta::default()
-                };
-                self.complete(turn, x, &meta)?;
-            }
-        }
-        let t = world::task::get(&self.db(), task)?;
-        let text = world::message::get(&self.db(), reply)?.text;
-        let meta = MessageMeta {
-            cites: t.cites.clone(),
-            confidence: turn.level,
-            task: Some(task),
-            relayed: false,
-            note: note.or(t.note_path.clone()),
-            ..MessageMeta::default()
-        };
-        turn.text = text;
-        self.complete(turn, reply, &meta)?;
-        self.task_finished(task)
-    }
-
-    /// Trust for a request the user gave, and the change announced.
-    fn task_finished(&self, task: TaskId) -> Result<()> {
-        let t = world::task::get(&self.db(), task)?;
-        if t.granted.is_some()
-            && let Some(p) = &t.assignee
-        {
-            world::trust::task_done(&self.db(), p, &self.config.world.trust)?;
-        }
-        self.changed(vec![
-            api::events::WorldChange::Task {
-                id: crate::view::task_id(task),
-            },
-            api::events::WorldChange::Digest,
-        ]);
         Ok(())
     }
 

@@ -1054,9 +1054,6 @@ async fn help_lists_every_name_the_parser_accepts() {
         "read",
         "library",
         "lib",
-        "ask",
-        "requests",
-        "req",
         "clock",
         "time",
         "find",
@@ -1733,7 +1730,7 @@ async fn a_group_can_be_listed_and_deleted_after_asking() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn people_have_a_profile_a_mode_and_requests_are_listed() {
+async fn people_have_a_profile_and_a_mode() {
     let mut r = rig().await;
     let who = r.run("/who bo").await;
     assert!(who.contains("bo") && who.contains("no persona"), "{who}");
@@ -1751,7 +1748,6 @@ async fn people_have_a_profile_a_mode_and_requests_are_listed() {
             .await
             .contains("nobody matches")
     );
-    assert!(r.run("/requests").await.contains("no requests yet"));
     assert!(r.run("/waiting").await.contains("nobody is waiting"));
     assert!(r.run("/birthday").await.contains("no birthday"));
     assert!(r.run("/birthday 03-14").await.contains("saved"));
@@ -1797,8 +1793,8 @@ async fn without_an_endpoint_the_session_is_a_library_and_never_calls_a_model() 
     assert!(r.run("/memories").await.contains("no memories"));
     assert!(r.run("/save").await.contains("default"));
 
-    // Talking, asking and the like say what they need; the script would panic on a call.
-    for line in ["hello", "/ask ann tea?", "/wrapup"] {
+    // Talking and the like say what they need; the script would panic on a call.
+    for line in ["hello", "/wrapup"] {
         let out = r.run(line).await;
         assert!(out.contains("needs a language model"), "{line}: {out}");
     }
@@ -1980,8 +1976,6 @@ async fn a_message_posted_whole_offers_what_it_carries() {
         confidence: None,
         relayed: false,
         service: false,
-        task: None,
-        note: None,
         at: api::types::Timestamp("2026-03-10T12:00:00+00:00".into()),
     });
     message.actions = actions;

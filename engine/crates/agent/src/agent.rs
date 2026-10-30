@@ -91,15 +91,13 @@ impl Frontend {
     }
 }
 
-/// The parameter groups the agent reads, and where request notes go.
+/// The parameter groups the agent reads, and where failed turns leave a line.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     pub frontend: Frontend,
     pub world: world::params::Params,
     pub find_people: index::params::FindPeople,
     pub agent: params::Params,
-    /// `$DRAMATIS_HOME/office`.
-    pub office: PathBuf,
     /// `$DRAMATIS_HOME/logs`, where failed turns leave a line; empty: no log.
     pub logs: PathBuf,
 }
@@ -137,7 +135,7 @@ fn llm_model(p: &api::endpoints::Profile) -> api::endpoints::Model {
 }
 
 /// A message the host asked to post in a group it is a member of. It goes out once the
-/// host's turn is over and its channel lock released, like the requests the host makes.
+/// host's turn is over and its channel lock released.
 #[derive(Debug, Clone)]
 pub(crate) struct HostPost {
     pub group: ChannelId,
@@ -206,9 +204,6 @@ impl Agent {
             descriptions,
             wording,
         };
-        // Nothing runs yet: a request still open was cut off by a crash or a quit.
-        let now = parts.clock.now().ms;
-        world::task::interrupt_open(&parts.world, now)?;
         Ok(Self {
             world: Mutex::new(parts.world),
             index: Mutex::new(parts.index),
@@ -308,7 +303,7 @@ impl Agent {
         let msgs = world::message::history(&conn, channel, before, limit)?;
         Ok(msgs
             .iter()
-            .map(|m| crate::view::message(&conn, m, offset, &self.config.office))
+            .map(|m| crate::view::message(&conn, m, offset))
             .collect())
     }
 

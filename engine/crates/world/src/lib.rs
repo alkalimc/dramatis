@@ -472,9 +472,7 @@ mod tests {
                 conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
                     .unwrap()
             };
-            for t in [
-                "channel", "bond", "message", "fact", "meter", "settings",
-            ] {
+            for t in ["channel", "bond", "message", "fact", "meter", "settings"] {
                 assert_eq!(count(t), 1, "{t} from {from}");
             }
             if from >= 2 {

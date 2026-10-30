@@ -5,7 +5,7 @@ use api::views::{self as v, CallShape, QuotaBand, QuotaWindow, ToolAction};
 use folio::Folio;
 use rusqlite::Connection;
 use world::quota::{self, Band};
-use world::{Actor, ChannelId, FactId, MessageId, PersonId, Shape, TaskId, Tier};
+use world::{Actor, ChannelId, FactId, MessageId, PersonId, Shape, Tier};
 
 use crate::error::{Result, timestamp};
 
@@ -15,10 +15,6 @@ pub fn channel_id(c: ChannelId) -> t::ChannelId {
 
 pub fn message_id(m: MessageId) -> t::MessageId {
     t::MessageId(m.0.to_string())
-}
-
-pub fn task_id(t_: TaskId) -> t::TaskId {
-    t::TaskId(t_.0.to_string())
 }
 
 pub fn fact_id(f: FactId) -> t::FactId {
@@ -80,12 +76,11 @@ pub fn confidence(l: index::Level) -> t::Confidence {
     }
 }
 
-/// A stored message as the UI renders it. `office` resolves a request's note.
+/// A stored message as the UI renders it.
 pub fn message(
     conn: &rusqlite::Connection,
     m: &world::message::Message,
     offset_min: i32,
-    office: &std::path::Path,
 ) -> v::Message {
     let meta = api::meta::MessageMeta::of(m.attachment.as_ref());
     let (attachment, picture_lost) = api::meta::picture_of(conn, m);
@@ -106,10 +101,6 @@ pub fn message(
         confidence: meta.confidence.map(confidence),
         relayed: meta.relayed,
         service: meta.service,
-        task: meta.task.map(task_id),
-        note: meta.note.map(|n| t::MediaFile {
-            path: office.join(n).to_string_lossy().into_owned(),
-        }),
         at: timestamp(m.at, offset_min),
     }
 }
@@ -120,7 +111,6 @@ pub fn call_shape(s: Shape) -> CallShape {
         Shape::Direct => CallShape::Direct,
         Shape::Group | Shape::Interject => CallShape::Group,
         Shape::Opening => CallShape::Opening,
-        Shape::Ask => CallShape::Ask,
         Shape::Host => CallShape::Host,
         Shape::Wrapup => CallShape::Wrapup,
     }

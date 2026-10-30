@@ -69,7 +69,6 @@ pub fn key(shape: Shape) -> &'static str {
         Shape::Group => "inject.group",
         Shape::Interject => "inject.interject",
         Shape::Opening => "inject.opening",
-        Shape::Ask => "inject.ask",
         Shape::Host => "inject.host",
         Shape::Wrapup => "inject.wrapup",
     }

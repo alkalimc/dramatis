@@ -131,9 +131,7 @@ impl From<Error> for ApiError {
             Error::World(
                 world::Error::Invalid(_)
                 | world::Error::NotParticipant { .. }
-                | world::Error::ChannelClosed(_)
-                | world::Error::NotEnoughTurns { .. }
-                | world::Error::NoTask { .. },
+                | world::Error::ChannelClosed(_),
             ) => ApiError::Invalid {
                 field: "request".into(),
             },

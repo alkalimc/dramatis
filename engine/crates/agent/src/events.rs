@@ -518,7 +518,7 @@ impl Agent {
         )?;
         event::set_message(&conn, id, msg)?;
         let stored = message::get(&conn, msg)?;
-        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        let shown = view::message(&conn, &stored, now.offset_min);
         drop(conn);
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         self.changed(vec![WorldChange::Digest]);

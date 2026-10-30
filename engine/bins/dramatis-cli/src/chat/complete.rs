@@ -26,8 +26,6 @@ const COMMANDS: &[&str] = &[
     "read",
     "who",
     "mode",
-    "ask",
-    "requests",
     "clock",
     "find",
     "waiting",
@@ -187,14 +185,6 @@ pub fn complete(line: &str, pos: usize, data: &Snapshot) -> (usize, Vec<Pair>) {
         }
         "remove" => (args_at, persons(args, data, true)),
         "memories" | "mem" => (args_at, persons(args, data, true)),
-        "ask" => {
-            // The person is the first word; the question follows.
-            if args.contains(char::is_whitespace) {
-                none
-            } else {
-                (args_at, persons(args, data, false))
-            }
-        }
         "list" | "ls" => {
             // Any number of filter words, then a name fragment.
             let (_, start, partial, _) = last_word(args);
@@ -501,12 +491,10 @@ mod tests {
     }
 
     #[test]
-    fn ask_and_memories_complete_a_person() {
-        let found = at("/ask An");
-        assert_eq!(found.0, 5);
-        assert_eq!(shown(&found), ["Anchor", "Annie"]);
-        // The question is free text.
-        assert!(at("/ask Bo wh").1.is_empty());
+    fn memories_completes_a_person() {
+        let found = at("/memories An");
+        assert_eq!(found.0, 10);
+        assert_eq!(shown(&found), ["Anchor", "Ann Lee", "Annie"]);
         assert_eq!(shown(&at("/memories Ann L")), ["Ann Lee"]);
         assert_eq!(shown(&at("/mem BO")), ["Bo"]);
     }

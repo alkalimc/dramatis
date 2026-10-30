@@ -529,9 +529,7 @@ pub fn plan(
             continue;
         };
         let fact = match c.kind {
-            SeedKind::Commitment(f)
-            | SeedKind::Memory(f)
-            | SeedKind::Happening(f) => Some(f),
+            SeedKind::Commitment(f) | SeedKind::Memory(f) | SeedKind::Happening(f) => Some(f),
             _ => None,
         };
         return Ok(Planned::Open(Opening {

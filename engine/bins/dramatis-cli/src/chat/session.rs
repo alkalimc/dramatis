@@ -10,7 +10,7 @@ use api::error::{ApiError, ApiResult};
 use api::types::{Author, ChannelId, FactId, Mode, PersonId, Target, Tier, Timestamp};
 use api::views::{
     Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, InterfaceLanguage,
-    Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage, TaskStatus,
+    Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -386,13 +386,9 @@ impl Session {
             Command::Read(all) => self.read(all).await,
             Command::ReadUnit(unit) => self.read_unit(&unit).await,
             Command::Library(on) => self.set_library(on),
-            Command::Ask(..) | Command::Say(_) | Command::Wrapup if self.library => {
-                self.needs_model()
-            }
+            Command::Say(_) | Command::Wrapup if self.library => self.needs_model(),
             // Without any endpoint a rollover has no model to ask; with one it would.
             Command::Name(_) if self.library && !self.no_model => self.needs_model(),
-            Command::Ask(who, question) => self.ask(&who, question).await,
-            Command::Requests => self.requests().await,
             Command::Clock => self.clock().await,
             Command::Find(topic) => self.find(&topic).await,
             Command::Waiting => self.waiting().await,
@@ -916,7 +912,7 @@ impl Session {
         }
     }
 
-    // ---- conversations, people and requests ----
+    // ---- conversations and people ----
 
     fn stamp(at: &Timestamp) -> String {
         at.0.chars().take(16).collect::<String>().replace('T', " ")
@@ -1009,7 +1005,7 @@ impl Session {
         ));
         self.term.line(&self.msg("host.summary"));
         self.term.line(&self.msg("host.can"));
-        for key in ["find", "group", "ask", "explain"] {
+        for key in ["find", "group", "explain"] {
             self.term
                 .line(&format!("  - {}", self.msg(&format!("host.can.{key}"))));
         }
@@ -1056,10 +1052,8 @@ impl Session {
             .last_seen
             .as_ref()
             .map_or_else(|| self.msg("cli.who.never"), Self::stamp);
-        self.term.line(&self.names.say(
-            "cli.who.seen",
-            &[("seen", &seen), ("done", &page.tasks_done)],
-        ));
+        self.term
+            .line(&self.names.say("cli.who.seen", &[("seen", &seen)]));
         if !page.companions.is_empty() {
             let names: Vec<&str> = page.companions.iter().map(|p| p.name.as_str()).collect();
             self.term.line(
@@ -1210,72 +1204,6 @@ impl Session {
         ));
     }
 
-    async fn ask(&mut self, who: &str, question: String) {
-        let person = match self.resolve(who).await {
-            Ok(p) => p,
-            Err(e) => return self.term.line(&e),
-        };
-        let name = self.names.person(&person.0);
-        let (started, at) = (Instant::now(), now_ms());
-        let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
-        let result = self
-            .interruptible(async move {
-                engine.ask(person, question, None, None).await?;
-                bridge.idle().await;
-                Ok::<(), api::ApiError>(())
-            })
-            .await;
-        match result {
-            Some(Err(e)) => self.fail(&e),
-            Some(Ok(())) => self
-                .term
-                .note(&self.names.say("cli.ask.sent", &[("name", &name)])),
-            None => {}
-        }
-        self.report_failures();
-        self.footer(at, started).await;
-    }
-
-    async fn requests(&self) {
-        let tasks = match self.engine.tasks().await {
-            Ok(t) => t,
-            Err(e) => return self.fail(&e),
-        };
-        if tasks.is_empty() {
-            return self.term.note(&self.msg("cli.requests.none"));
-        }
-        for t in &tasks {
-            let state = self.names.word_with(
-                match t.status {
-                    TaskStatus::Active => "cases.active",
-                    TaskStatus::Done => "cases.done",
-                },
-                match t.status {
-                    TaskStatus::Active => "active",
-                    TaskStatus::Done => "done",
-                },
-                &[],
-            );
-            let who = t
-                .assignee
-                .as_ref()
-                .map_or_else(|| self.msg("cli.requests.nobody"), |p| p.name.clone());
-            let pin = if t.pinned {
-                format!(" {}", self.msg("cli.requests.pinned"))
-            } else {
-                String::new()
-            };
-            self.term.line(&format!(
-                "{:<7} {}  {}: {}{}",
-                state,
-                Self::stamp(&t.created_at),
-                who,
-                excerpt(&t.question, 60),
-                pin
-            ));
-        }
-    }
-
     async fn clock(&self) {
         match self.engine.clock().await {
             Ok(c) => self.term.print(&format!(
@@ -1318,11 +1246,6 @@ impl Session {
             };
             let what = match &w.activity {
                 Activity::Messaged { .. } => word("activity.messaged", "wrote to you", &[]),
-                Activity::Replied { question, .. } => word(
-                    "activity.replied",
-                    "answered: {question}",
-                    &[("question", &excerpt(question, 50))],
-                ),
                 Activity::CommitmentDue { text, .. } => word(
                     "activity.commitment_due",
                     "due: {text}",
@@ -1524,11 +1447,7 @@ impl Session {
     // ---- memories ----
 
     async fn facts(&self, person: Option<PersonId>, scope: FactScope) -> ApiResult<Vec<FactView>> {
-        let filter = FactFilter {
-            scope,
-            person,
-            task: None,
-        };
+        let filter = FactFilter { scope, person };
         Ok(self.engine.facts(filter).await?.items)
     }
 

@@ -1,7 +1,7 @@
 //! Tool execution. Every constraint is enforced here, where the call runs, never by
 //! varying what the model is offered: the harness fills `as_person` and audiences,
-//! disabled people and people without a persona are never candidates, `report` needs an
-//! active request, `wrapup` exists only in the harness's wrap-up turn, and the host's
+//! disabled people and people without a persona are never candidates, `wrapup` exists
+//! only in the harness's wrap-up turn, and the host's
 //! mode and memory changes need the user's own turn.
 
 use api::tools::{self, HostCall, SharedCall, TargetKind};
@@ -213,57 +213,6 @@ impl Agent {
             SharedCall::GetChunk(g) => self.get_chunk(turn, g, names, seg),
             SharedCall::RequestJoin(r) => self.request_join(turn, &me, r, names),
             SharedCall::AskHost(a) => self.ask_host(turn, &me, a, names),
-            SharedCall::Report(r) => {
-                // The request this turn runs on, or one he is on in this channel.
-                let task = {
-                    let conn = self.db();
-                    let t = match turn.task {
-                        Some(t) => Some(world::task::get(&conn, t)?),
-                        None => world::task::active_for(&conn, &me, turn.channel)?,
-                    };
-                    t.filter(|t| {
-                        t.assignee.as_ref() == Some(&me) && t.status == world::TaskStatus::Active
-                    })
-                };
-                let Some(task) = task else {
-                    // Only a delegated request is answered this way; an ordinary reply is
-                    // plain speech, and the refusal says so.
-                    return Ok(Err(self.refuse(names, "harness.error.no_request", "")));
-                };
-                self.show_action(turn, ToolAction::Report)?;
-                let mut shown = turn.shown.clone();
-                shown.extend(self.seen(seg)?);
-                let mut cited = r
-                    .cites
-                    .iter()
-                    .map(|c| format!("[#{c}]"))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                cited.push(' ');
-                cited.push_str(&r.text);
-                let cites = self.citations(turn.channel, &cited, &shown)?;
-                let reported = world::task::report(
-                    &self.db(),
-                    &me,
-                    task.id,
-                    &r.text,
-                    &cites,
-                    r.note.as_deref(),
-                    &self.config.office,
-                    self.now().ms,
-                );
-                match reported {
-                    Ok(rep) => {
-                        let note = rep
-                            .note
-                            .as_ref()
-                            .map(|_| world::task::note_rel_path(task.id));
-                        self.after_report(turn, task.id, rep.message, note)?;
-                        Ok(Ok(self.say(names, "harness.done", &[])))
-                    }
-                    Err(e) => Ok(Err(self.world_refusal(names, e)?)),
-                }
-            }
             SharedCall::Wrapup(w) => {
                 if !turn.wrapup {
                     return Ok(Err(self.refuse(names, "harness.error.wrapup_only", "")));
@@ -360,14 +309,8 @@ impl Agent {
         if turn.joined.is_some() || &candidate == me {
             return Ok(Err(self.refuse(names, "harness.error.unavailable", "")));
         }
-        let joined = world::task::request_join(
-            &self.db(),
-            turn.channel,
-            me,
-            &candidate,
-            r.turns,
-            self.now().ms,
-        );
+        let joined =
+            world::session::request_join(&self.db(), turn.channel, me, &candidate, self.now().ms);
         match joined {
             Ok(j) => {
                 let name = self.display(candidate.as_str())?;
@@ -803,47 +746,6 @@ impl Agent {
                     ));
                 }
                 Ok(Ok(lines.join("\n")))
-            }
-            HostCall::Ask(a) => {
-                let p = PersonId::from(a.person.as_str());
-                if let Err(e) = self.available(&self.db(), &p) {
-                    return match e {
-                        Error::NoPersona(_) | Error::World(_) => {
-                            Ok(Err(self.not_offered(names, &a.person)))
-                        }
-                        e => Err(e),
-                    };
-                }
-                let person = view::person_ref(self.ix().folio(), &a.person)?;
-                self.show_action(
-                    turn,
-                    ToolAction::Ask {
-                        person,
-                        question: a.question.clone(),
-                    },
-                )?;
-                let asked = {
-                    let conn = self.db();
-                    let tier = world::settings::intensity(&conn)?;
-                    world::task::ask(
-                        &conn,
-                        &p,
-                        &a.question,
-                        a.turns,
-                        None,
-                        tier,
-                        &self.config.world.ask,
-                        now.ms,
-                    )
-                };
-                match asked {
-                    Ok(asked) => {
-                        turn.asks.push(asked);
-                        let name = self.display(p.as_str())?;
-                        Ok(Ok(self.say(names, "harness.asked", &[("name", &name)])))
-                    }
-                    Err(e) => Ok(Err(self.world_refusal(names, e)?)),
-                }
             }
             HostCall::CreateGroup(g) => {
                 let mut members: Vec<PersonId> = Vec::new();

@@ -67,8 +67,7 @@ pub struct Session {
     pub closed_at: Option<i64>,
 }
 
-const COLUMNS: &str =
-    "id, channel, person, cause, replies_left, opened_at, last_at, closed_at";
+const COLUMNS: &str = "id, channel, person, cause, replies_left, opened_at, last_at, closed_at";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Session> {
     let replies: Option<u32> = row.get("replies_left")?;
@@ -285,7 +284,14 @@ pub fn request_join(
             });
         }
         channel::add_participant(conn, channel, &Actor::Person(candidate.clone()))?;
-        open(conn, channel, candidate, Budget::Replies(1), Cause::Join, now)?;
+        open(
+            conn,
+            channel,
+            candidate,
+            Budget::Replies(1),
+            Cause::Join,
+            now,
+        )?;
         Ok(Joined {
             person: candidate.clone(),
         })

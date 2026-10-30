@@ -62,7 +62,8 @@ impl Engine {
         let w = self.w();
         let everything = fact::all(&w, true).map_err(world_err)?;
         let deleted = everything.iter().filter(|f| f.retracted).count();
-        let listed = fact::list(&w, convert::fact_scope(filter.scope), person.as_ref()).map_err(world_err)?;
+        let listed = fact::list(&w, convert::fact_scope(filter.scope), person.as_ref())
+            .map_err(world_err)?;
         let mut items = Vec::with_capacity(listed.len());
         for f in &listed {
             items.push(self.fact_view(&w, f, offset)?);

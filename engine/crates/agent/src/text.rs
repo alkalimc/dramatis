@@ -38,7 +38,7 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Welcome. The terminal is maintained by alkali. You can talk to anyone here with \
          /talk <name>, start a group with /group, \
          and ask me for anything: finding someone who knows a subject, or a summary of what \
-         changed. Requests, memories, saves and settings all have commands; /help lists them, \
+         changed. Memories, saves and settings all have commands; /help lists them, \
          and I can explain any of them.",
     ),
     (
@@ -51,7 +51,7 @@ const DEFAULTS: &[(&str, &str)] = &[
         "host.intro.app",
         "Welcome. The terminal is maintained by alkali. You can talk to anyone on the \
          Roster, start a group, and ask me for anything: \
-         finding someone who knows a subject, or a summary of what changed. Requests, memories, \
+         finding someone who knows a subject, or a summary of what changed. Memories, \
          saves and settings each have a page; ask me and I will explain any of them.",
     ),
     (
@@ -150,23 +150,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("daypart.afternoon", "afternoon"),
     ("daypart.evening", "evening"),
     ("harness.host_offline", "{when}"),
-    (
-        "harness.context.turns",
-        "[{date} {weekday} {time}, {part} · {turns} turns left on this request]",
-    ),
-    (
-        "harness.task",
-        "Request {id} to {name} ({question}): {state}",
-    ),
-    ("harness.task.active", "still open, {turns} turns left"),
-    (
-        "harness.task.failed",
-        "it did not run and no answer is coming",
-    ),
-    (
-        "harness.task.interrupted",
-        "it stopped before it finished and no answer is coming",
-    ),
     ("harness.nothing_found", "Nothing came back for this."),
     (
         "harness.low_match",
@@ -233,14 +216,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.groups.line_named", "- {title}: {others}"),
     ("harness.groups.about", " ({purpose})"),
     (
-        "harness.ask",
-        "{user} asks {name} to look into this: {question}",
-    ),
-    (
-        "harness.must_report",
-        "This is the last turn on this request: answer it with report now.",
-    ),
-    (
         "harness.wrapup",
         "The conversation is closing. Step out of the scene and do not answer as the \
          character. Give only the wrap-up: write what is worth remembering as short \
@@ -276,11 +251,6 @@ const DEFAULTS: &[(&str, &str)] = &[
          one, shows that.",
     ),
     ("harness.opening.commitment", "A promise is due: {text}"),
-    (
-        "harness.opening.conclusion",
-        "{user} wrote down a conclusion: {text}",
-    ),
-    ("harness.opening.pinned", "{user} pinned a question: {text}"),
     ("harness.opening.birthday", "Today is {user}'s birthday."),
     (
         "harness.opening.visit",
@@ -330,10 +300,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     ("harness.digest.messaged", "- {name} sent messages."),
     (
-        "harness.digest.replied",
-        "- {name} answered the request: {question}",
-    ),
-    (
         "harness.digest.commitment_due",
         "- A promise with {name} is due: {text}",
     ),
@@ -369,10 +335,6 @@ const DEFAULTS: &[(&str, &str)] = &[
         "Everyone named is already in this group.",
     ),
     ("harness.error.disabled", "That colleague is not available."),
-    (
-        "harness.error.no_request",
-        "report answers a request {user} delegated with ask, and there is none now. Write the reply as ordinary speech.",
-    ),
     (
         "harness.error.not_member",
         "You are not a member of the group {detail}.",
@@ -555,7 +517,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.guide.limits",
-        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due, or which you take up yourself. Removing someone from a group, renaming a group or deleting one is likewise {user}'s own, and you have no means for it.",
+        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due, or which you take up yourself. Removing someone from a group, renaming a group or deleting one is likewise {user}'s own, and you have no means for it.",
     ),
     (
         "harness.host.group",
@@ -584,7 +546,6 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.suggested",
         "The host has the suggestion; {user} decides, and nothing has happened yet.",
     ),
-    ("harness.asked", "{name} is looking into it."),
     ("harness.group_created", "Group {id} created."),
     (
         "harness.group_reused",

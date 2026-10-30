@@ -463,11 +463,7 @@ pub enum Scope {
 
 /// The drawer: all facts (live, or only deleted ones under [`Scope::Deleted`]) matching
 /// the scope, optionally only those about or recallable by a person.
-pub fn list(
-    conn: &Connection,
-    scope: Scope,
-    person: Option<&PersonId>,
-) -> Result<Vec<Fact>> {
+pub fn list(conn: &Connection, scope: Scope, person: Option<&PersonId>) -> Result<Vec<Fact>> {
     let mut facts = all(conn, true)?;
     facts.retain(|f| match scope {
         Scope::Deleted => f.retracted,

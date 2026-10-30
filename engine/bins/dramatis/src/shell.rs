@@ -404,11 +404,11 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(Arrivals::default());
     app.manage(AwayItem::default());
     let home = Home::from_env();
-    // The webview may read the cached media, the notes people write and the pictures the
-    // user chose, and nothing else; the home can be moved by `DRAMATIS_HOME`, so the scope
+    // The webview may read the cached media and the pictures the user chose, and nothing
+    // else; the home can be moved by `DRAMATIS_HOME`, so the scope
     // is not static.
     let scope = app.asset_protocol_scope();
-    for dir in [home.media(), home.office(), home.uploads()] {
+    for dir in [home.media(), home.uploads()] {
         // The scope canonicalizes its paths, so they must exist (a fresh home has none of them yet).
         let _ = std::fs::create_dir_all(&dir);
         let _ = scope.allow_directory(dir, true);

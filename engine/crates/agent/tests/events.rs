@@ -268,7 +268,7 @@ async fn a_reply_that_is_not_an_event_is_skipped_quietly() {
 
 /// The diagnostics log of an environment.
 fn log(e: &Env) -> String {
-    std::fs::read_to_string(e._office.0.join("logs").join("dramatis.log")).unwrap_or_default()
+    std::fs::read_to_string(e._dir.0.join("logs").join("dramatis.log")).unwrap_or_default()
 }
 
 #[tokio::test]

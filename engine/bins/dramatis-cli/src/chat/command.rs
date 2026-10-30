@@ -37,10 +37,6 @@ pub enum Command {
     ReadUnit(String),
     /// Library mode on (the corpus without a language model), or back off.
     Library(bool),
-    /// Ask a person to look into a question.
-    Ask(String, String),
-    /// The requests and their state.
-    Requests,
     Clock,
     /// Who knows about a topic.
     Find(String),
@@ -279,14 +275,6 @@ pub fn parse(line: &str) -> Command {
             "off" => Command::Library(false),
             _ => Command::Invalid("cli.usage.library"),
         },
-        "ask" => {
-            let w = words(args);
-            match w.split_first() {
-                Some((who, rest)) if !rest.is_empty() => Command::Ask(who.clone(), rest.join(" ")),
-                _ => Command::Invalid("cli.usage.ask"),
-            }
-        }
-        "requests" | "req" => Command::Requests,
         "clock" | "time" => Command::Clock,
         "find" if args.is_empty() => Command::Invalid("cli.usage.find"),
         "find" => Command::Find(args.to_owned()),
@@ -497,11 +485,6 @@ mod tests {
         assert_eq!(parse("/leave"), Command::Leave);
         assert_eq!(parse("/read"), Command::Read(false));
         assert_eq!(parse("/read all"), Command::Read(true));
-        assert_eq!(
-            parse("/ask \"Ann Lee\" what is in the east wing"),
-            Command::Ask("Ann Lee".into(), "what is in the east wing".into())
-        );
-        assert_eq!(parse("/requests"), Command::Requests);
         assert_eq!(parse("/clock"), Command::Clock);
         assert_eq!(
             parse("/find tea brewing"),
@@ -596,7 +579,6 @@ mod tests {
             "/source",
             "/sources 1 0",
             "/sources x",
-            "/ask Ann",
             "/find",
         ] {
             assert!(matches!(parse(bad), Command::Invalid(_)), "{bad}");

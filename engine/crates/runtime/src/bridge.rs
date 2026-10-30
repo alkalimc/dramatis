@@ -18,7 +18,7 @@ use api::error::{ApiError, ApiResult};
 use api::home::Home;
 use api::params::Params;
 use api::port::AgentPort;
-use api::types::{ChannelId, MessageId, PersonId, TaskId};
+use api::types::{ChannelId, MessageId, PersonId};
 use api::views::ImagePart;
 use async_trait::async_trait;
 use tokio::sync::watch;
@@ -195,7 +195,6 @@ impl AgentBridge {
                 world: p.params.world.clone(),
                 find_people: p.params.find_people.clone(),
                 agent: self.agent_params.clone(),
-                office: p.home.office(),
                 logs: p.home.logs(),
             },
             endpoints: self
@@ -324,24 +323,6 @@ impl AgentPort for Port {
         self.0
             .spawn("relay", move |a| async move { a.respond(posted).await });
         Ok(ch)
-    }
-
-    async fn ask(
-        &self,
-        person: PersonId,
-        question: String,
-        turns: Option<u32>,
-        parent: Option<TaskId>,
-    ) -> ApiResult<TaskId> {
-        let agent = self.0.agent().await?;
-        let parent = parent.map(|p| parse(&p.0).map(world::TaskId)).transpose()?;
-        let asked = agent.ask(&world::PersonId(person.0), &question, turns, parent)?;
-        let id = TaskId(asked.task.0.to_string());
-        self.0.spawn(
-            "request",
-            move |a| async move { a.run_request(asked).await },
-        );
-        Ok(id)
     }
 
     async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String> {

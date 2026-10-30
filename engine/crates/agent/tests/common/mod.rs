@@ -615,7 +615,7 @@ pub struct Env {
     pub sink: Arc<Recorder>,
     pub clock: Arc<TestClock>,
     pub _folio: TempFolio,
-    pub _office: tempdir::Dir,
+    pub _dir: tempdir::Dir,
 }
 
 pub mod tempdir {
@@ -683,10 +683,9 @@ pub fn env_in(
     tune: impl FnOnce(&mut Config),
 ) -> Env {
     let index = index::Index::open(folio_file.path(), retrieve).unwrap();
-    let office = tempdir::Dir::new();
+    let dir = tempdir::Dir::new();
     let mut config = Config {
-        office: office.0.clone(),
-        logs: office.0.join("logs"),
+        logs: dir.0.join("logs"),
         ..Config::default()
     };
     // Scripts do not expect the extra audience request unless a test asks for it.
@@ -717,7 +716,7 @@ pub fn env_in(
         sink,
         clock,
         _folio: folio_file,
-        _office: office,
+        _dir: dir,
     }
 }
 

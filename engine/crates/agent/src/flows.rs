@@ -1,4 +1,4 @@
-//! What the app calls: a user turn, a request, a wrap-up, presence, a rename.
+//! What the app calls: a user turn, a wrap-up, presence, a rename.
 //!
 //! A user turn is two steps so the command can return at once: [`Agent::post`] stores
 //! and echoes the user's message, [`Agent::respond`] runs the replies (streamed as
@@ -18,8 +18,8 @@ use world::quota::{self, Band, CallKind, Decision};
 use world::seed::{self, Opening, SeedKind, WordsHit};
 use world::wrapup::Summary;
 use world::{
-    Actor, Call, ChannelId, ChannelKind, MessageId, MonthDay, PersonId, Shape, TaskId, bond,
-    channel, fact, message, session, settings,
+    Actor, Call, ChannelId, ChannelKind, MessageId, MonthDay, PersonId, Shape, bond, channel, fact,
+    message, session, settings,
 };
 
 use crate::address::Audience;
@@ -134,7 +134,7 @@ impl Agent {
         session::touch_channel(&conn, channel, now.ms)?;
         let stored = message::get(&conn, id)?;
         let host = ch.is_host_channel();
-        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        let shown = view::message(&conn, &stored, now.offset_min);
         drop(conn);
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(Posted {
@@ -170,7 +170,6 @@ impl Agent {
     }
 
     async fn respond_inner(&self, posted: Posted) -> Result<()> {
-        let mut asks = Vec::new();
         let mut said = None;
         let first = {
             let _turn = self.lock_channel(posted.channel).await;
@@ -184,13 +183,9 @@ impl Agent {
                 return Err(Error::QuotaExhausted { release_at });
             }
             if ch.is_host_channel() {
-                // Requests made before a failure are kept: they exist in the world and
-                // must end in a state, not stay open with nothing running.
-                let (made, result) = self.host_turn(&posted).await;
-                asks = made;
-                result
+                self.host_turn(&posted).await
             } else if ch.kind == ChannelKind::Group {
-                self.group_turn(&posted, &mut asks).await
+                self.group_turn(&posted).await
             } else {
                 let person = ch.person().cloned().ok_or_else(|| {
                     Error::Invalid(format!("channel {} has no owner", posted.channel))
@@ -198,11 +193,6 @@ impl Agent {
                 self.direct_turn(&posted, &person).await.map(|s| said = s)
             }
         };
-        // Requests the host made run in the asked person's channel, after the host's own
-        // lock is released: no flow holds two channel locks. After a failed host turn
-        // they are not run (the endpoint is likely still failing); they end as failed and
-        // the host sees that on its next turn.
-        let ran = self.run_asks(asks, first.is_err()).await;
         // The line a person was asked to post in a group goes out after the direct chat's
         // lock is released, for the same reason.
         let posted_say = match (&first, said) {
@@ -211,45 +201,7 @@ impl Agent {
             }
             _ => Ok(()),
         };
-        first.and(ran).and(posted_say)
-    }
-
-    /// Run the requests of one host turn in order. Every one ends in a state: after the
-    /// first failure (or with `skip`) the rest are marked failed without a call.
-    async fn run_asks(&self, asks: Vec<world::task::Asked>, skip: bool) -> Result<()> {
-        let mut stop = skip;
-        let mut first: Result<()> = Ok(());
-        // Dropped mid-way (the work was cancelled), the requests not yet ended are marked.
-        let guards: Vec<_> = asks.iter().map(|a| self.guard(a.task)).collect();
-        for (asked, mut guard) in asks.into_iter().zip(guards) {
-            if stop {
-                self.fail_request(asked.task, world::task::Failure::Failed);
-                guard.disarm();
-                continue;
-            }
-            let ran = {
-                let _turn = self.lock_channel(asked.channel).await;
-                self.run_ask(asked.task, asked.channel).await
-            };
-            guard.disarm();
-            if let Err(e) = ran {
-                self.fail_request(asked.task, world::task::Failure::Failed);
-                stop = true;
-                first = Err(e);
-            }
-        }
-        first
-    }
-
-    /// A request ended without an answer: it stops being open, and the UI and the host
-    /// see that. Does nothing to one that was answered.
-    pub(crate) fn fail_request(&self, task: TaskId, why: world::task::Failure) {
-        let changed = world::task::fail(&self.db(), task, why, self.now().ms);
-        if matches!(changed, Ok(true)) {
-            self.changed(vec![WorldChange::Task {
-                id: view::task_id(task),
-            }]);
-        }
+        first.and(posted_say)
     }
 
     /// Take back the user's `message` and everything after it in `ch` ([`world::rewind`]),
@@ -273,9 +225,6 @@ impl Agent {
                 id: view::fact_id(*f),
             })
             .collect();
-        changes.extend(out.tasks.iter().map(|t| WorldChange::Task {
-            id: view::task_id(*t),
-        }));
         changes.push(WorldChange::Digest);
         self.changed(changes);
         Ok(out.text)
@@ -324,27 +273,21 @@ impl Agent {
         let host = channel::host(&conn)?;
         let id = message::append(&conn, host, &Actor::Host, &text, None, None, now.ms)?;
         let stored = message::get(&conn, id)?;
-        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        let shown = view::message(&conn, &stored, now.offset_min);
         drop(conn);
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(())
     }
 
     /// The user's entry: their words verbatim, then the harness's lines and material.
-    fn user_entry(
-        &self,
-        seg: world::SegmentId,
-        posted: &Posted,
-        lines: &[String],
-        turns: Option<u32>,
-    ) -> Result<()> {
+    fn user_entry(&self, seg: world::SegmentId, posted: &Posted, lines: &[String]) -> Result<()> {
         let before = message::history(&self.db(), posted.channel, Some(posted.message), 50)?;
         let since = before
             .iter()
             .rev()
             .find(|m| m.author == Actor::User)
             .map(|m| m.at);
-        let context = self.context_line(seg, turns, since)?;
+        let context = self.context_line(seg, since)?;
         let mut parts: Vec<&str> = vec![&posted.text];
         parts.extend(lines.iter().map(String::as_str));
         parts.push(&context);
@@ -352,74 +295,15 @@ impl Agent {
         self.append_user(seg, &text, posted.image.as_ref())
     }
 
-    /// Returns the requests the host made, even when the turn failed after making them;
-    /// the caller runs them.
-    async fn host_turn(&self, posted: &Posted) -> (Vec<world::task::Asked>, Result<()>) {
+    async fn host_turn(&self, posted: &Posted) -> Result<()> {
         let mut turn = Turn::new(posted.channel, Actor::Host, Shape::Host);
         turn.authorized = posted.authorized;
-        let result = self.host_turn_run(posted, &mut turn).await;
-        (std::mem::take(&mut turn.asks), result)
-    }
-
-    async fn host_turn_run(&self, posted: &Posted, turn: &mut Turn) -> Result<()> {
         let seg = self
             .ensure_segment(posted.channel, Some(posted.message))
             .await?;
-        let (lines, told) = self.request_lines(seg)?;
-        self.user_entry(seg, posted, &lines, None)?;
-        for t in told {
-            world::task::mark_told(&self.db(), t)?;
-        }
-        self.run(turn, self.config.agent.turn_loop.max_steps).await
-    }
-
-    /// One line per open request, and per request that ended without an answer (once),
-    /// so the host answers about what is really happening. Also returns the failures
-    /// shown, to be marked told once the entry is stored.
-    fn request_lines(&self, seg: world::SegmentId) -> Result<(Vec<String>, Vec<TaskId>)> {
-        let names = self.segment_names(seg)?;
-        let (open, failed) = {
-            let conn = self.db();
-            (
-                world::task::open_requests(&conn)?,
-                world::task::untold_failures(&conn)?,
-            )
-        };
-        let mut lines = Vec::new();
-        let mut told = Vec::new();
-        for t in open.iter().chain(&failed) {
-            let Some(person) = &t.assignee else { continue };
-            let name = self.display(person.as_str())?;
-            let state = match t.failure {
-                None => self.corpus.wording.fill(
-                    "harness.task.active",
-                    &names,
-                    &[("turns", &t.turns_left.to_string())],
-                ),
-                Some(world::task::Failure::Failed) => {
-                    self.corpus.wording.fill("harness.task.failed", &names, &[])
-                }
-                Some(world::task::Failure::Interrupted) => {
-                    self.corpus
-                        .wording
-                        .fill("harness.task.interrupted", &names, &[])
-                }
-            };
-            if t.failure.is_some() {
-                told.push(t.id);
-            }
-            lines.push(self.corpus.wording.fill(
-                "harness.task",
-                &names,
-                &[
-                    ("id", &t.id.0.to_string()),
-                    ("name", &name),
-                    ("question", &t.question),
-                    ("state", &state),
-                ],
-            ));
-        }
-        Ok((lines, told))
+        self.user_entry(seg, posted, &[])?;
+        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await
     }
 
     async fn direct_turn(&self, posted: &Posted, person: &PersonId) -> Result<Said> {
@@ -456,7 +340,7 @@ impl Agent {
         let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
         lines.extend(self.attachment(seg, &mut turn, &query, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, std::slice::from_ref(person))?);
-        self.user_entry(seg, posted, &lines, None)?;
+        self.user_entry(seg, posted, &lines)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         self.replied(posted.channel, person)?;
@@ -538,28 +422,13 @@ impl Agent {
         Ok(())
     }
 
-    /// Run a turn, handing over to a colleague it pulls in. In a request the caller
-    /// resumes once the colleague has answered, within the request's turns; in an
-    /// ordinary conversation the colleague's one answer ends the turn.
+    /// Run a turn; a colleague it pulls in answers once, and that answer ends the turn.
     pub(crate) async fn drive(&self, turn: &mut Turn, max_steps: u32) -> Result<()> {
-        loop {
-            self.run(turn, max_steps).await?;
-            let Some(joined) = turn.joined.take() else {
-                break;
-            };
+        self.run(turn, max_steps).await?;
+        if let Some(joined) = turn.joined.take() {
             self.join_turn(turn.channel, &joined, turn.shape).await?;
-            let resume = match turn.task {
-                Some(t) => world::task::get(&self.db(), t)?.status == world::TaskStatus::Active,
-                None => false,
-            };
-            if !resume {
-                break;
-            }
-            turn.text.clear();
-            turn.message = None;
-            turn.actions.clear();
         }
-        self.close_open_task(turn)
+        Ok(())
     }
 
     /// A colleague pulled in answers. His persona enters the log as an entry the first
@@ -570,7 +439,7 @@ impl Agent {
     async fn join_turn(
         &self,
         ch: ChannelId,
-        joined: &world::task::Joined,
+        joined: &world::session::Joined,
         shape: Shape,
     ) -> Result<()> {
         let mut seg = self.current_segment(ch)?;
@@ -599,21 +468,15 @@ impl Agent {
         );
         let speaker = Actor::Person(joined.person.clone());
         let mut turn = Turn::new(ch, speaker, shape);
-        turn.task = joined.task;
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
             None,
         )?;
-        let steps = if joined.task.is_some() {
-            joined.turns.max(1) + 1
-        } else {
-            self.config.agent.turn_loop.max_steps
-        };
         // No further hand-over from a colleague: one join per turn.
-        self.run(&mut turn, steps).await?;
+        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await?;
         turn.joined = None;
-        self.close_open_task(&mut turn)?;
         self.replied(ch, &joined.person)?;
         Ok(())
     }
@@ -788,7 +651,7 @@ impl Agent {
             now.ms,
         )?;
         let stored = message::get(&conn, id)?;
-        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        let shown = view::message(&conn, &stored, now.offset_min);
         drop(conn);
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(())
@@ -797,7 +660,7 @@ impl Agent {
     /// A message in a group: the people answer as they always did. The host, if it is a
     /// member, answers only when the message calls it by name: alone when no person is
     /// named or addressed as a whole, else after the people.
-    async fn group_turn(&self, posted: &Posted, asks: &mut Vec<world::task::Asked>) -> Result<()> {
+    async fn group_turn(&self, posted: &Posted) -> Result<()> {
         let host_called = self.host_called(posted)?;
         if host_called {
             let members: Vec<PersonId> = {
@@ -809,14 +672,12 @@ impl Agent {
             };
             if self.named_in(&posted.text, &members)?.is_none() && !self.is_collective(&posted.text)
             {
-                return self
-                    .host_group_turn(posted.channel, Some(posted), asks)
-                    .await;
+                return self.host_group_turn(posted.channel, Some(posted)).await;
             }
         }
         self.group_people_turn(posted).await?;
         if host_called {
-            self.host_group_turn(posted.channel, None, asks).await?;
+            self.host_group_turn(posted.channel, None).await?;
         }
         Ok(())
     }
@@ -838,14 +699,8 @@ impl Agent {
 
     /// The host speaks in a group it is a member of, on the group's shared log but with its
     /// own model, tools and manner. `posted` is the user's message it answers (the entry
-    /// that carries it); without one it speaks after the people have. Requests it makes are
-    /// handed back to run once the group's turn is over.
-    async fn host_group_turn(
-        &self,
-        ch: ChannelId,
-        posted: Option<&Posted>,
-        asks: &mut Vec<world::task::Asked>,
-    ) -> Result<()> {
+    /// that carries it); without one it speaks after the people have.
+    async fn host_group_turn(&self, ch: ChannelId, posted: Option<&Posted>) -> Result<()> {
         let seg = self.ensure_segment(ch, posted.map(|p| p.message)).await?;
         let names = self.segment_names(seg)?;
         let host_name = self.corpus.host_name.clone();
@@ -876,9 +731,9 @@ impl Agent {
         let mut turn = Turn::new(ch, Actor::Host, Shape::Host);
         turn.authorized = posted.is_some();
         match posted {
-            Some(p) => self.user_entry(seg, p, &lines, None)?,
+            Some(p) => self.user_entry(seg, p, &lines)?,
             None => {
-                lines.push(self.context_line(seg, None, None)?);
+                lines.push(self.context_line(seg, None)?);
                 self.append_user(
                     seg,
                     &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -886,11 +741,8 @@ impl Agent {
                 )?;
             }
         }
-        let result = self
-            .run(&mut turn, self.config.agent.turn_loop.max_steps)
-            .await;
-        asks.append(&mut turn.asks);
-        result
+        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await
     }
 
     async fn group_people_turn(&self, posted: &Posted) -> Result<()> {
@@ -956,7 +808,7 @@ impl Agent {
         let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
         lines.extend(self.attachment(seg, &mut turn, &query, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, &members)?);
-        self.user_entry(seg, posted, &lines, None)?;
+        self.user_entry(seg, posted, &lines)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         self.replied(posted.channel, &addressed)?;
@@ -1167,7 +1019,7 @@ impl Agent {
         };
         let mut lines = vec![self.corpus.wording.fill(key, &names, &[("name", &name)])];
         lines.extend(self.attachment(seg, &mut turn, &last_user, vec![person.0.clone()])?);
-        lines.push(self.context_line(seg, None, None)?);
+        lines.push(self.context_line(seg, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -1212,7 +1064,7 @@ impl Agent {
             let id = message::append(&conn, group, from, words, None, None, now.ms)?;
             session::touch_channel(&conn, group, now.ms)?;
             let stored = message::get(&conn, id)?;
-            let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+            let shown = view::message(&conn, &stored, now.offset_min);
             drop(conn);
             self.emit(Event::MessageAdded(MessageAdded { message: shown }));
             let members: Vec<PersonId> = self.corpus.personas.filter(bond::filter_disabled(
@@ -1329,7 +1181,7 @@ impl Agent {
                 &[("id", &id), ("lines", &kept)],
             )]
         };
-        lines.push(self.context_line(seg, None, None)?);
+        lines.push(self.context_line(seg, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -1386,7 +1238,7 @@ impl Agent {
         }
         let id = id?;
         let stored = message::get(&conn, id)?;
-        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        let shown = view::message(&conn, &stored, now.offset_min);
         drop(conn);
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(())
@@ -1438,7 +1290,7 @@ impl Agent {
             now.ms,
         )?;
         let stored = message::get(&conn, id)?;
-        let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
+        let shown = view::message(&conn, &stored, now.offset_min);
         drop(conn);
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         Ok(())
@@ -1472,98 +1324,6 @@ impl Agent {
             target: target.clone(),
             mode,
         }));
-        Ok(())
-    }
-
-    // ---- requests ----
-
-    /// The user asks a person to look into a question. Returns the request at once; the
-    /// work runs in [`Agent::run_request`].
-    pub fn ask(
-        &self,
-        person: &PersonId,
-        question: &str,
-        turns: Option<u32>,
-        parent: Option<TaskId>,
-    ) -> Result<world::task::Asked> {
-        let conn = self.db();
-        self.available(&conn, person)?;
-        let tier = settings::intensity(&conn)?;
-        let asked = world::task::ask(
-            &conn,
-            person,
-            question,
-            turns,
-            parent,
-            tier,
-            &self.config.world.ask,
-            self.now().ms,
-        )?;
-        drop(conn);
-        self.changed(vec![WorldChange::Task {
-            id: view::task_id(asked.task),
-        }]);
-        Ok(asked)
-    }
-
-    /// Work on a request until it is answered or its turns run out.
-    pub async fn run_request(&self, asked: world::task::Asked) -> Result<()> {
-        // Cancelled (the future dropped) before it ended, the request is marked interrupted.
-        let mut guard = self.guard(asked.task);
-        let ran = async {
-            let _turn = self.lock_channel(asked.channel).await;
-            if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
-                return Err(Error::QuotaExhausted { release_at });
-            }
-            self.run_ask(asked.task, asked.channel).await
-        }
-        .await;
-        guard.disarm();
-        if ran.is_err() {
-            self.fail_request(asked.task, world::task::Failure::Failed);
-        }
-        ran
-    }
-
-    fn guard(&self, task: TaskId) -> OpenRequest<'_> {
-        OpenRequest {
-            agent: self,
-            task,
-            armed: true,
-        }
-    }
-
-    async fn run_ask(&self, task: TaskId, ch: ChannelId) -> Result<()> {
-        let t = world::task::get(&self.db(), task)?;
-        let Some(person) = t.assignee.clone() else {
-            return Ok(());
-        };
-        let seg = self.ensure_segment(ch, None).await?;
-        let names = self.segment_names(seg)?;
-        let name = self.display(person.as_str())?;
-        let mut turn = Turn::new(ch, Actor::Person(person.clone()), Shape::Ask);
-        turn.task = Some(task);
-        let mut lines = vec![self.corpus.wording.fill(
-            "harness.ask",
-            &names,
-            &[("name", &name), ("question", &t.question)],
-        )];
-        lines.extend(self.attachment(seg, &mut turn, &t.question, Vec::new())?);
-        lines.push(self.context_line(seg, Some(t.turns_left), None)?);
-        self.append_user(
-            seg,
-            &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
-            None,
-        )?;
-        self.drive(&mut turn, t.turns_left.saturating_add(1))
-            .await?;
-        // The request was its own conversation: wrap it up when nothing else is open here.
-        let open = session::open_sessions(&self.db())?
-            .iter()
-            .any(|s| s.channel == ch);
-        if !open {
-            self.run_wrapup(ch, false).await?;
-        }
         Ok(())
     }
 
@@ -1938,7 +1698,7 @@ impl Agent {
             self.corpus
                 .wording
                 .fill("harness.reminder", &names, &[("text", text)]),
-            self.context_line(seg, None, None)?,
+            self.context_line(seg, None)?,
         ];
         self.append_user(
             seg,
@@ -1961,7 +1721,7 @@ impl Agent {
         Ok(())
     }
 
-    /// Event seeds outside presence (a commitment fell due, a conclusion was written):
+    /// Event seeds outside presence (a commitment fell due):
     /// at most one opening, within every limit.
     pub async fn on_event(&self) -> Result<Option<(PersonId, ChannelId)>> {
         let _plan = self.planner.lock().await;
@@ -2029,20 +1789,8 @@ impl Agent {
             // A channel with a flow in progress is not idle, however long the flow takes.
             for ch in self.busy_channels() {
                 session::touch_channel(&conn, ch, now)?;
-                world::task::touch_channel(&conn, ch, now)?;
             }
-            let ended = session::expire_idle(&conn, now, &self.config.world.session)?;
-            // A request whose process is gone (a crash, or another process that quit).
-            let cut = world::task::interrupt_open(&conn, now)?;
-            drop(conn);
-            self.changed(
-                cut.into_iter()
-                    .map(|t| WorldChange::Task {
-                        id: view::task_id(t),
-                    })
-                    .collect(),
-            );
-            ended
+            session::expire_idle(&conn, now, &self.config.world.session)?
         };
         if self.chat().is_ok() {
             for ch in &ended {
@@ -2195,7 +1943,7 @@ impl Agent {
         let seg = self.ensure_segment(ch, None).await?;
         let names = self.segment_names(seg)?;
         let mut lines = vec![self.digest_text(digest, &names)?];
-        lines.push(self.context_line(seg, None, None)?);
+        lines.push(self.context_line(seg, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2220,11 +1968,6 @@ impl Agent {
             let n = [("name", name.as_str())];
             lines.push(match &item.activity {
                 Activity::Messaged { .. } => w.fill("harness.digest.messaged", names, &n),
-                Activity::Replied { question, .. } => w.fill(
-                    "harness.digest.replied",
-                    names,
-                    &[("name", &name), ("question", question)],
-                ),
                 Activity::CommitmentDue { text, .. } => w.fill(
                     "harness.digest.commitment_due",
                     names,
@@ -2258,8 +2001,7 @@ impl Agent {
             }
             _ => None,
         };
-        let task_text = match &o.kind {
-            SeedKind::Pinned(t) => Some(world::task::get(&self.db(), *t)?.question),
+        let words_text = match &o.kind {
             SeedKind::Words(m) => Some(message::get(&self.db(), *m)?.text),
             _ => None,
         };
@@ -2268,10 +2010,8 @@ impl Agent {
         };
         let line = match &o.kind {
             SeedKind::Commitment(_) => detail("harness.opening.commitment", fact_text.as_ref()),
-            SeedKind::Conclusion(_) => detail("harness.opening.conclusion", fact_text.as_ref()),
             SeedKind::Memory(_) => detail("harness.opening.memory", fact_text.as_ref()),
-            SeedKind::Pinned(_) => detail("harness.opening.pinned", task_text.as_ref()),
-            SeedKind::Words(_) => detail("harness.opening.words", task_text.as_ref()),
+            SeedKind::Words(_) => detail("harness.opening.words", words_text.as_ref()),
             SeedKind::Birthday(_) => Some(w.fill("harness.opening.birthday", &names, &[])),
             SeedKind::Happening(_) => detail("harness.opening.event", fact_text.as_ref()),
             SeedKind::Visit(_) => Some(w.fill("harness.opening.visit", &names, &[])),
@@ -2292,7 +2032,7 @@ impl Agent {
             turn.shown.extend(m.shown);
             lines.push(m.text);
         }
-        lines.push(self.context_line(seg, None, None)?);
+        lines.push(self.context_line(seg, None)?);
         self.append_user(
             seg,
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2360,28 +2100,5 @@ impl seed::TopicMatch for TopicHits<'_> {
         resp.hits
             .iter()
             .any(|h| seed.material.iter().any(|m| m == h.item.id()))
-    }
-}
-
-/// A request being worked on. If dropped while armed, the work was cancelled before the
-/// request ended, so it is marked interrupted instead of staying open for good.
-pub(crate) struct OpenRequest<'a> {
-    agent: &'a Agent,
-    task: TaskId,
-    armed: bool,
-}
-
-impl OpenRequest<'_> {
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for OpenRequest<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            self.agent
-                .fail_request(self.task, world::task::Failure::Interrupted);
-        }
     }
 }

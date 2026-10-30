@@ -60,13 +60,7 @@ fn every_parsed_name_is_offered() {
     let host: Vec<_> = host_tools(&none).iter().map(|t| t.name).collect();
     assert_eq!(
         shared,
-        [
-            "search",
-            "get_chunk",
-            "request_join",
-            "wrapup",
-            "ask_host"
-        ]
+        ["search", "get_chunk", "request_join", "wrapup", "ask_host"]
     );
     assert_eq!(
         host,
