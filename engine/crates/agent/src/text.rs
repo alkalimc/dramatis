@@ -486,13 +486,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.guide.app.channels",
         "Switching conversation: open it from Home, or press the choice you offer.",
     ),
-    (
-        "harness.guide.app.group",
-        "A group: New group on Roster, or Bring people in inside a conversation.",
-    ),
+    ("harness.guide.app.group", "A group: New group in the Menu."),
     (
         "harness.guide.app.resend",
-        "Say it again: Send again on {user}'s own message.",
+        "Say it again: right-click {user}'s own message, then Send again.",
     ),
     (
         "harness.guide.app.sources",
