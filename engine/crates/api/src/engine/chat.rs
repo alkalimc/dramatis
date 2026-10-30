@@ -14,6 +14,8 @@ use crate::views::*;
 
 /// The most messages one `history` call returns.
 const HISTORY_MAX: u32 = 500;
+/// Most messages one search across the conversations returns.
+const SEARCH_MAX: u32 = 100;
 
 /// `text` as it is read aloud: scene lines (whole lines, as the screen sets them apart)
 /// and citation marks are not speech.
@@ -128,6 +130,18 @@ impl Engine {
         Ok(rows
             .iter()
             .map(|m| self.message_view(&w, m, offset))
+            .collect())
+    }
+
+    pub(crate) fn search_messages_impl(&self, query: &str) -> ApiResult<Vec<Message>> {
+        let terms: Vec<String> = query.split_whitespace().map(str::to_owned).collect();
+        let offset = self.now().offset_min;
+        let w = self.w();
+        let rows = message::search(&w, &terms, SEARCH_MAX).map_err(world_err)?;
+        Ok(rows
+            .iter()
+            .map(|m| self.message_view(&w, m, offset))
+            .filter(|m| !m.service)
             .collect())
     }
 

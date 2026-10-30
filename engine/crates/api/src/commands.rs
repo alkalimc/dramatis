@@ -143,6 +143,9 @@ commands! {
     /// Newest last; `before` pages backwards.
     fn history(channel: ChannelId, before: Option<MessageId>, limit: u32) -> Vec<Message>
         = Ok(Vec::new());
+    /// Messages in every live conversation whose text holds all the words of `query`,
+    /// newest first. Service lines are left out.
+    fn search_messages(query: String) -> Vec<Message> = Ok(Vec::new());
     /// The direct channel with a person, created on first use.
     fn open_direct(person: PersonId) -> ChannelId;
     /// The host's channel.

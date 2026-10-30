@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
-import type { ChannelSummary } from "../api";
+import type { ChannelSummary, Message } from "../api";
 import { useT, useUserName } from "../i18n";
 import { activityText, authorName, typingText, when } from "../lib/format";
 import { jumpTo } from "../lib/jump";
@@ -136,6 +136,68 @@ function SearchPanel({ query }: { query: string }) {
 }
 
 /** The channels, most recent first: pinned on top, then direct chats, groups and the host. */
+/** Messages across every conversation that hold all the words of the list's search. */
+function MessageHits({ query }: { query: string }) {
+  const t = useT();
+  const api = useApi();
+  const actions = useActions();
+  const names = useStore((s) => s.names);
+  const user = useStore((s) => s.settings?.user_name ?? null);
+  const channels = useStore((s) => s.channels);
+  const marker = useStore((s) => s.wording.scene_marker);
+  const me = useUserName();
+  const [hits, setHits] = useState<Message[] | null>(null);
+  const terms = termsOf(query);
+  useEffect(() => {
+    // A short pause so each keystroke does not search the whole save.
+    const timer = setTimeout(() => {
+      void api.commands.searchMessages(query).then((r) => setHits(r.status === "ok" ? r.data : []));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [api, query]);
+  const go = async (m: Message) => {
+    await actions.open(m.channel);
+    // The log renders after the history loads; try again a moment later if needed.
+    if (!jumpTo(m.id)) setTimeout(() => jumpTo(m.id), 300);
+  };
+  if (hits === null) return null;
+  return (
+    <>
+      <p className="scope-title">{t("chatlist.search.messages")}</p>
+      {hits.length === 0 ? (
+        <p className="muted pad">{t("chatlist.search.messages.none")}</p>
+      ) : (
+        <ul>
+          {hits.map((m) => {
+            const name = authorName(m.author, t, names, user);
+            const where = channels.find((c) => c.id === m.channel);
+            const text = previewOf(m, marker);
+            return (
+              <li key={m.id}>
+                <button type="button" className="chat-row result" onClick={() => void go(m)}>
+                  <AuthorAvatar author={m.author} name={name} />
+                  <span className="chat-main">
+                    <span className="chat-top">
+                      <span className="chat-name">
+                        <span className="chat-title" title={name}>{name}</span>
+                      </span>
+                      <time className="chat-time" dateTime={m.at}>{when(m.at, t)}</time>
+                    </span>
+                    {where && where.kind === "group" && <span className="chat-where muted small">{channelTitle(where, t, me)}</span>}
+                    <span className="chat-snippet">
+                      <Highlight text={snippet(text, terms)} terms={terms} />
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
 export function ChatList() {
   const t = useT();
   const actions = useActions();
@@ -223,6 +285,7 @@ export function ChatList() {
             </span>
           </button>
         )}
+        {q && <p className="scope-title">{t("chatlist.search.chats")}</p>}
         {rows.length === 0 ? (
           <p className="muted pad">{q ? t("chatlist.search.empty") : archivedView ? t("chatlist.archived.empty") : t("chatlist.empty")}</p>
         ) : (
@@ -234,6 +297,7 @@ export function ChatList() {
             ))}
           </ul>
         )}
+        {q && <MessageHits query={query.trim()} />}
         {rows.length > 0 && !q && !archivedView && rows.every((c) => c.kind === "favorites") && <p className="muted pad">{t("chatlist.empty")}</p>}
       </div>
       <ClockLine />

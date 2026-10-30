@@ -317,3 +317,17 @@ test("a note typed in the favorites stays there without an answer, and there is 
   expect(screen.getByText("Messages you kept")).toBeDefined();
   expect(fav.participants).toEqual([]);
 });
+
+test("the list's search also finds messages in every chat, with the author's avatar", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const nav = await list();
+  await user.type(within(nav).getByRole("searchbox", { name: "Search" }), "fish market");
+  expect(await within(nav).findByText("Messages")).toBeDefined();
+  const hit = (await within(nav).findAllByRole("button", { name: /Tess Arden/ })).find((b) => b.classList.contains("result"))!;
+  expect(hit.querySelector(".avatar")).not.toBeNull();
+  expect(hit.textContent).toMatch(/fish market/);
+  expect(hit.querySelectorAll("mark").length).toBeGreaterThan(0);
+  await user.click(hit);
+  await waitFor(() => expect(within(nav).queryByText("Messages")).not.toBeNull());
+});

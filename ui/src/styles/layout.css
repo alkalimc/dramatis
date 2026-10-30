@@ -707,6 +707,13 @@ button.chat-row.result {
   min-height: var(--row-h);
   align-items: flex-start;
 }
+/* the group a search hit was said in, under the author */
+.chat-where {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 /* two lines of the message, the matched words marked */
 .chat-snippet {
   display: -webkit-box;

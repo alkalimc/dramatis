@@ -230,6 +230,36 @@ pub fn history(
     Ok(rows)
 }
 
+/// Messages whose text holds every one of `terms` (case-folded), in live channels only,
+/// newest first, at most `limit`. A plain scan: a save holds a few thousand messages.
+pub fn search(conn: &Connection, terms: &[String], limit: u32) -> Result<Vec<Message>> {
+    let terms: Vec<String> = terms
+        .iter()
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM message
+         WHERE channel IN (SELECT id FROM channel WHERE deleted_at IS NULL)
+         ORDER BY id DESC"
+    ))?;
+    let mut out = Vec::new();
+    for row in stmt.query_map([], read)? {
+        let m = row?;
+        let text = m.text.to_lowercase();
+        if terms.iter().all(|t| text.contains(t.as_str())) {
+            out.push(m);
+            if out.len() >= limit as usize {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Messages after `after` (all when `None`), oldest first.
 pub fn since(
     conn: &Connection,
@@ -305,6 +335,38 @@ mod tests {
     use super::*;
     use crate::testing::*;
     use crate::types::{Mode, Origin};
+
+    #[test]
+    fn search_finds_every_word_in_live_channels_newest_first() {
+        let w = world();
+        let a = channel::direct(&w, &p("a")).unwrap();
+        let g = channel::create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        append(&w, a, &Actor::User, "Tea at Noon", None, None, 1).unwrap();
+        let later = append(
+            &w,
+            g,
+            &Actor::Person(p("b")),
+            "noon tea, then",
+            None,
+            None,
+            2,
+        )
+        .unwrap();
+        append(&w, a, &Actor::User, "only tea", None, None, 3).unwrap();
+        let words = |q: &[&str]| q.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let found: Vec<_> = search(&w, &words(&["tea", "NOON"]), 10)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0], later);
+        assert_eq!(search(&w, &words(&["tea"]), 1).unwrap().len(), 1);
+        assert!(search(&w, &words(&["  "]), 10).unwrap().is_empty());
+        // A deleted group's messages are gone from the search.
+        channel::delete_group(&w, g, 4).unwrap();
+        assert_eq!(search(&w, &words(&["tea", "noon"]), 10).unwrap().len(), 1);
+    }
 
     #[test]
     fn append_checks_membership_and_moves_last_seen() {

@@ -726,6 +726,15 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(null);
     },
     channels: () => ok([...channels.values()].map(summaryOf)),
+    searchMessages: (query) => {
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      if (terms.length === 0) return ok([]);
+      const hits = [...channels.values()]
+        .flatMap((ch) => ch.log)
+        .filter((m) => !m.service && terms.every((w) => m.text.toLowerCase().includes(w)))
+        .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+      return ok(hits.slice(0, 100));
+    },
     history: (channel, before, limit) => {
       const ch = channels.get(channel);
       if (!ch) return fail({ code: "not_found" });

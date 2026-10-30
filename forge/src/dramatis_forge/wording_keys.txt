@@ -72,7 +72,10 @@ chatlist.preview.author
 chatlist.preview.draft
 chatlist.preview.you
 chatlist.search
+chatlist.search.chats
 chatlist.search.empty
+chatlist.search.messages
+chatlist.search.messages.none
 chatlist.unread
 chatmenu.archive
 chatmenu.label

@@ -647,6 +647,9 @@ impl Api for Engine {
     async fn channels(&self) -> ApiResult<Vec<ChannelSummary>> {
         self.channels_impl()
     }
+    async fn search_messages(&self, query: String) -> ApiResult<Vec<Message>> {
+        self.search_messages_impl(&query)
+    }
     async fn history(
         &self,
         channel: ChannelId,

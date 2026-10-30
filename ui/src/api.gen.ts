@@ -62,6 +62,11 @@ export const commands = {
 	channels: () => typedError<ChannelSummary[], ApiError>(__TAURI_INVOKE("channels")),
 	/**  Newest last; `before` pages backwards. */
 	history: (channel: ChannelId, before: string | null, limit: number) => typedError<Message[], ApiError>(__TAURI_INVOKE("history", { channel, before, limit })),
+	/**
+	 *  Messages in every live conversation whose text holds all the words of `query`,
+	 *  newest first. Service lines are left out.
+	 */
+	searchMessages: (query: string) => typedError<Message[], ApiError>(__TAURI_INVOKE("search_messages", { query })),
 	/**  The direct channel with a person, created on first use. */
 	openDirect: (person: PersonId) => typedError<ChannelId, ApiError>(__TAURI_INVOKE("open_direct", { person })),
 	/**  The host's channel. */
