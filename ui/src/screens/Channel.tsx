@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import type { ChannelId, ChannelSummary, ImagePart, Message } from "../api";
 import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
+import { isBlank } from "../lib/scene";
 import { authorName, dayKey, dayLabel, sameAuthor, typingText } from "../lib/format";
 import { pastedImage, readImage } from "../lib/image";
 import { isMac, isSendKey } from "../lib/keys";
@@ -54,6 +55,24 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
   const lastMessage = messages[messages.length - 1];
   const find = useStore((s) => s.find);
   const shown = messages;
+  const marker = useStore((s) => s.wording.scene_marker);
+  // Runs are read across messages that draw nothing: their neighbours are the ones on screen.
+  const { prev, next } = useMemo(() => {
+    const drawn = shown.map((m) => !isBlank(m, marker));
+    const prev: number[] = [];
+    const next: number[] = [];
+    let last = -1;
+    for (let i = 0; i < shown.length; i++) {
+      prev[i] = last;
+      if (drawn[i]) last = i;
+    }
+    last = -1;
+    for (let i = shown.length - 1; i >= 0; i--) {
+      next[i] = last;
+      if (drawn[i]) last = i;
+    }
+    return { prev, next };
+  }, [shown, marker]);
 
   useEffect(() => {
     void actions.loadHistory(channel);
@@ -114,8 +133,8 @@ export function ChannelView({ channel, pinned, after }: { channel: ChannelId; pi
             <MessageView
               message={m}
               showPlay={tts}
-              first={!(i > 0 && continues(shown[i - 1], m))}
-              last={!(i < shown.length - 1 && continues(m, shown[i + 1]))}
+              first={!(prev[i] >= 0 && continues(shown[prev[i]], m))}
+              last={!(next[i] >= 0 && continues(m, shown[next[i]]))}
             />
             {after?.(m, i)}
           </div>

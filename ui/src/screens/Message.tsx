@@ -4,7 +4,7 @@ import type { Author, Message, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
-import { bubbles, speechOnly } from "../lib/scene";
+import { bubbles, isBlank, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { SourcesPanel } from "./Citation";
 import { Avatar, HOST_ID, UserAvatar } from "../ui/Avatar";
@@ -30,7 +30,7 @@ export function ActionLines({ author, actions }: { author: Author; actions: Tool
 }
 
 /** What the host or a person offered the user: each button takes them to a conversation, or makes the suggested group. */
-function Choices({ actions, message }: { actions: ToolAction[]; message: Message }) {
+function Choices({ actions, message, lead }: { actions: ToolAction[]; message: Message; lead?: string }) {
   const t = useT();
   const acts = useActions();
   const api = useApi();
@@ -47,6 +47,7 @@ function Choices({ actions, message }: { actions: ToolAction[]; message: Message
   if (choices.length === 0) return null;
   return (
     <div className="choices message-offers">
+      {lead && <p className="service-line">{lead}</p>}
       {choices.map((c) =>
         c.kind === "invite" ? (
           <button
@@ -363,6 +364,17 @@ const BubbleMessage = memo(function BubbleMessage({
       {f}
     </>
   );
+
+  // Nothing to say and nothing to show: no bubble. The offers it carries, if any, stand
+  // alone under a plain line.
+  if (isBlank(message, marker)) {
+    return (
+      <>
+        <ActionLines author={message.author} actions={message.actions} />
+        {message.author.kind !== "user" && <Choices actions={message.actions} message={message} lead={t("message.offers")} />}
+      </>
+    );
+  }
 
   return (
     <>

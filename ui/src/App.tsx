@@ -5,6 +5,7 @@ import { createActions, createStore, Provider, subscribe, useActions, useDispatc
 import { ErrorBar, InlineError } from "./ui/ErrorBar";
 import { unreadOf } from "./lib/chats";
 import { inLibrary } from "./lib/library";
+import { readFresh } from "./lib/fresh";
 import { isDark } from "./lib/prefs";
 import { Icon, type IconName } from "./ui/Icon";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
@@ -85,6 +86,8 @@ function Shell() {
   if (status?.needs_setup) firstRun.current = true;
   const [avatarDone, setAvatarDone] = useState(false);
   const [modelDone, setModelDone] = useState(false);
+  // A step the user went back to, when the usual order would skip it.
+  const [forced, setForced] = useState<"name" | "model" | null>(null);
   const chat = endpoints?.roles?.chat;
   const modelMissing = endpoints !== null && (!chat || endpoints.profiles.some((p) => p.profile.name === chat.profile && !p.has_key));
   usePresence();
@@ -112,21 +115,47 @@ function Shell() {
   if (status.save === null) return <SavePicker />;
   // The model step follows the name on a first run, and only then: afterwards the
   // endpoints page in settings is where this lives.
-  if (status.needs_setup) return <FirstOpen />;
-  if (firstRun.current && !avatarDone) return <AvatarStep onDone={() => setAvatarDone(true)} />;
-  if (firstRun.current && !modelDone && modelMissing) {
+  // Each step can go back one. The first one can only leave the new-save flow, when this
+  // window began with a save made by it: back to where the user came from, empty save deleted.
+  const fresh = readFresh();
+  const leave =
+    fresh && fresh.name === status.save
+      ? async () => {
+          if ((await actions.cancelFresh(fresh)) === "switched") window.location.reload();
+        }
+      : undefined;
+  if (forced === "name") {
+    return (
+      <FirstOpen
+        onBack={leave}
+        onDone={() => {
+          setForced(null);
+          setAvatarDone(false);
+        }}
+      />
+    );
+  }
+  if (status.needs_setup) return <FirstOpen onBack={leave} />;
+  if (firstRun.current && !avatarDone) return <AvatarStep onDone={() => setAvatarDone(true)} onBack={() => setForced("name")} />;
+  if (firstRun.current && (forced === "model" || (!modelDone && modelMissing))) {
     return (
       <ModelStep
         onDone={() => {
           setModelDone(true);
+          setForced(null);
           void actions.boot();
+        }}
+        onBack={() => {
+          setForced(null);
+          setModelDone(false);
+          setAvatarDone(false);
         }}
       />
     );
   }
 
   // The one question about checking for updates, asked once per home, after any first-run steps.
-  if (update && !update.asked) return <UpdateStep />;
+  if (update && !update.asked) return <UpdateStep onBack={firstRun.current ? () => setForced("model") : undefined} />;
 
   return (
     <div className="app">

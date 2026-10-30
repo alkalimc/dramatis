@@ -32,6 +32,7 @@ import type {
   Wording,
 } from "../api";
 import { makeT, type T } from "../i18n";
+import { NO_FILTER, type RosterFilter } from "../lib/roster";
 
 export type Drawer =
   | { kind: "roster" }
@@ -123,6 +124,8 @@ export interface State {
   digest: Digest;
   coldstart: Candidate[];
   roster: Roster | null;
+  /** The roster's quick filters, kept while the window lives. */
+  rosterFilter: RosterFilter;
   quota: QuotaStatus | null;
   hostChannel: ChannelId | null;
   channels: ChannelSummary[];
@@ -203,6 +206,7 @@ export function initialState(): State {
     digest: { items: [] },
     coldstart: [],
     roster: null,
+    rosterFilter: NO_FILTER,
     quota: null,
     hostChannel: null,
     channels: [],
@@ -257,6 +261,7 @@ export type Action =
   | { type: "digest"; digest: Digest }
   | { type: "coldstart"; candidates: Candidate[] }
   | { type: "roster"; roster: Roster }
+  | { type: "rosterFilter"; filter: RosterFilter }
   | { type: "quota"; quota: QuotaStatus }
   | { type: "hostChannel"; id: ChannelId }
   | { type: "channels"; channels: ChannelSummary[] }

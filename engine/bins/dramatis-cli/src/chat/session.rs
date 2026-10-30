@@ -17,6 +17,7 @@ use runtime::{AgentBridge, Call};
 
 use super::command::{Command, PasswordAct, Save, StorageAct, parse};
 use super::complete::{Completions, Snapshot};
+use super::filter::ListFilter;
 use super::interrupt::Interrupt;
 use super::show::{Names, Offer, Show, Term, Working};
 
@@ -45,6 +46,9 @@ struct Entry {
     /// Names of the other forms the corpus records for them.
     forms: Vec<String>,
     persona: bool,
+    mode: Mode,
+    /// Whether the user has talked with them before.
+    talked: bool,
 }
 
 /// One model call of this session, with the time it took.
@@ -477,6 +481,8 @@ impl Session {
                     .map(|p| p.forms.into_iter().map(|f| f.page).collect())
                     .unwrap_or_default(),
                 persona: r.has_persona,
+                mode: r.mode,
+                talked: r.talked,
                 id: r.person.id.0,
                 display: r.person.name,
             })
@@ -525,7 +531,7 @@ impl Session {
             Ok(r) => r,
             Err(e) => return self.fail(&e),
         };
-        let needle = filter.map(str::to_lowercase);
+        let filter = ListFilter::parse(filter);
         let host = self.msg(if self.names.has_host() && !self.library {
             "cli.list.host.available"
         } else {
@@ -537,11 +543,12 @@ impl Session {
         ));
         let mut shown = 0;
         for e in roster.iter().filter(|e| e.persona || self.library) {
-            let hit = needle.as_deref().is_none_or(|n| {
-                e.id.to_lowercase().contains(n)
-                    || e.display.to_lowercase().contains(n)
-                    || e.forms.iter().any(|f| f.to_lowercase().contains(n))
-            });
+            let hit = filter.allows(e.mode, e.talked, e.persona)
+                && filter.text.as_deref().is_none_or(|n| {
+                    e.id.to_lowercase().contains(n)
+                        || e.display.to_lowercase().contains(n)
+                        || e.forms.iter().any(|f| f.to_lowercase().contains(n))
+                });
             if hit {
                 self.term
                     .print(&format!("{}  {}\n", e.display, self.term.style.dim(&e.id)));

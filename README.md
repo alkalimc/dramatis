@@ -199,7 +199,7 @@ A turn that ends without a reply leaves one line in `$DRAMATIS_HOME/logs/dramati
 
 | Command | What it does |
 | --- | --- |
-| `/list [filter]` | persons with a persona, and whether the host is available |
+| `/list [words]` | persons with a persona, and whether the host is available; words: `enabled`, `frozen`, `disabled`, `talked`, `never`, `persona`, or part of a name |
 | `/talk <person>` | open the direct channel; an id, display name, other form or alias |
 | `/group <p1> <p2> ...` | start a group channel |
 | `/host` | switch to the host's channel |
@@ -268,7 +268,8 @@ right, with a side panel for a person's or a group's profile; a person's name or
 opens their page as a card over the conversation. You can set your own name, birthday,
 bio and avatar, give a group a name and an avatar, paste pictures into the input line, and open a
 reply's sources to see the original passage and its page. Enter inserts a new line and Cmd-Enter
-sends. Saves are managed on the saves page (new, switch, copy, rename, delete, export) and the password
+sends. The roster has quick filters (mode, talked to or never talked, has a persona). Saves are managed on the saves page (new, switch, copy, rename, delete, export, import; the same page
+is shown after logging out) and the password
 setting is under privacy and security.
 
 Settings has an About page: the version, the author, links to the repository and the issue

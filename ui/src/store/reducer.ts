@@ -63,7 +63,7 @@ export function reduce(s: State, a: Action): State {
   switch (a.type) {
     case "reset":
       // The words are the person's, not the world's: they stay while the next world loads.
-      return { ...initialState(), theme: s.theme, pinned: s.pinned, wording: s.wording, language: s.language, t: s.t };
+      return { ...initialState(), theme: s.theme, pinned: s.pinned, rosterFilter: s.rosterFilter, wording: s.wording, language: s.language, t: s.t };
     case "status":
       return { ...s, status: a.status };
     case "wording":
@@ -86,6 +86,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, coldstart: a.candidates, names: withNames(s.names, a.candidates.map((c) => c.person)) };
     case "roster":
       return { ...s, roster: a.roster, names: withNames(s.names, rosterPersons(a.roster)) };
+    case "rosterFilter":
+      return { ...s, rosterFilter: a.filter };
     case "quota":
       return { ...s, quota: a.quota };
     case "hostChannel":

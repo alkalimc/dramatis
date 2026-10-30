@@ -169,7 +169,7 @@ describe("persons without a persona", () => {
     const store = createStore();
     const roster = {
       total: 1, enabled: 1,
-      groups: [{ band: "acquainted", rows: [{ person: { id: "p1", name: "Ann" }, mode: "enabled", recent: null, companions: [], has_persona: false }] }],
+      groups: [{ band: "acquainted", rows: [{ person: { id: "p1", name: "Ann" }, mode: "enabled", recent: null, companions: [], has_persona: false, talked: false }] }],
     } as unknown as Roster;
     store.dispatch({ type: "roster", roster });
     renderWith(<RosterList />, { store });

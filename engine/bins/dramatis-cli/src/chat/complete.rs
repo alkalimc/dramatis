@@ -193,6 +193,11 @@ pub fn complete(line: &str, pos: usize, data: &Snapshot) -> (usize, Vec<Pair>) {
                 (args_at, persons(args, data, false))
             }
         }
+        "list" | "ls" => {
+            // Any number of filter words, then a name fragment.
+            let (_, start, partial, _) = last_word(args);
+            (args_at + start, fixed(&partial, super::filter::WORDS))
+        }
         "save" => save(args, args_at, data),
         "storage" => storage(args, args_at),
         _ => match FIXED.iter().find(|(names, _)| names.contains(&command)) {
@@ -405,6 +410,20 @@ mod tests {
         assert!(at("/save rename main m").1.is_empty());
         assert!(at("/save copy main ").1.is_empty());
         assert!(at("/save import m").1.is_empty());
+    }
+
+    #[test]
+    fn list_completes_its_filter_words_at_every_position() {
+        assert_eq!(
+            shown(&at("/list ")),
+            [
+                "all", "enabled", "frozen", "disabled", "talked", "never", "persona"
+            ]
+        );
+        assert_eq!(shown(&at("/list d")), ["disabled"]);
+        let found = at("/ls enabled ta");
+        assert_eq!(found.0, 12);
+        assert_eq!(shown(&found), ["talked"]);
     }
 
     #[test]

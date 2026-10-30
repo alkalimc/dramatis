@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { settle, type Failure, type SaveInfo } from "../api";
 import { useT } from "../i18n";
+import { markFresh } from "../lib/fresh";
 import { when } from "../lib/format";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
@@ -70,8 +71,12 @@ type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
 /**
  * System drawer, third tab: the saves of this home. Opening another one reloads the
  * window, since every list on screen belongs to the world that was open.
+ *
+ * `picker`: the same page with no save open (after logging out, or on a first start). It
+ * leaves out what belongs to the drawer (title, hint, the log out button), a new save is
+ * opened at once, and an imported one too.
  */
-export function SavesPage({ onSwitched = () => window.location.reload() }: { onSwitched?: () => void }) {
+export function SavesPage({ onSwitched = () => window.location.reload(), picker = false, onCount }: { onSwitched?: () => void; picker?: boolean; onCount?: (n: number) => void }) {
   const t = useT();
   const api = useApi();
   const actions = useActions();
@@ -89,10 +94,18 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
 
   const refresh = useCallback(async () => {
     const list = await actions.attempt(api.commands.saves());
-    if (list) setSaves(list);
-  }, [actions, api]);
+    if (!list) return;
+    setSaves(list);
+    onCount?.(list.length);
+  }, [actions, api, onCount]);
 
-  const { open, prompt, setPrompt } = useOpenSave(onSwitched, refresh);
+  const { open: openNamed, prompt, setPrompt } = useOpenSave(onSwitched, refresh);
+  // Saves made in this window: opening one starts the first-run steps, which can undo it.
+  const made = useRef(new Set<string>());
+  const open = async (name: string) => {
+    if (made.current.has(name)) markFresh({ name, from: status?.save ?? null });
+    await openNamed(name);
+  };
 
   useEffect(() => {
     void refresh();
@@ -112,6 +125,10 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
     const r = await settle(api.commands.importSave(source.trim(), importName.trim() || null, password));
     if (r.ok) {
       setPrompt(null);
+      if (picker) {
+        await open(r.data);
+        return null;
+      }
       setNote(t("saves.imported", { name: r.data }));
       setSource("");
       setImportName("");
@@ -127,11 +144,15 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
   };
 
   return (
-    <section className="saves" aria-labelledby={`${id}-h`}>
-      <h3 id={`${id}-h`}>{t("saves.title")}</h3>
-      <p className="muted small">{t("saves.hint")}</p>
-      {status && <FolderNote text={t("saves.folder")} path={status.saves_dir} />}
-      {status?.save && (
+    <section className="saves" aria-labelledby={picker ? undefined : `${id}-h`}>
+      {!picker && (
+        <>
+          <h3 id={`${id}-h`}>{t("saves.title")}</h3>
+          <p className="muted small">{t("saves.hint")}</p>
+        </>
+      )}
+      {status && <FolderNote text={t(picker ? "picker.folder" : "saves.folder")} path={status.saves_dir} />}
+      {!picker && status?.save && (
         <p className="row wrap">
           <button type="button" className="ghost" onClick={() => void actions.logOut()}>
             <Icon name="leave" size={16} /> {t("logout")}
@@ -139,7 +160,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
           <span className="muted small">{t("logout.hint")}</span>
         </p>
       )}
-      {saves?.length === 0 && <p className="muted">{t("saves.empty")}</p>}
+      {saves?.length === 0 && !picker && <p className="muted">{t("saves.empty")}</p>}
       <ul className="save-list">
         {saves?.map((s) => (
           <li key={s.name} className={s.current ? "save current" : "save"}>
@@ -158,10 +179,7 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
             </div>
             <div className="row wrap" role="group" aria-label={t("saves.actions", { name: s.name })}>
               {!s.current && (
-                <button
-                  type="button"
-                  onClick={() => void open(s.name)}
-                >
+                <button type="button" aria-label={picker ? `${t("saves.switch")} ${s.name}` : undefined} onClick={() => void open(s.name)}>
                   {t("saves.switch")}
                 </button>
               )}
@@ -199,13 +217,19 @@ export function SavesPage({ onSwitched = () => window.location.reload() }: { onS
         className="row wrap"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (fresh.trim() && (await run(api.commands.newSave(fresh.trim())))) setFresh("");
+          const given = (fresh.trim() || (picker ? t("picker.new.default") : "")).trim();
+          if (!given) return;
+          if (await run(api.commands.newSave(given))) {
+            setFresh("");
+            made.current.add(given);
+            if (picker) await open(given);
+          }
         }}
       >
-        <label htmlFor={`${id}-new`}>{t("saves.new")}</label>
-        <input id={`${id}-new`} value={fresh} placeholder={t("saves.name")} onChange={(e) => setFresh(e.target.value)} />
-        <button type="submit" disabled={!fresh.trim()}>
-          {t("saves.create")}
+        <label htmlFor={`${id}-new`}>{t(picker ? "picker.new.name" : "saves.new")}</label>
+        <input id={`${id}-new`} value={fresh} placeholder={t(picker ? "picker.new.default" : "saves.name")} autoComplete="off" onChange={(e) => setFresh(e.target.value)} />
+        <button type="submit" disabled={!picker && !fresh.trim()}>
+          {t(picker ? "picker.new.go" : "saves.create")}
         </button>
       </form>
 

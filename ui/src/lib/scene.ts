@@ -115,3 +115,8 @@ export function bubbles(text: string, marker: SceneMarker): Bubble[] {
   }
   return out;
 }
+
+/** A message with no text to show and no picture draws no bubble at all. */
+export function isBlank(m: { text: string; attachment: unknown; picture_lost: boolean; service?: boolean }, marker: SceneMarker): boolean {
+  return !m.service && !m.attachment && !m.picture_lost && bubbles(m.text, marker).length === 0;
+}

@@ -10,6 +10,7 @@
 
 mod command;
 mod complete;
+mod filter;
 mod interrupt;
 mod render;
 mod secret;

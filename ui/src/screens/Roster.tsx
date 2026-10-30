@@ -5,6 +5,7 @@ import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
 import { canTalk } from "../lib/library";
 import { hasPersona } from "../lib/persona";
+import { filtering, passes, type RosterFilter } from "../lib/roster";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar } from "../ui/Avatar";
 import { ModeSwitch, modeHintKey } from "../ui/ModeSwitch";
@@ -73,9 +74,15 @@ function GroupList() {
 export function RosterList() {
   const t = useT();
   const roster = useStore((s) => s.roster);
+  const filter = useStore((s) => s.rosterFilter);
+  const on = filtering(filter);
+  const groups = (roster?.groups ?? [])
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => passes(r, filter)) }))
+    .filter((g) => g.rows.length > 0);
   return (
     <section className="roster" aria-label={t("roster.title")}>
       <FindByTopic />
+      <FilterBar />
       <details className="mode-legend">
         <summary>{t("roster.modes")}</summary>
         <dl>
@@ -89,14 +96,19 @@ export function RosterList() {
       </details>
       {!roster || roster.groups.length === 0 ? (
         <p className="muted">{t("roster.empty")}</p>
+      ) : groups.length === 0 ? (
+        <p className="muted" role="status">
+          {t("roster.filter.none")}
+        </p>
       ) : (
-        roster.groups.map((g) => <Band key={g.band} group={g} />)
+        // A filter opens the folded bands: what it found is what the user asked for.
+        groups.map((g) => <Band key={`${g.band}:${on}`} group={g} open={on} />)
       )}
     </section>
   );
 }
 
-function Band({ group }: { group: RosterGroup }) {
+function Band({ group, open }: { group: RosterGroup; open: boolean }) {
   const t = useT();
   const title = t(`roster.band.${group.band}`, { count: group.rows.length });
   const rows = (
@@ -116,7 +128,7 @@ function Band({ group }: { group: RosterGroup }) {
     );
   }
   return (
-    <details className={`band band-${group.band}`}>
+    <details className={`band band-${group.band}`} open={open || undefined}>
       <summary>
         <h3>{title}</h3>
       </summary>
@@ -170,6 +182,41 @@ function Row({ row }: { row: RosterGroup["rows"][number] }) {
   );
 }
 
+/** Quick filters over the list: mode, contact, persona. One chip per choice, one choice per row. */
+function FilterBar() {
+  const t = useT();
+  const dispatch = useDispatch();
+  const filter = useStore((s) => s.rosterFilter);
+  const set = (next: Partial<RosterFilter>) => dispatch({ type: "rosterFilter", filter: { ...filter, ...next } });
+  const modes = ["all", "enabled", "frozen", "disabled"] as const;
+  const talks = [
+    ["any", t("roster.filter.all")],
+    ["talked", t("roster.filter.talked")],
+    ["never", t("roster.filter.never")],
+  ] as const;
+  return (
+    <div className="roster-filters">
+      <div className="chips" role="group" aria-label={t("roster.filter.mode")}>
+        {modes.map((m) => (
+          <button key={m} type="button" className={`chip${filter.mode === m ? " on" : ""}`} aria-pressed={filter.mode === m} onClick={() => set({ mode: m })}>
+            {m === "all" ? t("roster.filter.all") : t(`mode.${m}`)}
+          </button>
+        ))}
+      </div>
+      <div className="chips" role="group" aria-label={t("roster.filter.talk")}>
+        {talks.map(([k, label]) => (
+          <button key={k} type="button" className={`chip${filter.talk === k ? " on" : ""}`} aria-pressed={filter.talk === k} onClick={() => set({ talk: k })}>
+            {label}
+          </button>
+        ))}
+        <button type="button" className={`chip${filter.persona ? " on" : ""}`} aria-pressed={filter.persona} onClick={() => set({ persona: !filter.persona })}>
+          {t("roster.filter.persona")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Search by what you need, not by name: a roster retrieval, no model call. */
 function FindByTopic() {
   const t = useT();
@@ -178,12 +225,20 @@ function FindByTopic() {
   const dispatch = useDispatch();
   const id = useId();
   const library = !useStore(canTalk);
+  const filter = useStore((s) => s.rosterFilter);
+  const roster = useStore((s) => s.roster);
   const [topic, setTopic] = useState("");
   const [found, setFound] = useState<Candidate[] | null>(null);
   const run = async () => {
     if (!topic.trim()) return;
     setFound((await actions.attempt(api.commands.findPeople(topic.trim()))) ?? []);
   };
+  // The same filters narrow what the search found (a candidate not on the roster stays).
+  const rows = new Map(roster?.groups.flatMap((g) => g.rows).map((r) => [r.person.id, r]));
+  const shown = found?.filter((c) => {
+    const row = rows.get(c.person.id);
+    return row ? passes(row, filter) : passes({ mode: c.mode, talked: false, has_persona: true }, { ...filter, talk: "any" });
+  });
   return (
     <div className="find">
       <form
@@ -200,12 +255,12 @@ function FindByTopic() {
         <input id={id} type="search" value={topic} placeholder={t("roster.find.placeholder")} onChange={(e) => setTopic(e.target.value)} />
         <button type="submit">{t("roster.find.submit")}</button>
       </form>
-      {found &&
-        (found.length === 0 ? (
+      {shown &&
+        (shown.length === 0 ? (
           <p className="muted">{t("select.who.empty")}</p>
         ) : (
           <ul className="candidates">
-            {found.map((c) => (
+            {shown.map((c) => (
               <li key={c.person.id}>
                 <button
                   type="button"

@@ -46,7 +46,8 @@ anything else       send it to the current channel
     (
         "cli.help.channels",
         "Channels
-/list [filter]      persons who can be talked to, and whether {host} is available
+/list [words]       persons who can be talked to, and whether {host} is available; words:
+                    enabled frozen disabled, talked never, persona, or part of a name
 /talk <person>      open the direct channel with a person (id, name or alias)
 /group <p1> <p2>    start a group channel with several persons
 /host               switch to {host}'s channel

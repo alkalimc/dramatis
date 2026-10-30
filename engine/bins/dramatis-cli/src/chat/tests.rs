@@ -341,6 +341,20 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
         listed.contains("ann") && !listed.contains("bo "),
         "{listed}"
     );
+    // Filter words narrow the list; the rest of the argument is still a name fragment.
+    let never = r.run("/list never").await;
+    assert!(
+        never.contains("ann") && never.contains("2 persons"),
+        "{never}"
+    );
+    assert!(r.run("/list talked").await.contains("0 persons"));
+    assert!(r.run("/list persona ann").await.contains("1 persons"));
+    assert!(r.run("/list disabled").await.contains("0 persons"));
+    r.run("/mode ann disabled").await;
+    assert!(r.run("/list disabled").await.contains("1 persons"));
+    assert!(r.run("/list enabled frozen").await.contains("1 persons"));
+    r.run("/mode ann frozen").await;
+    assert!(r.run("/list enabled frozen").await.contains("2 persons"));
     assert!(r.run("/talk nobody").await.contains("nobody matches"));
     assert!(r.run("/talk bo").await.contains("has no persona"));
     assert!(r.run("hello").await.contains("no channel yet"));

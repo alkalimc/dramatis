@@ -28,8 +28,8 @@ const roster: Roster = {
     {
       band: "close",
       rows: [
-        { person: { id: "p1", name: "Ann" }, mode: "frozen", recent: null, companions: [{ id: "p2", name: "Bo" }], has_persona: true },
-        { person: { id: "p2", name: "Bo" }, mode: "frozen", recent: null, companions: [], has_persona: true },
+        { person: { id: "p1", name: "Ann" }, mode: "frozen", recent: null, companions: [{ id: "p2", name: "Bo" }], has_persona: true, talked: false },
+        { person: { id: "p2", name: "Bo" }, mode: "frozen", recent: null, companions: [], has_persona: true, talked: false },
       ],
     },
   ],

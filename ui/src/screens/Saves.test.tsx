@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { renderWith } from "../test/render";
+import { readFresh } from "../lib/fresh";
 import { SavesPage } from "./Saves";
 
 async function open(onSwitched = vi.fn()) {
@@ -111,4 +112,17 @@ test("logging out closes the save and the status says none is open", async () =>
   await actions.refreshStatus();
   await user.click(await screen.findByRole("button", { name: "Log out of this save" }));
   await waitFor(() => expect(store.getState().status?.save).toBeNull());
+});
+
+test("a save made here and then opened is remembered with the one it was made from", async () => {
+  sessionStorage.clear();
+  const { user, actions } = await open();
+  await actions.boot();
+  await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
+  expect(readFresh()).toBeNull();
+  await user.type(screen.getByPlaceholderText("Name"), "fresh");
+  await user.click(screen.getByRole("button", { name: "Create" }));
+  await screen.findByText("fresh");
+  await user.click(within(row("fresh")).getByRole("button", { name: "Open" }));
+  await waitFor(() => expect(readFresh()).toEqual({ name: "fresh", from: "default" }));
 });
