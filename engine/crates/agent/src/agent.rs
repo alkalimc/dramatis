@@ -135,6 +135,19 @@ fn llm_model(p: &api::endpoints::Profile) -> api::endpoints::Model {
     p.models.first().cloned().unwrap_or_default()
 }
 
+/// A message the host asked to post in a group it is a member of. It goes out once the
+/// host's turn is over and its channel lock released, like the requests the host makes.
+#[derive(Debug, Clone)]
+pub(crate) struct HostPost {
+    pub group: ChannelId,
+    pub text: String,
+    /// The host gets a turn in its own channel with the members' answers.
+    pub report_back: bool,
+    /// The user's own message led here (else a reminder did, which the quiet hours and
+    /// the quota hold back like any unprompted speech).
+    pub prompted: bool,
+}
+
 pub struct Agent {
     pub(crate) world: Mutex<World>,
     pub(crate) index: Mutex<Index>,
@@ -162,6 +175,8 @@ pub struct Agent {
     /// When the daily seeds were last planned outside a return of the user (`tick`).
     /// Lost on restart, which only makes the next planning earlier.
     pub(crate) daily_planned: Mutex<Option<i64>>,
+    /// Posts the host asked for during a turn, sent when the turn is over.
+    pub(crate) posts: Mutex<Vec<HostPost>>,
 }
 
 impl Agent {
@@ -209,6 +224,7 @@ impl Agent {
             filled: Mutex::new(HashMap::new()),
             sightless: Mutex::new(HashSet::new()),
             daily_planned: Mutex::new(None),
+            posts: Mutex::new(Vec::new()),
         })
     }
 

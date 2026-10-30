@@ -586,6 +586,8 @@ harness.about
 harness.address
 harness.ask
 harness.asked
+harness.birthdays
+harness.birthdays.none
 harness.channels
 harness.channels.direct
 harness.channels.group
@@ -606,6 +608,7 @@ harness.digest.none
 harness.digest.replied
 harness.done
 harness.error.arguments
+harness.error.date
 harness.error.disabled
 harness.error.due
 harness.error.due_past
@@ -614,9 +617,10 @@ harness.error.no_request
 harness.error.nobody_new
 harness.error.not_asked
 harness.error.not_found
+harness.error.not_member
 harness.error.once
 harness.error.own_channel
-harness.error.promise_person
+harness.error.post_here
 harness.error.promises_full
 harness.error.quiet
 harness.error.refused
@@ -646,8 +650,10 @@ harness.guide.app.name
 harness.guide.app.resend
 harness.guide.app.saves
 harness.guide.app.sources
+harness.guide.birthdays
 harness.guide.intro
 harness.guide.limits
+harness.guide.post
 harness.guide.promise
 harness.guide.recent
 harness.guide.terminal
@@ -662,6 +668,8 @@ harness.guide.terminal.saves
 harness.guide.terminal.sources
 harness.host.group
 harness.host.manner
+harness.host_away
+harness.host_here
 harness.host_offline
 harness.interject
 harness.joined
@@ -674,6 +682,7 @@ harness.must_report
 harness.next
 harness.next_mark
 harness.nothing_found
+harness.offer_only
 harness.opening
 harness.opening.birthday
 harness.opening.commitment
@@ -686,13 +695,20 @@ harness.opening.words
 harness.output
 harness.persona
 harness.picture_unseen
+harness.posted
+harness.posted.report
 harness.promised
+harness.promised.own
 harness.propose
 harness.read_recent
 harness.read_recent.line
 harness.read_recent.none
 harness.recent
 harness.remembered
+harness.reminder
+harness.report_back
+harness.report_back.line
+harness.report_back.none
 harness.rules
 harness.rules.host
 harness.said
@@ -726,6 +742,8 @@ host.intro.terminal
 host.name
 host.quota_exhausted
 host.rate_limited
+host.reminder_done
+host.reminder_failed
 host.role
 host.summary
 lang.corpus
@@ -1037,6 +1055,8 @@ tool.host.ask
 tool.host.ask.person
 tool.host.ask.question
 tool.host.ask.turns
+tool.host.birthdays
+tool.host.birthdays.date
 tool.host.create_group
 tool.host.create_group.members
 tool.host.create_group.purpose
@@ -1047,6 +1067,10 @@ tool.host.get_chunk
 tool.host.get_chunk.id
 tool.host.get_chunk.neighbours
 tool.host.list_channels
+tool.host.post
+tool.host.post.channel
+tool.host.post.report_back
+tool.host.post.text
 tool.host.promise
 tool.host.promise.due
 tool.host.promise.person

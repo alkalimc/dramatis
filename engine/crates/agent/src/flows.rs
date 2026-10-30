@@ -39,6 +39,9 @@ use llm::ToolChoice;
 /// Most characters of the user's earlier message that join the automatic search's query.
 const EARLIER_QUERY_CHARS: usize = 300;
 
+/// Most of a group's answers, in characters, the host is shown when it reports back.
+const REPORT_CHARS: usize = 3000;
+
 /// A user message stored and waiting for its replies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Posted {
@@ -154,6 +157,9 @@ impl Agent {
     /// endpoint failed, the quota ran out) leave it stored.
     pub async fn respond(&self, posted: Posted) -> Result<()> {
         let result = self.respond_inner(posted).await;
+        // What the host asked to post goes out now that its channel is free.
+        let posts = self.flush_posts().await;
+        let result = result.and(posts);
         if matches!(result, Err(Error::RateLimited { .. })) {
             // The app shows only events, so the host says it in its own channel.
             self.host_line("host.rate_limited", &[])?;
@@ -1169,6 +1175,20 @@ impl Agent {
     /// each reply passes the quota band, and `group.collective_max` bounds the round.
     /// Those the line names answer first.
     async fn say_in_group(&self, from: &PersonId, group: ChannelId, words: &str) -> Result<()> {
+        self.post_in_group(&Actor::Person(from.clone()), group, words)
+            .await
+            .map(|_| ())
+    }
+
+    /// `words` posted in a group by one of its members, a person or the host, and the round
+    /// of answers that follows. Returns the posted message, or `None` when the group no
+    /// longer takes it (deleted, disabled, the sender not a member).
+    async fn post_in_group(
+        &self,
+        from: &Actor,
+        group: ChannelId,
+        words: &str,
+    ) -> Result<Option<MessageId>> {
         let _turn = self.lock_channel(group).await;
         let (members, id) = {
             let conn = self.db();
@@ -1176,20 +1196,12 @@ impl Agent {
             if ch.kind != ChannelKind::Group
                 || ch.deleted_at.is_some()
                 || ch.mode == world::Mode::Disabled
-                || !ch.persons().contains(from)
+                || !ch.has(from)
             {
-                return Ok(());
+                return Ok(None);
             }
             let now = self.now();
-            let id = message::append(
-                &conn,
-                group,
-                &Actor::Person(from.clone()),
-                words,
-                None,
-                None,
-                now.ms,
-            )?;
+            let id = message::append(&conn, group, from, words, None, None, now.ms)?;
             session::touch_channel(&conn, group, now.ms)?;
             let stored = message::get(&conn, id)?;
             let shown = view::message(&conn, &stored, now.offset_min, &self.config.office);
@@ -1197,14 +1209,28 @@ impl Agent {
             self.emit(Event::MessageAdded(MessageAdded { message: shown }));
             let members: Vec<PersonId> = self.corpus.personas.filter(bond::filter_disabled(
                 &self.db(),
-                ch.persons().into_iter().filter(|p| p != from).collect(),
+                ch.persons()
+                    .into_iter()
+                    .filter(|p| from.person() != Some(p))
+                    .collect(),
             )?);
             (members, id)
         };
         let seg = self.ensure_segment(group, Some(id)).await?;
-        let seg = self.admit(group, seg, from, Some(id)).await?;
+        let (seg, name) = match from.person() {
+            Some(p) => (
+                self.admit(group, seg, p, Some(id)).await?,
+                self.display(p.as_str())?,
+            ),
+            None => {
+                let names = self.segment_names(seg)?;
+                if !self.log_has_persona(seg, &names, &self.corpus.host_name)? {
+                    self.introduce_host(seg)?;
+                }
+                (seg, self.corpus.host_name.clone())
+            }
+        };
         let names = self.segment_names(seg)?;
-        let name = self.display(from.as_str())?;
         let line =
             self.corpus
                 .wording
@@ -1218,8 +1244,92 @@ impl Agent {
                 }
             }
         }
-        let mut spoken = vec![from.clone()];
-        self.round(group, &mut spoken, queue, &[]).await
+        let mut spoken: Vec<PersonId> = from.person().cloned().into_iter().collect();
+        self.round(group, &mut spoken, queue, &[]).await?;
+        Ok(Some(id))
+    }
+
+    /// Send what the host asked to post, one group after another, and give the host its
+    /// turn to report where it asked for one. Run with no channel lock held.
+    pub(crate) async fn flush_posts(&self) -> Result<()> {
+        let posts = std::mem::take(&mut *self.posts.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut first = Ok(());
+        for post in posts {
+            let sent = self.host_post(&post).await;
+            if let Err(e) = sent
+                && first.is_ok()
+            {
+                first = Err(e);
+            }
+        }
+        first
+    }
+
+    async fn host_post(&self, post: &crate::agent::HostPost) -> Result<()> {
+        let Some(id) = self
+            .post_in_group(&Actor::Host, post.group, &post.text)
+            .await?
+        else {
+            return Ok(());
+        };
+        if post.report_back {
+            self.report_back(post, id).await?;
+        }
+        Ok(())
+    }
+
+    /// The host's turn in its own channel with what the group said after its post, to tell
+    /// the user. A harness turn: it can read and answer but not post again.
+    async fn report_back(&self, post: &crate::agent::HostPost, after: MessageId) -> Result<()> {
+        let kind = if post.prompted {
+            CallKind::UserInitiated
+        } else {
+            CallKind::Opening
+        };
+        if self.chat().is_err() || !self.decide(kind)?.allowed() {
+            return Ok(());
+        }
+        let host = channel::host(&self.db())?;
+        let _turn = self.lock_channel(host).await;
+        let seg = self.ensure_segment(host, None).await?;
+        let names = self.segment_names(seg)?;
+        let mut said = Vec::new();
+        for m in message::since(&self.db(), post.group, Some(after))? {
+            let Some(p) = m.author.person() else { continue };
+            let text = names.sub(m.text.trim());
+            said.push(self.corpus.wording.fill(
+                "harness.report_back.line",
+                &names,
+                &[("name", &self.display(p.as_str())?), ("text", &text)],
+            ));
+        }
+        let id = post.group.to_string();
+        let mut lines = if said.is_empty() {
+            vec![
+                self.corpus
+                    .wording
+                    .fill("harness.report_back.none", &names, &[("id", &id)]),
+            ]
+        } else {
+            let mut kept: String = said.join("\n");
+            if kept.chars().count() > REPORT_CHARS {
+                kept = kept.chars().take(REPORT_CHARS).collect();
+            }
+            vec![self.corpus.wording.fill(
+                "harness.report_back",
+                &names,
+                &[("id", &id), ("lines", &kept)],
+            )]
+        };
+        lines.push(self.context_line(seg, None, None)?);
+        self.append_user(
+            seg,
+            &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
+            None,
+        )?;
+        let mut turn = Turn::new(host, Actor::Host, Shape::Host);
+        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await
     }
 
     // ---- channels and modes ----
@@ -1538,7 +1648,7 @@ impl Agent {
             self.note_wrapup(ch, "wrapup without a call", &reply.text());
             return Ok(None);
         };
-        wrapup_json::keep_undated(&mut args, self.now());
+        wrapup_json::keep_undated(&mut args, self.now(), self.corpus.year_offset);
         let outcome = world::wrapup::apply(
             &self.db(),
             ch,
@@ -1642,6 +1752,14 @@ impl Agent {
     /// the host's one line, at most one opening) and returns the digest at once if the
     /// moment is not a presence occasion.
     pub async fn presence(&self, opened: bool) -> Result<PresenceOutcome> {
+        let out = self.presence_inner(opened).await;
+        let posts = self.flush_posts().await;
+        let out = out?;
+        posts?;
+        Ok(out)
+    }
+
+    async fn presence_inner(&self, opened: bool) -> Result<PresenceOutcome> {
         let now = self.now();
         // The very first open: the host's pre-written welcome, no model call, so it is
         // instant, free and the same with or without an endpoint.
@@ -1707,15 +1825,15 @@ impl Agent {
                     let d = self.persona_digest(d);
                     if !d.is_empty() {
                         out.host_spoke = self.host_harness(&d).await?;
-                        if out.host_spoke {
-                            let conn = self.db();
-                            world::presence::mark_announced(
-                                &conn,
-                                &planned.digest,
-                                &d,
-                                now.local_date(),
-                            )?;
-                        }
+                        // Announced once the host has had its turn, whether or not it
+                        // chose to say anything: it is not asked again for the same news.
+                        let conn = self.db();
+                        world::presence::mark_announced(
+                            &conn,
+                            &planned.digest,
+                            &d,
+                            now.local_date(),
+                        )?;
                     }
                 }
                 Call::Opening(o) => {
@@ -1730,6 +1848,80 @@ impl Agent {
             out.host_spoke = true;
         }
         Ok(out)
+    }
+
+    /// The host's own reminders that fell due: the host takes a turn in its own channel
+    /// with the reminder, does what it says and tells the user. Held through the quiet
+    /// hours and while the quota band is shut, like any unprompted speech; a channel in the
+    /// middle of a turn waits for the next tick.
+    async fn host_reminders(&self) -> Result<()> {
+        if self.chat().is_err() {
+            return Ok(());
+        }
+        let now = self.now();
+        let due: Vec<_> = {
+            let conn = self.db();
+            fact::due_commitments(&conn, now.ms)?
+                .into_iter()
+                .filter(|f| f.author == Actor::Host)
+                .collect()
+        };
+        for f in due {
+            let held = {
+                let conn = self.db();
+                settings::quiet_hours(&conn, &self.config.world.seed)?
+                    .is_some_and(|q| world::clock::in_quiet_hours(&q, now))
+            };
+            if held || !self.decide(CallKind::Opening)?.allowed() {
+                return Ok(());
+            }
+            let ch = channel::host(&self.db())?;
+            let Some(guard) = self.try_lock_channel(ch) else {
+                return Ok(());
+            };
+            // Marked first: a reminder is acted on once, and a failure says so below.
+            fact::mark_delivered(&self.db(), f.id)?;
+            let ran = self.remind(ch, &f.text).await;
+            drop(guard);
+            if let Err(e) = ran {
+                self.host_line("host.reminder_failed", &[("text", &f.text)])?;
+                drop(e);
+            }
+            self.changed(vec![WorldChange::Digest]);
+        }
+        Ok(())
+    }
+
+    /// One reminder's turn. Nothing is said in the host's channel when the host had
+    /// nothing to say and nothing is on its way back from a group.
+    async fn remind(&self, ch: ChannelId, text: &str) -> Result<()> {
+        let seg = self.ensure_segment(ch, None).await?;
+        let names = self.segment_names(seg)?;
+        let lines = [
+            self.corpus
+                .wording
+                .fill("harness.reminder", &names, &[("text", text)]),
+            self.context_line(seg, None, None)?,
+        ];
+        self.append_user(
+            seg,
+            &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
+            None,
+        )?;
+        let mut turn = Turn::new(ch, Actor::Host, Shape::Host);
+        turn.reminder = true;
+        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await?;
+        let reporting = self
+            .posts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|p| p.report_back);
+        if turn.message.is_none() && !reporting {
+            self.host_line("host.reminder_done", &[("text", text)])?;
+        }
+        Ok(())
     }
 
     /// Event seeds outside presence (a commitment fell due, a conclusion was written):
@@ -1784,6 +1976,14 @@ impl Agent {
     /// daily event may be made. Call it every minute or so; it makes no call when nothing
     /// is due.
     pub async fn tick(&self, present: bool) -> Result<Option<(PersonId, ChannelId)>> {
+        let out = self.tick_inner(present).await;
+        let posts = self.flush_posts().await;
+        let out = out?;
+        posts?;
+        Ok(out)
+    }
+
+    async fn tick_inner(&self, present: bool) -> Result<Option<(PersonId, ChannelId)>> {
         let ended = {
             let now = self.now().ms;
             let conn = self.db();
@@ -1810,6 +2010,7 @@ impl Agent {
                 self.wrapup_ended(*ch).await?;
             }
         }
+        self.host_reminders().await?;
         let mut opened = self.on_event().await?;
         if present && self.chat().is_ok() {
             if opened.is_none() {
@@ -1942,8 +2143,8 @@ impl Agent {
         Ok(out)
     }
 
-    /// A harness turn in the host's own log: the digest line. One call, no tools, nothing
-    /// the user asked for.
+    /// A harness turn in the host's own log: the digest line. It may read before it
+    /// writes; nothing here was asked for by the user.
     async fn host_harness(&self, digest: &Digest) -> Result<bool> {
         let ch = channel::host(&self.db())?;
         let _turn = self.lock_channel(ch).await;
@@ -1956,8 +2157,10 @@ impl Agent {
             &assemble::entry(&lines.iter().map(String::as_str).collect::<Vec<_>>()),
             None,
         )?;
+        // Room to call a tool and then write the line.
         let mut turn = Turn::new(ch, Actor::Host, Shape::Host);
-        self.run(&mut turn, 1).await?;
+        self.run(&mut turn, self.config.agent.turn_loop.max_steps)
+            .await?;
         Ok(turn.message.is_some())
     }
 

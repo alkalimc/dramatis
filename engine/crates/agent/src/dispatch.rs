@@ -1013,6 +1013,8 @@ impl Agent {
             }
             HostCall::Promise(p) => self.promise(turn, p, names),
             HostCall::Recent(r) => self.read_recent(turn, r, names),
+            HostCall::Post(p) => self.queue_post(turn, p, names),
+            HostCall::Birthdays(b) => self.born_on(turn, b, names),
             HostCall::ListChannels(_) => {
                 let (refs, lines) = self.channel_lines(names)?;
                 self.show_action(turn, ToolAction::ListChannels { channels: refs })?;
@@ -1097,28 +1099,30 @@ impl Agent {
         )
     }
 
-    /// Set a reminder: a commitment the person brings up as their opening when it falls
-    /// due, the same kind a wrap-up writes. Nothing else in the harness surfaces a
-    /// reminder to the host, so a person is required.
+    /// Set a reminder: a commitment. With a person it is brought up as their opening when it
+    /// falls due, the same kind a wrap-up writes. Without one it is the host's own: when
+    /// due the host takes a turn to act on it and tell the user. The due time is read in
+    /// the calendar the model sees.
     fn promise(&self, turn: &mut Turn, p: tools::Promise, names: &Names) -> Result<Outcome> {
         if !turn.authorized {
             return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
         }
-        let who = p.person.trim();
-        if who.is_empty() {
-            return Ok(Err(self.refuse(names, "harness.error.promise_person", "")));
-        }
-        let offer = self.offerable(&self.db())?;
-        let everyone = self.roster()?;
-        let Some(person) = self.person_named(who, &everyone)? else {
-            return Ok(Err(self.refuse(names, "harness.error.no_match", who)));
-        };
-        if !offer.iter().any(|o| o == person.as_str()) {
-            return Ok(Err(self.refuse(names, "harness.error.disabled", who)));
+        let who = p.person.as_deref().map(str::trim).filter(|w| !w.is_empty());
+        let mut person = None;
+        if let Some(who) = who {
+            let offer = self.offerable(&self.db())?;
+            let everyone = self.roster()?;
+            let Some(found) = self.person_named(who, &everyone)? else {
+                return Ok(Err(self.refuse(names, "harness.error.no_match", who)));
+            };
+            if !offer.iter().any(|o| o == found.as_str()) {
+                return Ok(Err(self.refuse(names, "harness.error.disabled", who)));
+            }
+            person = Some(found);
         }
         let now = self.now();
         let due = p.due.trim();
-        let Some(at) = world::clock::parse_due(due, now) else {
+        let Some(at) = world::clock::parse_due_in_world(due, now, self.corpus.year_offset) else {
             return Ok(Err(self.refuse(names, "harness.error.due", due)));
         };
         if at <= now.ms {
@@ -1132,37 +1136,141 @@ impl Agent {
                 &[("max", &max)],
             )));
         }
-        let new = NewFact::new(
-            Actor::User,
-            Audience::Own(person.clone()),
-            FactKind::Commitment,
-            p.text.trim(),
-        )
-        .about(About::Person(person.clone()))
+        let text = p.text.trim();
+        let new = match &person {
+            Some(person) => NewFact::new(
+                Actor::User,
+                Audience::Own(person.clone()),
+                FactKind::Commitment,
+                text,
+            )
+            .about(About::Person(person.clone())),
+            // Seen by nobody but the host: the host channel has no persons.
+            None => NewFact::new(
+                Actor::Host,
+                Audience::Participants(channel::host(&self.db())?),
+                FactKind::Commitment,
+                text,
+            )
+            .about(About::User),
+        }
         .due(at);
         if fact::normalize(&new.text).is_empty() {
             return Ok(Err(self.refuse(names, "harness.error.refused", "empty")));
         }
         let written = fact::write(&self.db(), &new, now.ms)?;
-        let person_ref = view::person_ref(self.ix().folio(), person.as_str())?;
-        let name = person_ref.name.clone();
-        self.show_action(
-            turn,
-            ToolAction::Promise {
-                person: person_ref,
-                text: new.text.clone(),
-                due: due.to_owned(),
-            },
-        )?;
+        let said = match &person {
+            Some(person) => {
+                let person_ref = view::person_ref(self.ix().folio(), person.as_str())?;
+                let name = person_ref.name.clone();
+                self.show_action(
+                    turn,
+                    ToolAction::Promise {
+                        person: person_ref,
+                        text: new.text.clone(),
+                        due: due.to_owned(),
+                    },
+                )?;
+                self.say(names, "harness.promised", &[("name", &name), ("due", due)])
+            }
+            None => self.say(names, "harness.promised.own", &[("due", due)]),
+        };
         if let fact::Written::New(id) = written {
             self.changed(vec![api::events::WorldChange::Fact {
                 id: view::fact_id(id),
             }]);
         }
-        Ok(Ok(self.say(
-            names,
-            "harness.promised",
-            &[("name", &name), ("due", due)],
+        Ok(Ok(said))
+    }
+
+    /// Post a message in a group the host is a member of. It is queued: the host's turn
+    /// ends first, then the message goes out and the members answer.
+    fn queue_post(&self, turn: &mut Turn, p: tools::Post, names: &Names) -> Result<Outcome> {
+        if !turn.authorized && !turn.reminder {
+            return Ok(Err(self.refuse(names, "harness.error.not_asked", "")));
+        }
+        let id = p.channel.trim();
+        let Some(ch) = id
+            .parse::<i64>()
+            .ok()
+            .and_then(|n| channel::get(&self.db(), ChannelId(n)).ok())
+            .filter(|c| c.deleted_at.is_none() && c.kind == world::ChannelKind::Group)
+        else {
+            return Ok(Err(self.refuse(names, "harness.error.not_found", id)));
+        };
+        if !ch.is_open() || !ch.has(&Actor::Host) {
+            return Ok(Err(self.refuse(names, "harness.error.not_member", id)));
+        }
+        if ch.id == turn.channel {
+            return Ok(Err(self.refuse(names, "harness.error.post_here", "")));
+        }
+        let text = p.text.trim();
+        if text.is_empty() {
+            return Ok(Err(self.refuse(names, "harness.error.refused", "empty")));
+        }
+        // A reminder speaks on its own; that is held back like any unprompted speech.
+        if !turn.authorized && !self.decide(CallKind::Opening)?.allowed() {
+            return Ok(Err(self.refuse(names, "harness.error.quiet", "")));
+        }
+        let mut queue = self.posts.lock().unwrap_or_else(|e| e.into_inner());
+        if queue.iter().any(|q| q.group == ch.id) {
+            return Ok(Err(self.refuse(names, "harness.error.once", "")));
+        }
+        let report_back = p.report_back.unwrap_or(true);
+        queue.push(crate::agent::HostPost {
+            group: ch.id,
+            text: text.chars().take(crate::flows::SAY_MAX).collect(),
+            report_back,
+            prompted: turn.authorized,
+        });
+        drop(queue);
+        let key = if report_back {
+            "harness.posted.report"
+        } else {
+            "harness.posted"
+        };
+        Ok(Ok(self.say(names, key, &[("id", &ch.id.to_string())])))
+    }
+
+    /// Who has a birthday on a day, from the roster's birthdays.
+    fn born_on(&self, turn: &mut Turn, b: tools::Birthdays, names: &Names) -> Result<Outcome> {
+        let today = self.now().local_date().month_day();
+        let day = match b.date.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            None => today,
+            Some(d) => match world::clock::parse_day(d) {
+                Some(day) => day,
+                None => return Ok(Err(self.refuse(names, "harness.error.date", d))),
+            },
+        };
+        let offer = self.offerable(&self.db())?;
+        let mut persons = Vec::new();
+        let mut lines = Vec::new();
+        for (p, born) in self.birthdays()? {
+            if born != day || !offer.iter().any(|o| o == p.as_str()) {
+                continue;
+            }
+            lines.push(format!("- {} ({})", self.display(p.as_str())?, p));
+            persons.push(view::person_ref(self.ix().folio(), p.as_str())?);
+        }
+        let when = day.to_string();
+        self.show_action(
+            turn,
+            ToolAction::FindPeople {
+                topic: when.clone(),
+                persons,
+            },
+        )?;
+        if lines.is_empty() {
+            return Ok(Ok(self.say(
+                names,
+                "harness.birthdays.none",
+                &[("date", &when)],
+            )));
+        }
+        Ok(Ok(format!(
+            "{}\n{}",
+            self.say(names, "harness.birthdays", &[("date", &when)]),
+            lines.join("\n")
         )))
     }
 

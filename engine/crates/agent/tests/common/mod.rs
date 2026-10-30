@@ -483,6 +483,11 @@ pub fn corpus() -> TempFolio {
 
 /// The same, with the pack's own wording in CJK text when `cjk` is set.
 pub fn corpus_in(cjk: bool) -> TempFolio {
+    corpus_with(cjk, 0)
+}
+
+/// The same, with the in-world year this many years before the real one.
+pub fn corpus_with(cjk: bool, year_offset: i32) -> TempFolio {
     let wording = if cjk {
         r#"{"user.you": "Doc", "host.name": "Hostess", "host.intro.terminal": "Welcome, <U>. I am {host}. Try /talk or the Roster.", "host.intro.app": "Welcome, <U>. I am {host}. Try /talk or the Roster.", "tool.search": "Search the archive.", "daypart.night": "\u591c\u91cc"}"#
     } else {
@@ -491,7 +496,8 @@ pub fn corpus_in(cjk: bool) -> TempFolio {
     let mut b = Builder::new()
         .manifest("user_placeholder", r#""<U>""#)
         .manifest("wording", wording)
-        .manifest("scene_marker", r#"["(", ")"]"#);
+        .manifest("scene_marker", r#"["(", ")"]"#)
+        .manifest("clock.year_offset", &year_offset.to_string());
     b.person("ann", Some("03-10"))
         .person("bo", None)
         .person("cy", None)

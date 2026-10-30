@@ -109,13 +109,16 @@ fn sample(root: &Value, node: &Value, depth: usize) -> Value {
 
 /// A commitment whose due time cannot be read (relative or prose, such as "tomorrow
 /// afternoon") is kept as a plain fact with the words it was given, not dropped.
-pub(crate) fn keep_undated(args: &mut Args, now: Now) {
+pub(crate) fn keep_undated(args: &mut Args, now: Now, year_offset: i32) {
     for m in &mut args.facts {
         if m.kind != MemoryKind::Commitment {
             continue;
         }
         let due = m.due.as_deref().map(str::trim).filter(|d| !d.is_empty());
-        if due.is_some_and(|d| clock::parse_due(d, now).is_some()) {
+        // A date in the calendar the model sees is moved to the real one the store keeps.
+        let real = due.map(|d| clock::to_real_calendar(d, now, year_offset));
+        if let Some(real) = real.filter(|r| clock::parse_due(r, now).is_some()) {
+            m.due = Some(real);
             continue;
         }
         m.kind = MemoryKind::Fact;

@@ -91,6 +91,8 @@ pub fn guide(ctx: &Ctx<'_>, frontend: Frontend) -> String {
     lines.push(ctx.fill("harness.guide.limits", &[]));
     lines.push(ctx.fill("harness.guide.promise", &[]));
     lines.push(ctx.fill("harness.guide.recent", &[]));
+    lines.push(ctx.fill("harness.guide.post", &[]));
+    lines.push(ctx.fill("harness.guide.birthdays", &[]));
     // What the user was told at the first meeting, so the host can tell it again.
     let intro = ctx.fill(&format!("host.intro.{which}"), &[]);
     lines.push(ctx.fill("harness.guide.intro", &[("intro", &intro)]));
@@ -193,6 +195,8 @@ pub struct Opening<'a> {
     pub recent: &'a [(String, String)],
     /// The groups the person of a direct chat is in, when there are any.
     pub groups: Option<Groups<'a>>,
+    /// In a group: whether the host is a member. `None` elsewhere.
+    pub host_here: Option<bool>,
 }
 
 /// A person's groups, as block C lists them.
@@ -223,6 +227,11 @@ pub fn block_c(ctx: &Ctx<'_>, o: &Opening<'_>) -> String {
     }
     if let Some(t) = o.topic.filter(|t| !t.trim().is_empty()) {
         parts.push(ctx.fill("harness.topic", &[("topic", t.trim())]));
+    }
+    match o.host_here {
+        Some(true) => parts.push(ctx.fill("harness.host_here", &[])),
+        Some(false) => parts.push(ctx.fill("harness.host_away", &[])),
+        None => {}
     }
     if let Some(g) = o.groups.as_ref().filter(|g| !g.list.is_empty()) {
         let lines: Vec<String> = g
@@ -453,6 +462,49 @@ pub fn closing_marks(wording: &Wording, group: bool, proposing: bool) -> Marks<'
     }
 }
 
+/// A mark's character as models write it: the full-width colon and bar stand for the
+/// half-width ones.
+fn mark_char(c: char) -> char {
+    match c {
+        '\u{ff1a}' => ':',
+        '\u{ff5c}' => '|',
+        c => c,
+    }
+}
+
+/// How a line starts against a mark, tolerating the spaces a model adds or drops around
+/// the arrow and the colon, and a full-width colon or bar for a half-width one.
+enum Lead<'a> {
+    /// The line starts with the whole mark; what follows it.
+    Full(&'a str),
+    /// The line ends before the mark does: it may still become one.
+    Partial,
+    No,
+}
+
+fn lead<'a>(line: &'a str, mark: &str) -> Lead<'a> {
+    let mut want = mark.chars().filter(|c| !c.is_whitespace()).map(mark_char);
+    let mut chars = line.char_indices().peekable();
+    let mut next = want.next();
+    while let Some(w) = next {
+        match chars.next() {
+            None => return Lead::Partial,
+            Some((_, c)) if c.is_whitespace() => continue,
+            Some((_, c)) if mark_char(c) == w => next = want.next(),
+            Some(_) => return Lead::No,
+        }
+    }
+    Lead::Full(&line[chars.peek().map_or(line.len(), |(i, _)| *i)..])
+}
+
+/// What follows `mark` at the start of a line, if the line starts with it.
+fn after_mark<'a>(line: &'a str, mark: &str) -> Option<&'a str> {
+    match lead(line.trim_start(), mark) {
+        Lead::Full(rest) => Some(rest),
+        _ => None,
+    }
+}
+
 /// A reply without its last closing line that starts with `mark`, and what follows the
 /// mark. The line is the last non-empty one, or comes just before closing lines of
 /// citation marks and `others` only (a model that writes the closing lines in another
@@ -468,14 +520,11 @@ fn split_line(text: &str, mark: &str, others: &[&str]) -> (String, Option<String
             || api::cites::is_cite_line(lines[i - 1])
             || others
                 .iter()
-                .any(|o| lines[i - 1].trim_start().starts_with(o)))
+                .any(|o| !o.is_empty() && after_mark(lines[i - 1], o).is_some()))
     {
         i -= 1;
     }
-    let Some(rest) = i
-        .checked_sub(1)
-        .and_then(|k| lines[k].trim_start().strip_prefix(mark))
-    else {
+    let Some(rest) = i.checked_sub(1).and_then(|k| after_mark(lines[k], mark)) else {
         return (text.to_owned(), None);
     };
     let head = lines[..i - 1].join("\n");
@@ -547,6 +596,8 @@ pub fn split_closing(text: &str, marks: Marks<'_>) -> Closing {
         out.text = kept;
         out.hand_off = split_names(&rest);
     }
+    // A line that names someone is a closing line and leaves the text, whether or not
+    // anyone on it can be offered afterwards (they may all be in the group already).
     let (kept, rest) = split_line(&out.text, marks.find, &others(marks.find));
     if let Some((names, purpose)) = rest
         .map(|r| split_purpose(&r))
@@ -587,18 +638,19 @@ pub fn shown_len(pending: &str, marks: &[&str]) -> usize {
         return pending.len();
     }
     let body = pending.trim_end();
-    let unfinished = pending.len() == body.len();
+    // A space after the arrow is still the line being written; only a newline ends it.
+    let unfinished = !pending.ends_with(['\n', '\r']);
     let mut hold = None;
     let mut end = body.len();
     let mut last = true;
     loop {
         let start = body[..end].rfind('\n').map_or(0, |i| i + 1);
         let line = body[start..end].trim();
-        let marked = marks.iter().any(|m| line.starts_with(m))
+        let marked = marks.iter().any(|m| matches!(lead(line, m), Lead::Full(_)))
             || (last
                 && unfinished
                 && !line.is_empty()
-                && marks.iter().any(|m| m.starts_with(line)));
+                && marks.iter().any(|m| matches!(lead(line, m), Lead::Partial)));
         if marked {
             hold = Some(start);
         } else if !(line.is_empty()
@@ -937,6 +989,43 @@ mod tests {
         // Off when the tools are native.
         let off = closing_marks(&w, false, false);
         assert_eq!(split_closing(&format!("a\n{find} x"), off).find, None);
+    }
+
+    #[test]
+    fn closing_marks_match_with_or_without_spaces_and_either_width() {
+        // The pack's marks, written the way the owner's model wrote them.
+        let marks = Marks {
+            hand_off: "\u{2192}",
+            find: "\u{21d2} \u{627e}\u{4eba}\u{ff1a}",
+            group: "\u{21d2} \u{62c9}\u{7fa4}\u{ff1a}",
+            say: "",
+        };
+        let owner = "\u{21d2}\u{627e}\u{4eba}\u{ff1a}A,B\u{ff5c}plan the menu";
+        let c = split_closing(&format!("Hi.\n{owner}"), marks);
+        assert_eq!(c.text, "Hi.");
+        assert_eq!(c.find, Some(vec!["A".to_owned(), "B".to_owned()]));
+        assert_eq!(c.find_purpose.as_deref(), Some("plan the menu"));
+        for line in [
+            "\u{21d2} \u{627e}\u{4eba}: A, B | plan the menu",
+            "\u{21d2}  \u{627e}\u{4eba} \u{ff1a} A,B \u{ff5c} plan the menu",
+            "\u{21d2}\u{627e}\u{4eba}:A,B|plan the menu",
+        ] {
+            let c = split_closing(&format!("Hi.\n{line}"), marks);
+            assert_eq!(c.text, "Hi.", "{line}");
+            assert_eq!(c.find.as_ref().map(Vec::len), Some(2), "{line}");
+            assert_eq!(c.find_purpose.as_deref(), Some("plan the menu"), "{line}");
+        }
+        // The hand-off arrow too, spaced or not.
+        let (t, n) = split_hand_off("Hi.\n\u{2192}Ann, Bo", "\u{2192}");
+        assert_eq!((t.as_str(), n.len()), ("Hi.", 2));
+        // The stream holds the line back whichever way it is being written.
+        let list = marks.list();
+        let body = format!("Hello\n{owner}");
+        assert_eq!(shown_len(&body, &list), 6);
+        assert_eq!(shown_len("Hello\n\u{21d2}\u{627e}", &list), 6);
+        assert_eq!(shown_len("Hello\n\u{21d2} ", &list), 6);
+        // Other text is released.
+        assert_eq!(shown_len("Hello\n\u{21d2}x", &list), 10);
     }
 
     #[test]

@@ -239,18 +239,21 @@
       },
       {
         "function": {
-          "description": "Set a reminder for the user: a promise with a due date. When it falls due the person\nnamed brings it up as their opening, so a person is required. Only when the user asks.\nAt most twenty are pending at once.",
+          "description": "Set a reminder for the user: a promise with a due date. With a person, that person\nbrings it up as their opening when it falls due. Without one the reminder is yours:\nwhen it falls due you take a turn, do what it says and tell the user. Only when the\nuser asks. At most twenty are pending at once.",
           "name": "promise",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "due": {
-                "description": "When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or\n2026-12-24T18:00.",
+                "description": "When it is due: an ISO 8601 date or date-time in the calendar the context line\nshows, for example 2026-12-24 or 2026-12-24T18:00.",
                 "type": "string"
               },
               "person": {
-                "description": "Roster id of the person who brings it up when it is due.",
-                "type": "string"
+                "description": "Roster id of the person who brings it up when it is due. Leave out for a reminder\nthat is yours to act on.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "text": {
                 "description": "What is promised, as one short sentence.",
@@ -259,8 +262,7 @@
             },
             "required": [
               "text",
-              "due",
-              "person"
+              "due"
             ],
             "type": "object"
           }
@@ -282,6 +284,58 @@
             "required": [
               "channel"
             ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Say one thing in a group conversation you are a member of, by the id `list_channels`\nshows. It appears there as your message and the members answer. Only when the user\nasked for it or a reminder of yours calls for it.",
+          "name": "post",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "channel": {
+                "description": "The group id, as listed.",
+                "type": "string"
+              },
+              "report_back": {
+                "description": "Whether you get a turn to tell the user what the members answered. Defaults to yes.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "text": {
+                "description": "What you say there, as one short message.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "channel",
+              "text"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Who has a birthday on a day, from the roster. Search cannot answer this.",
+          "name": "birthdays",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "description": "The day, as month and day (MM-DD) or a full date in the calendar the context line\nshows. Leave out for today.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "type": "object"
           }
         },
@@ -499,17 +553,20 @@
         "name": "list_channels"
       },
       {
-        "description": "Set a reminder for the user: a promise with a due date. When it falls due the person\nnamed brings it up as their opening, so a person is required. Only when the user asks.\nAt most twenty are pending at once.",
+        "description": "Set a reminder for the user: a promise with a due date. With a person, that person\nbrings it up as their opening when it falls due. Without one the reminder is yours:\nwhen it falls due you take a turn, do what it says and tell the user. Only when the\nuser asks. At most twenty are pending at once.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
             "due": {
-              "description": "When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or\n2026-12-24T18:00.",
+              "description": "When it is due: an ISO 8601 date or date-time in the calendar the context line\nshows, for example 2026-12-24 or 2026-12-24T18:00.",
               "type": "string"
             },
             "person": {
-              "description": "Roster id of the person who brings it up when it is due.",
-              "type": "string"
+              "description": "Roster id of the person who brings it up when it is due. Leave out for a reminder\nthat is yours to act on.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "text": {
               "description": "What is promised, as one short sentence.",
@@ -518,8 +575,7 @@
           },
           "required": [
             "text",
-            "due",
-            "person"
+            "due"
           ],
           "type": "object"
         },
@@ -541,6 +597,52 @@
           "type": "object"
         },
         "name": "recent"
+      },
+      {
+        "description": "Say one thing in a group conversation you are a member of, by the id `list_channels`\nshows. It appears there as your message and the members answer. Only when the user\nasked for it or a reminder of yours calls for it.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "description": "The group id, as listed.",
+              "type": "string"
+            },
+            "report_back": {
+              "description": "Whether you get a turn to tell the user what the members answered. Defaults to yes.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "text": {
+              "description": "What you say there, as one short message.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel",
+            "text"
+          ],
+          "type": "object"
+        },
+        "name": "post"
+      },
+      {
+        "description": "Who has a birthday on a day, from the roster. Search cannot answer this.",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "date": {
+              "description": "The day, as month and day (MM-DD) or a full date in the calendar the context line\nshows. Leave out for today.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "name": "birthdays"
       }
     ],
     "responses": [
@@ -763,18 +865,21 @@
         "type": "function"
       },
       {
-        "description": "Set a reminder for the user: a promise with a due date. When it falls due the person\nnamed brings it up as their opening, so a person is required. Only when the user asks.\nAt most twenty are pending at once.",
+        "description": "Set a reminder for the user: a promise with a due date. With a person, that person\nbrings it up as their opening when it falls due. Without one the reminder is yours:\nwhen it falls due you take a turn, do what it says and tell the user. Only when the\nuser asks. At most twenty are pending at once.",
         "name": "promise",
         "parameters": {
           "additionalProperties": false,
           "properties": {
             "due": {
-              "description": "When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or\n2026-12-24T18:00.",
+              "description": "When it is due: an ISO 8601 date or date-time in the calendar the context line\nshows, for example 2026-12-24 or 2026-12-24T18:00.",
               "type": "string"
             },
             "person": {
-              "description": "Roster id of the person who brings it up when it is due.",
-              "type": "string"
+              "description": "Roster id of the person who brings it up when it is due. Leave out for a reminder\nthat is yours to act on.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "text": {
               "description": "What is promised, as one short sentence.",
@@ -783,8 +888,7 @@
           },
           "required": [
             "text",
-            "due",
-            "person"
+            "due"
           ],
           "type": "object"
         },
@@ -804,6 +908,54 @@
           "required": [
             "channel"
           ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Say one thing in a group conversation you are a member of, by the id `list_channels`\nshows. It appears there as your message and the members answer. Only when the user\nasked for it or a reminder of yours calls for it.",
+        "name": "post",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "description": "The group id, as listed.",
+              "type": "string"
+            },
+            "report_back": {
+              "description": "Whether you get a turn to tell the user what the members answered. Defaults to yes.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "text": {
+              "description": "What you say there, as one short message.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel",
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      },
+      {
+        "description": "Who has a birthday on a day, from the roster. Search cannot answer this.",
+        "name": "birthdays",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "date": {
+              "description": "The day, as month and day (MM-DD) or a full date in the calendar the context line\nshows. Leave out for today.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         },
         "type": "function"
@@ -955,7 +1107,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "due": {
-                      "description": "For a commitment: when it is due, ISO 8601 date or date-time.",
+                      "description": "For a commitment: when it is due, ISO 8601 date or date-time, in the calendar the\ncontext line shows.",
                       "type": [
                         "string",
                         "null"
@@ -1198,7 +1350,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "due": {
-                    "description": "For a commitment: when it is due, ISO 8601 date or date-time.",
+                    "description": "For a commitment: when it is due, ISO 8601 date or date-time, in the calendar the\ncontext line shows.",
                     "type": [
                       "string",
                       "null"
@@ -1442,7 +1594,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "due": {
-                    "description": "For a commitment: when it is due, ISO 8601 date or date-time.",
+                    "description": "For a commitment: when it is due, ISO 8601 date or date-time, in the calendar the\ncontext line shows.",
                     "type": [
                       "string",
                       "null"

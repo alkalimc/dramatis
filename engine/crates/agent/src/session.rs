@@ -85,6 +85,9 @@ pub(crate) struct Turn {
     pub say: Option<(ChannelId, String)>,
     /// `profile/model` of the last call, for the diagnostics log.
     pub model: String,
+    /// A reminder of the host's own started this turn: it may post in a group, as the user
+    /// asked for when setting it.
+    pub reminder: bool,
 }
 
 impl Turn {
@@ -111,6 +114,7 @@ impl Turn {
             material: String::new(),
             say: None,
             model: String::new(),
+            reminder: false,
         }
     }
 
@@ -262,6 +266,7 @@ impl Agent {
                     summary: summary.map(|s| s.text.as_str()),
                     recent: &recent,
                     groups: None,
+                    host_here: None,
                 },
             );
             return Ok([a, String::new(), c_block]);
@@ -374,6 +379,7 @@ impl Agent {
                 summary: summary.map(|s| s.text.as_str()),
                 recent: &recent,
                 groups,
+                host_here: (c.kind == ChannelKind::Group).then(|| c.has(&Actor::Host)),
             },
         );
         Ok([a, b, c_block])
@@ -1311,11 +1317,20 @@ impl Agent {
                     turn.text = rest.trim_start().to_owned();
                 }
             }
-            // Only the hand-off line was written: nothing to keep as a message.
-            if turn.text.trim().is_empty() && turn.actions.is_empty() {
+        }
+        // No words are left (a turn that ended on a tool call, or wrote only closing
+        // lines): no empty message is stored. What the turn offered is kept under a fixed
+        // line; anything else is dropped.
+        if turn.text.trim().is_empty() {
+            if turn.actions.iter().any(is_offer) {
+                let names = self.segment_names(self.current_segment(turn.channel)?)?;
+                turn.text = self.corpus.wording.fill("harness.offer_only", &names, &[]);
+            } else {
                 if let Some(id) = turn.message.take() {
                     world::message::discard(&self.db(), id)?;
                 }
+                turn.text.clear();
+                turn.actions.clear();
                 return Ok(());
             }
         }
@@ -1344,6 +1359,17 @@ pub(crate) struct Log {
 /// keeping only the schema's own top-level keys): the JSON document becomes the `wrapup`
 /// call, so the loop treats it like a tool call. A reply that is not a JSON object is
 /// still read as a fenced call block; with neither it stays text, and nothing is recorded.
+/// Whether an action is a choice the user is shown, which has no meaning without words.
+fn is_offer(a: &ToolAction) -> bool {
+    match a {
+        ToolAction::FindPeople { persons, .. } | ToolAction::InviteToGroup { persons, .. } => {
+            !persons.is_empty()
+        }
+        ToolAction::CreateGroup { members, .. } => !members.is_empty(),
+        _ => false,
+    }
+}
+
 fn adopt_json_call(mut reply: Response) -> Response {
     let Some(doc) = crate::wrapup_json::document(&reply.text()) else {
         return adopt_text_call(reply, true, &[]);

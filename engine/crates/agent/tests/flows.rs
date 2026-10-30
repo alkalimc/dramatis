@@ -9,7 +9,7 @@ use common::*;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use world::fact::{self, Audience, NewFact};
-use world::{Actor, ChannelId, FactKind, Mode, Origin, Shape, bond, channel, settings};
+use world::{Actor, ChannelId, FactKind, Mode, Origin, Shape, World, bond, channel, settings};
 
 fn rows(agent: &agent::Agent, sql: &str) -> Vec<(String, i64, i64, i64)> {
     agent.with_world(|w| {
@@ -1311,21 +1311,24 @@ async fn host_log(wire: WireApi) {
 
     // A harness turn of the host's: a tool call it attempts is refused.
     e.clock.advance(31 * 60_000);
-    e.fake.push([call(
-        "set_mode",
-        json!({"target_kind": "person", "target": "ann", "mode": "enabled"}),
-    )]);
+    e.fake.push([
+        call(
+            "set_mode",
+            json!({"target_kind": "person", "target": "ann", "mode": "enabled"}),
+        ),
+        say("Nothing to change."),
+    ]);
     let out = e.agent.presence(false).await.unwrap();
-    assert!(!out.host_spoke);
+    // The turn has room to call a tool and then write its line.
+    assert!(out.host_spoke);
     assert_eq!(
         e.agent.with_world(|w| bond::mode(w, &p("ann")).unwrap()),
         Mode::Frozen
     );
     assert!(log_bytes(&e.agent, host).contains("Only when Doc asks for it."));
-    // The last step offers no tool where the protocol lets the choice vary.
     match wire {
         WireApi::Messages => assert_eq!(e.fake.json()[0]["tool_choice"]["type"], "auto"),
-        _ => assert_eq!(e.fake.json()[0]["tool_choice"], "none"),
+        _ => assert_eq!(e.fake.json()[0]["tool_choice"], "auto"),
     }
 
     // The user's own turn may.
@@ -1342,11 +1345,11 @@ async fn host_log(wire: WireApi) {
         Mode::Enabled
     );
 
-    // Back after idle: one line about the digest (ann's birthday), on the same log.
+    // The digest line (ann's birthday) was the first turn's entry, on the same log, and is
+    // not announced again.
     e.clock.advance(31 * 60_000);
-    e.fake.push([say("It is ann's birthday today.")]);
     let out = e.agent.presence(false).await.unwrap();
-    assert!(out.host_spoke);
+    assert!(!out.host_spoke);
     let bodies = e.fake.bodies();
     assert_eq!(bodies.len(), 4);
     assert_prefix_chain(&bodies);
@@ -1356,7 +1359,7 @@ async fn host_log(wire: WireApi) {
     for v in &json {
         assert_eq!(head(v), head(&json[0]));
     }
-    let digest = list(&json[3]).last().unwrap().to_string();
+    let digest = list(&json[0]).last().unwrap().to_string();
     assert!(digest.contains("Today is ann's birthday."), "{digest}");
     let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
     assert_eq!(shapes, ["host", "host", "host", "host"]);
@@ -3970,4 +3973,289 @@ async fn a_deleted_group_is_not_listed_read_posted_into_or_offered_again() {
             .count(),
         1
     );
+}
+
+// ---- one clock, empty turns, the host's own reminders and posts ----
+
+/// A corpus whose in-world year is 923 before the real one, with the host able to take
+/// several steps.
+fn offset_env() -> Env {
+    env_in(
+        corpus_with(false, 923),
+        World::in_memory().unwrap(),
+        endpoints(WireApi::Chat, true, None),
+        retrieve(),
+        |c| c.agent.turn_loop.max_steps = 6,
+    )
+}
+
+fn host_texts(e: &Env) -> Vec<(api::types::Author, String)> {
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    texts(e, host)
+}
+
+#[tokio::test]
+async fn a_due_written_in_the_world_calendar_fires_at_the_real_time() {
+    let e = offset_env();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    // T0 is 2026-03-10 12:00, which the context line calls year 1103.
+    e.fake.push([
+        call(
+            "promise",
+            json!({"text": "tea", "due": "1103-03-11T09:00", "person": "ann"}),
+        ),
+        call(
+            "promise",
+            json!({"text": "cake", "due": "2026-03-12T09:00", "person": "ann"}),
+        ),
+        call(
+            "promise",
+            json!({"text": "old", "due": "1103-03-09", "person": "ann"}),
+        ),
+        say("ok"),
+    ]);
+    e.agent.send(host, "remind ann", None).await.unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert!(log.contains("has already passed"), "{log}");
+    assert!(
+        log.contains("context") || log.contains("1103-03-10"),
+        "{log}"
+    );
+    let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    let due = |text: &str| facts.iter().find(|f| f.text == text).and_then(|f| f.due);
+    assert_eq!(due("tea"), Some(T0 + 21 * 3_600_000));
+    assert_eq!(due("cake"), Some(T0 + 45 * 3_600_000));
+    assert_eq!(due("old"), None);
+
+    // It is not due before that real time, and opens right after it.
+    e.agent
+        .with_world(|w| bond::set_mode(w, &p("ann"), Mode::Enabled).unwrap());
+    e.clock.advance(20 * 3_600_000);
+    assert!(e.agent.on_event().await.unwrap().is_none());
+    e.clock.advance(2 * 3_600_000);
+    e.fake.push([say("About the tea.")]);
+    assert_eq!(
+        e.agent.on_event().await.unwrap().map(|o| o.0),
+        Some(p("ann"))
+    );
+}
+
+#[tokio::test]
+async fn a_wrapup_commitment_in_the_world_calendar_is_stored_in_the_real_one() {
+    let e = offset_env();
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        say("See you tomorrow at nine."),
+        call(
+            "wrapup",
+            json!({"facts": [{"kind": "commitment", "text": "Tea tomorrow", "due": "1103-03-11T09:00"}]}),
+        ),
+    ]);
+    e.agent
+        .send(ch, "tea tomorrow at nine?", None)
+        .await
+        .unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    let tea = facts.iter().find(|f| f.text == "Tea tomorrow").unwrap();
+    assert_eq!(tea.kind, FactKind::Commitment);
+    assert_eq!(tea.due, Some(T0 + 21 * 3_600_000));
+}
+
+#[tokio::test]
+async fn a_turn_that_ends_without_words_stores_no_message() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.turn_loop.max_steps = 1;
+    });
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    // The only step ends on a tool call, with no text.
+    e.fake.push([call("list_channels", json!({}))]);
+    e.agent.send(host, "what do I have", None).await.unwrap();
+    let said = host_texts(&e);
+    assert!(
+        said.iter().all(|(a, _)| *a == api::types::Author::User),
+        "{said:?}"
+    );
+    // A person's too.
+    let ann = direct(&e, "ann");
+    e.fake.push([call("search", json!({"query": "tea"}))]);
+    e.agent.send(ann, "hello", None).await.unwrap();
+    assert!(
+        texts(&e, ann)
+            .iter()
+            .all(|(a, _)| *a == api::types::Author::User)
+    );
+}
+
+#[tokio::test]
+async fn an_offer_with_no_words_gets_the_fixed_line() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.turn_loop.max_steps = 1;
+    });
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake
+        .push([call("find_people", json!({"topic": "forge blade"}))]);
+    e.agent.send(host, "who knows steel", None).await.unwrap();
+    let said = host_texts(&e);
+    assert_eq!(
+        said.last().map(|(_, t)| t.as_str()),
+        Some("Here is what I suggest.")
+    );
+}
+
+#[tokio::test]
+async fn a_host_turn_on_the_digest_can_read_and_then_write() {
+    let e = env(WireApi::Chat);
+    let ann = direct(&e, "ann");
+    say_in(&e, ann, Actor::User, "hello", T0);
+    e.agent.presence(true).await.unwrap();
+    e.clock.advance(31 * 60_000);
+    e.fake
+        .push([call("list_channels", json!({})), say("Ann has a birthday.")]);
+    let out = e.agent.presence(false).await.unwrap();
+    assert!(out.host_spoke);
+    assert_eq!(
+        host_texts(&e).last().map(|(_, t)| t.as_str()),
+        Some("Ann has a birthday.")
+    );
+}
+
+#[tokio::test]
+async fn birthdays_come_from_the_roster_by_day() {
+    let e = offset_env();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        call("birthdays", json!({})),
+        call("birthdays", json!({"date": "1103-03-10"})),
+        call("birthdays", json!({"date": "05-05"})),
+        call("birthdays", json!({"date": "someday"})),
+        say("ok"),
+    ]);
+    e.agent
+        .send(host, "who has a birthday", None)
+        .await
+        .unwrap();
+    let log = log_bytes(&e.agent, host);
+    assert_eq!(log.matches("Birthdays on 03-10:").count(), 2, "{log}");
+    assert!(log.contains("- ann (ann)"), "{log}");
+    assert!(
+        log.contains("Nobody on the roster has a birthday on 05-05."),
+        "{log}"
+    );
+    assert!(log.contains("Could not read the day someday"), "{log}");
+}
+
+#[tokio::test]
+async fn the_hosts_own_reminder_posts_in_the_group_and_reports_back() {
+    let e = offset_env();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.agent
+        .with_world(|w| channel::add_participant(w, g, &Actor::Host).unwrap());
+    e.fake.push([
+        call(
+            "promise",
+            json!({"text": "ask the group about the party", "due": "1103-03-10T14:00"}),
+        ),
+        say("I will ask them then."),
+    ]);
+    e.agent.send(host, "remind yourself", None).await.unwrap();
+    let facts = e.agent.with_world(|w| fact::all(w, false).unwrap());
+    let [f] = facts.as_slice() else {
+        panic!("{facts:?}")
+    };
+    assert_eq!(
+        (f.author.clone(), f.due),
+        (Actor::Host, Some(T0 + 2 * 3_600_000))
+    );
+    // Not due yet: nothing happens.
+    assert!(e.agent.tick(false).await.unwrap().is_none());
+    assert_eq!(e.fake.bodies().len(), 2);
+
+    // Due: the host takes a turn, posts, the members answer, and the host reports.
+    e.clock.advance(3 * 3_600_000);
+    e.fake.push([
+        call(
+            "post",
+            json!({"channel": g.to_string(), "text": "How is the party going?"}),
+        ),
+        say("I asked the group."),
+        say("Ann: the cake is ready."),
+        say("Bo: the gifts are bought."),
+        say("They say the cake is ready and the gifts are bought."),
+    ]);
+    e.agent.tick(false).await.unwrap();
+    let in_group = texts(&e, g);
+    assert_eq!(in_group[0].0, api::types::Author::Host, "{in_group:?}");
+    assert_eq!(in_group[0].1, "How is the party going?");
+    assert_eq!(in_group.len(), 3, "{in_group:?}");
+    let said: Vec<String> = host_texts(&e).into_iter().map(|(_, t)| t).collect();
+    assert_eq!(
+        said.last().map(String::as_str),
+        Some("They say the cake is ready and the gifts are bought.")
+    );
+    assert!(said.contains(&"I asked the group.".to_owned()), "{said:?}");
+    let report = last_entry(&e);
+    assert!(report.contains("the cake is ready"), "{report}");
+    // Acted on once.
+    let before = e.fake.bodies().len();
+    e.clock.advance(60_000);
+    e.agent.tick(false).await.unwrap();
+    assert_eq!(e.fake.bodies().len(), before);
+}
+
+#[tokio::test]
+async fn the_host_posts_only_into_a_group_it_is_in() {
+    let e = offset_env();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([
+        call("post", json!({"channel": g.to_string(), "text": "hi"})),
+        say("I cannot."),
+    ]);
+    e.agent.send(host, "tell the group hi", None).await.unwrap();
+    assert!(log_bytes(&e.agent, host).contains("not a member of the group"));
+    assert!(texts(&e, g).is_empty());
+}
+
+#[tokio::test]
+async fn a_group_is_told_whether_the_host_is_there_and_a_find_names_it() {
+    use agent::Event;
+    use api::views::ToolAction;
+    let e = offset_env();
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake.push([
+        call("ask_host", json!({"find": ["Hostess"]})),
+        say("Shall we ask Hostess?"),
+    ]);
+    e.agent
+        .send(g, "ann, can the host help?", None)
+        .await
+        .unwrap();
+    let log = log_bytes(&e.agent, g);
+    assert!(log.contains("Hostess is not in this group."), "{log}");
+    let invited: Vec<_> = e
+        .sink
+        .take()
+        .into_iter()
+        .filter_map(|ev| match ev {
+            Event::ToolCalled(t) => Some(t.action),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        invited.iter().any(|a| matches!(
+            a,
+            ToolAction::InviteToGroup { persons, .. }
+                if persons.iter().any(|x| x.id.0 == api::types::HOST_MEMBER)
+        )),
+        "{invited:?}"
+    );
+
+    let there = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.agent
+        .with_world(|w| channel::add_participant(w, there, &Actor::Host).unwrap());
+    e.fake.push([say("Ann here.")]);
+    e.agent.send(there, "ann, hello", None).await.unwrap();
+    assert!(log_bytes(&e.agent, there).contains("Hostess is in this group."));
 }

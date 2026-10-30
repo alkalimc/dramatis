@@ -138,6 +138,39 @@ pub fn civil_from_days(z: i64) -> Date {
     Date { year, month, day }
 }
 
+/// A day of the year as a model writes it: `MM-DD`, or a full `YYYY-MM-DD` of which only the
+/// month and day count.
+pub fn parse_day(s: &str) -> Option<MonthDay> {
+    let parts: Vec<&str> = s.trim().split('-').collect();
+    let (m, d) = match parts[..] {
+        [m, d] | [_, m, d] => (m, d),
+        _ => return None,
+    };
+    let (m, d): (u8, u8) = (m.parse().ok()?, d.parse().ok()?);
+    MonthDay::parse(&format!("{m:02}-{d:02}"))
+}
+
+/// A due time written in the calendar the model sees (the in-world year) or in the real
+/// one, as the real-calendar text [`parse_due`] reads. The year is read as in-world when it
+/// lies nearer the in-world year of `now` than the real one, so an unambiguous real year is
+/// accepted too; a tie, and an offset of zero, leave the text as written.
+pub fn to_real_calendar(s: &str, now: Now, year_offset: i32) -> String {
+    let s = s.trim();
+    let Some(year) = s.get(..4).and_then(|y| digits::<i32>(y, 4)) else {
+        return s.to_owned();
+    };
+    let real = now.local_date().year;
+    if year_offset == 0 || (year - (real - year_offset)).abs() > (year - real).abs() {
+        return s.to_owned();
+    }
+    format!("{:04}{}", year + year_offset, &s[4..])
+}
+
+/// [`parse_due`] for a time in the model's calendar: see [`to_real_calendar`].
+pub fn parse_due_in_world(s: &str, now: Now, year_offset: i32) -> Option<i64> {
+    parse_due(&to_real_calendar(s, now, year_offset), now)
+}
+
 /// A due time as a model writes it: ISO 8601 `YYYY-MM-DD` (local midnight), or a
 /// date-time `YYYY-MM-DDTHH:MM[:SS]` with an optional `Z` / `±HH:MM` (local when absent).
 /// A space may stand for the `T`. `None` when it is not one of those.
@@ -202,6 +235,38 @@ fn digits<T: std::str::FromStr>(s: &str, len: usize) -> Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_due_in_the_in_world_calendar_lands_in_the_real_one() {
+        // 2026-10-30 13:00 at UTC+8 is the in-world 1103-10-30 with an offset of 923.
+        let now = Now::new(1_793_336_400_000, 480);
+        assert_eq!(now.local_date().year, 2026);
+        let real = parse_due("2026-10-30T18:00", now).unwrap();
+        assert_eq!(parse_due_in_world("1103-10-30T18:00", now, 923), Some(real));
+        // A real-calendar year is unambiguous and accepted as it is.
+        assert_eq!(parse_due_in_world("2026-10-30T18:00", now, 923), Some(real));
+        assert_eq!(
+            parse_due_in_world("1103-10-30", now, 923),
+            parse_due("2026-10-30", now)
+        );
+        // No offset: nothing moves. Prose stays unreadable.
+        assert_eq!(parse_due_in_world("2026-10-30T18:00", now, 0), Some(real));
+        assert_eq!(parse_due_in_world("tomorrow", now, 923), None);
+        assert_eq!(
+            to_real_calendar("1104-01-02 08:00", now, 923),
+            "2027-01-02 08:00"
+        );
+    }
+
+    #[test]
+    fn a_day_reads_with_or_without_a_year() {
+        let md = |m, d| Some(MonthDay { month: m, day: d });
+        assert_eq!(parse_day("10-30"), md(10, 30));
+        assert_eq!(parse_day("1103-10-30"), md(10, 30));
+        assert_eq!(parse_day(" 3-7 "), md(3, 7));
+        assert_eq!(parse_day("13-01"), None);
+        assert_eq!(parse_day("today"), None);
+    }
 
     #[test]
     fn civil_round_trip() {

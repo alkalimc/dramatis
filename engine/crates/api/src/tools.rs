@@ -130,7 +130,8 @@ pub struct WrapupFact {
     pub kind: WrapupKind,
     /// One short sentence.
     pub text: String,
-    /// For a commitment: when it is due, ISO 8601 date or date-time.
+    /// For a commitment: when it is due, ISO 8601 date or date-time, in the calendar the
+    /// context line shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due: Option<String>,
 }
@@ -246,19 +247,47 @@ pub struct HostRemember {
 #[serde(deny_unknown_fields)]
 pub struct ListChannels {}
 
-/// Set a reminder for the user: a promise with a due date. When it falls due the person
-/// named brings it up as their opening, so a person is required. Only when the user asks.
-/// At most twenty are pending at once.
+/// Set a reminder for the user: a promise with a due date. With a person, that person
+/// brings it up as their opening when it falls due. Without one the reminder is yours:
+/// when it falls due you take a turn, do what it says and tell the user. Only when the
+/// user asks. At most twenty are pending at once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Promise {
     /// What is promised, as one short sentence.
     pub text: String,
-    /// When it is due: an ISO 8601 date or date-time, for example 2026-12-24 or
-    /// 2026-12-24T18:00.
+    /// When it is due: an ISO 8601 date or date-time in the calendar the context line
+    /// shows, for example 2026-12-24 or 2026-12-24T18:00.
     pub due: String,
-    /// Roster id of the person who brings it up when it is due.
-    pub person: String,
+    /// Roster id of the person who brings it up when it is due. Leave out for a reminder
+    /// that is yours to act on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<String>,
+}
+
+/// Say one thing in a group conversation you are a member of, by the id `list_channels`
+/// shows. It appears there as your message and the members answer. Only when the user
+/// asked for it or a reminder of yours calls for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Post {
+    /// The group id, as listed.
+    pub channel: String,
+    /// What you say there, as one short message.
+    pub text: String,
+    /// Whether you get a turn to tell the user what the members answered. Defaults to yes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_back: Option<bool>,
+}
+
+/// Who has a birthday on a day, from the roster. Search cannot answer this.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Birthdays {
+    /// The day, as month and day (MM-DD) or a full date in the calendar the context line
+    /// shows. Leave out for today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
 }
 
 /// Read the last few lines of one conversation, by the id `list_channels` shows. No
@@ -297,6 +326,8 @@ pub enum HostCall {
     ListChannels(ListChannels),
     Promise(Promise),
     Recent(Recent),
+    Post(Post),
+    Birthdays(Birthdays),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -348,6 +379,8 @@ impl HostCall {
             "list_channels" => Self::ListChannels(args(name, raw)?),
             "promise" => Self::Promise(args(name, raw)?),
             "recent" => Self::Recent(args(name, raw)?),
+            "post" => Self::Post(args(name, raw)?),
+            "birthdays" => Self::Birthdays(args(name, raw)?),
             _ => return Err(CallError::Unknown(name.to_owned())),
         })
     }
@@ -451,6 +484,8 @@ pub fn host_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<ListChannels>("tool.host", "list_channels", overrides),
         spec::<Promise>("tool.host", "promise", overrides),
         spec::<Recent>("tool.host", "recent", overrides),
+        spec::<Post>("tool.host", "post", overrides),
+        spec::<Birthdays>("tool.host", "birthdays", overrides),
     ]
 }
 

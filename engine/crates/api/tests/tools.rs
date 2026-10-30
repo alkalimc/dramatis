@@ -82,7 +82,9 @@ fn every_parsed_name_is_offered() {
             "remember",
             "list_channels",
             "promise",
-            "recent"
+            "recent",
+            "post",
+            "birthdays"
         ]
     );
     for name in &shared {

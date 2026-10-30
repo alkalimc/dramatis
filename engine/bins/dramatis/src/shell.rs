@@ -403,7 +403,7 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     sync_dock(&handle);
 
     // The app keeps running with the window closed: conversations that went idle are
-    // wrapped up and due commitments may open, without anyone looking.
+    // wrapped up, due commitments and the day's seeds may open, without anyone looking.
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(TICK).await;
@@ -419,7 +419,11 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let shown = handle
                         .get_webview_window("main")
                         .is_some_and(|w| w.is_visible().unwrap_or(false));
-                    bridge.tick(shown).await;
+                    // In the tray the user is still reachable through a notification, so
+                    // persons may come with the window closed; the quota bands, the daily
+                    // limits and the quiet hours apply as they do with it open.
+                    let notifiable = engine.may_notify().unwrap_or(false);
+                    bridge.tick(presence::reachable(shown, notifiable)).await;
                 }
             }
         }

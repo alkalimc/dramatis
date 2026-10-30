@@ -28,6 +28,13 @@ pub fn unattended(window_visible: bool, window_focused: bool) -> bool {
     !(window_visible && window_focused)
 }
 
+/// Whether persons may come to the user on the scheduled step: with the window shown, or
+/// hidden while a notification could still reach the user. Hidden with notifications off or
+/// in quiet hours nobody would learn of an opening, so no call is spent on one.
+pub fn reachable(window_visible: bool, may_notify: bool) -> bool {
+    window_visible || may_notify
+}
+
 /// What a notification says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arrival {
@@ -143,6 +150,13 @@ mod tests {
     fn the_dock_follows_the_window() {
         assert_eq!(dock_for(true), Dock::Shown);
         assert_eq!(dock_for(false), Dock::Hidden);
+    }
+
+    #[test]
+    fn a_hidden_window_is_reachable_only_through_notifications() {
+        assert!(reachable(true, false));
+        assert!(reachable(false, true));
+        assert!(!reachable(false, false));
     }
 
     #[test]

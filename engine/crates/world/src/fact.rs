@@ -427,11 +427,11 @@ pub fn due_commitments(conn: &Connection, now: i64) -> Result<Vec<Fact>> {
 }
 
 /// Promises the user has had set that are not yet brought up: commitments authored as the
-/// user (a person's own come from a wrap-up and are not counted).
+/// user or the host (a person's own come from a wrap-up and are not counted).
 pub fn pending_promises(conn: &Connection) -> Result<usize> {
     Ok(conn.query_row(
         "SELECT count(*) FROM fact
-         WHERE kind = 'commitment' AND author = 'user' AND retracted = 0 AND delivered = 0",
+         WHERE kind = 'commitment' AND author IN ('user', 'host') AND retracted = 0 AND delivered = 0",
         [],
         |r| r.get(0),
     )?)

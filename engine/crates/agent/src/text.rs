@@ -20,6 +20,14 @@ const DEFAULTS: &[(&str, &str)] = &[
         "The quota for this period is used up until {when}. The archive stays available.",
     ),
     (
+        "host.reminder_failed",
+        "A reminder of mine fell due and I could not act on it: {text}",
+    ),
+    (
+        "host.reminder_done",
+        "A reminder of mine fell due, and I have dealt with it: {text}",
+    ),
+    (
         "host.rate_limited",
         "The language model service is rate limited right now. Your message is kept; \
          send it again later.",
@@ -73,7 +81,8 @@ const DEFAULTS: &[(&str, &str)] = &[
          only within this gathering. Other chats, groups and the host are out of reach \
          except through the means given here, and so are removing someone from a group, \
          changing a setting or taking {user} somewhere; what has no means is offered or left \
-         to {user}, never reported as done.",
+         to {user}, never reported as done. The host answers for itself alone: a person never \
+         voices the host or makes up what it would say.",
     ),
     (
         "harness.rules.host",
@@ -236,7 +245,9 @@ const DEFAULTS: &[(&str, &str)] = &[
          character. Give only the wrap-up: write what is worth remembering as short \
          memories, such as what {user} told you of their own life, what was decided or \
          agreed, and what passed between you, even when small; anything either of you said \
-         you would do becomes a promise with its date. Write none only if nothing but \
+         you would do, and can do within a talk with {user}, becomes a promise with its \
+         date, in the calendar the context line shows. Going elsewhere, asking others or \
+         checking other chats is not something a person can promise. Write none only if nothing but \
          greetings were exchanged. Use the wrapup call if it is available; otherwise reply \
          with just the JSON object the schema describes.",
     ),
@@ -246,7 +257,9 @@ const DEFAULTS: &[(&str, &str)] = &[
          character. Give only the wrap-up: write what is worth remembering as short \
          memories, such as what {user} told you of their own life, what was decided or \
          agreed, and what passed between you, even when small; anything either of you said \
-         you would do becomes a promise with its date. Write none only if nothing but \
+         you would do, and can do within a talk with {user}, becomes a promise with its \
+         date, in the calendar the context line shows. Going elsewhere, asking others or \
+         checking other chats is not something a person can promise. Write none only if nothing but \
          greetings were exchanged. Add a summary of the conversation so far. Use the \
          wrapup call if it is available; otherwise reply with just the JSON object the \
          schema describes.",
@@ -354,8 +367,16 @@ const DEFAULTS: &[(&str, &str)] = &[
         "report answers a request {user} delegated with ask, and there is none now. Write the reply as ordinary speech.",
     ),
     (
-        "harness.error.promise_person",
-        "A reminder needs a person from the roster to bring it up.",
+        "harness.error.not_member",
+        "You are not a member of the group {detail}.",
+    ),
+    (
+        "harness.error.post_here",
+        "That is this conversation; write the message here as your reply.",
+    ),
+    (
+        "harness.error.date",
+        "Could not read the day {detail}. Use a month and day such as 12-24.",
     ),
     (
         "harness.error.due",
@@ -403,6 +424,51 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.promised",
         "Reminder set: {name} will bring it up when it is due ({due}).",
     ),
+    (
+        "harness.promised.own",
+        "Reminder set: you will take it up yourself when it is due ({due}).",
+    ),
+    (
+        "harness.posted",
+        "Posted in group {id}; the members answer there.",
+    ),
+    (
+        "harness.posted.report",
+        "Posted in group {id}; the members answer there, and you will get a turn to tell \
+         {user} what they said.",
+    ),
+    (
+        "harness.report_back",
+        "Group {id} answered what you posted:\n{lines}\nTell {user} briefly what they said.",
+    ),
+    ("harness.report_back.line", "- {name}: {text}"),
+    (
+        "harness.report_back.none",
+        "Nobody in group {id} answered what you posted. Tell {user} briefly.",
+    ),
+    (
+        "harness.reminder",
+        "A reminder you set for {user} has fallen due: {text}\nDo what it says with your own \
+         means, then tell {user} briefly what you did or found out. A message you post in a \
+         group gets answers there, and you will get a turn to tell {user} what they said.",
+    ),
+    ("harness.birthdays", "Birthdays on {date}:"),
+    (
+        "harness.birthdays.none",
+        "Nobody on the roster has a birthday on {date}.",
+    ),
+    (
+        "harness.host_here",
+        "{host} is in this group. It answers only when called by name, and only {host} \
+         voices what it says: nobody else writes its answers.",
+    ),
+    (
+        "harness.host_away",
+        "{host} is not in this group. What {host} would answer comes from {host} alone, so \
+         nobody here voices it or makes it up. To have {host} here, offer {user} {host} among \
+         the colleagues to bring in.",
+    ),
+    ("harness.offer_only", "Here is what I suggest."),
     (
         "harness.guide.terminal",
         "How {user} operates this place from the terminal, for explaining it. /help lists every command. Name the commands as written.",
@@ -482,7 +548,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.guide.limits",
-        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due. Removing someone from a group, renaming a group or deleting one is likewise {user}'s own, and you have no means for it.",
+        "Explain these as operations of this place, in its own words. {user} acts on them; you can only list choices and offer them, and never say you switched, opened or changed anything for {user}. Say only what your tools did: found people, made a group, asked someone, listed conversations. You have no queue and no way to chase anyone, so nothing is queued, chased or followed up; that is {user}'s to do, except a reminder you set with promise, which the person you name brings up when it falls due, or which you take up yourself. Removing someone from a group, renaming a group or deleting one is likewise {user}'s own, and you have no means for it.",
     ),
     (
         "harness.host.group",
@@ -492,7 +558,15 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.guide.promise",
-        "When {user} asks to be reminded of something, you can set a reminder with promise: give the text, the due date and the person who brings it up.",
+        "When {user} asks to be reminded of something, you can set a reminder with promise: give the text and the due date. With a person it is that person who brings it up; without one it is yours, and when it falls due you act on it and tell {user}.",
+    ),
+    (
+        "harness.guide.post",
+        "In a group you are a member of, you can say something with post, by the id list_channels shows; the members answer there and you can be given a turn to tell {user} what they said.",
+    ),
+    (
+        "harness.guide.birthdays",
+        "Who has a birthday on a day is answered by birthdays; a search cannot answer it.",
     ),
     (
         "harness.guide.recent",
