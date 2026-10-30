@@ -225,3 +225,37 @@ async fn one_picture_sent_twice_is_kept_until_both_messages_are_gone() {
         0
     );
 }
+
+#[tokio::test]
+async fn a_forwarded_message_keeps_its_picture_and_the_recipient_sees_it() {
+    let e = env(WireApi::Chat);
+    let ann = e.agent.open_direct(&p("ann")).unwrap();
+    e.fake.push([say("I see it.")]);
+    e.agent
+        .send(ann, "what is this?", Some(tiny()))
+        .await
+        .unwrap();
+    let mine = e.agent.history(ann, None, 5).unwrap().remove(0);
+    let id = world::MessageId(mine.id.0.parse().unwrap());
+
+    // To a person: the copy carries the picture and the model gets it.
+    let (to, posted) = e
+        .agent
+        .forward(id, &agent::Forward::Person(p("bo")))
+        .unwrap();
+    e.fake.push([say("A fine picture.")]);
+    e.agent.respond(posted.unwrap()).await.unwrap();
+    let copy = e.agent.history(to, None, 5).unwrap().remove(0);
+    assert!(copy.attachment.is_some() && copy.forwarded_from == Some(api::types::Author::User));
+    let body = String::from_utf8(e.fake.bodies().pop().unwrap()).unwrap();
+    assert!(
+        body.contains(TINY),
+        "the picture reaches the recipient's model"
+    );
+
+    // To the favorites: kept with the picture, as the user wrote it.
+    let (fav, _) = e.agent.forward(id, &agent::Forward::Favorites).unwrap();
+    let kept = e.agent.history(fav, None, 5).unwrap().remove(0);
+    assert!(kept.attachment.is_some());
+    assert_eq!(kept.author, api::types::Author::User);
+}

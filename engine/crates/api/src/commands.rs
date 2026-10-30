@@ -147,8 +147,16 @@ commands! {
     fn open_direct(person: PersonId) -> ChannelId;
     /// The host's channel.
     fn host_channel() -> ChannelId;
-    /// Append a user turn. The reply streams back as events.
-    fn send_message(channel: ChannelId, text: String, image: Option<ImagePart>) -> MessageId;
+    /// Append a user turn. The reply streams back as events. `reply_to` is an earlier
+    /// message of the same channel that this one answers (`Invalid` for another channel's);
+    /// the model is told what it quotes. In the favorites it is a note: stored, nobody
+    /// answers, and no endpoint is needed.
+    fn send_message(
+        channel: ChannelId,
+        text: String,
+        image: Option<ImagePart>,
+        reply_to: Option<MessageId>,
+    ) -> MessageId;
     /// End the channel's conversation now: the next message starts a new one, and what is
     /// worth keeping from this one is written as facts (`WorldChanged`). Returns at once;
     /// idle conversations are wrapped up without being asked.
@@ -159,8 +167,15 @@ commands! {
     /// while a reply is being written in the channel, and for a message that is not the
     /// user's. `Rewound` follows.
     fn rewind(channel: ChannelId, message: MessageId) -> String;
-    /// Pass a quoted excerpt to someone else; their answer lands in their direct channel.
-    fn relay(excerpt: String, from: MessageId, to: PersonId) -> ChannelId;
+    /// Forward a message, with its picture, to a person, the host or the favorites. To a
+    /// person or the host it lands in their direct channel as a forwarded copy and they
+    /// answer it as they would a message; to the favorites it is kept as its original
+    /// author wrote it and nobody answers. Returns the channel it landed in.
+    fn forward(message: MessageId, to: ForwardTo) -> ChannelId;
+    /// The user's favorites channel, created on first use.
+    fn favorites_channel() -> ChannelId;
+    /// Remove one message from the favorites; `Invalid` for a message anywhere else.
+    fn delete_saved(message: MessageId) -> ();
     /// Everything before this message has been seen.
     fn mark_read(channel: ChannelId, up_to: MessageId) -> ();
     fn create_group(members: Vec<PersonId>, topic: Option<String>) -> ChannelId;
@@ -190,6 +205,10 @@ commands! {
     fn remove_member(channel: ChannelId, person: PersonId) -> ();
     /// Title a channel. `None` or blank returns to the derived title.
     fn rename_channel(channel: ChannelId, name: Option<String>) -> ();
+    /// Describe a group (its `topic`). `None` or blank clears it. A changed description
+    /// leaves a service line in the group (no model call). `Invalid` for a channel that is
+    /// not a group.
+    fn set_topic(channel: ChannelId, topic: Option<String>) -> ();
     /// Set (or, with `None`, clear) a channel's picture. Returns the stored file.
     fn set_channel_avatar(channel: ChannelId, image: Option<ImagePart>) -> Option<MediaFile>;
     /// Move a channel out of or back into the main list. The host's channel cannot be

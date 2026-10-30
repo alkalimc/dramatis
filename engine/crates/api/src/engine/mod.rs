@@ -666,8 +666,9 @@ impl Api for Engine {
         channel: ChannelId,
         text: String,
         image: Option<ImagePart>,
+        reply_to: Option<MessageId>,
     ) -> ApiResult<MessageId> {
-        self.send_message_impl(channel, text, image).await
+        self.send_message_impl(channel, text, image, reply_to).await
     }
     async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String> {
         self.rewind_impl(channel, message).await
@@ -676,8 +677,14 @@ impl Api for Engine {
     async fn wrapup(&self, channel: ChannelId) -> ApiResult<()> {
         self.wrapup_impl(channel).await
     }
-    async fn relay(&self, excerpt: String, from: MessageId, to: PersonId) -> ApiResult<ChannelId> {
-        self.relay_impl(excerpt, from, to).await
+    async fn forward(&self, message: MessageId, to: ForwardTo) -> ApiResult<ChannelId> {
+        self.forward_impl(message, to).await
+    }
+    async fn favorites_channel(&self) -> ApiResult<ChannelId> {
+        self.favorites_channel_impl()
+    }
+    async fn delete_saved(&self, message: MessageId) -> ApiResult<()> {
+        self.delete_saved_impl(&message)
     }
     async fn mark_read(&self, channel: ChannelId, up_to: MessageId) -> ApiResult<()> {
         self.mark_read_impl(&channel, &up_to)
@@ -719,6 +726,9 @@ impl Api for Engine {
     }
     async fn rename_channel(&self, channel: ChannelId, name: Option<String>) -> ApiResult<()> {
         self.rename_channel_impl(&channel, name)
+    }
+    async fn set_topic(&self, channel: ChannelId, topic: Option<String>) -> ApiResult<()> {
+        self.set_topic_impl(&channel, topic).await
     }
     async fn set_channel_avatar(
         &self,

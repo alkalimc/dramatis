@@ -24,7 +24,8 @@ test("group channel: members in the header, speakers in order, scene lines apart
   const title = await openGroup(user);
   const header = title.closest("header")!;
   // Named after its members, with how many are in it.
-  expect(within(header).getByText("3 members")).toBeDefined();
+  // The user is one of the members, and counts.
+  expect(within(header).getByText("4 members")).toBeDefined();
 
   const log = await screen.findByRole("log");
   await within(log).findByText("It did. I'm on nights this week.");
@@ -78,18 +79,36 @@ test("a group can be renamed in the info panel, and goes back to its members' na
   await waitFor(() => expect(screen.getAllByRole("heading", { name: TITLE }).length).toBeGreaterThan(0));
 });
 
-test("the info panel shows what a group is about unless that is already its name", async () => {
+test("the description is edited in the info panel, saved once, and cleared when emptied", async () => {
   const user = userEvent.setup();
   await openGroup(user);
   const panel = await openInfo(user);
-  // Named after its members: the topic is the description.
   expect(within(panel).getByText("About")).toBeDefined();
-  await user.click(within(panel).getByRole("button", { name: "Rename" }));
-  await user.type(within(panel).getByRole("textbox", { name: "Rename" }), "Ward rota");
+  expect(within(panel).getByText("Ward rota")).toBeDefined();
+  await user.click(within(panel).getByRole("button", { name: "Edit the description" }));
+  const box = within(panel).getByRole("textbox", { name: "Edit the description" });
+  await user.clear(box);
+  await user.type(box, "Who covers the nights");
   await user.click(within(panel).getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(screen.getAllByRole("heading", { name: "Ward rota" }).length).toBeGreaterThan(0));
-  // Named by its topic: said once, as the title.
-  expect(within(panel).queryByText("About")).toBeNull();
+  await waitFor(() => expect(within(panel).getByText("Who covers the nights")).toBeDefined());
+  // The group says so, as a quiet line.
+  expect(await within(await screen.findByRole("log")).findByText("The description is now: Who covers the nights")).toBeDefined();
+  await user.click(within(panel).getByRole("button", { name: "Edit the description" }));
+  await user.clear(within(panel).getByRole("textbox", { name: "Edit the description" }));
+  await user.click(within(panel).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(within(panel).getByText("No description yet.")).toBeDefined());
+});
+
+test("the member list starts with the user, who cannot be taken out", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  const members = within(panel).getAllByRole("listitem");
+  expect(members[0].textContent).toContain("Rowan");
+  expect(members[0].textContent).toContain("You");
+  expect(within(members[0]).queryByRole("button", { name: /out/ })).toBeNull();
+  expect(members[1].textContent).toContain("Oren Lark");
+  expect(within(members[1]).getByRole("button", { name: "Take Oren Lark out" })).toBeDefined();
 });
 
 test("enabled group: one person answers and at most one more adds a line like a normal message", async () => {
@@ -172,10 +191,10 @@ test("a member is taken out after asking, the title follows, and the group says 
   const panel = await openInfo(user);
   const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
   await user.click(within(panel).getByRole("button", { name: "Take Tess Arden out" }));
-  expect(within(panel).getByText("3 members")).toBeDefined();
+  expect(within(panel).getByText("4 members")).toBeDefined();
   await user.click(within(panel).getByRole("button", { name: "Take Tess Arden out" }));
   expect(confirm).toHaveBeenCalledTimes(2);
-  await waitFor(() => expect(within(panel).getByText("2 members")).toBeDefined());
+  await waitFor(() => expect(within(panel).getByText("3 members")).toBeDefined());
   // No custom name: the title is the remaining members' names, in the list and the header.
   await waitFor(() => expect(screen.getAllByRole("heading", { name: "Rowan, Oren Lark, Mira Vale" }).length).toBeGreaterThan(0));
   expect(await within(await screen.findByRole("log")).findByText("Tess Arden leaves the conversation.")).toBeDefined();
@@ -194,7 +213,7 @@ test("people are added from a picker that leaves out the members, and the title 
   await user.clear(search);
   await user.type(search, "Juno");
   await user.click(await within(dialog).findByRole("button", { name: "Juno Reyes" }));
-  await waitFor(() => expect(within(panel).getByText("4 members")).toBeDefined());
+  await waitFor(() => expect(within(panel).getByText("5 members")).toBeDefined());
   await waitFor(() => expect(screen.getAllByRole("heading", { name: "Rowan, Oren Lark (5 in all)" }).length).toBeGreaterThan(0));
   expect(await within(await screen.findByRole("log")).findByText("Juno Reyes joins the conversation.")).toBeDefined();
 });
@@ -206,7 +225,7 @@ test("a colleague's invitation is a button under the message, and goes once the 
   const log = await screen.findByRole("log");
   const invite = await within(log).findByRole("button", { name: "Invite Juno Reyes to join" });
   await user.click(invite);
-  await waitFor(() => expect(within(panel).getByText("4 members")).toBeDefined());
+  await waitFor(() => expect(within(panel).getByText("5 members")).toBeDefined());
   await waitFor(() => expect(within(log).queryByRole("button", { name: "Invite Juno Reyes to join" })).toBeNull());
 });
 

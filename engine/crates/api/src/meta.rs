@@ -11,8 +11,11 @@ pub struct MessageMeta {
     pub cites: Vec<world::Citation>,
     /// How sure retrieval was about the material the reply had.
     pub confidence: Option<index::Level>,
-    /// A retelling of something said elsewhere.
-    pub relayed: bool,
+    /// Who wrote the original of a forwarded message (an actor id).
+    pub forwarded_from: Option<String>,
+    /// When the original of a message kept in the favorites was written; the message's own
+    /// time is when it was saved.
+    pub original_at: Option<i64>,
     /// A context line written by the harness, shown as a service line.
     pub service: bool,
     /// Hash of the picture the user attached, which lives in the save (`world::picture`).
@@ -75,6 +78,33 @@ pub fn picture_of(
     }
 }
 
+/// What a message shows beyond its own text: who a forwarded copy came from, and the
+/// message a reply quotes (gone when that message was taken back).
+pub fn links_of(
+    conn: &rusqlite::Connection,
+    m: &world::message::Message,
+    meta: &MessageMeta,
+) -> (Option<crate::types::Author>, Option<crate::views::Quote>) {
+    let forwarded = meta
+        .forwarded_from
+        .as_deref()
+        .map(|a| crate::convert::author(&world::Actor::parse(a)));
+    let quote = m
+        .reply_to
+        .and_then(|id| world::message::get(conn, id).ok())
+        .map(|o| {
+            let text = crate::cites::strip(&o.text);
+            let o_meta = MessageMeta::of(o.attachment.as_ref());
+            crate::views::Quote {
+                id: crate::convert::message_id(o.id),
+                author: crate::convert::author(&o.author),
+                text: text.chars().take(crate::views::QUOTE_CHARS).collect(),
+                has_picture: o_meta.picture.is_some() || o_meta.picture_lost,
+            }
+        });
+    (forwarded, quote)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,7 +118,7 @@ mod tests {
         let m = MessageMeta::of(Some(&v));
         assert_eq!(m.cites[0].chunk_id, "dialogue:x");
         assert_eq!(m.confidence, Some(index::Level::Low));
-        assert!(!m.relayed);
+        assert!(m.forwarded_from.is_none());
         assert!(MessageMeta::of(Some(&serde_json::json!("junk"))).is_empty());
         assert!(MessageMeta::of(None).is_empty());
     }

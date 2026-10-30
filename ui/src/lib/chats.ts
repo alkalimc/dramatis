@@ -22,6 +22,7 @@ export function groupTitle(c: ChannelSummary, t: T, user: string): string {
 /** What a conversation is called in lists and headers. */
 export function channelTitle(c: ChannelSummary, t: T, user: string): string {
   if (c.kind === "host") return t("host.name");
+  if (c.kind === "favorites") return t("favorites.title");
   if (c.kind === "direct") return c.participants[0]?.name ?? t("person.unknown");
   return groupTitle(c, t, user);
 }

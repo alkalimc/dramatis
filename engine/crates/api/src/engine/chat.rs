@@ -34,6 +34,7 @@ impl Engine {
     ) -> Message {
         let meta = MessageMeta::of(m.attachment.as_ref());
         let (attachment, picture_lost) = crate::meta::picture_of(w, m);
+        let (forwarded_from, reply) = crate::meta::links_of(w, m, &meta);
         Message {
             id: convert::message_id(m.id),
             channel: convert::channel_id(m.channel),
@@ -48,7 +49,9 @@ impl Engine {
             picture_lost,
             cites: meta.cites.iter().map(convert::citation).collect(),
             confidence: meta.confidence.map(convert::confidence),
-            relayed: meta.relayed,
+            forwarded_from,
+            reply,
+            original_at: meta.original_at.map(|ms| convert::ts(ms, offset)),
             service: meta.service,
             at: convert::ts(m.at, offset),
         }
@@ -60,10 +63,13 @@ impl Engine {
         let offset = self.now().offset_min;
         let w = self.w();
         let mut out = Vec::new();
+        // The favorites are pinned in the list from the start, so they exist from the first
+        // look.
+        channel::favorites(&w).map_err(world_err)?;
         for ch in channel::list(&w).map_err(world_err)? {
             let last = message::last(&w, ch.id).map_err(world_err)?;
             let host = ch.is_host_channel();
-            if last.is_none() && !host {
+            if last.is_none() && !host && !ch.is_favorites() {
                 continue;
             }
             let mode = match (&ch.kind, ch.person()) {
@@ -77,6 +83,7 @@ impl Engine {
                     (true, _) => ChannelKind::Host,
                     (_, world::ChannelKind::Direct) => ChannelKind::Direct,
                     (_, world::ChannelKind::Group) => ChannelKind::Group,
+                    (_, world::ChannelKind::Favorites) => ChannelKind::Favorites,
                 },
                 origin: convert::origin(ch.origin),
                 participants: ch
@@ -95,7 +102,11 @@ impl Engine {
                 archived: ch.archived,
                 mode: convert::mode(mode),
                 last_at: last.map(|m| convert::ts(m.at, offset)),
-                unread: message::unread_count(&w, ch.id, ch.read_up_to).map_err(world_err)?,
+                unread: if ch.is_favorites() {
+                    0
+                } else {
+                    message::unread_count(&w, ch.id, ch.read_up_to).map_err(world_err)?
+                },
             });
         }
         Ok(out)
@@ -136,28 +147,39 @@ impl Engine {
         ch: ChannelId,
         text: String,
         image: Option<ImagePart>,
+        reply_to: Option<MessageId>,
     ) -> ApiResult<MessageId> {
         if text.trim().is_empty() && image.is_none() {
             return Err(ApiError::Invalid {
                 field: "text".into(),
             });
         }
-        let found = {
-            let id = convert::world_channel(&ch)?;
-            channel::get(&self.w(), id).map_err(world_err)?
-        };
+        let id = convert::world_channel(&ch)?;
+        let found = channel::get(&self.w(), id).map_err(world_err)?;
         if !found.is_open() {
             return Err(ApiError::Invalid {
                 field: "channel".into(),
             });
         }
+        if let Some(r) = &reply_to {
+            let quoted = message::get(&self.w(), convert::world_message(r)?).map_err(world_err)?;
+            if quoted.channel != id {
+                return Err(ApiError::Invalid {
+                    field: "reply_to".into(),
+                });
+            }
+        }
         if let Some(p) = found.person() {
             self.require_available(&PersonId(p.0.clone()))?;
         }
-        if !self.has_chat() {
+        // A note in the favorites goes to no model.
+        if !self.has_chat() && !found.is_favorites() {
             return Err(ApiError::NoEndpoint);
         }
-        self.ports.agent.send_message(ch, text, image).await
+        self.ports
+            .agent
+            .send_message(ch, text, image, reply_to)
+            .await
     }
 
     pub(crate) async fn wrapup_impl(&self, ch: ChannelId) -> ApiResult<()> {
@@ -173,23 +195,36 @@ impl Engine {
         self.ports.agent.rewind(ch, message).await
     }
 
-    pub(crate) async fn relay_impl(
-        &self,
-        excerpt: String,
-        from: MessageId,
-        to: PersonId,
-    ) -> ApiResult<ChannelId> {
-        if excerpt.trim().is_empty() {
+    pub(crate) async fn forward_impl(&self, msg: MessageId, to: ForwardTo) -> ApiResult<ChannelId> {
+        let stored = message::get(&self.w(), convert::world_message(&msg)?).map_err(world_err)?;
+        let meta = MessageMeta::of(stored.attachment.as_ref());
+        let has_picture = meta.picture.is_some();
+        // A context line of the harness is no one's words.
+        if meta.service || (stored.text.trim().is_empty() && !has_picture) {
             return Err(ApiError::Invalid {
-                field: "excerpt".into(),
+                field: "message".into(),
             });
         }
-        message::get(&self.w(), convert::world_message(&from)?).map_err(world_err)?;
-        self.require_available(&to)?;
-        if !self.has_chat() {
-            return Err(ApiError::NoEndpoint);
+        match &to {
+            ForwardTo::Person { id } => {
+                self.require_available(id)?;
+                if !self.has_chat() {
+                    return Err(ApiError::NoEndpoint);
+                }
+            }
+            ForwardTo::Host if !self.has_chat() => return Err(ApiError::NoEndpoint),
+            ForwardTo::Host | ForwardTo::Favorites => {}
         }
-        self.ports.agent.relay(excerpt, from, to).await
+        self.ports.agent.forward(msg, to).await
+    }
+
+    pub(crate) fn favorites_channel_impl(&self) -> ApiResult<ChannelId> {
+        let id = channel::favorites(&self.w()).map_err(world_err)?;
+        Ok(convert::channel_id(id))
+    }
+
+    pub(crate) fn delete_saved_impl(&self, msg: &MessageId) -> ApiResult<()> {
+        message::delete_saved(&self.w(), convert::world_message(msg)?).map_err(world_err)
     }
 
     pub(crate) fn mark_read_impl(&self, ch: &ChannelId, up_to: &MessageId) -> ApiResult<()> {

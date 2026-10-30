@@ -3,6 +3,7 @@ import type { ChannelSummary, PersonRef } from "../api";
 import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
 import { useApi, useStore } from "../store";
+import { Icon } from "./Icon";
 
 type Size = "s" | "m" | "l" | "xl";
 
@@ -87,6 +88,14 @@ function GroupAvatar({ channel, size }: { channel: ChannelSummary; size: Size })
 export function ChannelAvatar({ channel, size = "m" }: { channel: ChannelSummary; size?: Size }) {
   const t = useT();
   if (channel.kind === "host") return <Avatar person={{ id: HOST_ID, name: t("host.name") }} size={size} />;
+  // The favorites have a bookmark where others have a face.
+  if (channel.kind === "favorites") {
+    return (
+      <span className={`avatar avatar-${size} avatar-favorites`} aria-hidden="true">
+        <Icon name="bookmark" size={size === "s" ? 14 : size === "m" ? 20 : 26} />
+      </span>
+    );
+  }
   if (channel.kind === "direct" && channel.participants[0]) return <Avatar person={channel.participants[0]} size={size} />;
   return <GroupAvatar channel={channel} size={size} />;
 }

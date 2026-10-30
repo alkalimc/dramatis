@@ -138,7 +138,11 @@ export function reduce(s: State, a: Action): State {
         pendingActions: omit(s.pendingActions, m.id),
         // The user's own turn echoed back is not an answer.
         awaiting: m.author.kind === "user" ? s.awaiting : answered(s, m.channel),
-        unread: m.author.kind === "user" || m.channel === (s.channel ?? s.hostChannel) ? s.unread : { ...s.unread, [m.channel]: (s.unread[m.channel] ?? 0) + 1 },
+        // What was saved in the favorites is not news.
+        unread:
+          m.author.kind === "user" || m.channel === (s.channel ?? s.hostChannel) || s.channels.find((c) => c.id === m.channel)?.kind === "favorites"
+            ? s.unread
+            : { ...s.unread, [m.channel]: (s.unread[m.channel] ?? 0) + 1 },
       };
     }
     case "offerTaken": {
@@ -230,6 +234,7 @@ export function reduce(s: State, a: Action): State {
         streams,
         pendingActions: keep(s.pendingActions),
         sourcesOpen: keep(s.sourcesOpen),
+        replies: s.replies[channel] && gone.has(s.replies[channel].id) ? omit(s.replies, channel) : s.replies,
         awaiting: answered(s, channel),
         typing: omit(s.typing, channel),
         failures: omit(s.failures, channel),
@@ -240,6 +245,20 @@ export function reduce(s: State, a: Action): State {
       return { ...s, restore: a.restore };
     case "draft":
       return { ...s, drafts: a.text ? { ...s.drafts, [a.channel]: a.text } : omit(s.drafts, a.channel) };
+    case "reply":
+      return { ...s, replies: a.message ? { ...s.replies, [a.channel]: a.message } : omit(s.replies, a.channel) };
+    case "removed": {
+      const list = s.messages[a.channel];
+      if (!list) return s;
+      return {
+        ...s,
+        messages: { ...s.messages, [a.channel]: list.filter((m) => m.id !== a.message) },
+        replies: s.replies[a.channel]?.id === a.message ? omit(s.replies, a.channel) : s.replies,
+        sourcesOpen: omit(s.sourcesOpen, a.message),
+      };
+    }
+    case "forwarding":
+      return { ...s, forwarding: a.message };
     case "sources":
       return { ...s, sourcesOpen: s.sourcesOpen[a.message] ? omit(s.sourcesOpen, a.message) : { ...s.sourcesOpen, [a.message]: true } };
     case "awaiting":

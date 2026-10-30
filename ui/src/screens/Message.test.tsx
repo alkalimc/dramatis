@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Message } from "../api";
 import { renderWith } from "../test/render";
@@ -13,7 +13,7 @@ const base: Message = {
   at: new Date().toISOString(),
   actions: [],
   cites: [],
-  relayed: false,
+ 
   confidence: null,
   attachment: null,
   picture_lost: false,
@@ -329,4 +329,110 @@ test("a picture that is gone shows a placeholder instead of a broken image", () 
   expect(container.querySelector("img")).toBeNull();
   expect(screen.getByText("Picture unavailable")).toBeDefined();
   expect(screen.getByText("look at this")).toBeDefined();
+});
+
+const mira = { kind: "person", id: "mira" } as const;
+
+async function withHistory(channel: string, messages: Message[], names: Record<string, string> = { mira: "Mira" }) {
+  const r = renderWith(<ChannelView channel={channel} />);
+  await act(async () => {
+    r.store.dispatch({ type: "names", persons: Object.entries(names).map(([id, name]) => ({ id, name })) });
+    r.store.dispatch({ type: "history", channel, messages, older: false, done: true });
+  });
+  return r;
+}
+
+test("a reply shows an accent quote at the top of its bubble, and a click goes to the original", async () => {
+  const original: Message = { ...base, id: "m1", text: "*She nods.*\nThe tea needs cooler water." };
+  const answer: Message = { ...base, id: "m2", author: { kind: "user" }, text: "How cool?", reply: { id: "m1", author: mira, text: original.text, has_picture: false } };
+  const { container } = await withHistory("dm:mira", [original, answer]);
+  const quote = container.querySelector<HTMLButtonElement>("#m-m2 .quote")!;
+  // Author's name and the first spoken line, not the scene line; before the reply's own words.
+  expect(quote.querySelector(".quote-name")!.textContent).toBe("Mira");
+  expect(quote.querySelector(".quote-text")!.textContent).toBe("The tea needs cooler water.");
+  expect(quote.className).toMatch(/hue-\d/);
+  const bubble = quote.closest(".bubble")!;
+  expect(bubble.firstElementChild).toBe(quote);
+  expect(quote.compareDocumentPosition(bubble.querySelector(".speech")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await userEvent.setup().click(quote);
+  expect(container.querySelector("#m-m1")!.classList.contains("flash")).toBe(true);
+});
+
+test("a quote of a picture says so when the original had no words", async () => {
+  const answer: Message = { ...base, id: "m2", author: { kind: "user" }, text: "Nice.", reply: { id: "m1", author: mira, text: "", has_picture: true } };
+  const { container } = await withHistory("dm:mira", [answer]);
+  expect(container.querySelector(".quote-text")!.textContent).toBe("Picture");
+});
+
+test("a forwarded copy names its original author above the words", async () => {
+  const copy: Message = { ...base, id: "m3", author: { kind: "user" }, text: "Keep to the lit streets.", forwarded_from: mira };
+  const { container } = await withHistory("dm:oren", [{ ...copy, channel: "dm:oren" }]);
+  const header = container.querySelector(".forwarded")!;
+  expect(header.textContent).toBe("Forwarded from Mira");
+  expect(header.compareDocumentPosition(container.querySelector(".speech")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("the context menu lists reply, copy, forward, send again for one's own, sources, in that order", async () => {
+  const user = userEvent.setup();
+  const cites: Message["cites"] = [{ page: "Ledger", revid: 1, span_from: 0, span_to: 5, chunk_id: "c-ledger-1" }];
+  const { container } = await withHistory("dm:mira", [
+    { ...base, id: "m1", text: "Hello.", cites },
+    { ...base, id: "m2", author: { kind: "user" }, text: "Mine." },
+  ]);
+  const labels = async (id: string) => {
+    await user.pointer({ keys: "[MouseRight]", target: container.querySelector(`#m-${id}`)! });
+    const menu = await screen.findByRole("menu", { name: "Actions for this message" });
+    const out = within(menu).getAllByRole("menuitem").map((i) => i.textContent);
+    await user.keyboard("{Escape}");
+    return out;
+  };
+  expect(await labels("m1")).toEqual(["Reply", "Copy text", "Forward", "Sources (1)"]);
+  expect(await labels("m2")).toEqual(["Reply", "Copy text", "Forward", "Send again"]);
+});
+
+test("Reply from the menu opens the reply bar and the focus goes to the box", async () => {
+  const user = userEvent.setup();
+  const { container, store } = await withHistory("dm:mira", [{ ...base, id: "m1", text: "Hello." }]);
+  await user.pointer({ keys: "[MouseRight]", target: container.querySelector("#m-m1")! });
+  await user.click(await screen.findByRole("menuitem", { name: "Reply" }));
+  expect(store.getState().replies["dm:mira"].id).toBe("m1");
+  expect(screen.getByRole("group", { name: "Replying to Mira" })).toBeDefined();
+  expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Message" }));
+});
+
+test("a focused message answers keys: R replies, F opens the forward picker, the menu key opens the menu", async () => {
+  const user = userEvent.setup();
+  const { container, store } = await withHistory("dm:mira", [{ ...base, id: "m1", text: "Hello." }]);
+  const article = container.querySelector<HTMLElement>("#m-m1")!;
+  article.focus();
+  await user.keyboard("f");
+  expect(store.getState().forwarding?.id).toBe("m1");
+  act(() => store.dispatch({ type: "forwarding", message: null }));
+  article.focus();
+  await user.keyboard("{ContextMenu}");
+  expect(await screen.findByRole("menu", { name: "Actions for this message" })).toBeDefined();
+  await user.keyboard("{Escape}");
+  article.focus();
+  await user.keyboard("r");
+  expect(store.getState().replies["dm:mira"].id).toBe("m1");
+});
+
+test("@name of a member is set apart in a group message, and only there", async () => {
+  const r = renderWith(<ChannelView channel="g-rota" />);
+  await act(() => r.actions.refreshChannels());
+  await act(async () => {
+    r.store.dispatch({
+      type: "history",
+      channel: "g-rota",
+      messages: [{ ...base, id: "m1", channel: "g-rota", author: { kind: "user" }, text: "@Oren Lark can you take nights? Not @Nobody." }],
+      older: false,
+      done: true,
+    });
+  });
+  const marks = [...r.container.querySelectorAll(".mention")].map((m) => m.textContent);
+  expect(marks).toEqual(["@Oren Lark"]);
+  r.unmount();
+
+  const direct = await withHistory("dm:mira", [{ ...base, id: "m2", author: { kind: "user" }, text: "@Mira how are you?" }]);
+  expect(direct.container.querySelector(".mention")).toBeNull();
 });

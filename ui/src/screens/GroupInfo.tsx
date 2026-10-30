@@ -4,7 +4,7 @@ import { useT, useUserName } from "../i18n";
 import { groupTitle } from "../lib/chats";
 import { readAvatar } from "../lib/image";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { Avatar, ChannelAvatar, HOST_ID } from "../ui/Avatar";
+import { Avatar, ChannelAvatar, HOST_ID, UserAvatar } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { ModeSwitch } from "../ui/ModeSwitch";
@@ -25,6 +25,9 @@ export function GroupInfo({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
+  const [describing, setDescribing] = useState(false);
+  const [about, setAbout] = useState("");
+  const aboutId = useId();
 
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
   const modeOf = new Map((roster?.groups ?? []).flatMap((g) => g.rows).map((r) => [r.person.id, r.mode] as const));
@@ -35,6 +38,12 @@ export function GroupInfo({ id }: { id: string }) {
     setEditing(false);
     // Emptied: back to the names of the members.
     await actions.rename(id, draft.trim() || null);
+  };
+  const saveAbout = async () => {
+    setDescribing(false);
+    // Blank clears it.
+    if (about.trim() === (group.topic ?? "").trim()) return;
+    await actions.setTopic(id, about.trim() || null);
   };
   const put = async (p: PersonRef) => {
     if ((await actions.attempt(api.commands.addMembers(id, [p.id]))) === undefined) return;
@@ -81,7 +90,8 @@ export function GroupInfo({ id }: { id: string }) {
             </button>
           </h2>
         )}
-        <p className="muted">{t("group.members.count", { count: group.participants.length })}</p>
+        {/* The user is one of the members, and counts. */}
+        <p className="muted">{t("group.members.count", { count: group.participants.length + 1 })}</p>
         <PictureButtons onPick={async (f) => actions.setChannelAvatar(id, await readAvatar(f))} onClear={() => void actions.setChannelAvatar(id, null)} clearable={Boolean(group.avatar)} />
       </header>
 
@@ -90,17 +100,79 @@ export function GroupInfo({ id }: { id: string }) {
         <ModeSwitch kind="group" mode={group.mode} hints="all" label={t("mode.label.group")} onChange={(m) => actions.setMode({ kind: "channel", id }, m)} />
       </section>
 
-      {/* The topic a group was named after is the title already. */}
-      {group.topic && group.topic.trim() !== group.name?.trim() && (
-        <section className="info-section">
-          <h3>{t("group.description")}</h3>
+      <section className="info-section">
+        <h3>
+          {t("group.description")}{" "}
+          {!describing && (
+            <button
+              type="button"
+              className="round small"
+              aria-label={t("group.description.edit")}
+              title={t("group.description.edit")}
+              onClick={() => {
+                setAbout(group.topic ?? "");
+                setDescribing(true);
+              }}
+            >
+              <Icon name="pencil" size={16} />
+            </button>
+          )}
+        </h3>
+        {describing ? (
+          <form
+            className="about-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveAbout();
+            }}
+          >
+            <label htmlFor={aboutId} className="sr-only">
+              {t("group.description.edit")}
+            </label>
+            <textarea
+              id={aboutId}
+              rows={3}
+              autoFocus
+              value={about}
+              placeholder={t("group.description.placeholder")}
+              onChange={(e) => setAbout(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setDescribing(false);
+                } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void saveAbout();
+                }
+              }}
+            />
+            <p className="row end">
+              <button type="button" className="ghost" onClick={() => setDescribing(false)}>
+                {t("group.cancel")}
+              </button>
+              <button type="submit">{t("you.save")}</button>
+            </p>
+          </form>
+        ) : group.topic?.trim() ? (
           <p>{group.topic}</p>
-        </section>
-      )}
+        ) : (
+          <p className="muted">{t("group.description.empty")}</p>
+        )}
+      </section>
 
       <section className="info-section">
         <h3>{t("group.members")}</h3>
         <ul className="member-list">
+          {/* The user comes first and cannot be taken out. */}
+          <li>
+            <button type="button" className="member" onClick={() => dispatch({ type: "profile", mode: "view" })}>
+              <UserAvatar size="m" />
+              <span className="member-text">
+                <span>{me}</span>
+                <span className="muted small">{t("group.members.you")}</span>
+              </span>
+            </button>
+          </li>
           {group.participants.map((p) => (
             <li key={p.id}>
               <button type="button" className="member" onClick={() => dispatch({ type: "drawer", drawer: p.id === HOST_ID ? { kind: "host" } : { kind: "person", id: p.id } })}>

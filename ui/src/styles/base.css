@@ -353,9 +353,6 @@ legend {
   padding: 0 var(--s-2);
   font-weight: var(--fw);
 }
-.tag.relayed {
-  background: var(--line);
-}
 .tag.thin {
   color: var(--warn);
   border-color: var(--warn);

@@ -80,6 +80,9 @@ pub enum Working {
     Searching,
 }
 
+/// Most characters of a quoted message the terminal shows.
+const QUOTE_SHOWN: usize = 60;
+
 /// Most names a group label spells out before it counts the rest.
 const LABEL_NAMES: usize = 3;
 
@@ -546,6 +549,9 @@ pub struct Show {
     days: Mutex<BTreeMap<ChannelId, (i32, u8, u8)>>,
     /// Away mode, as the engine last said; the prompt shows it.
     away: AtomicBool,
+    /// The favorites channel: what is saved there is not news, so it is not printed as
+    /// it arrives.
+    favorites: Mutex<Option<ChannelId>>,
 }
 
 /// The calendar date in a timestamp's own offset (`2026-10-10T08:00:00+08:00`).
@@ -563,6 +569,11 @@ impl Show {
         self.away.load(Ordering::Relaxed)
     }
 
+    /// Do not print what arrives in the favorites.
+    pub fn mute_favorites(&self, channel: ChannelId) {
+        *self.favorites.lock().unwrap_or_else(|e| e.into_inner()) = Some(channel);
+    }
+
     pub fn set_away(&self, away: bool) {
         self.away.store(away, Ordering::Relaxed);
     }
@@ -570,6 +581,7 @@ impl Show {
     pub fn new(term: Arc<Term>) -> Self {
         Self {
             away: AtomicBool::new(false),
+            favorites: Mutex::new(None),
             term,
             bound: OnceLock::new(),
             state: Mutex::new(State::default()),
@@ -685,14 +697,41 @@ impl Show {
         (n > 0).then(|| names.say("cli.sources.count", &[("n", &n)]))
     }
 
+    /// The one line that says which message `m` answers: the author and the start of the
+    /// original, scene lines left out.
+    fn quote_line(&self, names: &Names, marker: &Marker, m: &Message) -> Option<String> {
+        let q = m.reply.as_ref()?;
+        let first = q
+            .text
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !api::cites::is_cite_line(l) && marker.inner(l).is_none())
+            .map(api::cites::strip)
+            .unwrap_or_default();
+        let snippet: String = if first.chars().count() > QUOTE_SHOWN {
+            format!("{}...", first.chars().take(QUOTE_SHOWN).collect::<String>())
+        } else {
+            first
+        };
+        let snippet = if snippet.is_empty() && q.has_picture {
+            names.text("cli.picture")
+        } else {
+            snippet
+        };
+        Some(names.say(
+            "cli.reply.quote",
+            &[("name", &names.author(&q.author)), ("text", &snippet)],
+        ))
+    }
+
     /// A stored message in full: name, text, tool lines, sources.
     pub fn whole(&self, m: &Message) -> String {
-        self.whole_dated(m, false)
+        self.whole_dated(m, false, None)
     }
 
     /// [`Self::whole`]; `first` puts the date line before it even when nothing was printed
     /// in the channel yet (the top of `/history`).
-    pub fn whole_dated(&self, m: &Message, first: bool) -> String {
+    pub fn whole_dated(&self, m: &Message, first: bool, number: Option<usize>) -> String {
         let Some(b) = self.bound.get() else {
             return String::new();
         };
@@ -706,13 +745,29 @@ impl Show {
             out.push_str(&style.dim(&format!("· {}", b.names.action_line(a))));
             out.push('\n');
         }
+        // A forwarded copy says whose words they were; a reply says what it answers.
+        if let Some(from) = &m.forwarded_from {
+            let line = b
+                .names
+                .say("cli.forwarded", &[("name", &b.names.author(from))]);
+            out.push_str(&style.dim(&line));
+            out.push('\n');
+        }
+        if let Some(line) = self.quote_line(&b.names, &b.marker, m) {
+            out.push_str(&style.dim(&line));
+            out.push('\n');
+        }
+        // The number `/reply` and `/forward` take, kept off the text itself.
+        let label = number.map_or_else(String::new, |n| style.dim(&format!("{n:>3} ")));
         let picture = m.attachment.is_some() || m.picture_lost;
         if !m.text.trim().is_empty() {
+            out.push_str(&label);
             out.push_str(&self.prefix(&b.names, &m.author));
             out.push_str(&render::message(&m.text, &b.marker, style));
         }
         if picture {
             if m.text.trim().is_empty() {
+                out.push_str(&label);
                 out.push_str(&self.prefix(&b.names, &m.author));
             }
             let marker = b.names.text(if m.attachment.is_some() {
@@ -812,7 +867,14 @@ impl Sink for Show {
             }
             Event::MessageAdded(a) => {
                 let m = a.message;
-                if m.author == Author::User {
+                if m.author == Author::User
+                    || self
+                        .favorites
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_ref()
+                        == Some(&m.channel)
+                {
                     return;
                 }
                 self.saw(&m);
@@ -820,6 +882,10 @@ impl Sink for Show {
                 self.close(&mut st);
                 st.named = None;
                 if streamed {
+                    // The quote is known only when the reply is whole: it follows the text.
+                    if let Some(line) = self.quote_line(names, &b.marker, &m) {
+                        self.term.note(&format!("  {line}"));
+                    }
                     if let Some(s) = self.sources(names, &m) {
                         self.term.note(&format!("  {s}"));
                     }

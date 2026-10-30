@@ -714,7 +714,12 @@ impl Agent {
             let mut held = String::new();
             let mut holding = true;
             // A group reply's trailing hand-off line, held back until it is known not to be.
-            let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), proposing);
+            let marks = assemble::closing_marks(
+                &self.corpus.wording,
+                turn.in_group(),
+                proposing,
+                matches!(turn.speaker, Actor::Person(_)),
+            );
             let mark_list = marks.list();
             let mut tail = String::new();
             while let Some(event) = events.next().await {
@@ -1132,6 +1137,25 @@ impl Agent {
         Ok(out)
     }
 
+    /// Mark the reply `id` as answering `target`, which a person named on a closing line.
+    /// Quoting what is not in this channel, comes later, or is the message right before
+    /// this one changes nothing: the line was a slip.
+    fn quote(&self, ch: ChannelId, id: MessageId, target: MessageId) -> Result<()> {
+        let conn = self.db();
+        let Ok(quoted) = message::get(&conn, target) else {
+            return Ok(());
+        };
+        if quoted.channel != ch || target.0 >= id.0 {
+            return Ok(());
+        }
+        let latest = message::history(&conn, ch, Some(id), 1)?;
+        if latest.first().is_some_and(|m| m.id == target) {
+            return Ok(());
+        }
+        message::set_reply_to(&conn, id, target)?;
+        Ok(())
+    }
+
     /// Store the turn's reply text with its actions and citations, and announce it.
     fn finish_message(&self, turn: &mut Turn) -> Result<()> {
         if turn.wrapup || (turn.message.is_none() && turn.text.is_empty()) {
@@ -1147,10 +1171,16 @@ impl Agent {
             turn.actions.clear();
             return Ok(());
         }
-        let marks = assemble::closing_marks(&self.corpus.wording, turn.in_group(), turn.proposing);
+        let marks = assemble::closing_marks(
+            &self.corpus.wording,
+            turn.in_group(),
+            turn.proposing,
+            matches!(turn.speaker, Actor::Person(_)),
+        );
         let closing = assemble::split_closing(&turn.text, marks);
         turn.text = closing.text.clone();
         turn.hand_off = closing.hand_off.clone();
+        let reply = closing.reply;
         if let Some((group, words)) = &closing.say {
             self.plan_say(turn, group, words)?;
         }
@@ -1187,6 +1217,9 @@ impl Agent {
             }
         }
         let id = self.message_for(turn)?;
+        if let Some(target) = reply {
+            self.quote(turn.channel, id, target)?;
+        }
         let meta = MessageMeta {
             cites: self.citations(turn.channel, &turn.text, &turn.shown)?,
             confidence: turn.level,

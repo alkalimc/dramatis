@@ -188,7 +188,7 @@ async fn material_is_deduplicated_and_nothing_found_is_said_plainly() {
     let v = &e.fake.json()[0];
     let entry = list(v).last().unwrap().to_string();
     assert!(entry.contains("Nothing came back for this."));
-    assert!(!entry.contains("request_join") && !entry.contains("[#"));
+    assert!(!entry.contains("request_join") && cited(&entry) == 0);
 
     e.agent.send(ch, "jasmine tea", None).await.unwrap();
     e.agent.send(ch, "jasmine tea again", None).await.unwrap();
@@ -234,7 +234,7 @@ async fn low_confidence_sends_the_top_passages_marked_as_possibly_unrelated() {
     assert!(entry.contains("poured the jasmine tea"), "{entry}");
     assert!(!entry.contains("nothing reliable") && !entry.contains("request_join"));
     // Only `low_hits` passages, without neighbours.
-    assert_eq!(entry.matches("[#").count(), 1, "{entry}");
+    assert_eq!(cited(&entry), 1, "{entry}");
 }
 
 #[tokio::test]
@@ -1752,6 +1752,7 @@ fn flows_are_send() {
         text: String::new(),
         image: None,
         authorized: false,
+        reply_to: None,
     };
     send(&e.agent.respond(posted));
     send(&e.agent.presence(true));
@@ -1883,22 +1884,186 @@ async fn a_due_commitment_opens_on_its_own_log_even_for_a_frozen_person() {
     assert_eq!(e.agent.on_event().await.unwrap(), None);
 }
 
+/// How many citation marks an entry holds, not counting the id tag of the user's message.
+fn cited(entry: &str) -> usize {
+    entry.matches("[#").count() - entry.matches("[#msg").count()
+}
+
+fn raw_id(m: &api::views::Message) -> world::MessageId {
+    world::MessageId(m.id.0.parse().unwrap())
+}
+
 #[tokio::test]
-async fn a_relay_is_posted_as_a_retelling_in_the_recipients_channel() {
+async fn a_forward_reaches_the_recipient_with_its_author_and_is_answered() {
     let e = env(WireApi::Responses);
-    let posted = e
-        .agent
-        .relay("Ann said the water must be cooler.", &p("bo"))
-        .unwrap();
+    let ann = direct(&e, "ann");
     e.fake.push([say("Cooler water, then.")]);
-    e.agent.respond(posted.clone()).await.unwrap();
-    let msgs = e.agent.history(posted.channel, None, 5).unwrap();
-    assert!(msgs[0].relayed && msgs[0].text == "Ann said the water must be cooler.");
-    assert_eq!(msgs[1].text, "Cooler water, then.");
+    e.agent
+        .send(ann, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let said = e.agent.history(ann, None, 5).unwrap().pop().unwrap();
+
+    let (ch, posted) = e
+        .agent
+        .forward(raw_id(&said), &agent::Forward::Person(p("bo")))
+        .unwrap();
+    e.fake.push([say("Noted.")]);
+    e.agent.respond(posted.unwrap()).await.unwrap();
+
+    let msgs = e.agent.history(ch, None, 5).unwrap();
+    assert_eq!(msgs[0].text, "Cooler water, then.");
+    assert_eq!(
+        msgs[0].forwarded_from,
+        Some(api::types::Author::Person {
+            id: api::types::PersonId("ann".into())
+        })
+    );
+    assert_eq!(msgs[1].text, "Noted.");
+    // The model reads who said it, not just the words.
+    let entry = list(&e.fake.json()[1]).last().unwrap().to_string();
+    assert!(
+        entry.contains("forwards you this message") && entry.contains("Cooler water, then."),
+        "{entry}"
+    );
     assert!(matches!(
-        e.agent.relay("x", &p("cy")),
+        e.agent
+            .forward(raw_id(&said), &agent::Forward::Person(p("cy"))),
         Err(agent::Error::NoPersona(_))
     ));
+}
+
+#[tokio::test]
+async fn a_forward_to_the_host_cannot_act_for_the_user() {
+    let e = env(WireApi::Responses);
+    let ann = direct(&e, "ann");
+    e.fake.push([say("Cooler water, then.")]);
+    e.agent.send(ann, "tea?", None).await.unwrap();
+    let said = e.agent.history(ann, None, 5).unwrap().pop().unwrap();
+    let (host, posted) = e
+        .agent
+        .forward(raw_id(&said), &agent::Forward::Host)
+        .unwrap();
+    assert_eq!(host, e.agent.with_world(|w| channel::host(w).unwrap()));
+    assert!(!posted.unwrap().authorized);
+}
+
+#[tokio::test]
+async fn favorites_keep_a_message_as_its_author_wrote_it_and_nobody_answers() {
+    let e = env(WireApi::Responses);
+    let ann = direct(&e, "ann");
+    e.fake.push([say("Cooler water, then.")]);
+    e.agent
+        .send(ann, "how should I brew tea?", None)
+        .await
+        .unwrap();
+    let said = e.agent.history(ann, None, 5).unwrap().pop().unwrap();
+    let calls = e.fake.bodies().len();
+
+    let (fav, posted) = e
+        .agent
+        .forward(raw_id(&said), &agent::Forward::Favorites)
+        .unwrap();
+    assert!(posted.is_none());
+    // The user's own notes join it, and no model is asked.
+    e.agent.send(fav, "remember this", None).await.unwrap();
+    let kept = e.agent.history(fav, None, 5).unwrap();
+    assert_eq!(kept[0].text, "Cooler water, then.");
+    assert_eq!(
+        kept[0].author,
+        api::types::Author::Person {
+            id: api::types::PersonId("ann".into())
+        }
+    );
+    assert_eq!(
+        kept[0].original_at,
+        Some(said.at),
+        "the original time stays"
+    );
+    assert!(kept[0].forwarded_from.is_none());
+    assert_eq!(kept[1].author, api::types::Author::User);
+    assert_eq!(e.fake.bodies().len(), calls);
+    // Saving the same message again, from the favorites, keeps its first author.
+    let (_, again) = e
+        .agent
+        .forward(raw_id(&kept[0]), &agent::Forward::Favorites)
+        .unwrap();
+    assert!(again.is_none());
+    assert_eq!(e.agent.history(fav, None, 5).unwrap().len(), 3);
+    // The favorites are no one's conversation: nobody's unread count moves, and saved words
+    // do not count as the user having written to anyone.
+    assert_eq!(e.fake.bodies().len(), calls);
+}
+
+#[tokio::test]
+async fn a_reply_tells_the_model_what_it_answers_and_is_quoted() {
+    let e = env(WireApi::Responses);
+    let ann = direct(&e, "ann");
+    e.fake.push([say("A1."), say("A2."), say("A3.")]);
+    e.agent.send(ann, "first question", None).await.unwrap();
+    e.agent.send(ann, "second question", None).await.unwrap();
+    let first = e.agent.history(ann, None, 10).unwrap()[0].clone();
+    let posted = e
+        .agent
+        .post_reply(ann, "about the first one", None, Some(raw_id(&first)))
+        .unwrap();
+    let tag = format!("[#msg{}]", posted.message.0);
+    e.agent.respond(posted).await.unwrap();
+
+    let entry = list(&e.fake.json()[2]).last().unwrap().to_string();
+    assert!(
+        entry.contains("replies to") && entry.contains("first question"),
+        "{entry}"
+    );
+    // Every user entry carries the id a later reply can quote it by.
+    assert!(entry.contains(&tag), "{entry}");
+    let hist = e.agent.history(ann, None, 10).unwrap();
+    let mine = hist
+        .iter()
+        .find(|m| m.text == "about the first one")
+        .unwrap();
+    let quote = mine.reply.as_ref().unwrap();
+    assert_eq!(quote.id, first.id);
+    assert_eq!(quote.text, "first question");
+    // A quote must come from the same channel.
+    let bo = direct(&e, "bo");
+    assert!(
+        e.agent
+            .post_reply(bo, "x", None, Some(raw_id(&first)))
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn a_person_may_quote_an_earlier_message_of_the_user_by_a_closing_line() {
+    let e = env(WireApi::Responses);
+    let ann = direct(&e, "ann");
+    e.fake.push([
+        say("A1."),
+        say("A2."),
+        say("Back to the first.\n\u{21a9} #msg1"),
+    ]);
+    e.agent.send(ann, "first question", None).await.unwrap();
+    e.agent.send(ann, "second question", None).await.unwrap();
+    e.agent.send(ann, "third", None).await.unwrap();
+    let hist = e.agent.history(ann, None, 10).unwrap();
+    let last = hist.last().unwrap();
+    assert_eq!(
+        last.text, "Back to the first.",
+        "the closing line leaves the text"
+    );
+    assert_eq!(last.reply.as_ref().unwrap().text, "first question");
+}
+
+#[tokio::test]
+async fn quoting_the_message_right_before_is_ignored() {
+    let e = env(WireApi::Responses);
+    let ann = direct(&e, "ann");
+    e.fake.push([say("A1.\n\u{21a9} #msg1")]);
+    e.agent.send(ann, "first question", None).await.unwrap();
+    let hist = e.agent.history(ann, None, 10).unwrap();
+    assert_eq!(hist[1].text, "A1.");
+    assert!(hist[1].reply.is_none());
 }
 
 fn models_sent(e: &Env) -> Vec<String> {
@@ -3899,6 +4064,75 @@ async fn the_host_posts_only_into_a_group_it_is_in() {
     e.agent.send(host, "tell the group hi", None).await.unwrap();
     assert!(log_bytes(&e.agent, host).contains("not a member of the group"));
     assert!(texts(&e, g).is_empty());
+}
+
+#[tokio::test]
+async fn the_host_may_quote_a_line_of_the_group_it_posts_in() {
+    let e = offset_env();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.agent
+        .with_world(|w| channel::add_participant(w, g, &Actor::Host).unwrap());
+    e.fake.push([say("Ann here.")]);
+    e.agent.send(g, "ann, hello", None).await.unwrap();
+    let line = e.agent.history(g, None, 5).unwrap()[0].clone();
+    e.fake.push([
+        call(
+            "post",
+            json!({
+                "channel": g.to_string(),
+                "text": "Back to that.",
+                "reply_to": format!("[#msg{}]", line.id.0),
+                "report_back": false,
+            }),
+        ),
+        say("Posted."),
+        say("Ann: fine."),
+        say("Bo: sure."),
+    ]);
+    e.agent.send(host, "tell the group", None).await.unwrap();
+    let posted = e
+        .agent
+        .history(g, None, 10)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.text == "Back to that.")
+        .unwrap();
+    assert_eq!(posted.reply.unwrap().text, "ann, hello");
+}
+
+#[tokio::test]
+async fn a_mention_or_a_reply_addresses_that_member() {
+    let e = env(WireApi::Chat);
+    let g = e.agent.create_group(&[p("ann"), p("bo")], None).unwrap();
+    e.fake
+        .push([say("Bo here."), say("Ann here."), say("Because.")]);
+    e.agent
+        .send(g, "@bo what do you think?", None)
+        .await
+        .unwrap();
+    e.agent.send(g, "@ann and you?", None).await.unwrap();
+    let hist = e.agent.history(g, None, 10).unwrap();
+    let person = |m: &api::views::Message| match &m.author {
+        api::types::Author::Person { id } => id.0.clone(),
+        other => format!("{other:?}"),
+    };
+    assert_eq!(
+        (person(&hist[1]), person(&hist[3])),
+        ("bo".into(), "ann".into())
+    );
+    // Ann spoke last, but answering Bo's line speaks to Bo.
+    let posted = e
+        .agent
+        .post_reply(g, "and why?", None, Some(raw_id(&hist[1])))
+        .unwrap();
+    e.agent.respond(posted).await.unwrap();
+    let hist = e.agent.history(g, None, 10).unwrap();
+    let last = hist.last().unwrap();
+    assert_eq!(
+        (last.text.as_str(), person(last)),
+        ("Because.", "bo".into())
+    );
 }
 
 #[tokio::test]

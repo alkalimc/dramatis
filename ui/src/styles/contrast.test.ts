@@ -35,6 +35,7 @@ const pairs: [string, string, number][] = [
   ...["--bg", "--panel", "--raised"].flatMap((s) => hues.map((h) => [h, s, 4.5] as [string, string, number])),
   ["--ink", "--own", 4.5],
   ["--stamp-own", "--own", 4.5],
+  ["--accent", "--own", 4.5],
   ["--ink", "--rail", 4.5],
   ["--muted", "--rail", 4.5],
   ["--accent", "--rail", 4.5],

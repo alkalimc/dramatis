@@ -29,12 +29,13 @@ CREATE TABLE bond (
 -- first session opens).
 CREATE TABLE channel (
     id          INTEGER PRIMARY KEY,
-    kind        TEXT    NOT NULL CHECK (kind IN ('direct', 'group')),
+    kind        TEXT    NOT NULL CHECK (kind IN ('direct', 'group', 'favorites')),
     origin      TEXT    NOT NULL CHECK (origin IN ('user', 'system')),
     topic       TEXT,
     mode        TEXT    NOT NULL DEFAULT 'frozen' CHECK (mode IN ('enabled', 'frozen', 'disabled')),
     log_segment INTEGER REFERENCES log_segment(id)
 ) STRICT;
+CREATE UNIQUE INDEX idx_channel_favorites ON channel(kind) WHERE kind = 'favorites';
 
 -- Channel.participants. Membership is having been brought in; memory visibility for
 -- audience = participants reads this table.
@@ -53,7 +54,8 @@ CREATE TABLE message (
     text       TEXT    NOT NULL,
     tool_calls TEXT    CHECK (tool_calls IS NULL OR json_valid(tool_calls)),
     attachment TEXT    CHECK (attachment IS NULL OR json_valid(attachment)),
-    at         INTEGER NOT NULL
+    at         INTEGER NOT NULL,
+    reply_to   INTEGER REFERENCES message(id) ON DELETE SET NULL      -- the message this one answers
 ) STRICT;
 CREATE INDEX idx_message_channel_at ON message(channel, at);
 CREATE INDEX idx_message_author_at ON message(author, at);

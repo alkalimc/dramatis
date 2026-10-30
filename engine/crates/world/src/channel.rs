@@ -52,6 +52,11 @@ impl Channel {
         self.owner == Some(Actor::Host)
     }
 
+    /// The user's favorites: a place for saved messages and notes, with no one in it.
+    pub fn is_favorites(&self) -> bool {
+        self.kind == ChannelKind::Favorites
+    }
+
     /// Accepts new messages: not deleted, and not a disabled group.
     pub fn is_open(&self) -> bool {
         self.deleted_at.is_none()
@@ -179,6 +184,23 @@ pub fn host(conn: &Connection) -> Result<ChannelId> {
         Some(id) => Ok(id),
         None => create_direct(conn, "host"),
     }
+}
+
+/// The user's favorites, created on first use.
+pub fn favorites(conn: &Connection) -> Result<ChannelId> {
+    let found = conn
+        .query_row("SELECT id FROM channel WHERE kind = 'favorites'", [], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    if let Some(id) = found {
+        return Ok(id);
+    }
+    conn.execute(
+        "INSERT INTO channel(kind, origin) VALUES ('favorites', 'user')",
+        [],
+    )?;
+    Ok(ChannelId(conn.last_insert_rowid()))
 }
 
 /// A new group. Every group starts frozen, whoever made it; disabled people cannot be
@@ -409,6 +431,23 @@ pub fn set_name(conn: &Connection, channel: ChannelId, name: Option<&str>) -> Re
     Ok(())
 }
 
+/// A group's description; `None` or blank clears it. Returns whether it changed.
+pub fn set_topic(conn: &Connection, channel: ChannelId, topic: Option<&str>) -> Result<bool> {
+    let topic = topic.map(str::trim).filter(|t| !t.is_empty());
+    let ch = get(conn, channel)?;
+    if ch.kind != ChannelKind::Group {
+        return Err(Error::Invalid(format!("channel {channel} is not a group")));
+    }
+    if ch.topic.as_deref() == topic {
+        return Ok(false);
+    }
+    conn.execute(
+        "UPDATE channel SET topic = ?2 WHERE id = ?1",
+        (channel, topic),
+    )?;
+    Ok(true)
+}
+
 /// The user's picture for a channel (a file name), or back to none.
 pub fn set_avatar(conn: &Connection, channel: ChannelId, file: Option<&str>) -> Result<()> {
     get(conn, channel)?;
@@ -422,8 +461,10 @@ pub fn set_avatar(conn: &Connection, channel: ChannelId, file: Option<&str>) -> 
 /// Move a channel out of, or back into, the main list. The host's channel stays.
 pub fn set_archived(conn: &Connection, channel: ChannelId, archived: bool) -> Result<()> {
     let ch = get(conn, channel)?;
-    if archived && ch.is_host_channel() {
-        return Err(Error::Invalid("the host channel cannot be archived".into()));
+    if archived && (ch.is_host_channel() || ch.is_favorites()) {
+        return Err(Error::Invalid(
+            "the host channel and the favorites cannot be archived".into(),
+        ));
     }
     conn.execute(
         "UPDATE channel SET archived = ?2 WHERE id = ?1",
@@ -959,5 +1000,18 @@ mod tests {
         mark_read(&w, c, MessageId(5)).unwrap();
         mark_read(&w, c, MessageId(3)).unwrap();
         assert_eq!(get(&w, c).unwrap().read_up_to, Some(MessageId(5)));
+    }
+
+    #[test]
+    fn a_description_is_trimmed_cleared_and_only_a_groups() {
+        let w = world();
+        let g = create_group(&w, &[p("a")], None, Origin::User).unwrap();
+        assert!(set_topic(&w, g, Some("  tea  ")).unwrap());
+        assert_eq!(get(&w, g).unwrap().topic.as_deref(), Some("tea"));
+        assert!(!set_topic(&w, g, Some("tea")).unwrap(), "unchanged");
+        assert!(set_topic(&w, g, Some(" ")).unwrap());
+        assert_eq!(get(&w, g).unwrap().topic, None);
+        let d = direct(&w, &p("a")).unwrap();
+        assert!(set_topic(&w, d, Some("x")).is_err());
     }
 }

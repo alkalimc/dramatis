@@ -223,7 +223,9 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       picture_lost: false,
       cites: [],
       confidence: null,
-      relayed: false,
+      forwarded_from: null,
+      reply: null,
+      original_at: null,
       at: iso(minutesAgo),
       ...extra,
     };
@@ -249,6 +251,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   };
 
   addChannel({ id: "host", kind: "host", origin: "system", participants: [], topic: null, mode: "enabled" });
+  addChannel({ id: "favorites", kind: "favorites", origin: "user", participants: [], topic: null, mode: "enabled" });
   const group = addChannel({
     id: "g-rota",
     kind: "group",
@@ -301,13 +304,12 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     );
 
     msg(direct("oren"), person("oren"), "You said you'd bring the new rota by today. No rush, just reminding you.", 60 * 9);
-    msg(direct("oren"), USER, "Mira says the corridor closed in the first month. What do you remember?", 60 * 8);
+    msg(direct("oren"), USER, "The east corridor was sealed in the first month after the gates failed. My own ledger says so.", 60 * 8, { forwarded_from: person("mira") });
     msg(
       direct("oren"),
       person("oren"),
       `${sc("Oren frowns.")}\nIf Mira wrote that down, she has the ledger. But I was on that ward, and it was hot. I remember it differently: the evacuation order came late, not the warning.`,
       60 * 8 - 1,
-      { relayed: true },
     );
 
     msg(direct("tess"), USER, "Which route is safest after dark?", 60 * 50);
@@ -315,6 +317,12 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       actions: [{ tool: "search", query: "dock routes after dark" }],
       cites: [cite("c-docks-1")],
     });
+
+    // One thing the user kept: it shows its first author, and when it was first said.
+    {
+      const saved = msg("favorites", person("tess"), "The market closes at dusk. Keep to the lit streets after that.", 60 * 30, { original_at: iso(60 * 24 * 3) });
+      void saved;
+    }
 
     msg(group.id, USER, "Did the rota change today?", 60 * 3);
     msg(group.id, person("oren"), "It did. I'm on nights this week.", 60 * 3 - 1);
@@ -460,7 +468,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     if (actions.some((a) => a.tool === "remember")) announceWorld({ kind: "fact", id: "" });
   }
 
-  async function replyChannel(ch: Chan, text: string) {
+  async function replyChannel(ch: Chan, text: string, quoted?: Message) {
     if (ch.kind === "direct") {
       const p = persons.get(ch.participants[0].id)!;
       const r = canned(p, text);
@@ -473,6 +481,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     const last = [...ch.log].reverse().find((m) => m.author.kind === "person");
     const addressed =
       mentioned(text, ids) ??
+      (quoted?.author.kind === "person" && ids.includes(quoted.author.id) ? quoted.author.id : undefined) ??
       ids.find((id) => knows(persons.get(id)!, text)) ??
       (last && last.author.kind === "person" ? last.author.id : ids[0]);
     if (!addressed) return;
@@ -732,10 +741,20 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(cid);
     },
     hostChannel: () => ok("host"),
-    sendMessage: (channel, text, image) => {
+    sendMessage: (channel, text, image, replyTo) => {
       const ch = channels.get(channel);
       if (!ch) return fail({ code: "not_found" });
       if (!text.trim() && !image) return fail({ code: "invalid", field: "text" });
+      const quoted = replyTo ? ch.log.find((m) => m.id === replyTo) : undefined;
+      if (replyTo && !quoted) return fail({ code: "invalid", field: "reply_to" });
+      const reply = quoted ? { id: quoted.id, author: quoted.author, text: quoted.text, has_picture: Boolean(quoted.attachment) } : null;
+      const extra: Partial<Message> = { reply, ...(image ? { attachment: { path: `data:${image.mime};base64,${image.data_base64}` } } : {}) };
+      // A note in the favorites goes to nobody.
+      if (ch.kind === "favorites") {
+        const note = msg(channel, USER, text, 0, extra);
+        setTimeout(() => bus.messageAdded.emit({ message: note }));
+        return ok(note.id);
+      }
       const blocked = gate();
       if (blocked) return fail(blocked);
       if (away) {
@@ -743,10 +762,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         away = false;
         setTimeout(() => bus.awayChanged.emit({ away: false, by_message: true }));
       }
-      const m = msg(channel, USER, text, 0, image ? { attachment: { path: `data:${image.mime};base64,${image.data_base64}` } } : {});
+      const m = msg(channel, USER, text, 0, extra);
       setTimeout(() => {
         bus.messageAdded.emit({ message: m });
-        void (/\bfail\b/i.test(text) ? failTurn(ch) : ch.kind === "host" ? replyHost(text) : replyChannel(ch, text));
+        void (/\bfail\b/i.test(text) ? failTurn(ch) : ch.kind === "host" ? replyHost(text) : replyChannel(ch, text, quoted));
       });
       return ok(m.id);
     },
@@ -760,16 +779,55 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       setTimeout(() => bus.rewound.emit({ channel, from: message }));
       return ok(m.text);
     },
-    relay: (excerpt, _from, to) => {
-      const p = persons.get(to);
-      if (!p) return fail({ code: "not_found" });
-      if (p.mode === "disabled") return fail({ code: "disabled", person: to });
+    forward: (message, to) => {
+      const original = [...channels.values()].flatMap((c) => c.log).find((m) => m.id === message);
+      if (!original || original.service) return fail({ code: "not_found" });
+      const origin = original.forwarded_from ?? original.author;
+      if (to.kind === "favorites") {
+        const saved = msg("favorites", origin, original.text, 0, { original_at: original.original_at ?? original.at, attachment: original.attachment, cites: original.cites });
+        setTimeout(() => bus.messageAdded.emit({ message: saved }));
+        return ok("favorites");
+      }
       const blocked = gate();
       if (blocked) return fail(blocked);
-      const cid = direct(to);
-      const first = p.name.split(" ")[0];
-      void stream(cid, person(to), `${sc(`${first} reads the quote twice.`)}\n"${excerpt.slice(0, 80)}"? That's not how I'd put it, but I can see where it comes from.`, { relayed: true });
+      if (to.kind === "host") {
+        const copy = msg("host", USER, original.text, 0, { forwarded_from: origin, attachment: original.attachment });
+        setTimeout(() => {
+          bus.messageAdded.emit({ message: copy });
+          void replyHost(original.text);
+        });
+        return ok("host");
+      }
+      const p = persons.get(to.id);
+      if (!p) return fail({ code: "not_found" });
+      if (p.mode === "disabled") return fail({ code: "disabled", person: to.id });
+      const cid = direct(to.id);
+      const copy = msg(cid, USER, original.text, 0, { forwarded_from: origin, attachment: original.attachment });
+      const home = channels.get(cid)!;
+      setTimeout(() => {
+        bus.messageAdded.emit({ message: copy });
+        void replyChannel(home, original.text);
+      });
       return ok(cid);
+    },
+    favoritesChannel: () => ok("favorites"),
+    deleteSaved: (message) => {
+      const fav = channels.get("favorites")!;
+      const i = fav.log.findIndex((m) => m.id === message);
+      if (i < 0) return fail({ code: "invalid", field: "request" });
+      fav.log.splice(i, 1);
+      return ok(null);
+    },
+    setTopic: (channel, topic) => {
+      const ch = channels.get(channel);
+      if (!ch) return fail({ code: "not_found" });
+      if (ch.kind !== "group") return fail({ code: "invalid", field: "request" });
+      const next = topic?.trim() || null;
+      if (next === ch.topic) return ok(null);
+      ch.topic = next;
+      msg(channel, USER, next ? `The description is now: ${next}` : "The description was removed.", 0, { service: true });
+      setTimeout(() => announceWorld({ kind: "channel", id: channel }));
+      return ok(null);
     },
     // The mock keeps no memories to write, so ending a conversation changes nothing.
     wrapup: (channel) => (channels.has(channel) ? ok(null) : fail({ code: "not_found" })),
@@ -901,7 +959,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     archiveChannel: (channel, archived) => {
       const ch = channels.get(channel);
       if (!ch) return fail({ code: "not_found" });
-      if (archived && ch.kind === "host") return fail({ code: "invalid", field: "channel" });
+      if (archived && (ch.kind === "host" || ch.kind === "favorites")) return fail({ code: "invalid", field: "channel" });
       ch.archived = archived;
       setTimeout(() => announceWorld({ kind: "channel", id: channel }));
       return ok(null);

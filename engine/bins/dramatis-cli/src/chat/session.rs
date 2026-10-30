@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use api::error::{ApiError, ApiResult};
-use api::types::{Author, ChannelId, FactId, Mode, PersonId, Target, Tier, Timestamp};
+use api::types::{Author, ChannelId, FactId, MessageId, Mode, PersonId, Target, Tier, Timestamp};
 use api::views::{
-    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, InterfaceLanguage,
-    Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage,
+    Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, ForwardTo,
+    InterfaceLanguage, Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -31,6 +31,8 @@ enum Kind {
     Person(PersonId),
     Host,
     Group(Vec<PersonId>),
+    /// The user's favorites: nobody answers there.
+    Favorites,
 }
 
 struct Current {
@@ -79,6 +81,9 @@ pub struct Session {
     listed: Vec<FactView>,
     /// The channels of the last `/chats` list, which `/chat` numbers into.
     chats: Vec<ChannelSummary>,
+    /// The messages of the last `/history` list, which `/reply`, `/forward` and `/delete`
+    /// number into.
+    numbered: Vec<MessageId>,
     /// What the next line answers (y/n), when a command asked. The question is the input
     /// prompt while it waits, so it is never drawn over by a fresh prompt.
     pending: Option<Asking>,
@@ -202,6 +207,7 @@ impl Session {
             metered,
             prefill: None,
             listed: Vec::new(),
+            numbered: Vec::new(),
             chats: Vec::new(),
             pending: None,
             secret: Box::new(super::secret::read),
@@ -380,13 +386,21 @@ impl Session {
             Command::Archive(on) => self.archive(on).await,
             Command::Rename(name) => self.rename(&name).await,
             Command::Members => self.members(),
+            Command::Topic(text) => self.topic(&text).await,
+            Command::Fav => self.fav().await,
+            Command::Forward(n, to) => self.forward(n, &to).await,
+            Command::Delete(n) => self.delete_saved(n).await,
             Command::Invite(who) => self.invite(&who).await,
             Command::Remove(who) => self.remove(&who).await,
             Command::Leave => self.leave(),
             Command::Read(all) => self.read(all).await,
             Command::ReadUnit(unit) => self.read_unit(&unit).await,
             Command::Library(on) => self.set_library(on),
-            Command::Say(_) | Command::Wrapup if self.library => self.needs_model(),
+            Command::Say(_) | Command::Reply(..) if self.library && !self.in_favorites() => {
+                self.needs_model()
+            }
+            Command::Wrapup if self.library => self.needs_model(),
+            Command::Reply(n, text) => self.reply(n, &text).await,
             // Without any endpoint a rollover has no model to ask; with one it would.
             Command::Name(_) if self.library && !self.no_model => self.needs_model(),
             Command::Clock => self.clock().await,
@@ -925,6 +939,7 @@ impl Session {
         }
         match c.kind {
             ChannelKind::Host => self.names.host(),
+            ChannelKind::Favorites => self.names.text("cli.favorites.title"),
             kind => {
                 let names: Vec<String> = c.participants.iter().map(|p| p.name.clone()).collect();
                 if kind == ChannelKind::Group {
@@ -938,7 +953,11 @@ impl Session {
 
     async fn list_chats(&mut self, archived: bool) {
         let mut list: Vec<ChannelSummary> = match self.engine.channels().await {
-            Ok(l) => l.into_iter().filter(|c| c.archived == archived).collect(),
+            // The favorites have their own command (`/fav`), not a place in this list.
+            Ok(l) => l
+                .into_iter()
+                .filter(|c| c.archived == archived && c.kind != ChannelKind::Favorites)
+                .collect(),
             Err(e) => return self.fail(&e),
         };
         // Newest first; the host's channel leads when nothing was said anywhere.
@@ -955,6 +974,7 @@ impl Session {
                 ChannelKind::Host => "cli.chats.kind.host",
                 ChannelKind::Direct => "cli.chats.kind.direct",
                 ChannelKind::Group => "cli.chats.kind.group",
+                ChannelKind::Favorites => "cli.chats.kind.favorites",
             });
             let when = c.last_at.as_ref().map_or(String::new(), Self::stamp);
             let unread = if c.unread > 0 {
@@ -987,6 +1007,7 @@ impl Session {
         };
         match (c.kind, c.participants.first()) {
             (ChannelKind::Host, _) => self.host().await,
+            (ChannelKind::Favorites, _) => self.fav().await,
             (ChannelKind::Direct, Some(p)) => self.open_person(p.id.clone()).await,
             _ => {
                 let members = c.participants.iter().map(|p| p.id.clone()).collect();
@@ -1141,7 +1162,10 @@ impl Session {
     fn members(&self) {
         match self.current.as_ref().map(|c| &c.kind) {
             Some(Kind::Group(members)) => {
-                let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
+                // The user is a member too, and the first.
+                let names: Vec<String> = std::iter::once(self.names.user())
+                    .chain(members.iter().map(|p| self.names.person(&p.0)))
+                    .collect();
                 self.term.print(&format!("{}\n", names.join(", ")));
             }
             Some(_) => self.term.line(&self.msg("cli.members.not_group")),
@@ -1336,6 +1360,11 @@ impl Session {
     }
 
     async fn say(&mut self, text: &str) {
+        self.say_reply(text, None).await;
+    }
+
+    /// Send `text` to the current channel, as the answer to `reply_to` when given.
+    async fn say_reply(&mut self, text: &str, reply_to: Option<MessageId>) {
         let Some(channel) = self.current_channel().await else {
             return;
         };
@@ -1344,7 +1373,9 @@ impl Session {
         let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
         let result = self
             .interruptible(async move {
-                engine.send_message(channel, text.to_owned(), None).await?;
+                engine
+                    .send_message(channel, text.to_owned(), None, reply_to)
+                    .await?;
                 bridge.idle().await;
                 Ok::<(), api::ApiError>(())
             })
@@ -1582,7 +1613,7 @@ impl Session {
 
     // ---- reading back ----
 
-    async fn history(&self, n: usize) {
+    async fn history(&mut self, n: usize) {
         let Some(channel) = self.current_channel().await else {
             return;
         };
@@ -1591,9 +1622,143 @@ impl Session {
             Ok(messages) if messages.is_empty() => self.term.note(&self.msg("cli.history.none")),
             Ok(messages) => {
                 for (i, m) in messages.iter().enumerate() {
-                    self.term.print(&self.show.whole_dated(m, i == 0));
+                    self.term
+                        .print(&self.show.whole_dated(m, i == 0, Some(i + 1)));
                 }
+                self.numbered = messages.iter().map(|m| m.id.clone()).collect();
             }
+            Err(e) => self.fail(&e),
+        }
+    }
+
+    /// Whether the open conversation is the favorites.
+    fn in_favorites(&self) -> bool {
+        matches!(
+            self.current.as_ref().map(|c| &c.kind),
+            Some(Kind::Favorites)
+        )
+    }
+
+    /// The message `n` of the last `/history` list, or the reason there is none, said.
+    fn numbered_message(&self, n: usize) -> Option<MessageId> {
+        let found = self.numbered.get(n - 1).cloned();
+        if found.is_none() {
+            self.term.line(&self.msg(if self.numbered.is_empty() {
+                "cli.history.no_list"
+            } else {
+                "cli.history.no_such"
+            }));
+        }
+        found
+    }
+
+    /// `/reply`: send `text` as the answer to message `n` of the last `/history`.
+    async fn reply(&mut self, n: usize, text: &str) {
+        let Some(id) = self.numbered_message(n) else {
+            return;
+        };
+        self.say_reply(text, Some(id)).await;
+    }
+
+    /// `/forward`: message `n` of the last `/history` to a person, the host or the
+    /// favorites. A person or the host answers it.
+    async fn forward(&mut self, n: usize, to: &str) {
+        let Some(id) = self.numbered_message(n) else {
+            return;
+        };
+        let (target, name) = if self.names_host(to) {
+            (ForwardTo::Host, self.names.host())
+        } else if matches!(
+            to.to_lowercase().as_str(),
+            "fav" | "favorites" | "favourites"
+        ) || to == self.names.text("cli.favorites.title")
+        {
+            (ForwardTo::Favorites, self.names.text("cli.favorites.title"))
+        } else {
+            match self.resolve(to).await {
+                Ok(p) => {
+                    let name = self.names.person(&p.0);
+                    (ForwardTo::Person { id: p }, name)
+                }
+                Err(e) => return self.term.line(&e),
+            }
+        };
+        if !matches!(target, ForwardTo::Favorites) && self.library {
+            return self.needs_model();
+        }
+        let answered = !matches!(target, ForwardTo::Favorites);
+        if !answered && let Ok(fav) = self.engine.favorites_channel().await {
+            self.show.mute_favorites(fav);
+        }
+        let (started, at) = (Instant::now(), now_ms());
+        let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
+        let result = self
+            .interruptible(async move {
+                engine.forward(id, target).await?;
+                bridge.idle().await;
+                Ok::<(), api::ApiError>(())
+            })
+            .await;
+        match result {
+            Some(Err(e)) => self.fail(&e),
+            _ => self
+                .term
+                .note(&self.names.say("cli.forward.done", &[("name", &name)])),
+        }
+        if answered {
+            self.report_failures();
+            self.offer();
+            self.footer(at, started).await;
+            self.arrivals(false).await;
+        }
+    }
+
+    /// `/fav`: open the favorites.
+    async fn fav(&mut self) {
+        match self.engine.favorites_channel().await {
+            Ok(channel) => {
+                self.show.mute_favorites(channel.clone());
+                self.term.note(&self.msg("cli.fav.open"));
+                self.current = Some(Current {
+                    channel,
+                    kind: Kind::Favorites,
+                    label: self.names.text("cli.favorites.title"),
+                });
+            }
+            Err(e) => self.fail(&e),
+        }
+    }
+
+    /// `/delete`: take message `n` of the last `/history` out of the favorites.
+    async fn delete_saved(&mut self, n: usize) {
+        if !self.in_favorites() {
+            return self.term.line(&self.msg("cli.unsave.only_fav"));
+        }
+        let Some(id) = self.numbered_message(n) else {
+            return;
+        };
+        match self.engine.delete_saved(id).await {
+            Ok(()) => {
+                self.numbered.clear();
+                self.term.note(&self.msg("cli.unsave.done"));
+            }
+            Err(e) => self.fail(&e),
+        }
+    }
+
+    /// `/topic`: describe the current group; no text clears it.
+    async fn topic(&mut self, text: &str) {
+        let Some((channel, _)) = self.current_group() else {
+            return;
+        };
+        let topic = (!text.trim().is_empty()).then(|| text.trim().to_owned());
+        let cleared = topic.is_none();
+        match self.engine.set_topic(channel, topic).await {
+            Ok(()) => self.term.note(&self.msg(if cleared {
+                "cli.topic.cleared"
+            } else {
+                "cli.topic.done"
+            })),
             Err(e) => self.fail(&e),
         }
     }
@@ -1718,7 +1883,7 @@ impl Session {
     async fn speaker(&self, c: &Current) -> Option<PersonId> {
         match &c.kind {
             Kind::Person(p) => Some(p.clone()),
-            Kind::Host => None,
+            Kind::Host | Kind::Favorites => None,
             Kind::Group(members) => {
                 let last = self
                     .engine

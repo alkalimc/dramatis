@@ -1,9 +1,11 @@
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { Author, Message, ToolAction } from "../api";
+import type { Author, Message, Quote, ToolAction } from "../api";
 import { useT } from "../i18n";
 import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
+import { jumpTo } from "../lib/jump";
 import { renderMarkdown } from "../lib/markdown";
+import { highlightMentions } from "../lib/mention";
 import { bubbles, isBlank, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { SourcesPanel } from "./Citation";
@@ -90,14 +92,17 @@ function Choices({ actions, message, lead }: { actions: ToolAction[]; message: M
   );
 }
 
-function Speech({ text }: { text: string }) {
-  const html = useMemo(() => renderMarkdown(text), [text]);
+/** `names` are the members a message may address with `@name`; those are set apart in the accent colour. */
+function Speech({ text, mentions = NO_NAMES }: { text: string; mentions?: string[] }) {
+  const html = useMemo(() => highlightMentions(renderMarkdown(text), mentions), [text, mentions]);
   return <div className="speech" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+const NO_NAMES: string[] = [];
+
 /** A stable accent per speaker, so a name keeps its colour across the conversation. */
 const HUES = 8;
-function hueOf(a: Author): number {
+export function hueOf(a: Author): number {
   const key = a.kind === "person" ? a.id : a.kind;
   let h = 0;
   for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) % 997;
@@ -180,16 +185,40 @@ function Picture({ message }: { message: Message }) {
   );
 }
 
-function BubbleView({ b, label, foot, top }: { b: ReturnType<typeof bubbles>[number]; label: ReactNode; foot: ReactNode; top?: ReactNode }) {
+function BubbleView({ b, label, foot, top, mentions }: { b: ReturnType<typeof bubbles>[number]; label: ReactNode; foot: ReactNode; top?: ReactNode; mentions?: string[] }) {
   return (
     <div className="bubble">
       {label}
       {top}
       <SceneLines lines={b.before} />
-      {b.text !== null && <Speech text={b.text} />}
+      {b.text !== null && <Speech text={b.text} mentions={mentions} />}
       <SceneLines lines={b.after} />
       {foot}
     </div>
+  );
+}
+
+/** What a reply answers, at the top of its bubble: the author in their colour and the start of the original. A click goes to it. */
+function QuoteBlock({ quote }: { quote: Quote }) {
+  const t = useT();
+  const names = useStore((s) => s.names);
+  const user = useStore((s) => s.settings?.user_name ?? null);
+  const marker = useStore((s) => s.wording.scene_marker);
+  const name = authorName(quote.author, t, names, user);
+  const first = useMemo(
+    () =>
+      speechOnly(quote.text, marker)
+        .split("\n")
+        .map((l) => l.trim())
+        .find(Boolean) ?? "",
+    [quote.text, marker],
+  );
+  const shown = first || (quote.has_picture ? t("message.quote.picture") : "");
+  return (
+    <button type="button" className={`quote hue-${hueOf(quote.author)}`} aria-label={t("message.quote.open", { name })} onClick={() => jumpTo(quote.id)}>
+      <span className="quote-name">{name}</span>
+      <span className="quote-text">{shown}</span>
+    </button>
   );
 }
 
@@ -224,12 +253,17 @@ const BubbleMessage = memo(function BubbleMessage({
 }) {
   const t = useT();
   const api = useApi();
-  const { attempt, resend } = useActions();
+  const { attempt, resend, deleteSaved } = useActions();
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
   // A direct chat has one other speaker; the name only helps where several can talk.
-  const direct = useStore((s) => s.channels.find((c) => c.id === message.channel)?.kind === "direct");
+  const kind = useStore((s) => s.channels.find((c) => c.id === message.channel)?.kind);
+  const direct = kind === "direct";
+  const favorites = kind === "favorites";
+  // Whom a message may address with `@name`: the members of a group.
+  const members = useStore((s) => s.channels.find((c) => c.id === message.channel)?.participants);
+  const mentions = useMemo(() => (kind === "group" && members ? members.map((p) => p.name) : NO_NAMES), [kind, members]);
   const parts = useMemo(() => bubbles(message.text, marker), [message.text, marker]);
   const sourcesOpen = useStore((s) => Boolean(s.sourcesOpen[message.id]));
   const dispatch = useDispatch();
@@ -258,13 +292,27 @@ const BubbleMessage = memo(function BubbleMessage({
   };
 
   const closeMenu = useCallback(() => setMenuAt(null), []);
+  const reply = () => {
+    dispatch({ type: "reply", channel: message.channel, message });
+    // The composer takes the focus when the reply bar appears.
+    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  };
+  const forward = () => dispatch({ type: "forwarding", message });
+  const remove = () => {
+    if (!window.confirm(t("message.delete.confirm"))) return;
+    void deleteSaved(message.channel, message.id);
+  };
+  // The one home for what can be done to a message, in this order. Each has a key too, on the focused message.
   const menuItems = (): MenuItem[] => {
     const out: MenuItem[] = [];
+    out.push({ label: t("message.reply"), icon: "reply", onSelect: reply });
     // A selection inside this message is what the user means to copy; otherwise the spoken text.
     const picked = window.getSelection()?.toString().trim();
     const text = picked && body.current?.contains(window.getSelection()?.anchorNode ?? null) ? picked : speech;
     if (text) out.push({ label: t("message.copy"), icon: "copy", onSelect: () => void navigator.clipboard?.writeText(text).catch(() => undefined) });
-    if (mine && !writing) {
+    out.push({ label: t("message.forward"), icon: "forward", onSelect: forward });
+    // Taking back in the favorites would take the saved messages after it too.
+    if (mine && !writing && !favorites) {
       out.push({
         label: t("message.resend"),
         icon: "reset",
@@ -274,26 +322,58 @@ const BubbleMessage = memo(function BubbleMessage({
         },
       });
     }
+    if (message.cites.length > 0) {
+      out.push({ label: t("message.sources", { count: message.cites.length }), icon: "info", onSelect: () => dispatch({ type: "sources", message: message.id }) });
+    }
+    if (favorites) out.push({ label: t("message.delete"), icon: "trash", danger: true, separated: true, onSelect: remove });
     return out;
   };
+  // Keys on the message itself, when it has the focus: R reply, F forward, Delete remove (favorites),
+  // the menu key or Shift+F10 the whole menu.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey) return;
+    if ((e.key === "r" || e.key === "R") && !e.shiftKey) reply();
+    else if ((e.key === "f" || e.key === "F") && !e.shiftKey) forward();
+    else if (e.key === "Delete" && favorites) remove();
+    else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+      const r = e.currentTarget.getBoundingClientRect();
+      setMenuAt({ x: r.left + 24, y: r.top + 24 });
+    } else return;
+    e.preventDefault();
+  };
 
+  // Who wrote a forwarded copy, then the name above a run: both sit at the top of the bubble.
+  const forwarded = message.forwarded_from ? (
+    <p className={`forwarded hue-${hueOf(message.forwarded_from)}`}>{t("message.forwarded", { name: authorName(message.forwarded_from, t, names, user) })}</p>
+  ) : null;
   const label =
     first && !mine && !direct ? (
-      <p className={`author hue-${hueOf(message.author)}`}>
-        <AuthorName author={message.author} name={name} />
-        {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
-        {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
-      </p>
-    ) : (
-      (message.relayed || message.confidence === "low") && (
-        <p className="author">
-          {message.relayed && <span className="tag relayed">{t("message.relayed")}</span>}
+      <>
+        <p className={`author hue-${hueOf(message.author)}`}>
+          <AuthorName author={message.author} name={name} />
           {message.confidence === "low" && <span className="tag thin">{t("confidence.low")}</span>}
         </p>
-      )
+        {forwarded}
+      </>
+    ) : (
+      <>
+        {message.confidence === "low" && (
+          <p className="author">
+            <span className="tag thin">{t("confidence.low")}</span>
+          </p>
+        )}
+        {forwarded}
+      </>
     );
 
-  const picture = message.attachment || message.picture_lost ? <Picture message={message} /> : null;
+  // The quote leads the bubble, above any picture.
+  const picture =
+    message.attachment || message.picture_lost || message.reply ? (
+      <>
+        {message.reply && <QuoteBlock quote={message.reply} />}
+        {(message.attachment || message.picture_lost) && <Picture message={message} />}
+      </>
+    ) : null;
 
   const foot = (
     <div className="message-foot">
@@ -310,7 +390,8 @@ const BubbleMessage = memo(function BubbleMessage({
           </button>
         )}
       </span>
-      <time dateTime={message.at}>{when(message.at, t)}</time>
+      {/* A kept message shows when it was first said; the list is in the order it was kept. */}
+      <time dateTime={message.original_at ?? message.at}>{when(message.original_at ?? message.at, t)}</time>
     </div>
   );
 
@@ -336,7 +417,8 @@ const BubbleMessage = memo(function BubbleMessage({
   return (
     <>
     <ActionLines author={message.author} actions={message.actions} />
-    <article id={`m-${message.id}`} className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name}
+    <article id={`m-${message.id}`} className={`message ${mine ? "from-user" : "from-other"}${first ? " first" : ""}${last ? " last" : ""}`} aria-label={name} tabIndex={0}
+      onKeyDown={onKeyDown}
       onContextMenu={(e) => {
         if (menuItems().length === 0) return;
         e.preventDefault();
@@ -347,7 +429,7 @@ const BubbleMessage = memo(function BubbleMessage({
       <div className="message-stack">
         <div ref={body} className="message-body">
           {parts.map((b, i) => (
-            <BubbleView key={i} b={b} label={i === 0 ? label : null} top={i === 0 ? picture : null} foot={i === parts.length - 1 ? withSources(foot) : null} />
+            <BubbleView key={i} b={b} label={i === 0 ? label : null} top={i === 0 ? picture : null} foot={i === parts.length - 1 ? withSources(foot) : null} mentions={mentions} />
           ))}
           {parts.length === 0 && <BubbleView b={{ before: [], text: null, after: [] }} label={label} top={picture} foot={withSources(foot)} />}
         </div>

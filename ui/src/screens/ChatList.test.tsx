@@ -29,7 +29,8 @@ test("the chat list holds the host, direct chats and groups, with the selected o
 test("rows are ordered by last activity, and a new message moves its chat to the top with a badge", async () => {
   const { store } = renderApp();
   const nav = await list();
-  const names = () => rowsOf(nav).map((r) => r.querySelector(".chat-name")!.textContent);
+  // The favorites stay pinned above everything; the order below them is the activity order.
+  const names = () => rowsOf(nav).map((r) => r.querySelector(".chat-name")!.textContent).filter((n) => n !== "Favorites");
   const before = names();
   const last = before[before.length - 1]!;
   const target = store.getState().channels.find((c) => channelTitle(c, store.getState().t, "Rowan") === last)!;
@@ -47,14 +48,14 @@ test("rows are ordered by last activity, and a new message moves its chat to the
           picture_lost: false,
           cites: [],
           confidence: null,
-          relayed: false,
+         
           at: new Date(Date.now() + 60_000).toISOString(),
         },
       },
     });
   });
   expect(names()[0]).toBe(last);
-  const top = rowsOf(nav)[0];
+  const top = rowsOf(nav).find((r) => r.querySelector(".chat-name")!.textContent === last)!;
   const badge = within(top.parentElement!).getByRole("button", { name: "1 unread" });
   // The shared pill, beside the row rather than inside its time line.
   expect(badge.className).toBe("badge");
@@ -127,7 +128,7 @@ test("a second right click opens the menu of the new row instead of closing", as
   const user = userEvent.setup();
   renderApp();
   const nav = await list();
-  const find = (name: string) => rowsOf(nav).find((r) => r.textContent?.includes(name))!;
+  const find = (name: string) => rowsOf(nav).find((r) => r.querySelector(".chat-title")?.textContent === name)!;
   await user.pointer({ keys: "[MouseRight]", target: find("Juno Reyes") });
   expect(await screen.findByRole("menu", { name: "Chat actions" })).toBeDefined();
   await user.pointer({ keys: "[MouseRight]", target: find("Tess Arden") });
@@ -256,4 +257,63 @@ test("unsent text stays as a draft: the list shows it, and coming back finds it 
   await user.click(row("Mira Vale"));
   await waitFor(() => expect(store.getState().channel).toBe("dm:mira"));
   expect(within(nav).queryByText(/^Draft:/)).toBeNull();
+});
+
+test("the favorites are the first row with a bookmark, whatever the other chats do, and have no row menu", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const nav = await list();
+  const first = rowsOf(nav)[0];
+  expect(first.querySelector(".chat-title")!.textContent).toBe("Favorites");
+  expect(first.querySelector(".avatar-favorites .icon-svg")).not.toBeNull();
+  // Pinned above even the pinned ones, and read: no badge, no menu.
+  expect(within(first.parentElement!).queryByRole("button", { name: /unread/ })).toBeNull();
+  await user.pointer({ keys: "[MouseRight]", target: first });
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("a kept message shows its first author and the time it was first said, and can be deleted from its menu", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp();
+  const nav = await list();
+  await user.click(rowsOf(nav)[0]);
+  const log = await screen.findByRole("log");
+  const kept = await within(log).findByText(/The market closes at dusk/);
+  const article = kept.closest("article")!;
+  // As if Tess had written it here: her name, no forward header.
+  expect(article.getAttribute("aria-label")).toBe("Tess Arden");
+  expect(within(article).queryByText(/Forwarded from/)).toBeNull();
+  // The small time is the original one (three days back), not when it was kept.
+  const fav = store.getState().channels.find((c) => c.kind === "favorites")!;
+  const message = store.getState().messages[fav.id].find((m) => m.text.includes("market closes"))!;
+  expect(article.querySelector("time")!.getAttribute("datetime")).toBe(message.original_at);
+  expect(message.original_at).not.toBe(message.at);
+
+  // The menu ends with Delete here, and it asks first.
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await user.pointer({ keys: "[MouseRight]", target: article });
+  let menu = await screen.findByRole("menu", { name: "Actions for this message" });
+  expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Reply", "Copy text", "Forward", "Delete"]);
+  await user.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(within(log).getByText(/The market closes at dusk/)).toBeDefined();
+  await user.pointer({ keys: "[MouseRight]", target: article });
+  menu = await screen.findByRole("menu", { name: "Actions for this message" });
+  await user.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+  await waitFor(() => expect(within(log).queryByText(/The market closes at dusk/)).toBeNull());
+  expect(within(log).getByText(/Nothing kept yet/)).toBeDefined();
+});
+
+test("a note typed in the favorites stays there without an answer, and there is no more menu or archive for them", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp();
+  const nav = await list();
+  await user.click(rowsOf(nav)[0]);
+  await screen.findByRole("log");
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Group info" })).toBeNull();
+  const fav = store.getState().channels.find((c) => c.kind === "favorites")!;
+  expect(screen.getByRole("heading", { name: "Favorites" })).toBeDefined();
+  expect(screen.getByText("Messages you kept")).toBeDefined();
+  expect(fav.participants).toEqual([]);
 });

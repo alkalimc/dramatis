@@ -205,7 +205,11 @@ A turn that ends without a reply leaves one line in `$DRAMATIS_HOME/logs/dramati
 | `/group <p1> <p2> ...` | start a group channel |
 | `/host` | switch to the host's channel |
 | `/go <n>` | take choice n from the list the host just offered |
-| `/history [n]` | reprint the last n messages (default 10) |
+| `/history [n]` | reprint the last n messages (default 10), numbered |
+| `/reply <n> <text>` | answer message n of the last `/history`; the model is told what it answers |
+| `/forward <n> <person\|host\|fav>` | pass message n on to a person or the host, who answers it, or keep it in the favorites |
+| `/fav` | open the favorites: saved messages and your own notes, answered by no one; `/delete <n>` removes one |
+| `/members`, `/topic [text]` | who is in the group (you first); describe the group |
 | `/sources [n]` | list in full the sources of the n-th last reply that has any |
 | `/search <query>` | corpus retrieval as the current speaker would see it; no model call |
 | `/memories [person]` | numbered memories; `/forget <n>`, `/restore <n>` and `/edit <n> <text>` change them |
@@ -218,7 +222,7 @@ Tab completes command names, the fixed words some commands take (`/tier`, `/quie
 `/lang`, `/library`, `/read`, `/chats`, `/storage`, `/password`), person names (`/talk`, `/group`,
 `/invite`, `/remove`, `/who`, `/mode`, `/memories`) and save names (`/save`).
 
-Anything else is sent to the current channel (`//text` sends a message that starts with a slash).
+Anything else is sent to the current channel (`//text` sends a message that starts with a slash). In a group, `@name` addresses that member.
 Enter starts a new line and Alt-Enter (Option set as Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
 chat opens and after each message the terminal runs what the app runs on a timer (idle
 conversations are wrapped up, due openings written), so a person who has something to say shows up
