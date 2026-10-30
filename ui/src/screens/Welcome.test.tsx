@@ -106,6 +106,7 @@ test("first run ends with the model step, then the host speaks first", async () 
   await user.type(url, "https://api.example.com/v1");
   await user.type(screen.getByLabelText("API key"), "sk-test");
   await user.click(screen.getByRole("button", { name: "Save and continue" }));
+  await user.click(await screen.findByRole("button", { name: "Not now" }));
   expect(await within(await screen.findByRole("log")).findByText(/Hello, Rowan\./)).toBeDefined();
 });
 
@@ -118,6 +119,7 @@ test("the model step can be skipped, and picking a starting point fills the form
   await user.selectOptions(await screen.findByLabelText("Start from"), "local");
   expect((screen.getByLabelText("Address (base URL)") as HTMLInputElement).value).toBe("http://127.0.0.1:8080/v1");
   await user.click(screen.getByRole("button", { name: "Skip for now" }));
+  await user.click(await screen.findByRole("button", { name: "Not now" }));
   expect(await screen.findByText(/Not connected\./)).toBeDefined();
 });
 

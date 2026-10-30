@@ -678,7 +678,7 @@ impl Session {
 
     async fn enter_group(&mut self, channel: ChannelId, members: Vec<PersonId>) {
         let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
-        let label = self.names.group_label(&names);
+        let label = self.names.group_title(&names);
         self.term
             .note(&self.names.say("cli.talk.group", &[("label", &label)]));
         self.catch_up(&channel).await;
@@ -791,7 +791,7 @@ impl Session {
     /// The current group has these members now.
     fn set_members(&mut self, members: Vec<PersonId>) {
         let names: Vec<String> = members.iter().map(|p| self.names.person(&p.0)).collect();
-        let label = self.names.group_label(&names);
+        let label = self.names.group_title(&names);
         if let Some(c) = self.current.as_mut() {
             c.kind = Kind::Group(members);
             c.label = label;
@@ -901,9 +901,13 @@ impl Session {
         }
         match c.kind {
             ChannelKind::Host => self.names.host(),
-            _ => {
+            kind => {
                 let names: Vec<String> = c.participants.iter().map(|p| p.name.clone()).collect();
-                self.names.group_label(&names)
+                if kind == ChannelKind::Group {
+                    self.names.group_title(&names)
+                } else {
+                    self.names.group_label(&names)
+                }
             }
         }
     }
@@ -967,7 +971,33 @@ impl Session {
         }
     }
 
+    /// The host's page: what it is, what it does, and where to go from here.
+    fn host_page(&self) {
+        let style = self.term.style;
+        self.term.print(&format!(
+            "{}  {}\n",
+            style.bold(&self.names.host()),
+            style.dim("host")
+        ));
+        self.term.line(&self.msg("host.summary"));
+        self.term.line(&self.msg("host.can"));
+        for key in ["find", "group", "ask", "explain"] {
+            self.term
+                .line(&format!("  - {}", self.msg(&format!("host.can.{key}"))));
+        }
+        self.term.line(&self.msg("cli.host.commands"));
+    }
+
+    /// Whether `who` names the host: the word `host`, or its name in the corpus.
+    fn names_host(&self, who: &str) -> bool {
+        let who = who.trim();
+        who.eq_ignore_ascii_case("host") || who.to_lowercase() == self.names.host().to_lowercase()
+    }
+
     async fn who(&self, who: &str) {
+        if self.names_host(who) {
+            return self.host_page();
+        }
         let person = match self.resolve_as(who, false).await {
             Ok(p) => p,
             Err(e) => return self.term.line(&e),
@@ -1609,11 +1639,12 @@ impl Session {
         let Some(channel) = self.current_channel().await else {
             return;
         };
+        self.show.forget_day(&channel);
         match self.engine.history(channel, None, n as u32).await {
             Ok(messages) if messages.is_empty() => self.term.note(&self.msg("cli.history.none")),
             Ok(messages) => {
-                for m in &messages {
-                    self.term.print(&self.show.whole(m));
+                for (i, m) in messages.iter().enumerate() {
+                    self.term.print(&self.show.whole_dated(m, i == 0));
                 }
             }
             Err(e) => self.fail(&e),

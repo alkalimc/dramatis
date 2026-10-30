@@ -55,7 +55,8 @@ fn fixture() -> TempFolio {
         .manifest(
             "player_avatar_url",
             r#""https://img.example/{md5_1}/player.png""#,
-        );
+        )
+        .manifest("host_avatar_url", r#""https://img.example/host.png""#);
     b.person("amy", Some("03-05"));
     b.person("kal", None);
     b.person("zed", None);
@@ -1576,6 +1577,20 @@ async fn the_user_avatar_defaults_to_the_player_portrait_and_can_be_replaced() {
 }
 
 #[tokio::test]
+async fn the_host_avatar_is_fetched_once_and_absent_without_a_url() {
+    let png = b"\x89PNG\r\n\x1a\nhost".to_vec();
+    let net = Arc::new(Net(Some(png.clone()), Mutex::new(0)));
+    let r = rig_with(net.clone());
+    let file = r.engine.host_avatar().await.unwrap().unwrap();
+    assert_eq!(std::fs::read(&file.path).unwrap(), png);
+    r.engine.host_avatar().await.unwrap();
+    assert_eq!(*net.1.lock().unwrap(), 1, "cached like a person's avatar");
+    // Offline: no picture, no error.
+    let offline = rig_with(Arc::new(Net(None, Mutex::new(0))));
+    assert_eq!(offline.engine.host_avatar().await.unwrap(), None);
+}
+
+#[tokio::test]
 async fn channels_carry_a_name_an_avatar_and_an_archive_flag() {
     let r = rig();
     let e = &r.engine;
@@ -2851,8 +2866,13 @@ async fn the_update_check_asks_at_most_once_a_day() {
     let net = release("v99.0.0");
     let r = rig_with(net.clone());
     let e = &r.engine;
+    // Off until the user is asked and says yes: an automatic check asks nobody.
     let none = e.update_status().await.unwrap();
-    assert!(!none.newer && none.latest.is_none() && none.auto);
+    assert!(!none.newer && none.latest.is_none() && !none.auto && !none.asked);
+    assert!(e.check_update(false).await.unwrap().latest.is_none());
+    assert_eq!(*net.1.lock().unwrap(), 0);
+    e.set_auto_update_check(true).await.unwrap();
+    assert!(e.update_status().await.unwrap().asked);
 
     let s = e.check_update(false).await.unwrap();
     assert_eq!(s.latest.as_deref(), Some("99.0.0"));
@@ -2884,7 +2904,7 @@ async fn the_off_switch_stops_automatic_checks_only() {
     e.set_auto_update_check(false).await.unwrap();
     assert!(!e.home.auto_update_check());
     let s = e.check_update(false).await.unwrap();
-    assert!(!s.auto && s.latest.is_none());
+    assert!(!s.auto && s.asked && s.latest.is_none());
     assert_eq!(*net.1.lock().unwrap(), 0);
     assert!(e.check_update(true).await.unwrap().newer);
     assert_eq!(*net.1.lock().unwrap(), 1);

@@ -126,6 +126,30 @@ fn yes(ask: &mut dyn Ask, names: &Names, prompt: &str) -> bool {
         .is_some_and(|a| !no.split('|').any(|n| n == a))
 }
 
+/// Asked once, when the home has no answer yet: whether to check for a newer version by
+/// itself. Only a yes turns it on; the answer is kept either way, and the end of input keeps
+/// nothing, so the question comes again.
+pub async fn update_check(engine: &Engine, names: &Names, ask: &mut dyn Ask) {
+    if engine.home().update_check_asked() {
+        return;
+    }
+    let Some(answer) = ask.line(&names.text("cli.update.ask")) else {
+        return;
+    };
+    let on = names
+        .text("cli.answer.yes")
+        .split('|')
+        .any(|y| y == answer.to_lowercase());
+    match engine.set_auto_update_check(on).await {
+        Ok(()) => ask.say(&names.text(if on {
+            "cli.update.on"
+        } else {
+            "cli.update.off"
+        })),
+        Err(e) => ask.say(&names.api_error(&e)),
+    }
+}
+
 /// What the endpoint step says about a refusal.
 fn endpoint_problem(e: &ApiError, names: &Names) -> String {
     match e {

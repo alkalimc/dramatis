@@ -50,7 +50,9 @@ test("a direct channel renders scene lines apart from speech, with sources and r
   expect(within(sources).getAllByRole("link", { name: "View original" })[0].getAttribute("href")).toMatch(/^https?:/);
   await user.click(entry);
   expect(within(sources).queryByText(/The east corridor was sealed/)).toBeNull();
-  await user.click(within(sources).getByRole("button", { name: "Close" }));
+  // The block sits inside the message's bubble, not beside it.
+  expect(sources.closest(".bubble")).not.toBeNull();
+  await user.click(within(sources).getByRole("button", { name: "Fold the sources" }));
   expect(screen.queryByRole("complementary", { name: "Sources" })).toBeNull();
   expect(screen.getAllByRole("button", { name: "Read aloud" }).length).toBeGreaterThan(0);
 });
@@ -196,6 +198,7 @@ test("first open: name, then the host introduces itself with the coldstart card"
   await user.type(await screen.findByLabelText("What should they call you?", {}, slow), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
   await user.click(await screen.findByRole("button", { name: "Keep the default" }, slow));
+  await user.click(await screen.findByRole("button", { name: "Not now" }, slow));
   expect(await screen.findByRole("heading", { name: "You could start with them" }, slow)).toBeDefined();
   expect(await within(await screen.findByRole("log", {}, slow)).findByText(/Hello, Rowan\./, {}, slow)).toBeDefined();
   expect(screen.getByText("They are all frozen now: they answer when you reach out.")).toBeDefined();
@@ -217,4 +220,23 @@ test("endpoints: a failed model fetch shows the endpoint's own text and a manual
   await user.click(within(card).getByRole("button", { name: "Store key" }));
   expect(await within(card).findByText("Stored in keychain")).toBeDefined();
   expect(within(card).queryByDisplayValue("sk-test")).toBeNull();
+});
+
+test("the host's name and avatar in its channel open its page, which has no trust or mode and leads to Talk", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const log = await screen.findByRole("log");
+  // Each local day in the log starts with a date pill.
+  expect(within(log).getAllByRole("separator").length).toBeGreaterThan(0);
+  await within(log).findByText(/Host ▸ finding who knows/);
+  await user.click(within(log).getAllByRole("button", { name: "Open Host's page" })[0]);
+  const card = await screen.findByRole("dialog", { name: "Host" });
+  expect(within(card).getByText(/The assistant of this place/)).toBeDefined();
+  expect(within(card).getByRole("heading", { name: "What it does" })).toBeDefined();
+  expect(within(card).queryByText(/Trust/)).toBeNull();
+  expect(within(card).queryByRole("radio")).toBeNull();
+  // The update setting is one click away, and the card gives way to it.
+  await user.click(within(card).getByRole("button", { name: "Updates" }));
+  expect(await screen.findByRole("region", { name: "About" })).toBeDefined();
+  expect(screen.queryByRole("dialog", { name: "Host" })).toBeNull();
 });

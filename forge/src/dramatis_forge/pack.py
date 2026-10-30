@@ -808,6 +808,9 @@ class WikiConfig:
     #: (the hash placeholders work, there is no `{page}`). Empty means the player has none.
     #: Stored in the folio as `player_avatar_url`.
     player_avatar_url: str = ""
+    #: The host's picture: a full URL in the same form as `player_avatar_url`. Empty means
+    #: the host keeps a plain letter. Stored in the folio as `host_avatar_url`.
+    host_avatar_url: str = ""
     rate: float = 8.0
     #: Namespaces whose changes can matter for incremental update.
     watch_namespaces: tuple[int, ...] = (0,)

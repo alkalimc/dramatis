@@ -300,6 +300,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, ask: a.draft, ...(a.draft ? { personCard: null } : {}) };
     case "personCard":
       return { ...s, personCard: a.person };
+    case "hostCard":
+      return { ...s, hostCard: a.open };
     case "groupDialog":
       return { ...s, groupDialog: a.open };
     case "library":

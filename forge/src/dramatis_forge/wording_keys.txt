@@ -155,6 +155,7 @@ cli.ask.sent
 cli.audience.channel
 cli.audience.own
 cli.audience.world
+cli.banner
 cli.bio.cleared
 cli.bio.none
 cli.bio.saved
@@ -175,6 +176,7 @@ cli.chats.kind.host
 cli.chats.none
 cli.chats.none_archived
 cli.chats.unread
+cli.date
 cli.delete.ask
 cli.delete.done
 cli.delete.in_use
@@ -211,6 +213,7 @@ cli.help.people
 cli.help.saves
 cli.help.settings
 cli.history.none
+cli.host.commands
 cli.host.none
 cli.interrupted
 cli.invite.already
@@ -375,6 +378,9 @@ cli.typing
 cli.typing.more
 cli.unknown_command
 cli.unread.header
+cli.update.ask
+cli.update.off
+cli.update.on
 cli.usage.ask
 cli.usage.birthday
 cli.usage.chat
@@ -431,6 +437,7 @@ composer.label
 composer.placeholder
 composer.send
 confidence.low
+credit.by
 daypart.afternoon
 daypart.evening
 daypart.morning
@@ -704,6 +711,11 @@ harness.topic
 harness.wrapup
 harness.wrapup.shape
 harness.wrapup.summary
+host.can
+host.can.ask
+host.can.explain
+host.can.find
+host.can.group
 host.event.frame
 host.intro.app
 host.intro.terminal
@@ -711,6 +723,7 @@ host.name
 host.quota_exhausted
 host.rate_limited
 host.role
+host.summary
 lang.corpus
 lang.english
 lang.hint
@@ -979,6 +992,7 @@ setup.corpus.title
 setup.corpus.use
 setup.corpus.version
 setup.folder
+sources.collapse
 sources.title
 span.days
 span.hours
@@ -1072,6 +1086,10 @@ unlock.password
 unlock.save
 unlock.submit
 unlock.title
+update.ask.hint
+update.ask.no
+update.ask.title
+update.ask.yes
 user.title
 user.you
 waiting.collapse

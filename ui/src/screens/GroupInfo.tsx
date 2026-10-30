@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { PersonRef } from "../api";
-import { useT } from "../i18n";
+import { useT, useUserName } from "../i18n";
 import { groupTitle } from "../lib/chats";
 import { readAvatar } from "../lib/image";
 import { useActions, useApi, useDispatch, useStore } from "../store";
@@ -18,6 +18,7 @@ export function GroupInfo({ id }: { id: string }) {
   const actions = useActions();
   const dispatch = useDispatch();
   const nameId = useId();
+  const me = useUserName();
   // A group nobody has spoken in yet is not in the list; the row made when it was opened stands in.
   const group = useStore((s) => s.channels.find((c) => c.id === id) ?? (s.temp?.id === id ? s.temp : undefined));
   const roster = useStore((s) => s.roster);
@@ -28,14 +29,14 @@ export function GroupInfo({ id }: { id: string }) {
   const rename = useStore((s) => s.drawer?.kind === "channel" && s.drawer.rename === true);
   useEffect(() => {
     setEditing(rename);
-    if (rename && group) setDraft(group.name?.trim() ? groupTitle(group, t) : "");
+    if (rename && group) setDraft(group.name?.trim() ? groupTitle(group, t, me) : "");
     // Only a new group or a new request to rename resets the field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, rename]);
 
   if (!group) return <p className="muted drawer-body">{t("app.loading")}</p>;
   const modeOf = new Map((roster?.groups ?? []).flatMap((g) => g.rows).map((r) => [r.person.id, r.mode] as const));
-  const title = groupTitle(group, t);
+  const title = groupTitle(group, t, me);
   const named = Boolean(group.name?.trim());
 
   const save = async () => {
@@ -74,7 +75,7 @@ export function GroupInfo({ id }: { id: string }) {
             <label htmlFor={nameId} className="sr-only">
               {t("group.rename")}
             </label>
-            <input id={nameId} value={draft} autoFocus placeholder={groupTitle({ ...group, name: null } as typeof group, t)} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setEditing(false)} />
+            <input id={nameId} value={draft} autoFocus placeholder={groupTitle({ ...group, name: null } as typeof group, t, me)} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setEditing(false)} />
             <button type="submit">{t("you.save")}</button>
           </form>
         ) : (

@@ -20,7 +20,7 @@ test("the chat list holds the host, direct chats and groups, with the selected o
   const rows = rowsOf(nav);
   expect(rows.length).toBeGreaterThanOrEqual(3);
   // A group is named after its members until it is renamed.
-  expect(within(nav).getByRole("button", { name: /Oren Lark, Mira Vale, Tess Arden/ })).toBeDefined();
+  expect(within(nav).getByRole("button", { name: /Rowan, Oren Lark \(4 in all\)/ })).toBeDefined();
   const selected = rows.filter((r) => r.getAttribute("aria-current") === "true");
   expect(selected).toHaveLength(1);
   expect(selected[0].textContent).toMatch(/Host/);
@@ -32,7 +32,7 @@ test("rows are ordered by last activity, and a new message moves its chat to the
   const names = () => rowsOf(nav).map((r) => r.querySelector(".chat-name")!.textContent);
   const before = names();
   const last = before[before.length - 1]!;
-  const target = store.getState().channels.find((c) => channelTitle(c, store.getState().t) === last)!;
+  const target = store.getState().channels.find((c) => channelTitle(c, store.getState().t, "Rowan") === last)!;
   await act(async () => {
     store.dispatch({
       type: "messageAdded",

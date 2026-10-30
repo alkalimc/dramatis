@@ -456,7 +456,7 @@ def report_figures(
 
 @app.command()
 def wording(pack: PackOpt = "", home: HomeOpt = None) -> None:
-    """Stamp the pack's current wording (and its credits) into the existing folio, without a rebuild.
+    """Stamp the pack's current wording (and its credits and host picture) into the existing folio, without a rebuild.
 
     A rebuild empties the persona table; wording is only text, so it can be refreshed in
     place. The fingerprint is recomputed because the manifest is part of what it covers.
@@ -467,6 +467,7 @@ def wording(pack: PackOpt = "", home: HomeOpt = None) -> None:
         folio.set_meta("wording", dict(pk.wording))
         if credits := pk.publication.credits():
             folio.set_meta("credits", credits)
+        folio.set_meta("host_avatar_url", pk.wiki.host_avatar_url)
         folio.set_meta("build_fingerprint", corpus_mod._fingerprint(folio))
     console.print(f"[green]{paths.folio}[/green]  {len(pk.wording)} wording keys")
 

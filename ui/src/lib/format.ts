@@ -25,6 +25,20 @@ export function when(iso: string, t: T, now: Date = new Date()): string {
     : d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
+/** The calendar day of a timestamp in the reader's local time, or `null` when it is not a date. */
+export function dayKey(iso: string): string | null {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** The date pill between days: month and day in the wording's locale, with the year when it is not this one. */
+export function dayLabel(iso: string, t: T, now: Date = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const year = d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" as const };
+  return d.toLocaleDateString(t("locale"), { ...year, month: "long", day: "numeric" });
+}
+
 export function activityText(a: Activity, t: T): string {
   switch (a.kind) {
     case "messaged":

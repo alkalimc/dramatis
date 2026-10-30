@@ -349,6 +349,14 @@ impl Engine {
             .await
     }
 
+    /// The host's picture: the corpus's `host_avatar_url`, cached like a person's.
+    pub(crate) async fn host_avatar_impl(&self) -> ApiResult<Option<MediaFile>> {
+        match self.corpus.as_ref().and_then(|c| c.host_avatar_url()) {
+            Some(url) => self.cached_avatar("~host", Some(url)).await,
+            None => Ok(None),
+        }
+    }
+
     /// An avatar for the page `page`: cached, else fetched from `url` (when there is one).
     pub(crate) async fn cached_avatar(
         &self,

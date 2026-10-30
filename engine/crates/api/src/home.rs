@@ -6,7 +6,7 @@
 //! saves/<name>.sqlite  one world per save: everything that changes with play
 //! current_save     the name of the save a process opens when it starts (empty: none)
 //! interface_language  `corpus` or `en`: the words the interface speaks (absent: never chosen)
-//! update_check     `off` when automatic update checks are off (absent: on)
+//! update_check     `on` or `off`: automatic update checks (absent: off, and not yet asked)
 //! update_cache.json  the last successful update check: time, version, release page
 //! corpus_path      optional: the full path of the corpus the user chose in the app
 //! office/          notes written by people looking into a request
@@ -169,9 +169,14 @@ impl Home {
         std::fs::rename(&tmp, self.root.join("interface_language"))
     }
 
-    /// Whether the app checks for a newer release by itself; on unless turned off.
+    /// Whether the app checks for a newer release by itself; off until the user says yes.
     pub fn auto_update_check(&self) -> bool {
-        std::fs::read_to_string(self.root.join("update_check")).map_or(true, |t| t.trim() != "off")
+        std::fs::read_to_string(self.root.join("update_check")).is_ok_and(|t| t.trim() == "on")
+    }
+
+    /// Whether the user has answered the question about automatic checks.
+    pub fn update_check_asked(&self) -> bool {
+        self.root.join("update_check").is_file()
     }
 
     pub fn set_auto_update_check(&self, auto: bool) -> io::Result<()> {

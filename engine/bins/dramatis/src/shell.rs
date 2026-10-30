@@ -11,7 +11,9 @@ use api::error::ApiResult;
 use api::home::Home;
 use api::port;
 use runtime::{AgentBridge, Options, Runtime};
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{
+    AboutMetadataBuilder, HELP_SUBMENU_ID, Menu, MenuItem, MenuItemKind, PredefinedMenuItem,
+};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -21,6 +23,45 @@ use crate::presence;
 
 /// How often idle conversations are wrapped up and due seeds looked at.
 const TICK: Duration = Duration::from_secs(60);
+
+// ---- the menu bar ----
+
+/// The default menu bar with an About item that carries the credit: the name, version and
+/// copyright, the author and the project page (the native panel on macOS shows only the
+/// credits text, other systems show the website as well).
+pub fn app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let info = api::views::AppInfo::current();
+    let about = PredefinedMenuItem::about(
+        app,
+        None,
+        Some(
+            AboutMetadataBuilder::new()
+                .name(Some("dramatis"))
+                .version(Some(info.version.clone()))
+                .copyright(app.config().bundle.copyright.clone())
+                .authors(Some(vec![info.author.clone()]))
+                .credits(Some(format!(
+                    "by {} \u{b7} {}",
+                    info.author, info.repository
+                )))
+                .website(Some(info.repository.clone()))
+                .website_label(Some("github.com/alkalimc/dramatis"))
+                .build(),
+        ),
+    )?;
+    let menu = Menu::default(app)?;
+    // The About item is the first of the app menu on macOS, the only one of Help elsewhere.
+    let host = if cfg!(target_os = "macos") {
+        menu.items()?.into_iter().next()
+    } else {
+        menu.get(HELP_SUBMENU_ID)
+    };
+    if let Some(MenuItemKind::Submenu(sub)) = host {
+        sub.remove_at(0)?;
+        sub.insert(&about, 0)?;
+    }
+    Ok(menu)
+}
 
 // ---- events and notifications ----
 

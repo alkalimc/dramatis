@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ChannelSummary, PersonRef } from "../api";
-import { useT } from "../i18n";
+import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
 import { useApi, useStore } from "../store";
 
@@ -11,7 +11,10 @@ const cache = new Map<string, Promise<string | null>>();
 
 const initialOf = (name: string) => Array.from(name.trim())[0] ?? "?";
 
-/** `plain` skips the portrait lookup: the initial only (the host). */
+/** The host's id wherever it stands in for a person (an author, a participant): its picture is the corpus's host portrait. */
+export const HOST_ID = "host";
+
+/** `plain` skips the portrait lookup: the initial only. */
 export function Avatar({ person, size = "m", plain = false }: { person: PersonRef; size?: Size; plain?: boolean }) {
   const api = useApi();
   const [src, setSrc] = useState<string | null>(null);
@@ -21,7 +24,7 @@ export function Avatar({ person, size = "m", plain = false }: { person: PersonRe
     let live = true;
     let p = cache.get(person.id);
     if (!p) {
-      p = api.commands.avatar(person.id).then((r) => (r.status === "ok" && r.data ? api.mediaUrl(r.data.path) : null));
+      p = (person.id === HOST_ID ? api.commands.hostAvatar() : api.commands.avatar(person.id)).then((r) => (r.status === "ok" && r.data ? api.mediaUrl(r.data.path) : null));
       cache.set(person.id, p);
     }
     p.then((url) => live && setSrc(url)).catch(() => undefined);
@@ -52,12 +55,16 @@ export function UserAvatar({ size = "m" }: { size?: Size }) {
   );
 }
 
-/** A group's picture: the one the user set, else its first four members in a 2x2 grid. */
+/**
+ * A group's picture: the one the user set, else a grid of up to four faces. The user's own
+ * takes the first place, the members in the order they joined fill the rest.
+ */
 function GroupAvatar({ channel, size }: { channel: ChannelSummary; size: Size }) {
   const api = useApi();
   const t = useT();
+  const user = useUserName();
   const custom = channel.avatar;
-  const members = channel.participants.slice(0, 4);
+  const members = channel.participants.slice(0, 3);
   if (custom) {
     return (
       <span className={`avatar avatar-${size}`} aria-hidden="true">
@@ -65,12 +72,10 @@ function GroupAvatar({ channel, size }: { channel: ChannelSummary; size: Size })
       </span>
     );
   }
-  if (members.length < 2) {
-    const name = members[0]?.name ?? channelTitle(channel, t);
-    return members[0] ? <Avatar person={members[0]} size={size} /> : <Avatar person={{ id: channel.id, name }} size={size} plain />;
-  }
+  if (members.length === 0) return <Avatar person={{ id: channel.id, name: channelTitle(channel, t, user) }} size={size} plain />;
   return (
-    <span className={`avatar avatar-${size} avatar-grid grid-${members.length}`} aria-hidden="true">
+    <span className={`avatar avatar-${size} avatar-grid grid-${members.length + 1}`} aria-hidden="true">
+      <UserAvatar size="s" />
       {members.map((p) => (
         <Avatar key={p.id} person={p} size="s" />
       ))}
@@ -81,7 +86,7 @@ function GroupAvatar({ channel, size }: { channel: ChannelSummary; size: Size })
 /** Whatever picture stands for a conversation in lists and headers. */
 export function ChannelAvatar({ channel, size = "m" }: { channel: ChannelSummary; size?: Size }) {
   const t = useT();
-  if (channel.kind === "host") return <Avatar person={{ id: "host", name: t("host.name") }} size={size} plain />;
+  if (channel.kind === "host") return <Avatar person={{ id: HOST_ID, name: t("host.name") }} size={size} />;
   if (channel.kind === "direct" && channel.participants[0]) return <Avatar person={channel.participants[0]} size={size} />;
   return <GroupAvatar channel={channel} size={size} />;
 }

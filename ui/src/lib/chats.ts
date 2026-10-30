@@ -5,22 +5,25 @@ import { splitScene, withoutCites } from "./scene";
 /** Most member names a group's default title spells out before it counts everyone. */
 const TITLE_NAMES = 3;
 
-/** A group's own name, else its members: "A, B, C", or "A, B (5 in all)" once there are many. */
-export function groupTitle(c: ChannelSummary, t: T): string {
+/**
+ * A group's own name, else the people in it: the user first, then the members in the order
+ * they joined. "Me, A, B", or "Me, A (5 in all)" once there are many; the user always stays.
+ */
+export function groupTitle(c: ChannelSummary, t: T, user: string): string {
   const own = c.name?.trim();
   if (own) return own;
-  const names = c.participants.map((p) => p.name);
+  if (c.participants.length === 0) return t("channel.group.untitled");
+  const names = [user, ...c.participants.map((p) => p.name)];
   const sep = t("group.name.separator");
-  if (names.length === 0) return t("channel.group.untitled");
   if (names.length <= TITLE_NAMES) return names.join(sep);
   return t("group.name.more", { names: names.slice(0, 2).join(sep), count: names.length });
 }
 
 /** What a conversation is called in lists and headers. */
-export function channelTitle(c: ChannelSummary, t: T): string {
+export function channelTitle(c: ChannelSummary, t: T, user: string): string {
   if (c.kind === "host") return t("host.name");
   if (c.kind === "direct") return c.participants[0]?.name ?? t("person.unknown");
-  return groupTitle(c, t);
+  return groupTitle(c, t, user);
 }
 
 /** When a channel last saw something: the newer of the engine's stamp and the loaded log. */

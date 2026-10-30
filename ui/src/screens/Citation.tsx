@@ -138,8 +138,10 @@ export function SourceEntries({ cites }: { cites: Citation[] }) {
 }
 
 /**
- * What a message cites, in a panel under it: for each source the page title, the original
- * wording of the cited passage and a link to the page.
+ * What a message cites, as a quote block inside its bubble: an accent bar on the left, the
+ * sources title with a chevron that folds it again, then one line per source. It grows
+ * down from the foot of the bubble; when the bubble is at the end of the log, the log
+ * scrolls so the block stays in view and the message moves up instead.
  */
 export function SourcesPanel({ cites, onClose }: { cites: Citation[]; onClose: () => void }) {
   const t = useT();
@@ -147,18 +149,17 @@ export function SourcesPanel({ cites, onClose }: { cites: Citation[]; onClose: (
 
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
-    // It opens under the message; bring it into view if that is past the end of the log.
     ref.current?.scrollIntoView?.({ block: "nearest" });
   }, []);
 
   return (
     <aside ref={ref} className="sources-panel" tabIndex={-1} aria-label={t("sources.title")} onKeyDown={(e) => e.key === "Escape" && onClose()}>
-      <header className="sources-head">
-        <h4>{t("sources.title")}</h4>
-        <button type="button" className="round small" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={onClose}>
-          <Icon name="close" size={16} />
-        </button>
-      </header>
+      <button type="button" className="sources-head" aria-expanded="true" aria-label={t("sources.collapse")} title={t("sources.collapse")} onClick={onClose}>
+        <span>{t("sources.title")}</span>
+        <span className="sources-chevron">
+          <Icon name="chevron" size={18} />
+        </span>
+      </button>
       <SourceEntries cites={cites} />
     </aside>
   );

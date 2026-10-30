@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { Candidate, RosterGroup } from "../api";
-import { pronounOf, useT } from "../i18n";
+import { pronounOf, useT, useUserName } from "../i18n";
 import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
 import { canTalk } from "../lib/library";
@@ -41,6 +41,7 @@ export function RosterDrawer() {
 function GroupList() {
   const t = useT();
   const actions = useActions();
+  const me = useUserName();
   const groups = useStore((s) => s.channels).filter((c) => c.kind === "group");
   const typing = useStore((s) => s.typing);
   const typingIn = new Set(Object.keys(typing));
@@ -54,7 +55,7 @@ function GroupList() {
           {groups.map((g) => (
             <li key={g.id}>
               <button type="button" className="link name" onClick={() => actions.open(g.id)}>
-                {groupTitle(g, t)}
+                {groupTitle(g, t, me)}
               </button>{" "}
               {typingIn.has(g.id) && <TypingMark />}
               <span className="muted small">

@@ -64,7 +64,7 @@ export function AboutPage() {
         ) : update?.newer && update.latest ? (
           <>
             {t("about.update.available", { version: update.latest })}{" "}
-            {update.url && <ExternalLink href={update.url}>{t("about.update.view")}</ExternalLink>}
+            <ExternalLink href={update.url ?? `${info?.repository ?? "https://github.com/alkalimc/dramatis"}/releases/latest`}>{t("about.update.view")}</ExternalLink>
           </>
         ) : update?.latest ? (
           t("about.update.current")
@@ -79,7 +79,7 @@ export function AboutPage() {
       </p>
       <label className="switch">
         <span>{t("about.update.auto")}</span>
-        <input type="checkbox" role="switch" checked={update?.auto ?? true} onChange={(e) => void actions.setAutoUpdate(e.target.checked)} />
+        <input type="checkbox" role="switch" checked={update?.auto ?? false} onChange={(e) => void actions.setAutoUpdate(e.target.checked)} />
       </label>
       <p className="muted small">{t("about.update.hint")}</p>
     </section>

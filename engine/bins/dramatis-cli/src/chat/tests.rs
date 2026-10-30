@@ -395,6 +395,12 @@ async fn a_streamed_reply_is_rendered_and_the_session_survives_a_failure() {
 
     let history = r.run("/history 2").await;
     assert!(history.contains("ann: Better now."), "{history:?}");
+    // The top of a history carries the day of its first message.
+    let first = history.lines().next().unwrap_or_default();
+    assert!(
+        first.len() == 10 && first.matches('-').count() == 2 && first.starts_with("20"),
+        "{history:?}"
+    );
     // Taking the last message back drops it and its reply and returns its text.
     let resent = r.run("/resend").await;
     assert!(resent.contains("took back 2 messages"), "{resent:?}");
@@ -500,8 +506,8 @@ async fn go_takes_a_choice_the_host_offered_and_name_sets_the_users_name() {
         "{listed}"
     );
     assert!(r.run("/go 3").await.contains("no such choice"));
-    assert!(r.run("/go 2").await.contains("group with ann, cy"));
-    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.run("/go 2").await.contains("group with Doc, ann, cy"));
+    assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
     assert!(r.run("/go 1").await.contains("talking to ann"));
     assert!(r.session.prompt().starts_with("[ann]"));
 
@@ -566,9 +572,9 @@ async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_grou
     let listed = r.out.take();
     assert!(listed.contains("1 start a group: ann, cy"), "{listed}");
     // Nothing was made or entered by the suggestion itself.
-    assert!(!r.session.prompt().starts_with("[ann, cy]"));
-    assert!(r.run("/go 1").await.contains("group with ann, cy"));
-    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(!r.session.prompt().starts_with("[Doc, ann, cy]"));
+    assert!(r.run("/go 1").await.contains("group with Doc, ann, cy"));
+    assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
     // The purpose is the group's topic.
     let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
     let topics: Vec<_> = world::channel::list(&w)
@@ -581,7 +587,7 @@ async fn a_persons_suggestion_is_a_numbered_choice_and_only_going_makes_the_grou
     drop(w);
     // Taking it again opens the same group instead of making another.
     r.run("/talk ann").await;
-    assert!(r.run("/go 1").await.contains("group with ann, cy"));
+    assert!(r.run("/go 1").await.contains("group with Doc, ann, cy"));
     let w = world::World::open(Home::new(&r._home.0).save_path("default")).unwrap();
     let made = world::channel::list(&w)
         .unwrap()
@@ -618,8 +624,8 @@ async fn the_hosts_channel_list_becomes_choices_that_switch_to_existing_conversa
     assert!(out.contains("/go <n> takes you there"), "{out}");
     assert!(r.run("/go 2").await.contains("talking to ann"));
     assert!(r.session.prompt().starts_with("[ann]"));
-    assert!(r.run("/go 1").await.contains("group with ann, cy"));
-    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.run("/go 1").await.contains("group with Doc, ann, cy"));
+    assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
 }
 
 /// Every command the host's terminal guide names. The pack's own guide test keeps the same
@@ -1570,6 +1576,8 @@ async fn history_marks_pictures_and_storage_clears_only_caches() {
 #[tokio::test(flavor = "multi_thread")]
 async fn about_shows_the_build_and_checks_for_an_update_at_most_daily() {
     let mut r = rig().await;
+    // Automatic checks are off until the person says yes.
+    r.engine.set_auto_update_check(true).await.unwrap();
     let about = r.run("/about").await;
     assert!(
         about.contains(&format!("Dramatis {}", env!("CARGO_PKG_VERSION"))),
@@ -1598,7 +1606,6 @@ async fn about_shows_the_build_and_checks_for_an_update_at_most_daily() {
     assert!(r.engine.home().update_cache().is_some());
     // With automatic checks off and nothing stored, nothing is asked.
     let mut off = rig().await;
-    off.engine.set_auto_update_check(false).await.unwrap();
     let about = off.run("/about").await;
     assert!(about.contains("Update check: no result yet"), "{about}");
     assert!(off.engine.home().update_cache().is_none());
@@ -1928,7 +1935,7 @@ async fn people_come_into_a_group_and_leave_it_by_command() {
     r.run("/group ann cy").await;
     assert!(r.run("/invite ann").await.contains("already in this group"));
     r.run("/remove cy").await;
-    assert!(r.session.prompt().starts_with("[ann]"));
+    assert!(r.session.prompt().starts_with("[Doc, ann]"));
     assert!(
         r.run("/remove cy")
             .await
@@ -1943,7 +1950,7 @@ async fn people_come_into_a_group_and_leave_it_by_command() {
     assert!(r.run("/invite bo, cy").await.contains("no persona"));
     assert!(r.run("/members").await.contains("ann"));
     r.run("/invite cy").await;
-    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
     assert!(r.run("/invite").await.contains("usage: /invite"));
     assert!(r.run("/remove").await.contains("usage: /remove"));
     r.run("/talk ann").await;
@@ -2003,10 +2010,60 @@ async fn an_invitation_is_a_numbered_choice_that_adds_the_person() {
     r.session.offers_for_test();
     let listed = r.out.take();
     assert!(listed.contains("1 invite cy to join"), "{listed}");
-    assert!(r.session.prompt().starts_with("[ann]"));
+    assert!(r.session.prompt().starts_with("[Doc, ann]"));
     r.run("/go 1").await;
-    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
     // Taking it again changes nothing.
     r.run("/go 1").await;
-    assert!(r.session.prompt().starts_with("[ann, cy]"));
+    assert!(r.session.prompt().starts_with("[Doc, ann, cy]"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn who_with_the_hosts_name_prints_the_hosts_page() {
+    let mut r = rig().await;
+    for who in ["/who host", "/who Host"] {
+        let page = r.run(who).await;
+        assert!(page.contains("The assistant of this place."), "{page}");
+        assert!(page.contains("What it does:"), "{page}");
+        assert!(page.contains("/events"), "{page}");
+        assert!(!page.contains("trust"), "{page}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_is_titled_with_the_user_first_and_a_direct_chat_is_not() {
+    let mut r = rig().await;
+    let opened = r.run("/group ann cy").await;
+    assert!(opened.contains("Doc, ann, cy"), "{opened}");
+    let direct = r.run("/talk ann").await;
+    assert!(!direct.contains("Doc, ann"), "{direct}");
+}
+
+#[tokio::test]
+async fn the_update_question_is_asked_once_and_only_a_yes_turns_it_on() {
+    let home = TempHome::new();
+    let h = Home::new(&home.0);
+    let engine = Engine::open(h.clone(), None, api::Ports::default()).unwrap();
+    let names = Names::load(&engine).await.unwrap();
+    assert!(!h.auto_update_check() && !h.update_check_asked());
+
+    // The end of input records nothing: the question comes again.
+    super::setup::update_check(&engine, &names, &mut Script::new(&[], &[])).await;
+    assert!(!h.update_check_asked());
+    // Anything but a yes is a no, and it is kept.
+    super::setup::update_check(&engine, &names, &mut Script::new(&[""], &[])).await;
+    assert!(h.update_check_asked() && !h.auto_update_check());
+    // Asked once: a later start does not ask, even when the answer would be yes.
+    let mut again = Script::new(&["y"], &[]);
+    super::setup::update_check(&engine, &names, &mut again).await;
+    assert!(again.said.is_empty() && !h.auto_update_check());
+
+    let other = TempHome::new();
+    let oh = Home::new(&other.0);
+    let e2 = Engine::open(oh.clone(), None, api::Ports::default()).unwrap();
+    let n2 = Names::load(&e2).await.unwrap();
+    let mut yes = Script::new(&["y"], &[]);
+    super::setup::update_check(&e2, &n2, &mut yes).await;
+    assert!(oh.auto_update_check());
+    assert!(yes.said[0].contains("downloads nothing"), "{:?}", yes.said);
 }

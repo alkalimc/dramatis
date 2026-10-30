@@ -9,8 +9,10 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use api::corpus::Corpus;
 use api::error::{ApiError, ApiResult};
 use api::events::ActivityState;
-use api::port::{Event, Sink};
-use api::types::{Author, ChannelId, Citation, MessageId, Mode, PersonId, PersonRef, Target};
+use api::port::{Clock, Event, Sink};
+use api::types::{
+    Author, ChannelId, Citation, MessageId, Mode, PersonId, PersonRef, Target, Timestamp,
+};
 use api::views::{ChannelKind, Message, ToolAction};
 use api::{Api, Engine};
 
@@ -188,6 +190,15 @@ impl Names {
                 .replace("{names}", &shown)
                 .replace("{count}", &more.to_string()),
         }
+    }
+
+    /// What a group is called when it has no name of its own: the user first, then the
+    /// members in the order they joined, counted past the first few. The user stays.
+    pub fn group_title(&self, names: &[String]) -> String {
+        let all: Vec<String> = std::iter::once(self.user())
+            .chain(names.iter().cloned())
+            .collect();
+        self.group_label(&all)
     }
 
     /// The header of a cited passage, else the chunk id.
@@ -532,6 +543,18 @@ pub struct Show {
     /// The newest message printed per channel since the session last took them, so what
     /// the user has seen counts as read.
     shown: Mutex<BTreeMap<ChannelId, MessageId>>,
+    /// The day of the last line printed per channel, so a new day gets a date line.
+    days: Mutex<BTreeMap<ChannelId, (i32, u8, u8)>>,
+}
+
+/// The calendar date in a timestamp's own offset (`2026-10-10T08:00:00+08:00`).
+fn day_of(at: &Timestamp) -> Option<(i32, u8, u8)> {
+    let s = at.0.get(..10)?;
+    let mut parts = s.split('-');
+    let year = parts.next()?.parse().ok()?;
+    let month = parts.next()?.parse().ok()?;
+    let day = parts.next()?.parse().ok()?;
+    Some((year, month, day))
 }
 
 impl Show {
@@ -541,7 +564,43 @@ impl Show {
             bound: OnceLock::new(),
             state: Mutex::new(State::default()),
             shown: Mutex::new(BTreeMap::new()),
+            days: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Start `channel` over for dates, so the next message printed there carries its day.
+    pub fn forget_day(&self, channel: &ChannelId) {
+        self.days
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(channel);
+    }
+
+    /// A dim date line when `day` is not the day of the last line printed in `channel`.
+    /// With nothing printed yet it says nothing unless `first` asks for it.
+    fn day_line(
+        &self,
+        names: &Names,
+        channel: &ChannelId,
+        day: (i32, u8, u8),
+        first: bool,
+    ) -> String {
+        let mut days = self.days.lock().unwrap_or_else(|e| e.into_inner());
+        let before = days.insert(channel.clone(), day);
+        if before == Some(day) || (before.is_none() && !first) {
+            return String::new();
+        }
+        let line = names.say(
+            "cli.date",
+            &[
+                ("year", &day.0),
+                ("month", &day.1),
+                ("day", &day.2),
+                ("mm", &format!("{:02}", day.1)),
+                ("dd", &format!("{:02}", day.2)),
+            ],
+        );
+        format!("{}\n", self.term.style.dim(&line))
     }
 
     fn saw(&self, m: &Message) {
@@ -618,12 +677,21 @@ impl Show {
 
     /// A stored message in full: name, text, tool lines, sources.
     pub fn whole(&self, m: &Message) -> String {
+        self.whole_dated(m, false)
+    }
+
+    /// [`Self::whole`]; `first` puts the date line before it even when nothing was printed
+    /// in the channel yet (the top of `/history`).
+    pub fn whole_dated(&self, m: &Message, first: bool) -> String {
         let Some(b) = self.bound.get() else {
             return String::new();
         };
         self.saw(m);
         let style = self.term.style;
         let mut out = String::new();
+        if let Some(day) = day_of(&m.at) {
+            out.push_str(&self.day_line(&b.names, &m.channel, day, first));
+        }
         for a in &m.actions {
             out.push_str(&style.dim(&format!("· {}", b.names.action_line(a))));
             out.push('\n');
@@ -689,6 +757,10 @@ impl Sink for Show {
                 }
                 if st.live.is_none() {
                     if st.named.as_ref() != Some(&d.message) {
+                        let today = api::port::LocalClock.now().local_date();
+                        let day = (today.year, today.month, today.day);
+                        self.term
+                            .print(&self.day_line(names, &d.channel, day, false));
                         self.term.print(&self.prefix(names, &d.author));
                     }
                     st.named = Some(d.message.clone());
