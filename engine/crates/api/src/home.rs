@@ -9,7 +9,6 @@
 //! update_check     `on` or `off`: automatic update checks (absent: off, and not yet asked)
 //! update_cache.json  the last successful update check: time, version, release page
 //! corpus_path      optional: the full path of the corpus the user chose in the app
-//! office/          notes written by people looking into a request
 //! uploads/         pictures the user chose (theirs, a group's), named by content hash
 //! media/           avatars and read-aloud audio: a bounded cache, never archived
 //! prompts/         optional local overrides, `<subject>.yaml` = { slot: body }
@@ -61,7 +60,6 @@ impl Home {
     /// Create the directory layout (idempotent).
     pub fn create(&self) -> io::Result<()> {
         for dir in [
-            self.office(),
             self.logs(),
             self.avatars(),
             self.uploads(),
@@ -215,10 +213,6 @@ impl Home {
         std::fs::rename(&tmp, self.root.join("corpus_path"))
     }
 
-    pub fn office(&self) -> PathBuf {
-        self.root.join("office")
-    }
-
     /// Diagnostics: what a turn that ended without a reply leaves behind.
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
@@ -281,7 +275,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let home = Home::new(&root);
         home.create().unwrap();
-        assert!(home.tts().is_dir() && home.avatars().is_dir() && home.office().is_dir());
+        assert!(home.tts().is_dir() && home.avatars().is_dir());
         assert!(home.saves().is_dir());
         assert_eq!(home.folio_in_home(), None);
         std::fs::write(root.join("pack.folio"), b"").unwrap();

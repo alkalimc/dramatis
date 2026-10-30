@@ -50,10 +50,6 @@ impl Engine {
             confidence: meta.confidence.map(convert::confidence),
             relayed: meta.relayed,
             service: meta.service,
-            task: meta.task.map(convert::task_id),
-            note: meta.note.map(|n| MediaFile {
-                path: self.home.office().join(n).to_string_lossy().into_owned(),
-            }),
             at: convert::ts(m.at, offset),
         }
     }

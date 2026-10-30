@@ -136,16 +136,6 @@ impl AgentPort for Spy {
         self.calls.lock().unwrap().push(format!("relay {}", to.0));
         Ok(ChannelId("1".into()))
     }
-    async fn ask(
-        &self,
-        p: PersonId,
-        q: String,
-        _: Option<u32>,
-        _: Option<TaskId>,
-    ) -> ApiResult<TaskId> {
-        self.calls.lock().unwrap().push(format!("ask {} {q}", p.0));
-        Ok(TaskId("1".into()))
-    }
     async fn rewind(&self, c: ChannelId, m: MessageId) -> ApiResult<String> {
         self.calls
             .lock()
@@ -614,10 +604,6 @@ async fn people_without_a_persona_are_visible_but_cannot_be_reached() {
     let none = ApiError::NoPersona { person: id("zed") };
     assert_eq!(e.open_direct(id("zed")).await, Err(none.clone()));
     assert_eq!(
-        e.ask(id("zed"), "q".into(), None, None).await,
-        Err(none.clone())
-    );
-    assert_eq!(
         e.relay("x".into(), MessageId("1".into()), id("zed")).await,
         Err(ApiError::NotFound)
     );
@@ -685,10 +671,6 @@ async fn no_chat_role_means_no_model_commands() {
         Err(ApiError::NoEndpoint)
     );
     assert_eq!(e.wrapup(ch).await, Err(ApiError::NoEndpoint));
-    assert_eq!(
-        e.ask(id("amy"), "q".into(), None, None).await,
-        Err(ApiError::NoEndpoint)
-    );
     assert_eq!(
         e.send_message(ChannelId("1".into()), " ".into(), None)
             .await,
@@ -824,63 +806,6 @@ async fn channels_history_groups_and_read_marks() {
     assert!(!kinds.contains(&ChannelKind::Group));
     assert_ne!(host, group);
     assert!(!r.events.take().is_empty());
-}
-
-#[tokio::test]
-async fn conclusions_seed_the_people_their_material_touches() {
-    // Two units cannot reach the production confidence bands; open them for this test.
-    let r = rig_full(
-        Arc::new(Offline),
-        "[retrieve.confidence]\nlow_top1 = 0.0\nlow_entropy = 10.0\n",
-    );
-    let e = &r.engine;
-    e.set_mode(Target::Person { id: id("kal") }, Mode::Enabled)
-        .await
-        .unwrap();
-    let case = e
-        .open_case("What does the furnace do?".into())
-        .await
-        .unwrap();
-    assert!(e.tasks().await.unwrap()[0].pinned);
-    let seeds = |e: &Engine, kind: &str| -> i64 {
-        e.w()
-            .query_row("SELECT count(*) FROM seed WHERE kind = ?1", [kind], |r| {
-                r.get(0)
-            })
-            .unwrap()
-    };
-    assert_eq!(seeds(e, "pinned"), 1);
-    let fact = e
-        .write_conclusion(case.clone(), "The furnace studies matter".into())
-        .await
-        .unwrap();
-    assert_eq!(
-        seeds(e, "conclusion"),
-        1,
-        "kal enabled, furnace matches his unit"
-    );
-    let file = e.case_file(case.clone()).await.unwrap();
-    assert_eq!(file.conclusion.as_ref().unwrap().id, fact);
-    assert!(r.spy.calls.lock().unwrap().iter().any(|c| c == "event"));
-
-    // Replacing retracts the old one.
-    let next = e
-        .write_conclusion(case.clone(), "Something else".into())
-        .await
-        .unwrap();
-    assert_ne!(next, fact);
-    let all = e.facts(FactFilter::default()).await.unwrap();
-    assert_eq!(all.items.len(), 1);
-    assert_eq!(all.deleted, 1);
-
-    e.unpin_task(case.clone()).await.unwrap();
-    assert!(!e.tasks().await.unwrap()[0].pinned);
-    assert_eq!(
-        e.write_conclusion(case, " ".into()).await,
-        Err(ApiError::Invalid {
-            field: "text".into()
-        })
-    );
 }
 
 #[tokio::test]
@@ -1268,7 +1193,7 @@ async fn a_suggested_group_is_made_once_and_the_line_remembers_it() {
     let (mid, other) = {
         let w = e.w();
         let ch = convert::world_channel(&direct).unwrap();
-        let calls = serde_json::to_value([ToolAction::Report, offer]).unwrap();
+        let calls = serde_json::to_value([ToolAction::Wrapup, offer]).unwrap();
         let m = world::message::append(
             &w,
             ch,

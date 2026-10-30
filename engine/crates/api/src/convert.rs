@@ -33,7 +33,6 @@ macro_rules! ids {
 ids! {
     channel_id / world_channel: ChannelId,
     message_id / world_message: MessageId,
-    task_id / world_task: TaskId,
     fact_id / world_fact: FactId,
 }
 
@@ -125,7 +124,6 @@ pub fn fact_kind(k: world::FactKind) -> v::FactKind {
     match k {
         world::FactKind::Fact => v::FactKind::Fact,
         world::FactKind::Commitment => v::FactKind::Commitment,
-        world::FactKind::Conclusion => v::FactKind::Conclusion,
         world::FactKind::Hurt => v::FactKind::Hurt,
     }
 }
@@ -142,13 +140,6 @@ pub fn fact_scope(s: v::FactScope) -> world::fact::Scope {
     }
 }
 
-pub fn task_status(s: world::TaskStatus) -> v::TaskStatus {
-    match s {
-        world::TaskStatus::Active => v::TaskStatus::Active,
-        world::TaskStatus::Done => v::TaskStatus::Done,
-    }
-}
-
 pub fn origin(o: world::Origin) -> v::Origin {
     match o {
         world::Origin::User => v::Origin::User,
@@ -162,7 +153,6 @@ pub fn call_shape(s: world::Shape) -> CallShape {
         world::Shape::Direct => CallShape::Direct,
         world::Shape::Group | world::Shape::Interject => CallShape::Group,
         world::Shape::Opening => CallShape::Opening,
-        world::Shape::Ask => CallShape::Ask,
         world::Shape::Host => CallShape::Host,
         world::Shape::Wrapup => CallShape::Wrapup,
     }
@@ -212,9 +202,7 @@ pub fn world_err(e: world::Error) -> ApiError {
         },
         world::Error::Invalid(_)
         | world::Error::NotParticipant { .. }
-        | world::Error::ChannelClosed(_)
-        | world::Error::NotEnoughTurns { .. }
-        | world::Error::NoTask { .. } => ApiError::Invalid {
+        | world::Error::ChannelClosed(_) => ApiError::Invalid {
             field: "request".into(),
         },
         other => ApiError::Io {
@@ -240,6 +228,9 @@ mod tests {
             world_channel(&channel_id(world::ChannelId(7))),
             Ok(world::ChannelId(7))
         );
-        assert_eq!(world_task(&t::TaskId::from("x")), Err(ApiError::NotFound));
+        assert_eq!(
+            world_message(&t::MessageId::from("x")),
+            Err(ApiError::NotFound)
+        );
     }
 }

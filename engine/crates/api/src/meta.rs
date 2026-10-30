@@ -1,7 +1,6 @@
 //! What `message.attachment` holds for a message the engine wrote: the reply's
-//! citations, how sure retrieval was, the request it answers, whether it retells
-//! something, and the request's note. One type, so the side that writes it (the agent)
-//! and the side that shows it (the history) cannot drift apart.
+//! citations, how sure retrieval was, whether it retells something. One type, so the side
+//! that writes it (the agent) and the side that shows it (the history) cannot drift apart.
 
 use serde::{Deserialize, Serialize};
 
@@ -12,14 +11,10 @@ pub struct MessageMeta {
     pub cites: Vec<world::Citation>,
     /// How sure retrieval was about the material the reply had.
     pub confidence: Option<index::Level>,
-    /// The request this message answers.
-    pub task: Option<world::TaskId>,
     /// A retelling of something said elsewhere.
     pub relayed: bool,
     /// A context line written by the harness, shown as a service line.
     pub service: bool,
-    /// The request's note, relative to the office directory.
-    pub note: Option<String>,
     /// Hash of the picture the user attached, which lives in the save (`world::picture`).
     pub picture: Option<String>,
     /// The picture is gone and cannot be shown.
@@ -89,13 +84,10 @@ mod tests {
         let v = serde_json::json!({
             "cites": [{"page": "P", "revid": 3, "span_from": 1, "span_to": 2, "chunk_id": "dialogue:x"}],
             "confidence": "low",
-            "task": 4,
-            "note": "requests/4.md",
         });
         let m = MessageMeta::of(Some(&v));
         assert_eq!(m.cites[0].chunk_id, "dialogue:x");
         assert_eq!(m.confidence, Some(index::Level::Low));
-        assert_eq!(m.task, Some(world::TaskId(4)));
         assert!(!m.relayed);
         assert!(MessageMeta::of(Some(&serde_json::json!("junk"))).is_empty());
         assert!(MessageMeta::of(None).is_empty());

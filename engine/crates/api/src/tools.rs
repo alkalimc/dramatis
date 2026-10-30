@@ -6,7 +6,7 @@
 //! list. The **host** list sits only in the host's own session.
 //!
 //! Things the model never supplies, because the harness fills them: the searching person
-//! (`as_person`), a memory's audience, a note's path, the caller's remaining turns.
+//! (`as_person`) and a memory's audience.
 //!
 //! Serialization is deterministic (keys sorted at every level): these bytes are part of a
 //! cached prefix, and a reordered key is a cache miss for every session.
@@ -58,11 +58,6 @@ pub struct RequestJoin {
     /// What they should know about, when you do not know who.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
-    /// Turns to hand over from your own, while looking into a request: at least 1 (the
-    /// default), and at most what you have left after this one. Ignored outside a request.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 1))]
-    pub turns: Option<u32>,
 }
 
 /// Ask the host to arrange something for the user: a way to talk to colleagues you point
@@ -90,21 +85,6 @@ pub struct AskHost {
     /// "plan a birthday party". Whoever the user goes to, or every member, is told.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purpose: Option<String>,
-}
-
-/// Answer a request the user delegated to you with ask. Never for an ordinary reply: a
-/// reply to the user is just written. Ends the request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Report {
-    /// Your reply, as you would say it.
-    pub text: String,
-    /// Ids of the passages the reply rests on.
-    #[serde(default)]
-    pub cites: Vec<String>,
-    /// A longer written note to leave with the reply, in Markdown.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
 }
 
 /// Close the conversation: what to remember from it.
@@ -171,20 +151,6 @@ pub struct Digest {}
 pub struct FindPeople {
     /// The subject, in plain words. The one the user picks is told it as the reason.
     pub topic: String,
-}
-
-/// Ask a person to look into a question for the user.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Ask {
-    /// Roster id.
-    pub person: String,
-    /// The question, as the user would put it.
-    pub question: String,
-    /// Turn budget. Leave out to use the default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 1))]
-    pub turns: Option<u32>,
 }
 
 /// Start a group conversation among two or more people; start small, with a few people who
@@ -308,7 +274,6 @@ pub enum SharedCall {
     GetChunk(GetChunk),
     RequestJoin(RequestJoin),
     AskHost(AskHost),
-    Report(Report),
     Wrapup(Wrapup),
 }
 
@@ -317,7 +282,6 @@ pub enum SharedCall {
 pub enum HostCall {
     Digest(Digest),
     FindPeople(FindPeople),
-    Ask(Ask),
     CreateGroup(CreateGroup),
     SetMode(SetMode),
     Search(HostSearch),
@@ -358,7 +322,6 @@ impl SharedCall {
             "get_chunk" => Self::GetChunk(args(name, raw)?),
             "request_join" => Self::RequestJoin(args(name, raw)?),
             "ask_host" => Self::AskHost(args(name, raw)?),
-            "report" => Self::Report(args(name, raw)?),
             "wrapup" => Self::Wrapup(args(name, raw)?),
             _ => return Err(CallError::Unknown(name.to_owned())),
         })
@@ -370,7 +333,6 @@ impl HostCall {
         Ok(match name {
             "digest" => Self::Digest(args(name, raw)?),
             "find_people" => Self::FindPeople(args(name, raw)?),
-            "ask" => Self::Ask(args(name, raw)?),
             "create_group" => Self::CreateGroup(args(name, raw)?),
             "set_mode" => Self::SetMode(args(name, raw)?),
             "search" => Self::Search(args(name, raw)?),
@@ -464,7 +426,6 @@ pub fn shared_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
         spec::<Search>("tool", "search", overrides),
         spec::<GetChunk>("tool", "get_chunk", overrides),
         spec::<RequestJoin>("tool", "request_join", overrides),
-        spec::<Report>("tool", "report", overrides),
         spec::<Wrapup>("tool", "wrapup", overrides),
         spec::<AskHost>("tool", "ask_host", overrides),
     ]
@@ -475,7 +436,6 @@ pub fn host_tools(overrides: &Descriptions) -> Vec<ToolSpec> {
     vec![
         spec::<Digest>("tool.host", "digest", overrides),
         spec::<FindPeople>("tool.host", "find_people", overrides),
-        spec::<Ask>("tool.host", "ask", overrides),
         spec::<CreateGroup>("tool.host", "create_group", overrides),
         spec::<SetMode>("tool.host", "set_mode", overrides),
         spec::<HostSearch>("tool.host", "search", overrides),
@@ -572,13 +532,13 @@ mod tests {
             Err(CallError::Unknown(_))
         ));
         assert!(matches!(
-            SharedCall::parse("report", r#"{"text":"t","path":"/etc/x"}"#),
+            SharedCall::parse("request_join", r#"{"person":"p","turns":2}"#),
             Err(CallError::Arguments { .. })
         ));
-        let SharedCall::Report(r) = SharedCall::parse("report", r#"{"text":"t"}"#).unwrap() else {
-            panic!()
-        };
-        assert!(r.cites.is_empty());
+        assert!(matches!(
+            SharedCall::parse("report", r#"{"text":"t"}"#),
+            Err(CallError::Unknown(_))
+        ));
         assert!(matches!(
             HostCall::parse(
                 "set_mode",
@@ -598,9 +558,9 @@ mod tests {
         let shared = shared_tools(&o);
         assert_eq!(shared[0].description, "override");
         assert_ne!(shared[1].description, "override");
-        assert_ne!(host_tools(&o)[5].description, "override");
+        assert_ne!(host_tools(&o)[4].description, "override");
         o.insert("tool.host.search".into(), "host override".into());
-        assert_eq!(host_tools(&o)[5].description, "host override");
+        assert_eq!(host_tools(&o)[4].description, "host override");
     }
 
     #[test]
@@ -620,7 +580,7 @@ mod tests {
             "param override"
         );
         assert_eq!(
-            shared[4].parameters["properties"]["facts"]["items"]["properties"]["due"]["description"],
+            shared[3].parameters["properties"]["facts"]["items"]["properties"]["due"]["description"],
             "nested override"
         );
         // The same parameter name in the other list is untouched.
@@ -630,11 +590,11 @@ mod tests {
         );
         let host = host_tools(&o);
         assert_eq!(
-            host[5].parameters["properties"]["persons"]["description"],
+            host[4].parameters["properties"]["persons"]["description"],
             "host param"
         );
         assert_ne!(
-            host[5].parameters["properties"]["query"]["description"],
+            host[4].parameters["properties"]["query"]["description"],
             "param override"
         );
     }
@@ -645,7 +605,7 @@ mod tests {
         let chat = to_wire(&tools, WireApi::Chat);
         assert_eq!(chat[0]["function"]["name"], "search");
         let resp = to_wire(&tools, WireApi::Responses);
-        assert_eq!(resp[4]["name"], "wrapup");
+        assert_eq!(resp[3]["name"], "wrapup");
         // Same bytes every time: part of a cached prefix.
         assert_eq!(chat.to_string(), to_wire(&tools, WireApi::Chat).to_string());
     }

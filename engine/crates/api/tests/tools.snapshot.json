@@ -35,39 +35,6 @@
       },
       {
         "function": {
-          "description": "Ask a person to look into a question for the user.",
-          "name": "ask",
-          "parameters": {
-            "additionalProperties": false,
-            "properties": {
-              "person": {
-                "description": "Roster id.",
-                "type": "string"
-              },
-              "question": {
-                "description": "The question, as the user would put it.",
-                "type": "string"
-              },
-              "turns": {
-                "description": "Turn budget. Leave out to use the default.",
-                "minimum": 1,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "person",
-              "question"
-            ],
-            "type": "object"
-          }
-        },
-        "type": "function"
-      },
-      {
-        "function": {
           "description": "Start a group conversation among two or more people; start small, with a few people who\nmatter for the matter at hand, and invite more later. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
           "name": "create_group",
           "parameters": {
@@ -370,36 +337,6 @@
         "name": "find_people"
       },
       {
-        "description": "Ask a person to look into a question for the user.",
-        "input_schema": {
-          "additionalProperties": false,
-          "properties": {
-            "person": {
-              "description": "Roster id.",
-              "type": "string"
-            },
-            "question": {
-              "description": "The question, as the user would put it.",
-              "type": "string"
-            },
-            "turns": {
-              "description": "Turn budget. Leave out to use the default.",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "person",
-            "question"
-          ],
-          "type": "object"
-        },
-        "name": "ask"
-      },
-      {
         "description": "Start a group conversation among two or more people; start small, with a few people who\nmatter for the matter at hand, and invite more later. One person is never a group: the\nuser is then only shown a way to talk to them. The result gives the group id when one\nwas made, and the user is shown a way to open it; you cannot move the user yourself.\nTo continue a group you already have with the same people, give its name as the\npurpose; any other purpose makes a new group.",
         "input_schema": {
           "additionalProperties": false,
@@ -669,37 +606,6 @@
           },
           "required": [
             "topic"
-          ],
-          "type": "object"
-        },
-        "type": "function"
-      },
-      {
-        "description": "Ask a person to look into a question for the user.",
-        "name": "ask",
-        "parameters": {
-          "additionalProperties": false,
-          "properties": {
-            "person": {
-              "description": "Roster id.",
-              "type": "string"
-            },
-            "question": {
-              "description": "The question, as the user would put it.",
-              "type": "string"
-            },
-            "turns": {
-              "description": "Turn budget. Leave out to use the default.",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "person",
-            "question"
           ],
           "type": "object"
         },
@@ -1043,51 +949,8 @@
                   "string",
                   "null"
                 ]
-              },
-              "turns": {
-                "description": "Turns to hand over from your own, while looking into a request: at least 1 (the\ndefault), and at most what you have left after this one. Ignored outside a request.",
-                "minimum": 1,
-                "type": [
-                  "integer",
-                  "null"
-                ]
               }
             },
-            "type": "object"
-          }
-        },
-        "type": "function"
-      },
-      {
-        "function": {
-          "description": "Answer a request the user delegated to you with ask. Never for an ordinary reply: a\nreply to the user is just written. Ends the request.",
-          "name": "report",
-          "parameters": {
-            "additionalProperties": false,
-            "properties": {
-              "cites": {
-                "default": [],
-                "description": "Ids of the passages the reply rests on.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "note": {
-                "description": "A longer written note to leave with the reply, in Markdown.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "text": {
-                "description": "Your reply, as you would say it.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "text"
-            ],
             "type": "object"
           }
         },
@@ -1292,51 +1155,11 @@
                 "string",
                 "null"
               ]
-            },
-            "turns": {
-              "description": "Turns to hand over from your own, while looking into a request: at least 1 (the\ndefault), and at most what you have left after this one. Ignored outside a request.",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
             }
           },
           "type": "object"
         },
         "name": "request_join"
-      },
-      {
-        "description": "Answer a request the user delegated to you with ask. Never for an ordinary reply: a\nreply to the user is just written. Ends the request.",
-        "input_schema": {
-          "additionalProperties": false,
-          "properties": {
-            "cites": {
-              "default": [],
-              "description": "Ids of the passages the reply rests on.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "note": {
-              "description": "A longer written note to leave with the reply, in Markdown.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "text": {
-              "description": "Your reply, as you would say it.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "text"
-          ],
-          "type": "object"
-        },
-        "name": "report"
       },
       {
         "description": "Close the conversation: what to remember from it.",
@@ -1534,49 +1357,8 @@
                 "string",
                 "null"
               ]
-            },
-            "turns": {
-              "description": "Turns to hand over from your own, while looking into a request: at least 1 (the\ndefault), and at most what you have left after this one. Ignored outside a request.",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
             }
           },
-          "type": "object"
-        },
-        "type": "function"
-      },
-      {
-        "description": "Answer a request the user delegated to you with ask. Never for an ordinary reply: a\nreply to the user is just written. Ends the request.",
-        "name": "report",
-        "parameters": {
-          "additionalProperties": false,
-          "properties": {
-            "cites": {
-              "default": [],
-              "description": "Ids of the passages the reply rests on.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "note": {
-              "description": "A longer written note to leave with the reply, in Markdown.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "text": {
-              "description": "Your reply, as you would say it.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "text"
-          ],
           "type": "object"
         },
         "type": "function"

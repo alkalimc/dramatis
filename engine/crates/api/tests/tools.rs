@@ -64,7 +64,6 @@ fn every_parsed_name_is_offered() {
             "search",
             "get_chunk",
             "request_join",
-            "report",
             "wrapup",
             "ask_host"
         ]
@@ -74,7 +73,6 @@ fn every_parsed_name_is_offered() {
         [
             "digest",
             "find_people",
-            "ask",
             "create_group",
             "set_mode",
             "search",

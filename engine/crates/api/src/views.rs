@@ -8,7 +8,7 @@ use specta::Type;
 use crate::endpoints::{Profile, Roles};
 use crate::types::{
     Author, ChannelId, Citation, Confidence, FactId, MediaFile, MessageId, Mode, PersonId,
-    PersonRef, Target, TaskId, Tier, Timestamp,
+    PersonRef, Target, Tier, Timestamp,
 };
 
 // ---- app ----
@@ -206,11 +206,6 @@ pub enum Activity {
     Messaged {
         at: Timestamp,
     },
-    Replied {
-        task: TaskId,
-        question: String,
-        at: Timestamp,
-    },
     CommitmentDue {
         fact: FactId,
         text: String,
@@ -281,7 +276,6 @@ pub struct PersonPage {
     /// See [`RosterRow::has_persona`].
     pub has_persona: bool,
     pub last_seen: Option<Timestamp>,
-    pub tasks_done: u32,
     pub companions: Vec<PersonRef>,
     /// Read-aloud voice; `None` = endpoint default.
     pub voice: Option<String>,
@@ -348,9 +342,6 @@ pub struct Message {
     /// quiet note between the bubbles, not as something the user said.
     #[serde(default)]
     pub service: bool,
-    /// The request this message answers.
-    pub task: Option<TaskId>,
-    pub note: Option<MediaFile>,
     pub at: Timestamp,
 }
 
@@ -379,7 +370,6 @@ pub enum ToolAction {
     Remember {
         text: String,
     },
-    Report,
     Wrapup,
     Digest,
     FindPeople {
@@ -387,10 +377,6 @@ pub enum ToolAction {
         /// Who was found, so a front end can offer to open their channels.
         #[serde(default)]
         persons: Vec<PersonRef>,
-    },
-    Ask {
-        person: PersonRef,
-        question: String,
     },
     CreateGroup {
         members: Vec<PersonRef>,
@@ -435,53 +421,6 @@ pub struct ChannelRef {
     pub members: Vec<PersonRef>,
 }
 
-// ---- tasks and case files ----
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Active,
-    Done,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct TaskSummary {
-    pub id: TaskId,
-    pub question: String,
-    /// A pinned question may have nobody on it yet.
-    pub assignee: Option<PersonRef>,
-    pub parent: Option<TaskId>,
-    pub status: TaskStatus,
-    pub pinned: bool,
-    pub channel: Option<ChannelId>,
-    pub created_at: Timestamp,
-}
-
-/// A pinned question and everything that hangs off it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct CaseFile {
-    pub task: TaskSummary,
-    /// Each request made under it, with its reply once there is one.
-    pub trail: Vec<TrailEntry>,
-    pub conclusion: Option<FactView>,
-    /// Messages elsewhere that responded to the conclusion.
-    pub reactions: Vec<MessageRef>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct TrailEntry {
-    pub task: TaskSummary,
-    pub reply: Option<Message>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct MessageRef {
-    pub channel: ChannelId,
-    pub message: MessageId,
-    pub author: Author,
-    pub excerpt: String,
-}
-
 // ---- facts ----
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -489,7 +428,6 @@ pub struct MessageRef {
 pub enum FactKind {
     Fact,
     Commitment,
-    Conclusion,
     Hurt,
 }
 
@@ -511,7 +449,6 @@ pub enum Audience {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum About {
-    Task { id: TaskId },
     Fact { id: FactId },
     Person { id: PersonId },
     User,
@@ -550,7 +487,6 @@ pub struct FactFilter {
     pub scope: FactScope,
     /// Only facts about, or recalled by, this person.
     pub person: Option<PersonId>,
-    pub task: Option<TaskId>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
@@ -635,7 +571,6 @@ pub enum CallShape {
     Direct,
     Group,
     Opening,
-    Ask,
     Host,
     Wrapup,
 }

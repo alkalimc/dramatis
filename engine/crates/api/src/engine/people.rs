@@ -18,11 +18,6 @@ fn activity(a: world::presence::Activity, offset: i32) -> Activity {
     let ts = |ms| convert::ts(ms, offset);
     match a {
         W::Messaged { at } => Activity::Messaged { at: ts(at) },
-        W::Replied { task, question, at } => Activity::Replied {
-            task: convert::task_id(task),
-            question,
-            at: ts(at),
-        },
         W::CommitmentDue { fact, text, due } => Activity::CommitmentDue {
             fact: convert::fact_id(fact),
             text,
@@ -248,7 +243,6 @@ impl Engine {
             mode: convert::mode(b.mode),
             has_persona: c.has_persona(&p.id),
             last_seen: b.last_seen.map(|ms| convert::ts(ms, offset)),
-            tasks_done: world::task::done_count(&w, &wp).map_err(world_err)?,
             companions: c
                 .companions(&p.id)
                 .iter()

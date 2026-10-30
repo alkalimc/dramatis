@@ -31,7 +31,6 @@ id! {
     PersonId,
     ChannelId,
     MessageId,
-    TaskId,
     FactId,
 }
 

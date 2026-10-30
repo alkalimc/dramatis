@@ -25,7 +25,7 @@ use crate::events::{
     AwayChanged, MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, Rewound,
     RosterChanged, ToolCalled, TurnActivity, WorldChanged,
 };
-use crate::types::{ChannelId, MessageId, PersonId, TaskId};
+use crate::types::{ChannelId, MessageId, PersonId};
 use crate::views::ImagePart;
 
 #[async_trait]
@@ -52,15 +52,6 @@ pub trait AgentPort: Send + Sync + 'static {
     /// returns its text. Refused while a turn is running in the channel. Emits `Rewound`.
     async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String>;
 
-    /// Create the request and return it at once; the work runs in the background.
-    async fn ask(
-        &self,
-        person: PersonId,
-        question: String,
-        turns: Option<u32>,
-        parent: Option<TaskId>,
-    ) -> ApiResult<TaskId>;
-
     /// End the channel's conversation now and write what is worth remembering from it.
     /// Runs in the background; the facts it writes arrive as `WorldChanged`.
     async fn wrapup(&self, channel: ChannelId) -> ApiResult<()>;
@@ -71,7 +62,7 @@ pub trait AgentPort: Send + Sync + 'static {
     async fn presence(&self, opened: bool) -> ApiResult<()>;
 
     /// Something happened that may seed an opening outside presence (a commitment fell
-    /// due, a conclusion was written, a question pinned). Runs in the background.
+    /// due). Runs in the background.
     async fn on_event(&self) -> ApiResult<()>;
 
     /// The user's name changed: every session rolls over so no log keeps the old one.
@@ -344,16 +335,6 @@ impl AgentPort for Unwired {
     }
 
     async fn rewind(&self, _: ChannelId, _: MessageId) -> ApiResult<String> {
-        Err(ApiError::NotImplemented)
-    }
-
-    async fn ask(
-        &self,
-        _: PersonId,
-        _: String,
-        _: Option<u32>,
-        _: Option<TaskId>,
-    ) -> ApiResult<TaskId> {
         Err(ApiError::NotImplemented)
     }
 

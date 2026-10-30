@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use crate::endpoints::{Profile, Role};
 use crate::error::{ApiError, ApiResult};
 use crate::types::{
-    ChannelId, Citation, FactId, MediaFile, MessageId, Mode, PersonId, Target, TaskId, Tier,
+    ChannelId, Citation, FactId, MediaFile, MessageId, Mode, PersonId, Target, Tier,
 };
 use crate::views::*;
 
@@ -155,7 +155,7 @@ commands! {
     fn wrapup(channel: ChannelId) -> ();
     /// Take back one of the user's own messages and everything after it in the channel, as
     /// if it was never sent: the later messages, the model's log of them, the memories
-    /// and requests they led to. Returns the message's text for the input box. Refused
+    /// they led to. Returns the message's text for the input box. Refused
     /// while a reply is being written in the channel, and for a message that is not the
     /// user's. `Rewound` follows.
     fn rewind(channel: ChannelId, message: MessageId) -> String;
@@ -196,21 +196,6 @@ commands! {
     /// archived (`Invalid`). A message from a person in an archived channel un-archives
     /// it (`WorldChanged`); the user's own messages do not.
     fn archive_channel(channel: ChannelId, archived: bool) -> ();
-
-    // ---- requests and case files ----
-
-    /// Ask a person to look into a question. `turns` absent: the tier's default.
-    /// `parent`: file it under a pinned question.
-    fn ask(person: PersonId, question: String, turns: Option<u32>, parent: Option<TaskId>)
-        -> TaskId;
-    fn tasks() -> Vec<TaskSummary> = Ok(Vec::new());
-    fn case_file(task: TaskId) -> CaseFile;
-    /// Pin a question nobody is on yet.
-    fn open_case(question: String) -> TaskId;
-    fn pin_task(task: TaskId) -> ();
-    fn unpin_task(task: TaskId) -> ();
-    /// Write or replace the conclusion; replacing retracts the old one.
-    fn write_conclusion(task: TaskId, text: String) -> FactId;
 
     // ---- facts ----
 

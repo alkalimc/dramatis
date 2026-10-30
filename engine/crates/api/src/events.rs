@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::types::{Author, ChannelId, FactId, MessageId, Mode, PersonId, Target, TaskId};
+use crate::types::{Author, ChannelId, FactId, MessageId, Mode, PersonId, Target};
 use crate::views::{Message, QuotaStatus, ToolAction};
 
 macro_rules! events {
@@ -109,9 +109,6 @@ events! {
 pub enum WorldChange {
     Fact {
         id: FactId,
-    },
-    Task {
-        id: TaskId,
     },
     Channel {
         id: ChannelId,

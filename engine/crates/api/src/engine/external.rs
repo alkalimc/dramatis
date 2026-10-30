@@ -30,7 +30,6 @@ pub(crate) struct Watch {
     dirty: bool,
     message: i64,
     fact: i64,
-    task: i64,
 }
 
 fn max_id(conn: &rusqlite::Connection, table: &str) -> ApiResult<i64> {
@@ -44,8 +43,8 @@ fn max_id(conn: &rusqlite::Connection, table: &str) -> ApiResult<i64> {
 
 impl Engine {
     /// Look once for writes by another process and announce them: `MessageAdded` for each
-    /// new message nobody has announced yet, and `WorldChanged` for the channels, facts and
-    /// requests that are new. Writes by this process's own agent are already announced
+    /// new message nobody has announced yet, and `WorldChanged` for the channels and facts
+    /// that are new. Writes by this process's own agent are already announced
     /// (they are in `seen`), and while the agent is working nothing is announced at all, so
     /// a half-streamed reply is never taken for someone else's message; the look repeats
     /// once it is idle. The first look only records where things stand. Returns how many
@@ -64,11 +63,7 @@ impl Engine {
             let version: i64 = w
                 .pragma_query_value(None, "data_version", |r| r.get(0))
                 .map_err(|e| world_err(e.into()))?;
-            let now = (
-                max_id(&w, "message")?,
-                max_id(&w, "fact")?,
-                max_id(&w, "task")?,
-            );
+            let now = (max_id(&w, "message")?, max_id(&w, "fact")?);
             (version, now)
         };
         drop(open);
@@ -81,7 +76,6 @@ impl Engine {
                 dirty: false,
                 message: now.0,
                 fact: now.1,
-                task: now.2,
             };
             return Ok(0);
         }
@@ -102,7 +96,6 @@ impl Engine {
         }
         watch.message = watch.message.min(now.0);
         watch.fact = watch.fact.min(now.1);
-        watch.task = watch.task.min(now.2);
 
         let offset = self.now().offset_min;
         let rows = message::all_since(&self.w(), watch.message, BATCH).map_err(world_err)?;
@@ -131,32 +124,23 @@ impl Engine {
             self.changed(changes);
             return Ok(announced);
         }
-        // Only what is new since the last look: ids above the cursors.
-        for (table, cursor, newest) in [("fact", watch.fact, now.1), ("task", watch.task, now.2)] {
-            if newest > cursor {
-                let w = self.w();
-                let mut stmt = w
-                    .prepare(&format!("SELECT id FROM {table} WHERE id > ?1 ORDER BY id"))
-                    .map_err(|e| world_err(e.into()))?;
-                let ids: Vec<i64> = stmt
-                    .query_map([cursor], |r| r.get(0))
-                    .and_then(|rows| rows.collect())
-                    .map_err(|e| world_err(e.into()))?;
-                for id in ids {
-                    changes.push(if table == "fact" {
-                        WorldChange::Fact {
-                            id: convert::fact_id(world::FactId(id)),
-                        }
-                    } else {
-                        WorldChange::Task {
-                            id: convert::task_id(world::TaskId(id)),
-                        }
-                    });
-                }
+        // Only what is new since the last look: ids above the cursor.
+        if now.1 > watch.fact {
+            let w = self.w();
+            let mut stmt = w
+                .prepare("SELECT id FROM fact WHERE id > ?1 ORDER BY id")
+                .map_err(|e| world_err(e.into()))?;
+            let ids: Vec<i64> = stmt
+                .query_map([watch.fact], |r| r.get(0))
+                .and_then(|rows| rows.collect())
+                .map_err(|e| world_err(e.into()))?;
+            for id in ids {
+                changes.push(WorldChange::Fact {
+                    id: convert::fact_id(world::FactId(id)),
+                });
             }
         }
         watch.fact = now.1;
-        watch.task = now.2;
         watch.dirty = false;
         self.changed(changes);
         Ok(announced)

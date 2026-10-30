@@ -8,11 +8,11 @@
 mod chat;
 mod endpoints;
 mod external;
+mod facts;
 mod library;
 mod people;
 mod saves;
 mod storage;
-mod tasks;
 mod update;
 mod uploads;
 
@@ -729,33 +729,6 @@ impl Api for Engine {
     }
     async fn archive_channel(&self, channel: ChannelId, archived: bool) -> ApiResult<()> {
         self.archive_channel_impl(&channel, archived)
-    }
-    async fn ask(
-        &self,
-        person: PersonId,
-        question: String,
-        turns: Option<u32>,
-        parent: Option<TaskId>,
-    ) -> ApiResult<TaskId> {
-        self.ask_impl(person, question, turns, parent).await
-    }
-    async fn tasks(&self) -> ApiResult<Vec<TaskSummary>> {
-        self.tasks_impl()
-    }
-    async fn case_file(&self, task: TaskId) -> ApiResult<CaseFile> {
-        self.case_file_impl(&task)
-    }
-    async fn open_case(&self, question: String) -> ApiResult<TaskId> {
-        self.open_case_impl(question).await
-    }
-    async fn pin_task(&self, task: TaskId) -> ApiResult<()> {
-        self.pin_impl(&task, true).await
-    }
-    async fn unpin_task(&self, task: TaskId) -> ApiResult<()> {
-        self.pin_impl(&task, false).await
-    }
-    async fn write_conclusion(&self, task: TaskId, text: String) -> ApiResult<FactId> {
-        self.write_conclusion_impl(&task, &text).await
     }
     async fn facts(&self, filter: FactFilter) -> ApiResult<FactList> {
         self.facts_impl(filter)
