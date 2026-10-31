@@ -352,6 +352,18 @@ impl Engine {
         }
     }
 
+    /// A person's portrait only if it is already in the cache: no fetch, no waiting, for
+    /// callers (a system notification) that must not touch the network.
+    pub fn cached_person_avatar(&self, person: &str) -> Option<std::path::PathBuf> {
+        let page = &self.corpus.as_ref()?.person(person)?.primary_page;
+        self.media.get("avatar", &media::stem(&["avatar", page]))
+    }
+
+    /// The host's picture only if it is already in the cache.
+    pub fn cached_host_avatar(&self) -> Option<std::path::PathBuf> {
+        self.media.get("avatar", &media::stem(&["avatar", "~host"]))
+    }
+
     /// An avatar for the page `page`: cached, else fetched from `url` (when there is one).
     pub(crate) async fn cached_avatar(
         &self,

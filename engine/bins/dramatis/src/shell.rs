@@ -17,8 +17,8 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_notification::NotificationExt;
 
+use crate::banner::{self, Banner};
 use crate::presence;
 
 /// How often idle conversations are wrapped up and due seeds looked at.
@@ -145,26 +145,29 @@ impl AppSink {
         let Some(found) = found else { return };
         let unseen = arrivals.unseen.fetch_add(1, Ordering::Relaxed) + 1;
         set_badge(&self.app, unseen);
-        if let Err(e) = self
-            .app
-            .notification()
-            .builder()
-            .title(found.title)
-            .body(found.body)
-            .show()
-        {
-            // An app started from the Finder has no terminal: the log is where this shows.
-            let ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis() as i64);
-            runtime::diag::record(
-                &engine.home().logs(),
-                ms,
-                &[("what", "notification failed")],
-                &e.to_string(),
-            );
-            eprintln!("dramatis: notification failed: {e}");
-        }
+        // The speaker's face, if it is already cached: a notification never waits for a fetch.
+        let image = presence::speaker_image(
+            &m.author,
+            |id| engine.cached_person_avatar(id),
+            || engine.cached_host_avatar(),
+        );
+        let logs = engine.home().logs();
+        banner::show(
+            &self.app,
+            Banner {
+                title: found.title,
+                body: found.body,
+                image,
+            },
+            move |e| {
+                // An app started from the Finder has no terminal: the log is where this shows.
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as i64);
+                runtime::diag::record(&logs, ms, &[("what", "notification failed")], &e);
+                eprintln!("dramatis: notification failed: {e}");
+            },
+        );
     }
 }
 
@@ -412,6 +415,8 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     // With no corpus the window asks for one itself (a file dialog or a typed path).
     let folio = home.resolve_folio();
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    banner::preview(&handle, &home.avatars());
     if let Err(e) = open(&handle, home.clone(), folio) {
         // Leave the placeholder engine in place (library form, nothing opened).
         eprintln!("dramatis: could not start the engine: {e}");

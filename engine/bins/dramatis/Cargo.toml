@@ -25,5 +25,10 @@ tauri-plugin-notification = "=2.4.0"
 tauri-plugin-dialog = "=2.7.3"
 tokio = { version = "=1.53.1", features = ["time"] }
 
+# The notification plugin cannot set the banner's left-hand picture, so macOS calls the
+# library under it directly; same version as the plugin's, from the lock file.
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "=0.6.15"
+
 [build-dependencies]
 tauri-build.workspace = true
