@@ -11,10 +11,9 @@ use api::home::Home;
 use api::port;
 use api::{Api, Engine};
 use runtime::{AgentBridge, Options, Runtime};
-use tauri::menu::{
-    AboutMetadataBuilder, CheckMenuItem, HELP_SUBMENU_ID, Menu, MenuItem, MenuItemKind,
-    PredefinedMenuItem,
-};
+#[cfg(target_os = "macos")]
+use tauri::menu::{AboutMetadataBuilder, MenuItemKind, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -28,8 +27,9 @@ const TICK: Duration = Duration::from_secs(60);
 // ---- the menu bar ----
 
 /// The default menu bar with an About item that carries the credit: the name, version and
-/// copyright, the author and the project page (the native panel on macOS shows only the
-/// credits text, other systems show the website as well).
+/// copyright, the author and the project page (the native panel shows only the credits
+/// text).
+#[cfg(target_os = "macos")]
 pub fn app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let info = api::views::AppInfo::current();
     let about = PredefinedMenuItem::about(
@@ -51,13 +51,8 @@ pub fn app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         ),
     )?;
     let menu = Menu::default(app)?;
-    // The About item is the first of the app menu on macOS, the only one of Help elsewhere.
-    let host = if cfg!(target_os = "macos") {
-        menu.items()?.into_iter().next()
-    } else {
-        menu.get(HELP_SUBMENU_ID)
-    };
-    if let Some(MenuItemKind::Submenu(sub)) = host {
+    // The About item is the first of the app menu.
+    if let Some(MenuItemKind::Submenu(sub)) = menu.items()?.into_iter().next() {
         sub.remove_at(0)?;
         sub.insert(&about, 0)?;
     }

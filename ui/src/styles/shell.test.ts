@@ -53,3 +53,9 @@ test("a search field and its filters and button share one control height", () =>
 test("the forward picker's rows start at the left edge, not centred like a plain button", () => {
   expect(rule(chat, ".forward-row")).toMatch(/justify-content:\s*flex-start/);
 });
+
+test("the list a select opens has the theme's surface and ink, not the browser's white", () => {
+  const css = rule(base, "select option");
+  expect(css).toMatch(/background:\s*var\(--raised\)/);
+  expect(css).toMatch(/color:\s*var\(--ink\)/);
+});
