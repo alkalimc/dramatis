@@ -121,7 +121,7 @@ export function GroupDialog() {
             </li>
           ))}
         </ul>
-        <div className="row">
+        <div className="row field-row">
           <input
             id={whoId}
             type="search"

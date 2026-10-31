@@ -88,7 +88,7 @@ function CorpusSearch() {
       <h2 id={`${id}-h`}>{t("library.search")}</h2>
       <form
         role="search"
-        className="row"
+        className="row field-row"
         onSubmit={(e) => {
           e.preventDefault();
           setReading(null);
