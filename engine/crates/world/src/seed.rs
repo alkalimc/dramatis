@@ -35,8 +35,10 @@ pub enum SeedKind {
     /// A daily event of today that involves him (the fact that tells of it).
     Happening(FactId),
     /// He has not talked with the user for a while, or the group has been silent: he
-    /// drops by with nothing in particular to say. Today's date as `yyyymmdd`.
-    Visit(i32),
+    /// drops by with nothing in particular to say. Today's date as `yyyymmdd`, and the
+    /// group when it is a group he speaks in (so a visit there and a visit to the user's
+    /// direct chat on the same day are two seeds).
+    Visit(i32, Option<ChannelId>),
 }
 
 impl SeedKind {
@@ -51,7 +53,8 @@ impl SeedKind {
             Self::Memory(f) => ("memory", f.0.to_string()),
             Self::Words(m) => ("words", m.0.to_string()),
             Self::Happening(f) => ("event", f.0.to_string()),
-            Self::Visit(d) => ("visit", d.to_string()),
+            Self::Visit(d, None) => ("visit", d.to_string()),
+            Self::Visit(d, Some(g)) => ("visit", format!("{d}:{}", g.0)),
         }
     }
 }
@@ -276,7 +279,7 @@ fn visit_candidates(
     pace: &Pace,
 ) -> Result<Vec<Candidate>> {
     let d = now.local_date();
-    let kind = SeedKind::Visit(d.year * 10_000 + i32::from(d.month) * 100 + i32::from(d.day));
+    let day = d.year * 10_000 + i32::from(d.month) * 100 + i32::from(d.day);
     let away = now.ms - i64::from(pace.visit_days) * clock::DAY_MS;
     let quiet = now.ms - i64::from(pace.group_quiet_hours) * clock::HOUR_MS;
     let mut out = Vec::new();
@@ -284,7 +287,7 @@ fn visit_candidates(
         let seen = last_seen(conn, p)?;
         let candidate = |origin: Option<ChannelId>| Candidate {
             person: p.clone(),
-            kind: kind.clone(),
+            kind: SeedKind::Visit(day, origin),
             material: Vec::new(),
             involved: Vec::new(),
             origin,
@@ -296,7 +299,7 @@ fn visit_candidates(
                 out.push(candidate(Some(g.id)));
             }
         }
-        if seen.is_none_or(|t| t <= away) && delivered_count(conn, Some(p), away, now.ms)? == 0 {
+        if seen.is_none_or(|t| t <= away) && own_count(conn, p, away, now.ms)? == 0 {
             out.push(candidate(None));
         }
     }
@@ -311,7 +314,7 @@ pub fn order(candidates: &mut [Candidate]) {
     let key = |c: &Candidate| {
         (
             !c.kind.is_event(),
-            matches!(c.kind, SeedKind::Visit(_)),
+            matches!(c.kind, SeedKind::Visit(..)),
             c.origin.is_none(),
             c.last_seen.unwrap_or(i64::MIN),
         )
@@ -446,6 +449,34 @@ pub fn delivered_count(
     )?)
 }
 
+/// Unprompted openings of `person` in `[since, now]` that spend his own budget: every one
+/// except a visit to a group, which has a budget of its own (see [`group_count`]).
+pub fn own_count(conn: &Connection, person: &PersonId, since: i64, now: i64) -> Result<u32> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM seed WHERE person = ?3 AND delivered_at BETWEEN ?1 AND ?2
+           AND NOT (kind = 'visit'
+                    AND channel IN (SELECT id FROM channel WHERE kind = 'group'))",
+        (since, now, person),
+        |r| r.get(0),
+    )?)
+}
+
+/// Visits `person` made to group `group` in `[since, now]`.
+fn group_count(
+    conn: &Connection,
+    person: &PersonId,
+    group: ChannelId,
+    since: i64,
+    now: i64,
+) -> Result<u32> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM seed WHERE person = ?3 AND channel = ?4 AND kind = 'visit'
+           AND delivered_at BETWEEN ?1 AND ?2",
+        (since, now, person, group),
+        |r| r.get(0),
+    )?)
+}
+
 /// Whether the user is in a conversation: he wrote somewhere within the idle timeout.
 pub fn in_conversation(conn: &Connection, now: i64, session: &SessionParams) -> Result<bool> {
     Ok(message::last_user_message_at(conn)?.is_some_and(|t| now - t < session.idle_timeout_ms()))
@@ -523,11 +554,23 @@ pub fn plan(
         }
     }
     for c in all {
-        if delivered_count(conn, Some(&c.person), day, now.ms)? >= limits.seed.per_agent_day {
-            continue;
-        }
-        let Some(channel) = place(conn, &c, topic)? else {
-            continue;
+        // A member speaking up in a quiet group draws on the group's budget (one a day
+        // per member and group; the group's own silence gates the rest), so the people
+        // the user talks with most do not spend their one opening a day in direct chats
+        // and leave the group mute.
+        let channel = if let SeedKind::Visit(_, Some(group)) = c.kind {
+            if group_count(conn, &c.person, group, day, now.ms)? >= limits.seed.per_agent_day {
+                continue;
+            }
+            group
+        } else {
+            if own_count(conn, &c.person, day, now.ms)? >= limits.seed.per_agent_day {
+                continue;
+            }
+            let Some(channel) = place(conn, &c, topic)? else {
+                continue;
+            };
+            channel
         };
         let fact = match c.kind {
             SeedKind::Commitment(f) | SeedKind::Memory(f) | SeedKind::Happening(f) => Some(f),
@@ -796,7 +839,7 @@ mod tests {
         let mut env = Env::new(&w);
         enable(&w, &["a"]);
         memory_about_user(&w, "a", "m1", 1);
-        // Quiet hours (default 23:00–08:00) at 02:00 UTC.
+        // Quiet hours (default 23:00–09:00) at 02:00 UTC.
         let night = at(T0 - 10 * HOUR);
         assert_eq!(presence(&w, &env, night), Planned::Held(Held::QuietHours));
         // In conversation: the user wrote five minutes ago.
@@ -867,7 +910,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            next.iter().all(|c| matches!(c.kind, SeedKind::Visit(_))),
+            next.iter().all(|c| matches!(c.kind, SeedKind::Visit(..))),
             "no reason left but a visit"
         );
 
@@ -895,7 +938,7 @@ mod tests {
         .unwrap();
         let said: Vec<_> = cands
             .iter()
-            .filter(|c| !matches!(c.kind, SeedKind::Visit(_)))
+            .filter(|c| !matches!(c.kind, SeedKind::Visit(..)))
             .collect();
         assert_eq!(said.len(), 1);
         assert_eq!(said[0].person, p("a"));
@@ -972,7 +1015,7 @@ mod tests {
             panic!("a visit")
         };
         assert_eq!(o.person, p("a"));
-        assert!(matches!(o.kind, SeedKind::Visit(_)));
+        assert!(matches!(o.kind, SeedKind::Visit(..)));
         assert_eq!(o.channel, channel::direct(&w, &p("a")).unwrap());
         deliver(&w, &o, T0);
         // Not again within `visit_days`, however many occasions come.
@@ -1021,10 +1064,10 @@ mod tests {
         for ms in &opened {
             assert!(!clock::in_quiet_hours(&quiet, at(*ms)), "{ms} is quiet");
         }
-        // The first day: one opening in each fifth of the waking day (08:00 to 23:00).
-        let part = 3 * HOUR;
+        // The first day: one opening in each fifth of the waking day (09:00 to 23:00).
+        let part = 14 * 60 / 5 * 60_000;
         for (i, ms) in opened.iter().take(5).enumerate() {
-            let since = ms - midnight - 8 * HOUR;
+            let since = ms - midnight - 9 * HOUR;
             assert!((i as i64 * part..(i as i64 + 1) * part).contains(&since));
         }
     }
@@ -1131,7 +1174,7 @@ mod tests {
             Planned::Open(Opening {
                 person: p("a"),
                 channel: g,
-                kind: SeedKind::Visit(20260310),
+                kind: SeedKind::Visit(20260310, Some(g)),
                 material: Vec::new(),
                 fact: None,
             })
@@ -1158,5 +1201,58 @@ mod tests {
             presence(&w, &env, at(T0 + 7 * HOUR)),
             Planned::Held(Held::NoSeed)
         );
+    }
+
+    #[test]
+    fn members_who_opened_in_direct_chats_still_open_in_a_silent_group() {
+        let w = world();
+        let env = Env::new(&w);
+        enable(&w, &["a", "b"]);
+        let g = channel::create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
+        channel::set_mode(&w, g, Mode::Enabled).unwrap();
+        let quiet = i64::from(env.pace.group_quiet_hours) * HOUR;
+        message::append(&w, g, &Actor::User, "hi all", None, None, T0 - quiet - HOUR).unwrap();
+        // Both members spent their one opening of the day on a memory in their own chats.
+        for (who, when) in [("a", T0), ("b", T0 + HOUR)] {
+            memory_about_user(&w, who, "likes tea", 1);
+            let Planned::Open(o) = presence(&w, &env, at(when)) else {
+                panic!()
+            };
+            assert_ne!(o.channel, g);
+            deliver(&w, &o, when);
+        }
+        let Planned::Open(o) = presence(&w, &env, at(T0 + 7 * HOUR)) else {
+            panic!("the group stays mute")
+        };
+        assert_eq!(o.channel, g);
+        assert!(matches!(o.kind, SeedKind::Visit(_, Some(c)) if c == g));
+        deliver(&w, &o, T0 + 7 * HOUR);
+        // The group is spoken in now: no second word from anyone until it is silent again.
+        assert_eq!(
+            presence(&w, &env, at(T0 + 8 * HOUR)),
+            Planned::Held(Held::NoSeed)
+        );
+        // That word did not spend the speaker's budget for direct chats, and a visit to
+        // the group and one to the direct chat on the same day are two seeds.
+        let day = at(T0).local_day_start();
+        assert_eq!(own_count(&w, &o.person, day, T0 + DAY).unwrap(), 1);
+        let n: i64 = w
+            .query_row("SELECT count(*) FROM seed WHERE kind = 'visit'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 1);
+        let direct = Opening {
+            channel: channel::direct(&w, &o.person).unwrap(),
+            kind: SeedKind::Visit(20260310, None),
+            ..o.clone()
+        };
+        deliver(&w, &direct, T0 + 9 * HOUR);
+        let n: i64 = w
+            .query_row("SELECT count(*) FROM seed WHERE kind = 'visit'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 2);
     }
 }

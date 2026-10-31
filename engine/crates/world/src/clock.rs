@@ -129,6 +129,20 @@ fn parse_hhmm(s: &str) -> Option<u32> {
     (h < 24 && m < 60).then_some(h * 60 + m)
 }
 
+/// A time of day as the user may type it (`9:00`, `09:00`, a full-width colon, spaces
+/// around) written the one way it is stored, `HH:MM`. `None` when it is not a time.
+pub fn normalize_hhmm(s: &str) -> Option<String> {
+    let s = s.trim().replace('\u{ff1a}', ":");
+    let (h, m) = s.split_once(':')?;
+    let digits =
+        |x: &str, n: usize| x.len() <= n && !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit());
+    if !digits(h, 2) || m.len() != 2 || !digits(m, 2) {
+        return None;
+    }
+    let minutes = parse_hhmm(&format!("{h}:{m}"))?;
+    Some(format!("{:02}:{:02}", minutes / 60, minutes % 60))
+}
+
 /// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm).
 pub fn days_from_civil(d: Date) -> i64 {
     let y = i64::from(d.year) - i64::from(d.month <= 2);
@@ -325,6 +339,25 @@ mod tests {
         let d = in_world_date(Now::utc(t), 0);
         assert_eq!((d.year, d.month, d.day), (2026, 3, 10));
         assert_eq!(local_time(Now::new(t, 480)), "07:30");
+    }
+
+    #[test]
+    fn times_are_read_leniently_and_stored_in_one_form() {
+        for (typed, stored) in [
+            ("9:00", "09:00"),
+            ("09:00", "09:00"),
+            (" 9:05 ", "09:05"),
+            ("9\u{ff1a}30", "09:30"),
+            ("23:59", "23:59"),
+            ("0:00", "00:00"),
+        ] {
+            assert_eq!(normalize_hhmm(typed).as_deref(), Some(stored), "{typed}");
+        }
+        for bad in [
+            "", "9", "9:0", "24:00", "12:60", "+9:00", "009:00", "a:00", "9:00:00",
+        ] {
+            assert_eq!(normalize_hhmm(bad), None, "{bad}");
+        }
     }
 
     #[test]

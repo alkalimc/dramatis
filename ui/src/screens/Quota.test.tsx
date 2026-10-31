@@ -1,7 +1,7 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import type { QuotaBand, QuotaStatus, Tier } from "../api";
 import { renderWith } from "../test/render";
-import { QuotaPanel } from "./Quota";
+import { QuotaPanel, normalizeClock } from "./Quota";
 
 function status(band: QuotaBand, tier: Tier = "middle"): QuotaStatus {
   const used = { open: 0.4, quiet: 0.86, exhausted: 1.02 }[band];
@@ -60,4 +60,12 @@ test("the intensity is a labelled choice that shows the tier and picks another",
 test("says what the intensity also sets", () => {
   renderWith(<QuotaPanel quota={status("open")} onTier={() => undefined} />);
   expect(screen.getByText(/up to 5 visits and 4 happenings on board a day/)).toBeDefined();
+});
+
+test("a time is read with or without the leading zero and stored as HH:MM", () => {
+  expect(normalizeClock("9:00")).toBe("09:00");
+  expect(normalizeClock("09:00")).toBe("09:00");
+  expect(normalizeClock(" 9\uff1a30 ")).toBe("09:30");
+  expect(normalizeClock("23:59")).toBe("23:59");
+  for (const bad of ["", "9", "9:0", "24:00", "12:60", "009:00", "a:00"]) expect(normalizeClock(bad)).toBeNull();
 });

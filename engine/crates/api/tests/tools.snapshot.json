@@ -3,7 +3,7 @@
     "chat": [
       {
         "function": {
-          "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two to four sentences, set in the world as it is.",
+          "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
           "name": "make_event",
           "parameters": {
             "additionalProperties": false,
@@ -48,7 +48,7 @@
                 "type": "array"
               },
               "text": {
-                "description": "Two to four sentences.",
+                "description": "Two or three short, natural sentences.",
                 "type": "string"
               },
               "title": {
@@ -70,7 +70,7 @@
     ],
     "messages": [
       {
-        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two to four sentences, set in the world as it is.",
+        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -114,7 +114,7 @@
               "type": "array"
             },
             "text": {
-              "description": "Two to four sentences.",
+              "description": "Two or three short, natural sentences.",
               "type": "string"
             },
             "title": {
@@ -135,7 +135,7 @@
     ],
     "responses": [
       {
-        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two to four sentences, set in the world as it is.",
+        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
         "name": "make_event",
         "parameters": {
           "additionalProperties": false,
@@ -180,7 +180,7 @@
               "type": "array"
             },
             "text": {
-              "description": "Two to four sentences.",
+              "description": "Two or three short, natural sentences.",
               "type": "string"
             },
             "title": {

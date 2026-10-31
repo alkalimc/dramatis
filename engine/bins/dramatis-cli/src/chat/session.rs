@@ -2271,7 +2271,7 @@ impl Session {
             Ok(s) => s,
             Err(e) => return self.fail(&e),
         };
-        let quiet = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
+        let mut quiet = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
             None => settings.quiet_hours.clone(),
             Some("off") => None,
             Some("on") => settings.quiet_hours.clone().or_else(|| {
@@ -2300,6 +2300,10 @@ impl Session {
                     api::ApiError::Invalid { .. } => self.term.line(&self.msg("cli.quiet.invalid")),
                     e => self.fail(&e),
                 };
+            }
+            // Shown as stored, in `HH:MM`, not as typed.
+            if let (Ok(stored), Some(_)) = (self.engine.settings().await, &quiet) {
+                quiet = stored.quiet_hours;
             }
         }
         self.term.note(&match quiet {

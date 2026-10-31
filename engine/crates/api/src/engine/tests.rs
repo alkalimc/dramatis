@@ -934,6 +934,19 @@ async fn settings_quota_and_voice_round_trip() {
             field: "quiet_hours".into()
         })
     );
+    // A time without its leading zero is read, and stored in the one form.
+    s.quiet_hours = Some(QuietHours {
+        from: "9:05".into(),
+        to: "10\u{ff1a}30".into(),
+    });
+    e.update_settings(s.clone()).await.unwrap();
+    assert_eq!(
+        e.settings().await.unwrap().quiet_hours,
+        Some(QuietHours {
+            from: "09:05".into(),
+            to: "10:30".into(),
+        })
+    );
     s.quiet_hours = Some(QuietHours {
         from: "12:00".into(),
         to: "13:00".into(),

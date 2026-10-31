@@ -80,7 +80,13 @@ export function QuotaPanel({ quota, onTier, children }: { quota: QuotaStatus; on
   );
 }
 
-const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+const CLOCK = /^([01]?\d|2[0-3])[:\uff1a]([0-5]\d)$/;
+
+/** A typed time of day (`9:00`, `09:00`, a full-width colon) as `HH:MM`, or null. */
+export function normalizeClock(s: string): string | null {
+  const m = CLOCK.exec(s.trim());
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : null;
+}
 
 /**
  * A 24-hour HH:MM field. The native time control draws the system's own clock (AM/PM and
@@ -98,10 +104,11 @@ function TimeInput({ value, onChange }: { value: string; onChange: (v: string) =
       size={6}
       placeholder={t("quiet.time.placeholder")}
       value={draft}
-      aria-invalid={draft !== "" && !CLOCK.test(draft)}
+      aria-invalid={draft !== "" && normalizeClock(draft) === null}
       onChange={(e) => {
         setDraft(e.target.value);
-        if (CLOCK.test(e.target.value)) onChange(e.target.value);
+        const time = normalizeClock(e.target.value);
+        if (time !== null) onChange(time);
       }}
       onBlur={() => setDraft(value)}
     />

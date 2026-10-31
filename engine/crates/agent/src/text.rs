@@ -307,14 +307,23 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.event.ask",
         "Make up one small happening for today, {date}, for {user} to hear about. \
-         Keep it everyday and small, something people mention over a meal, told in two to \
-         four sentences, set in the world as it is. It involves one to three of the people \
-         listed below, and may suggest that a few of them gather for a reason, or that {user} \
-         talk to someone about it.\n\nA theme for today: {topic}\n\nMaterial from the \
-         world, so that it fits the place:\n{material}\n\nPeople it may involve (id: \
-         name):\n{people}\n{extra}\n\nReply with a title, the text, the ids of the people \
-         involved, a gathering (its members' ids and its purpose) or null, and the ids of \
-         people {user} might talk to.",
+         Requirements:\n\
+         - It is an ordinary moment of daily life: a meal, a chore, practice, the weather, \
+         a small favour, a hobby. One event in one scene, with no twist, no punchline and \
+         no loose end.\n\
+         - Two or three short sentences, natural and fluent, the way someone would mention \
+         it over a meal.\n\
+         - Only the people listed below, one or two of them. Name nobody else.\n\
+         - Use the material only to know what these people are like (habits, temperament, \
+         how they get along). Do not retell its plot, lore, secrets or story events, do not \
+         join several pieces of it into one story, and do not invent anything that would \
+         need the archives to explain.\n\
+         You may suggest that a few of them gather for a reason, or that {user} talk to \
+         someone about it, but neither is required.\n\nA direction for today: \
+         {topic}\n\nMaterial about the people:\n{material}\n\nPeople it may involve \
+         (id: name):\n{people}\n{extra}\n\nReply with a title, the text, the ids of the \
+         people involved, a gathering (its members' ids and its purpose) or null, and the \
+         ids of people {user} might talk to.",
     ),
     (
         "harness.event.recent",
@@ -331,8 +340,20 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("events.fact", "{title}: {text}"),
     (
         "events.topics",
-        "training|the canteen|supplies|the medical bay|the weather|a festival|someone's hobby",
+        "someone took a second helping at the canteen|a dish sold out at the canteen|\
+         someone tidying their room|a broken lamp waiting to be fixed|\
+         someone borrowed something and has not returned it|a favour run for a colleague|\
+         practice that ran long|a rest in the corridor after training|\
+         a small mismatch in the supply count|a windy day on the deck|a rainy day indoors|\
+         sunshine and someone out in it|someone looking after a plant|\
+         someone reading or listening to music|someone busy with a hobby|\
+         someone sleepy after a late night|a queue at the medical check|\
+         a game of cards or chess in the lounge|a small gift for a colleague|\
+         someone learning something new, slowly",
     ),
+    // The kinds of unit that tell who a person is, which the event's material is drawn
+    // from; none listed means any kind of the person's own units.
+    ("events.material", ""),
     ("harness.digest", "Since {user} last looked:"),
     (
         "harness.digest.none",

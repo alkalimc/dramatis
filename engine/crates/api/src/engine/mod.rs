@@ -516,11 +516,15 @@ impl Engine {
             ),
             None => None,
         };
-        if let Some(q) = &s.quiet_hours
-            && !(valid_time(&q.from) && valid_time(&q.to))
-        {
-            return Err(invalid("quiet_hours"));
-        }
+        // Either way of writing a time is read; it is stored as `HH:MM`.
+        let quiet = match &s.quiet_hours {
+            Some(q) => Some(world::params::QuietHours {
+                from: world::clock::normalize_hhmm(&q.from)
+                    .ok_or_else(|| invalid("quiet_hours"))?,
+                to: world::clock::normalize_hhmm(&q.to).ok_or_else(|| invalid("quiet_hours"))?,
+            }),
+            None => None,
+        };
         if s.bio
             .as_ref()
             .is_some_and(|b| b.trim().chars().count() > world::settings::BIO_MAX)
@@ -539,10 +543,6 @@ impl Engine {
                 None => world::settings::unset(&w, world::settings::USER_BIRTHDAY),
             }
             .map_err(world_err)?;
-            let quiet = s.quiet_hours.map(|q| world::params::QuietHours {
-                from: q.from,
-                to: q.to,
-            });
             world::settings::set(&w, world::settings::QUIET_HOURS, &quiet).map_err(world_err)?;
             world::settings::set(&w, world::settings::NOTIFICATIONS, &s.notifications)
                 .map_err(world_err)?;
@@ -564,16 +564,6 @@ impl Engine {
         }
         Ok(())
     }
-}
-
-/// `HH:MM`, 24-hour.
-fn valid_time(s: &str) -> bool {
-    s.split_once(':').is_some_and(|(h, m)| {
-        h.len() == 2
-            && m.len() == 2
-            && h.parse::<u8>().is_ok_and(|h| h < 24)
-            && m.parse::<u8>().is_ok_and(|m| m < 60)
-    })
 }
 
 /// What of the corpus's wording stays when the interface speaks English: its names, the

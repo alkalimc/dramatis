@@ -34,7 +34,15 @@ fn emulated() -> api::endpoints::Endpoints {
 
 /// One event a day, and a user who has said something.
 fn setup(ep: api::endpoints::Endpoints) -> Env {
-    let e = env_with(ep, |c| c.world.pacing.middle.events_default = 1);
+    let e = env_with(ep, |c| {
+        c.world.pacing.middle.events_default = 1;
+        // The fixture's birthday is on the first day, and these hours put the event's
+        // slot on that day after the clock's start.
+        c.world.seed.quiet_hours = world::params::QuietHours {
+            from: "23:00".into(),
+            to: "08:00".into(),
+        };
+    });
     speak(&e);
     to_slot(&e, 1, 0);
     e
@@ -43,17 +51,26 @@ fn setup(ep: api::endpoints::Endpoints) -> Env {
 /// Move the clock to a minute after the start of event slot `k` of `per_day`, today or
 /// on the first day after that has it ahead.
 fn to_slot(e: &Env, per_day: u32, k: u32) {
-    let quiet = e
-        .agent
-        .with_world(|w| settings::quiet_hours(w, &world::params::Seed::default()).unwrap());
-    let (start, _) = world::clock::waking_window(quiet.as_ref());
+    let quiet = e.agent.with_world(|w| {
+        let seed = world::params::Seed {
+            quiet_hours: world::params::QuietHours {
+                from: "23:00".into(),
+                to: "08:00".into(),
+            },
+            ..world::params::Seed::default()
+        };
+        settings::quiet_hours(w, &seed).unwrap()
+    });
+    let (start, len) = world::clock::waking_window(quiet.as_ref());
     let ms = e.clock.0.load(std::sync::atomic::Ordering::SeqCst);
     for day in 0..3 {
         let today = world::clock::Now::utc(ms + day * DAY_MS);
         let slot = event::slots(quiet.as_ref(), today, per_day).at(k);
         let minutes = i64::from(start) + i64::from(slot) + 1;
         let target = today.local_day_start() + minutes * MINUTE_MS;
-        if target >= ms {
+        // Leaves the tests that wait a few hours afterwards inside the waking day.
+        let room = i64::from(slot) + 3 * 60 < i64::from(len);
+        if target >= ms && room {
             e.clock.advance(target - ms);
             return;
         }
@@ -121,6 +138,7 @@ async fn an_event_is_made_once_a_day_and_posted_with_offers() {
         assert_eq!(e.agent.daily_events().unwrap().len(), 1);
         // The next day brings another; the one missed in between is not made up.
         e.clock.advance(DAY_MS);
+        to_slot(&e, 1, 0);
         e.fake.push([say(&reply().replace(TEA, "Another"))]);
         e.agent.tick(true).await.unwrap();
         assert_eq!(requests(&e), 2);
