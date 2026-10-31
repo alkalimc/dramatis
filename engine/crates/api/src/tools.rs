@@ -277,13 +277,14 @@ pub struct Recent {
 // ---- daily event ----
 
 /// Make up one small happening of the day, for the user to hear about. Everyday and small,
-/// told in two to four sentences, set in the world as it is.
+/// told in two or three short sentences about the listed people only, without retelling
+/// the story or lore.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MakeEvent {
     /// A short title.
     pub title: String,
-    /// Two to four sentences.
+    /// Two or three short, natural sentences.
     pub text: String,
     /// Ids of the people it involves, one to three.
     pub persons: Vec<String>,

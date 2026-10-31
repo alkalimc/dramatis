@@ -282,7 +282,7 @@ mod tests {
             let midnight = T0 - 12 * clock::HOUR_MS;
             let made = run_clock(&w, &params, midnight, midnight + 2 * DAY_MS);
             assert_eq!(made.len(), 2 * n as usize, "n = {n}");
-            let part = 15 * 60 / i64::from(n) * 60_000;
+            let part = 14 * 60 / i64::from(n) * 60_000;
             let gap = i64::from(params.pacing.middle.gap_min) * 60_000;
             let quiet = params.seed.quiet_hours.clone();
             for (i, t) in made.iter().enumerate() {
@@ -293,7 +293,7 @@ mod tests {
                 // The day's i-th event falls in the i-th part of the waking day.
                 let day = i as i64 / i64::from(n);
                 let k = i as i64 % i64::from(n);
-                let from = midnight + day * DAY_MS + 8 * clock::HOUR_MS + k * part;
+                let from = midnight + day * DAY_MS + 9 * clock::HOUR_MS + k * part;
                 assert!((from..from + part).contains(t), "n = {n}: event {i} at {t}");
             }
             for pair in made.windows(2) {
@@ -368,18 +368,14 @@ mod tests {
         let params = Params::default();
         user_spoke(&w);
         let midnight = T0 - 12 * clock::HOUR_MS;
-        away::begin(&w, midnight + 8 * clock::HOUR_MS).unwrap();
-        let held = run_clock(&w, &params, midnight, midnight + 20 * clock::HOUR_MS);
+        let back = midnight + 22 * clock::HOUR_MS + 50 * clock::MINUTE_MS;
+        away::begin(&w, midnight + 9 * clock::HOUR_MS).unwrap();
+        let held = run_clock(&w, &params, midnight, back);
         assert!(held.is_empty(), "{held:?}");
-        away::end(&w, at(midnight + 20 * clock::HOUR_MS), &params).unwrap();
+        away::end(&w, at(back), &params).unwrap();
         // Back in the evening: today's one slot went by, so nothing is made today and
         // the next day is whole.
-        let rest = run_clock(
-            &w,
-            &params,
-            midnight + 20 * clock::HOUR_MS,
-            midnight + DAY_MS,
-        );
+        let rest = run_clock(&w, &params, back, midnight + DAY_MS);
         assert!(rest.is_empty(), "{rest:?}");
         let tomorrow = run_clock(&w, &params, midnight + DAY_MS, midnight + 2 * DAY_MS);
         assert_eq!(tomorrow.len(), 1);

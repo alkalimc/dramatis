@@ -131,7 +131,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     user_name: params.get("first") === "1" ? null : "Rowan",
     birthday: null,
     bio: null,
-    quiet_hours: { from: "23:00", to: "07:00" },
+    quiet_hours: { from: "23:00", to: "09:00" },
     notifications: true,
     events_per_day: 1,
   };

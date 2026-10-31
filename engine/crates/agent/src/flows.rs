@@ -2232,7 +2232,7 @@ impl Agent {
             SeedKind::Words(_) => detail("harness.opening.words", words_text.as_ref()),
             SeedKind::Birthday(_) => Some(w.fill("harness.opening.birthday", &names, &[])),
             SeedKind::Happening(_) => detail("harness.opening.event", fact_text.as_ref()),
-            SeedKind::Visit(_) => Some(w.fill("harness.opening.visit", &names, &[])),
+            SeedKind::Visit(..) => Some(w.fill("harness.opening.visit", &names, &[])),
         };
         lines.extend(line);
         let units: Vec<folio::Unit> = {

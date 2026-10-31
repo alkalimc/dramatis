@@ -119,7 +119,7 @@ impl Default for Seed {
             lapse_hours: 72,
             quiet_hours: QuietHours {
                 from: "23:00".into(),
-                to: "08:00".into(),
+                to: "09:00".into(),
             },
         }
     }

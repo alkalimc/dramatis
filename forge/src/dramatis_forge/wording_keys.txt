@@ -532,6 +532,7 @@ events.label.purpose
 events.label.talk
 events.label.text
 events.label.title
+events.material
 events.per_day
 events.topics
 favorites.empty

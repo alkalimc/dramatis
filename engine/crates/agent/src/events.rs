@@ -31,13 +31,15 @@ const TITLE_MAX: usize = 60;
 const TEXT_MAX: usize = 600;
 /// Most people a suggested gathering brings together (the host's offer to the user).
 const GATHERING_MAX: usize = 5;
+/// How many of the day's people the material is drawn from.
+const MATERIAL_PEOPLE: usize = 2;
 
 fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "a short title"},
-            "text": {"type": "string", "description": "two to four sentences"},
+            "text": {"type": "string", "description": "two or three short sentences"},
             "persons": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -405,13 +407,32 @@ impl Agent {
             .filter(|t| !t.trim().is_empty())
             .take(2)
             .collect();
-        let mut units = Vec::new();
-        for query in topic.iter().chain(group_topics.first()) {
-            let mut req = index::SearchRequest::new(query.as_str());
+        // Who it may involve: a rotating handful, so the same few do not carry every day.
+        // Birthdays are not a reason: with hundreds of people nearly every day has one.
+        let pool_max = (self.config.world.events.pool as usize).max(1);
+        let start = (day as usize).wrapping_mul(7) % offerable.len();
+        let pool: Vec<String> = (0..offerable.len().min(pool_max))
+            .map(|i| offerable[(start + i) % offerable.len()].clone())
+            .collect();
+        // The material is the first few of them as they are, from their own units of the
+        // kinds the corpus lists, and never a search over the whole story: the event is a
+        // small moment, and the model should not retell what it reads.
+        let kinds: Vec<String> = w
+            .get("events.material")
+            .split('|')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let mut units: Vec<folio::Unit> = Vec::new();
+        for person in pool.iter().take(MATERIAL_PEOPLE) {
+            let mut req = index::SearchRequest::new(topic.as_deref().unwrap_or(person));
+            req.filters.templates = kinds.clone();
+            req.filters.persons = vec![person.clone()];
             req.exclude = used
                 .iter()
                 .cloned()
-                .chain(units.iter().map(|u: &folio::Unit| u.id.clone()))
+                .chain(units.iter().map(|u| u.id.clone()))
                 .collect();
             let Ok(resp) = self.ix().search(&req) else {
                 continue;
@@ -429,29 +450,6 @@ impl Agent {
             let mut seen = std::collections::HashSet::new();
             assemble::units(&self.ctx(&names), &units, &mut seen).text
         };
-        // Who it may involve: the people of the material, then a rotating handful so the
-        // same few do not carry every day. Birthdays are not a reason: with hundreds of
-        // people nearly every day has one.
-        let mut pool: Vec<String> = Vec::new();
-        let push = |p: &str, pool: &mut Vec<String>| {
-            if offerable.iter().any(|o| o == p) && !pool.iter().any(|x| x == p) {
-                pool.push(p.to_owned());
-            }
-        };
-        for u in &units {
-            for p in &u.persons {
-                push(p, &mut pool);
-            }
-        }
-        let pool_max = self.config.world.events.pool as usize;
-        let start = (day as usize).wrapping_mul(7) % offerable.len();
-        for i in 0..offerable.len() {
-            if pool.len() >= pool_max {
-                break;
-            }
-            push(&offerable[(start + i) % offerable.len()], &mut pool);
-        }
-        pool.truncate(pool_max.max(1));
         let mut people = Vec::new();
         for p in &pool {
             people.push(format!("{p}: {}", self.display(p)?));
