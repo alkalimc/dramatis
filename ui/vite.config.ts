@@ -8,5 +8,5 @@ export default defineConfig({
   server: { port: 5173, strictPort: true, host: "127.0.0.1" },
   build: { target: "safari16", outDir: "dist", emptyOutDir: true },
   // The contrast and shell tests read these stylesheets as text; vitest otherwise hands CSS imports back empty.
-  test: { environment: "jsdom", globals: true, css: { include: [/(tokens|base|layout)\.css/] } },
+  test: { environment: "jsdom", globals: true, css: { include: [/(tokens|base|layout|chat)\.css/] } },
 });

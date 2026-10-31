@@ -242,7 +242,7 @@ function FindByTopic() {
     <div className="find">
       <form
         role="search"
-        className="row"
+        className="row field-row"
         onSubmit={(e) => {
           e.preventDefault();
           void run();

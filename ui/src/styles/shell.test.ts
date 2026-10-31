@@ -2,6 +2,7 @@
 // jsdom does no layout, so this reads the rules that make it so.
 import { expect, test } from "vitest";
 import base from "./base.css?raw";
+import chat from "./chat.css?raw";
 import layout from "./layout.css?raw";
 
 /** The declarations of the first rule whose selector list is exactly `selector`. */
@@ -40,4 +41,15 @@ test("screens outside the frame scroll inside themselves", () => {
 test("the side panel scrolls in its own body, not as a whole", () => {
   expect(rule(layout, ".drawer")).toMatch(/overflow:\s*hidden/);
   expect(rule(layout, ".drawer-scroll")).toMatch(/overflow-y:\s*auto/);
+});
+
+test("a search field and its filters and button share one control height", () => {
+  const css = rule(base, ".field-row > input,.field-row > select,.field-row > button");
+  expect(css).toMatch(/height:\s*var\(--ctl\)/);
+  expect(css).toMatch(/min-height:\s*var\(--ctl\)/);
+  expect(rule(base, ".row.field-row")).toMatch(/align-items:\s*stretch/);
+});
+
+test("the forward picker's rows start at the left edge, not centred like a plain button", () => {
+  expect(rule(chat, ".forward-row")).toMatch(/justify-content:\s*flex-start/);
 });

@@ -105,6 +105,24 @@ button.round:focus-visible {
   gap: var(--s-2);
   align-items: center;
 }
+/* a search field with its filters and button: every control is exactly one field high on one line */
+.row.field-row {
+  align-items: stretch;
+}
+.field-row > input,
+.field-row > select,
+.field-row > button {
+  box-sizing: border-box;
+  height: var(--ctl);
+  min-height: var(--ctl);
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.field-row > input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
 .row.wrap {
   flex-wrap: wrap;
 }
