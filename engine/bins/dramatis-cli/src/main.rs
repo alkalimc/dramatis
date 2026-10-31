@@ -182,16 +182,18 @@ enum Command {
     },
 }
 
-/// A UTF-8 console that reads escape sequences; a console that refuses keeps its settings.
+/// A UTF-8 console that reads escape sequences, with Ctrl-C delivered even when the parent
+/// started this process ignoring it; a console that refuses keeps its settings.
 #[cfg(windows)]
 fn console() {
     use windows_sys::Win32::System::Console::{
         ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE,
-        SetConsoleCP, SetConsoleMode, SetConsoleOutputCP,
+        SetConsoleCP, SetConsoleCtrlHandler, SetConsoleMode, SetConsoleOutputCP,
     };
     const UTF8: u32 = 65001;
     // SAFETY: plain calls on this process's own console; failures are ignored.
     unsafe {
+        SetConsoleCtrlHandler(None, 0);
         SetConsoleOutputCP(UTF8);
         SetConsoleCP(UTF8);
         let out = GetStdHandle(STD_OUTPUT_HANDLE);
