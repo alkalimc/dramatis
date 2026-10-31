@@ -34,6 +34,20 @@ const GATHERING_MAX: usize = 5;
 /// How many of the day's people the material is drawn from.
 const MATERIAL_PEOPLE: usize = 2;
 
+/// Up to `n` of `items`, drawn at random (std's per-instance random hash keys; no ordering
+/// survives between calls).
+fn random_pick<T>(items: Vec<T>, n: usize) -> Vec<T> {
+    use std::hash::{BuildHasher, RandomState};
+    let state = RandomState::new();
+    let mut keyed: Vec<(u64, T)> = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| (state.hash_one(i), t))
+        .collect();
+    keyed.sort_by_key(|(k, _)| *k);
+    keyed.into_iter().take(n).map(|(_, t)| t).collect()
+}
+
 fn schema() -> Value {
     json!({
         "type": "object",
@@ -388,18 +402,8 @@ impl Agent {
         if offerable.is_empty() {
             return Ok(None);
         }
-        // The everyday topic of the day, rotating; and the topic of the newest group.
-        let topics: Vec<&str> = w
-            .get("events.topics")
-            .split('|')
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .collect();
-        let day = now.local_day_start() / world::clock::DAY_MS;
-        let used = event::used_material(&self.db(), self.config.world.events.list)?;
-        let today = event::count_on(&self.db(), &event::day_key(now))?;
-        let topic = (!topics.is_empty())
-            .then(|| topics[(day as usize + today as usize) % topics.len()].to_owned());
+        let recent = event::recent(&self.db(), self.config.world.events.list)?;
+        let used: Vec<String> = recent.iter().flat_map(|e| e.material.clone()).collect();
         let group_topics: Vec<String> = channel::list(&self.db())?
             .into_iter()
             .filter(|c| c.kind == world::ChannelKind::Group)
@@ -407,16 +411,26 @@ impl Agent {
             .filter(|t| !t.trim().is_empty())
             .take(2)
             .collect();
-        // Who it may involve: a rotating handful, so the same few do not carry every day.
-        // Birthdays are not a reason: with hundreds of people nearly every day has one.
+        // Who it may involve: a fresh random handful each time, leaving out whoever the
+        // recent events were about while there are others to choose from. What happens is
+        // the model's to choose; only the direction is given.
         let pool_max = (self.config.world.events.pool as usize).max(1);
-        let start = (day as usize).wrapping_mul(7) % offerable.len();
-        let pool: Vec<String> = (0..offerable.len().min(pool_max))
-            .map(|i| offerable[(start + i) % offerable.len()].clone())
+        let lately: std::collections::HashSet<&str> = recent
+            .iter()
+            .flat_map(|e| e.persons.iter().map(PersonId::as_str))
             .collect();
-        // The material is the first few of them as they are, from their own units of the
-        // kinds the corpus lists, and never a search over the whole story: the event is a
-        // small moment, and the model should not retell what it reads.
+        let mut candidates: Vec<String> = offerable
+            .iter()
+            .filter(|p| !lately.contains(p.as_str()))
+            .cloned()
+            .collect();
+        if candidates.len() < pool_max {
+            candidates = offerable.clone();
+        }
+        let pool = random_pick(candidates, pool_max);
+        // The material is a few of their own units of the kinds the corpus lists, picked at
+        // random, and never a search over the whole story: the event is a small moment,
+        // and the model should not retell what it reads.
         let kinds: Vec<String> = w
             .get("events.material")
             .split('|')
@@ -426,7 +440,7 @@ impl Agent {
             .collect();
         let mut units: Vec<folio::Unit> = Vec::new();
         for person in pool.iter().take(MATERIAL_PEOPLE) {
-            let mut req = index::SearchRequest::new(topic.as_deref().unwrap_or(person));
+            let mut req = index::SearchRequest::new(&self.display(person)?);
             req.filters.templates = kinds.clone();
             req.filters.persons = vec![person.clone()];
             req.exclude = used
@@ -437,12 +451,13 @@ impl Agent {
             let Ok(resp) = self.ix().search(&req) else {
                 continue;
             };
-            let first = resp
+            let hits: Vec<folio::Unit> = resp
                 .hits
                 .iter()
                 .filter(|h| !req.exclude.iter().any(|x| x == h.item.id()))
-                .find_map(|h| h.item.unit().cloned());
-            units.extend(first);
+                .filter_map(|h| h.item.unit().cloned())
+                .collect();
+            units.extend(random_pick(hits, 1));
         }
         let material = if units.is_empty() {
             String::new()
@@ -459,6 +474,20 @@ impl Agent {
         let (role, _) = self.role_for(LogKind::Host)?;
         let schema = schema();
         let mut extra = Vec::new();
+        if !recent.is_empty() {
+            let told: Vec<String> = recent
+                .iter()
+                .map(|e| {
+                    let line = w.fill(
+                        "events.fact",
+                        &names,
+                        &[("title", &e.title), ("text", &e.text)],
+                    );
+                    format!("- {line}")
+                })
+                .collect();
+            extra.push(w.fill("harness.event.past", &names, &[("past", &told.join("\n"))]));
+        }
         if !group_topics.is_empty() {
             extra.push(w.fill(
                 "harness.event.recent",
@@ -471,7 +500,6 @@ impl Agent {
             &names,
             &[
                 ("date", &date),
-                ("topic", topic.as_deref().unwrap_or("")),
                 ("material", &material),
                 ("people", &people.join("\n")),
                 ("extra", &extra.join("\n")),
