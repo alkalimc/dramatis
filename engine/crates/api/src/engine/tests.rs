@@ -1075,6 +1075,31 @@ async fn avatars_are_fetched_once_and_degrade_offline() {
 }
 
 #[tokio::test]
+async fn the_cached_avatar_lookup_never_fetches() {
+    let png = b"\x89PNG\r\n\x1a\nrest".to_vec();
+    let net = Arc::new(Net(Some(png), Mutex::new(0)));
+    let r = rig_with(net.clone());
+    assert_eq!(r.engine.cached_person_avatar("amy"), None);
+    assert_eq!(r.engine.cached_host_avatar(), None);
+    assert_eq!(*net.1.lock().unwrap(), 0, "a lookup is not a fetch");
+
+    let a = r.engine.avatar(id("amy")).await.unwrap().unwrap();
+    let h = r.engine.host_avatar().await.unwrap().unwrap();
+    assert_eq!(
+        r.engine
+            .cached_person_avatar("amy")
+            .unwrap()
+            .to_string_lossy(),
+        a.path
+    );
+    assert_eq!(
+        r.engine.cached_host_avatar().unwrap().to_string_lossy(),
+        h.path
+    );
+    assert_eq!(r.engine.cached_person_avatar("nobody"), None);
+}
+
+#[tokio::test]
 async fn search_in_library_form_filters_by_person() {
     let r = rig();
     let e = &r.engine;

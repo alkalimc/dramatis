@@ -1029,6 +1029,7 @@ name = "dramatis"
 version = "1.0.5"
 dependencies = [
  "api",
+ "mac-notification-sys",
  "runtime",
  "tauri",
  "tauri-build",

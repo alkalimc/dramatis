@@ -3,6 +3,7 @@
 //! arrivals become a notification and what it says.
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 
 use api::types::Author;
 
@@ -96,6 +97,22 @@ pub fn arrival(
     Some(Arrival { title, body })
 }
 
+/// The picture a notification shows for its author: the speaker's own face, which in a
+/// group is the person who spoke, not the group. Only pictures already on disk count
+/// (`person` and `host` look in the cache), so a missing one means no picture and the
+/// notification goes out without waiting for a fetch.
+pub fn speaker_image(
+    author: &Author,
+    person: impl Fn(&str) -> Option<PathBuf>,
+    host: impl Fn() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    match author {
+        Author::User => None,
+        Author::Host => host(),
+        Author::Person { id } => person(&id.0),
+    }
+}
+
 /// The first spoken line without citation marks, cut to a short length. A message made
 /// only of scene description shows that description instead.
 pub fn preview(text: &str, scene: (&str, &str)) -> String {
@@ -147,6 +164,24 @@ mod tests {
 
     fn name(id: &str) -> String {
         format!("Name of {id}")
+    }
+
+    #[test]
+    fn the_speaker_shows_their_own_face() {
+        let p = |id: &str| (id != "bare").then(|| PathBuf::from(format!("/m/{id}.png")));
+        let h = || Some(PathBuf::from("/m/host.png"));
+        assert_eq!(
+            speaker_image(&person("amy"), p, h),
+            Some(PathBuf::from("/m/amy.png"))
+        );
+        assert_eq!(
+            speaker_image(&Author::Host, p, h),
+            Some(PathBuf::from("/m/host.png"))
+        );
+        // Not cached yet: no picture, and no other person's stands in.
+        assert_eq!(speaker_image(&person("bare"), p, h), None);
+        assert_eq!(speaker_image(&Author::Host, p, || None), None);
+        assert_eq!(speaker_image(&Author::User, p, h), None);
     }
 
     #[test]

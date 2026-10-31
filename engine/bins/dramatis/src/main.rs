@@ -6,11 +6,13 @@
 //! window, else the newest `.folio` in `$DRAMATIS_HOME` (default `~/.dramatis`), else the window asks for a file and the home
 //! remembers the choice. Debug builds load the UI from the Vite dev server (`devUrl`); builds
 //! with the `custom-protocol` feature (what `tauri build` enables) embed `ui/dist`, which
-//! must be built first. See the README's "Desktop app" section.
+//! must be built first. See the README's "Desktop app" section. A debug build also sends a
+//! sample notification at startup when `$DRAMATIS_NOTIFY_TEST` is set (see `banner::preview`).
 
 // Release builds are GUI apps; no console window on platforms that would open one.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod banner;
 mod presence;
 mod shell;
 
