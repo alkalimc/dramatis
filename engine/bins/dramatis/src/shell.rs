@@ -19,6 +19,8 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::banner::{self, Banner};
+#[cfg(target_os = "macos")]
+use crate::grid;
 use crate::presence;
 
 /// How often idle conversations are wrapped up and due seeds looked at.
@@ -145,29 +147,42 @@ impl AppSink {
         let Some(found) = found else { return };
         let unseen = arrivals.unseen.fetch_add(1, Ordering::Relaxed) + 1;
         set_badge(&self.app, unseen);
-        // The speaker's face, if it is already cached: a notification never waits for a fetch.
-        let image = presence::speaker_image(
-            &m.author,
-            |id| engine.cached_person_avatar(id),
-            || engine.cached_host_avatar(),
-        );
+        // Cached pictures only: a notification never waits for a fetch. Choosing and
+        // drawing the picture reads files, so on macOS (the one place a picture shows) it
+        // runs off this thread together with the send.
+        let author = m.author.clone();
+        let channel = m.channel.clone();
         let logs = engine.home().logs();
-        banner::show(
-            &self.app,
-            Banner {
-                title: found.title,
-                body: found.body,
-                image,
-            },
-            move |e| {
+        let (title, body, app) = (found.title, found.body, self.app.clone());
+        let send = move || {
+            #[cfg(target_os = "macos")]
+            let group = engine
+                .group_faces(&channel)
+                .map(|faces| || grid::group_image(&engine, faces));
+            #[cfg(not(target_os = "macos"))]
+            let group = {
+                let _ = &channel;
+                None::<fn() -> Option<std::path::PathBuf>>
+            };
+            let image = presence::notice_image(
+                &author,
+                group,
+                |id| engine.cached_person_avatar(id),
+                || engine.cached_host_avatar(),
+            );
+            banner::show(&app, Banner { title, body, image }, move |e| {
                 // An app started from the Finder has no terminal: the log is where this shows.
                 let ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_millis() as i64);
                 runtime::diag::record(&logs, ms, &[("what", "notification failed")], &e);
                 eprintln!("dramatis: notification failed: {e}");
-            },
-        );
+            });
+        };
+        #[cfg(target_os = "macos")]
+        tauri::async_runtime::spawn_blocking(send);
+        #[cfg(not(target_os = "macos"))]
+        send();
     }
 }
 

@@ -97,10 +97,29 @@ pub fn arrival(
     Some(Arrival { title, body })
 }
 
-/// The picture a notification shows for its author: the speaker's own face, which in a
-/// group is the person who spoke, not the group. Only pictures already on disk count
-/// (`person` and `host` look in the cache), so a missing one means no picture and the
-/// notification goes out without waiting for a fetch.
+/// The picture a notification shows. A message in a group shows the group's picture
+/// (`group` is `Some` only for a group; it yields the picture, or `None` when no face of
+/// the group is cached). A direct chat and the host's own channel show the speaker's face
+/// ([`speaker_image`]), since the title already names who wrote in a group. The user's own
+/// messages never notify. Only pictures already on disk count, so a missing one means no
+/// picture and the notification goes out without waiting for a fetch.
+pub fn notice_image(
+    author: &Author,
+    group: Option<impl FnOnce() -> Option<PathBuf>>,
+    person: impl Fn(&str) -> Option<PathBuf>,
+    host: impl Fn() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if matches!(author, Author::User) {
+        return None;
+    }
+    match group {
+        Some(group) => group(),
+        None => speaker_image(author, person, host),
+    }
+}
+
+/// The picture for a speaker's own face: the person's, or the host's portrait. Only
+/// pictures already on disk count (`person` and `host` look in the cache).
 pub fn speaker_image(
     author: &Author,
     person: impl Fn(&str) -> Option<PathBuf>,
@@ -182,6 +201,36 @@ mod tests {
         assert_eq!(speaker_image(&person("bare"), p, h), None);
         assert_eq!(speaker_image(&Author::Host, p, || None), None);
         assert_eq!(speaker_image(&Author::User, p, h), None);
+    }
+
+    #[test]
+    fn a_group_shows_its_own_picture_and_the_rest_the_speaker() {
+        let p = |id: &str| Some(PathBuf::from(format!("/m/{id}.png")));
+        let h = || Some(PathBuf::from("/m/host.png"));
+        let grid = || Some(PathBuf::from("/m/group.png"));
+        let none = None::<fn() -> Option<PathBuf>>;
+        // In a group, whoever spoke (a person or the host), the group's picture.
+        assert_eq!(
+            notice_image(&person("amy"), Some(grid), p, h),
+            Some(PathBuf::from("/m/group.png"))
+        );
+        assert_eq!(
+            notice_image(&Author::Host, Some(grid), p, h),
+            Some(PathBuf::from("/m/group.png"))
+        );
+        // A group with no face cached has no picture; the speaker's does not stand in.
+        assert_eq!(notice_image(&person("amy"), Some(|| None), p, h), None);
+        // Direct chats and the host's channel (no group): the speaker.
+        assert_eq!(
+            notice_image(&person("amy"), none, p, h),
+            Some(PathBuf::from("/m/amy.png"))
+        );
+        assert_eq!(
+            notice_image(&Author::Host, none, p, h),
+            Some(PathBuf::from("/m/host.png"))
+        );
+        // The user's own messages carry nothing.
+        assert_eq!(notice_image(&Author::User, Some(grid), p, h), None);
     }
 
     #[test]

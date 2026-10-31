@@ -16,6 +16,8 @@ mod storage;
 mod update;
 mod uploads;
 
+pub use uploads::{Face, GROUP_TILES, GroupFaces};
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

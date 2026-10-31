@@ -1100,6 +1100,59 @@ async fn the_cached_avatar_lookup_never_fetches() {
 }
 
 #[tokio::test]
+async fn a_group_offers_its_cached_faces_and_nothing_else_does() {
+    let png = b"\x89PNG\r\n\x1a\nrest".to_vec();
+    let r = rig_with(Arc::new(Net(Some(png.clone()), Mutex::new(0))));
+    let e = &r.engine;
+    let group = e
+        .create_group(vec![id("amy"), id("kal")], None)
+        .await
+        .unwrap();
+    // Nothing cached: members are known but have no picture, so no face to draw.
+    let faces = e.group_faces(&group).unwrap();
+    assert_eq!(faces.custom, None);
+    assert_eq!(faces.user, None);
+    assert_eq!(faces.members, vec![None, None]);
+
+    // One member's picture is cached; the order is the group's.
+    let a = e.avatar(id("amy")).await.unwrap().unwrap();
+    let faces = e.group_faces(&group).unwrap();
+    assert_eq!(
+        faces.members,
+        vec![Some(std::path::PathBuf::from(&a.path)), None]
+    );
+
+    // A picture the user set for the group is the group's.
+    let set = e
+        .set_channel_avatar(
+            group.clone(),
+            Some(ImagePart {
+                mime: "image/png".into(),
+                data_base64: crate::media::base64_encode(&png),
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        e.group_faces(&group).unwrap().custom,
+        Some(std::path::PathBuf::from(set.path))
+    );
+
+    // Direct chats and the host's channel are not groups.
+    assert_eq!(
+        e.group_faces(&e.open_direct(id("amy")).await.unwrap()),
+        None
+    );
+    assert_eq!(e.group_faces(&e.host_channel().await.unwrap()), None);
+
+    // A composed picture is stored once under its name.
+    assert_eq!(e.cached_notice_image("k"), None);
+    let p = e.store_notice_image("k", &png).unwrap();
+    assert_eq!(e.cached_notice_image("k"), Some(p));
+}
+
+#[tokio::test]
 async fn search_in_library_form_filters_by_person() {
     let r = rig();
     let e = &r.engine;
