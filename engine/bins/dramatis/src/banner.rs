@@ -92,7 +92,9 @@ pub fn show_at(
 /// Debug builds only: `DRAMATIS_NOTIFY_TEST` sends one sample banner at startup, whatever
 /// the window and the settings, to see the picture without waiting for a message. The
 /// value picks the place (`icon`, `thumbnail`, or `none` for no picture); the picture is
-/// the first one in the avatar cache.
+/// the first one in the avatar cache. `group`, `group2` and `group3` send the grid a group
+/// without a picture of its own gets, with the first four, three or two cached avatars as
+/// its tiles (the first stands in for the user's own).
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub fn preview(app: &AppHandle, avatars: &std::path::Path) {
     let Some(mode) = std::env::var("DRAMATIS_NOTIFY_TEST")
@@ -101,23 +103,39 @@ pub fn preview(app: &AppHandle, avatars: &std::path::Path) {
     else {
         return;
     };
-    let place = if mode == "thumbnail" {
-        Place::Thumbnail
-    } else {
+    let place = if mode == "icon" {
         Place::Icon
+    } else {
+        Place::Thumbnail
     };
-    let image = (mode != "none")
-        .then(|| {
-            let mut found: Vec<_> = std::fs::read_dir(avatars)
-                .ok()?
-                .filter_map(Result::ok)
+    let mut found: Vec<_> = std::fs::read_dir(avatars)
+        .map(|d| {
+            d.filter_map(Result::ok)
                 .map(|e| e.path())
                 .filter(|p| p.is_file())
-                .collect();
-            found.sort();
-            found.into_iter().next()
+                .collect()
         })
-        .flatten();
+        .unwrap_or_default();
+    found.sort();
+    let tiles = match mode.as_str() {
+        "group" => Some(4),
+        "group3" => Some(3),
+        "group2" => Some(2),
+        _ => None,
+    };
+    let image = if let Some(tiles) = tiles {
+        let bytes: Vec<_> = found
+            .iter()
+            .take(tiles)
+            .map(|p| std::fs::read(p).ok())
+            .collect();
+        crate::grid::compose(&bytes).and_then(|png| {
+            let path = std::env::temp_dir().join("dramatis-sample-group.png");
+            std::fs::write(&path, png).ok().map(|()| path)
+        })
+    } else {
+        (mode != "none").then(|| found.into_iter().next()).flatten()
+    };
     eprintln!("dramatis: sample notification ({mode}) with {image:?}");
     let banner = Banner {
         title: "Sample".into(),

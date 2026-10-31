@@ -13,6 +13,61 @@ use crate::port::GroupChange;
 use crate::types::*;
 use crate::views::ImagePart;
 
+/// How many tiles a group's composed picture has at most: the user's own, then three members.
+pub const GROUP_TILES: usize = 4;
+
+/// One picture for a tile of a group's composed picture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Face {
+    /// A file in the media cache.
+    File(std::path::PathBuf),
+    /// The user's own picture, which the save keeps as bytes.
+    Bytes(Vec<u8>),
+}
+
+impl Face {
+    /// A short text that changes when the picture does: the file's place, size and time,
+    /// or the hash of the bytes.
+    pub fn identity(&self) -> String {
+        match self {
+            Face::File(path) => {
+                let (len, at) = std::fs::metadata(path).map_or((0, 0), |m| {
+                    let at = m
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |d| d.as_secs());
+                    (m.len(), at)
+                });
+                format!("file:{}:{len}:{at}", path.display())
+            }
+            Face::Bytes(bytes) => Sha256::digest(bytes)[..12]
+                .iter()
+                .fold(String::from("bytes:"), |s, b| s + &format!("{b:02x}")),
+        }
+    }
+
+    /// The picture's bytes, if they can still be read.
+    pub fn read(&self) -> Option<Vec<u8>> {
+        match self {
+            Face::File(path) => std::fs::read(path).ok(),
+            Face::Bytes(bytes) => Some(bytes.clone()),
+        }
+    }
+}
+
+/// What is on this machine to draw a group with, for [`Engine::group_faces`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupFaces {
+    /// The picture the user set for the group: when there is one, it is the group's.
+    pub custom: Option<std::path::PathBuf>,
+    /// The user's own picture (their upload, else the cached player portrait).
+    pub user: Option<Face>,
+    /// Up to three members in join order (people, then the host); `None` for one whose
+    /// picture is not cached.
+    pub members: Vec<Option<std::path::PathBuf>>,
+}
+
 impl Engine {
     /// Decode and store a picture under `uploads/`, named by its content hash so a repeat
     /// is free. Returns the file name.
@@ -47,6 +102,56 @@ impl Engine {
         path.is_file().then(|| MediaFile {
             path: path.to_string_lossy().into_owned(),
         })
+    }
+
+    /// What a notification can draw for a message in `channel`, from pictures already on
+    /// this machine; `None` when the channel is not a group (a direct chat and the host's
+    /// own channel show the speaker). No fetch, so a notification never waits.
+    pub fn group_faces(&self, channel: &ChannelId) -> Option<GroupFaces> {
+        let (custom, persons, host) = {
+            let w = self.w();
+            let ch = channel::get(&w, convert::world_channel(channel).ok()?).ok()?;
+            if ch.is_host_channel() || ch.kind != world::ChannelKind::Group {
+                return None;
+            }
+            let user = settings::user_avatar(&w).ok().flatten();
+            (
+                (self.upload_file(ch.avatar.as_deref()), user),
+                ch.persons(),
+                ch.has(&world::Actor::Host),
+            )
+        };
+        let (custom, user) = custom;
+        // The same order as the group's member list, which the UI's grid follows: people
+        // in the order they joined, the host after them.
+        let members = persons
+            .iter()
+            .map(|p| self.cached_person_avatar(p.as_str()))
+            .chain(host.then(|| self.cached_host_avatar()))
+            .take(GROUP_TILES - 1)
+            .collect();
+        let user = match user {
+            Some((_, bytes)) => Some(Face::Bytes(bytes)),
+            None => self
+                .media
+                .get("avatar", &media::stem(&["avatar", "~player"]))
+                .map(Face::File),
+        };
+        Some(GroupFaces {
+            custom: custom.map(|f| f.path.into()),
+            user,
+            members,
+        })
+    }
+
+    /// A picture the app composed for a notification, if it is already stored under `stem`.
+    pub fn cached_notice_image(&self, stem: &str) -> Option<std::path::PathBuf> {
+        self.media.get("notice", stem)
+    }
+
+    /// Store a picture composed for a notification under `stem`.
+    pub fn store_notice_image(&self, stem: &str, png: &[u8]) -> Option<std::path::PathBuf> {
+        self.media.put("notice", stem, "png", png).ok()
     }
 
     /// The user's own picture, else the corpus's player portrait. Their own comes out of
