@@ -172,7 +172,7 @@ test("first open: name, then the host introduces itself with the coldstart card"
   expect(screen.getByText("They are all frozen now: they answer when you reach out.")).toBeDefined();
 });
 
-test("endpoints: a failed model fetch shows the endpoint's own text and a manual field", async () => {
+test("endpoints: a failed check shows the endpoint's own text, a manual field, and the key can be stored from the same editor", async () => {
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
@@ -180,14 +180,18 @@ test("endpoints: a failed model fetch shows the endpoint's own text and a manual
   await user.click(within(await screen.findByRole("complementary", { name: "Menu" })).getByRole("button", { name: "Settings" }));
   await user.click(await screen.findByRole("button", { name: "Endpoints" }));
   const card = (await screen.findByRole("heading", { name: "deepseek" })).closest("li")!;
-  await user.click(within(card).getByRole("button", { name: "Fetch models" }));
+  expect(within(card).getByText("No key stored")).toBeDefined();
+  await user.click(within(card).getByRole("button", { name: "Edit deepseek" }));
+  // The model list is checked from the same editor; without a key the endpoint refuses.
+  await user.click(within(card).getByRole("button", { name: "Refresh models" }));
   expect(await within(card).findByText(/401 Unauthorized/)).toBeDefined();
-  expect(within(card).getByLabelText("Model name")).toBeDefined();
+  expect(within(card).getByLabelText("Model for chat")).toBeDefined();
   // Storing a key leaves only the notice; the key is never shown again.
   await user.type(within(card).getByLabelText("API key"), "sk-test");
-  await user.click(within(card).getByRole("button", { name: "Store key" }));
+  await user.click(within(card).getByRole("button", { name: "Refresh models" }));
   expect(await within(card).findByText("Stored in keychain")).toBeDefined();
   expect(within(card).queryByDisplayValue("sk-test")).toBeNull();
+  expect(await within(card).findByText("Models found: 2")).toBeDefined();
 });
 
 test("the host's name and avatar in its channel open its page, which has no trust or mode and leads to Talk", async () => {

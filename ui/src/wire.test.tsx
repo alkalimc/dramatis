@@ -124,10 +124,30 @@ describe("endpoints", () => {
     expect(store.getState().endpoints?.presets.some((p) => p.name === "anthropic-compatible")).toBe(true);
     await user.click(await screen.findByRole("button", { name: /Add/ }));
     await user.click(screen.getByRole("radio", { name: "anthropic-compatible" }));
-    const wire = screen.getByLabelText("Wire API") as HTMLSelectElement;
+    const wire = screen.getByLabelText("Protocol") as HTMLSelectElement;
     expect(wire.value).toBe("messages");
     expect(within(wire).getAllByRole("option")).toHaveLength(3);
     expect(screen.getByDisplayValue("https://api.anthropic.com/v1")).toBeDefined();
+  });
+
+  test("adding an endpoint is the first-run editor: key, check, models, and a model for chat that is kept by default", async () => {
+    const user = userEvent.setup();
+    const { actions, store } = renderWith(<EndpointsPage />);
+    await act(() => actions.refreshEndpoints());
+    await user.click(await screen.findByRole("button", { name: /Add/ }));
+    await user.click(screen.getByRole("radio", { name: "deepseek" }));
+    await user.type(screen.getByLabelText("API key"), "sk-test");
+    await user.click(screen.getByRole("button", { name: "Check connection" }));
+    const model = (await screen.findByLabelText("Model for chat")) as HTMLSelectElement;
+    expect(model.value).toBe("");
+    expect(within(model).getByRole("option", { name: "Keep primary · model-a" })).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByLabelText("Model for chat")).toBeNull());
+    expect(store.getState().endpoints?.roles?.chat).toMatchObject({ profile: "primary", model: "model-a" });
+    // The models it listed are remembered and offered by the roles.
+    const card = screen.getByRole("heading", { name: "deepseek-2" }).closest("li")!;
+    expect(within(card).getByText(/Models: 2/)).toBeDefined();
+    expect(within(screen.getByLabelText("Chat")).getByRole("option", { name: "deepseek-2 · deepseek-chat" })).toBeDefined();
   });
 
   test("host role defaults to the chat model and can be set apart", async () => {
@@ -144,17 +164,38 @@ describe("endpoints", () => {
     await waitFor(() => expect(store.getState().endpoints?.roles?.host ?? null).toBeNull());
   });
 
-  test("edit form: cache write price shows on the messages wire only; key is never shown", async () => {
+  test("edit form: cache write price shows on the messages wire only; the key is never shown and can be replaced", async () => {
     const user = userEvent.setup();
     const { actions } = renderWith(<EndpointsPage />);
     await act(() => actions.refreshEndpoints());
     expect(screen.getAllByText("Stored in keychain").length).toBeGreaterThan(0);
     const card = (await screen.findByRole("heading", { name: "primary" })).closest("li")!;
     await user.click(within(card).getByRole("button", { name: "Edit primary" }));
-    await user.click(within(card).getByText("Limits and prices"));
+    expect(within(card).queryByLabelText("API key")).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "Replace key" }));
+    expect(within(card).getByLabelText("API key")).toBeDefined();
+    await user.click(within(card).getByText("Models"));
+    await user.click(within(card).getAllByText("Limits and prices")[0]);
     expect(within(card).queryByLabelText("Cache write price")).toBeNull();
-    await user.selectOptions(within(card).getByLabelText("Wire API"), "messages");
+    await user.selectOptions(within(card).getByLabelText("Protocol"), "messages");
     expect(within(card).getByLabelText("Cache write price")).toBeDefined();
+  });
+
+  test("a profile a role uses cannot be removed; another asks first and goes", async () => {
+    const user = userEvent.setup();
+    const { actions, store } = renderWith(<EndpointsPage />);
+    await act(() => actions.refreshEndpoints());
+    const primary = (await screen.findByRole("heading", { name: "primary" })).closest("li")!;
+    expect(within(primary).queryByRole("button", { name: "Remove primary" })).toBeNull();
+    expect(within(primary).getByText(/In use by a role/)).toBeDefined();
+    const other = screen.getByRole("heading", { name: "deepseek" }).closest("li")!;
+    await user.click(within(other).getByRole("button", { name: "Remove deepseek" }));
+    expect(within(other).getByText(/Its key is deleted/)).toBeDefined();
+    await user.click(within(other).getByRole("button", { name: "Cancel" }));
+    expect(store.getState().endpoints?.profiles).toHaveLength(2);
+    await user.click(within(other).getByRole("button", { name: "Remove deepseek" }));
+    await user.click(within(other).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(store.getState().endpoints?.profiles).toHaveLength(1));
   });
 });
 

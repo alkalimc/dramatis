@@ -24,7 +24,9 @@ import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
 import { ChangedScreen } from "./screens/Changed";
 import { UnlockScreen } from "./screens/Unlock";
-import { AvatarStep, CorpusSetup, ModelStep, SavePicker, UpdateStep } from "./screens/Welcome";
+import { AvatarStep, CorpusSetup, SavePicker, UpdateStep } from "./screens/Welcome";
+import { ConnectStep } from "./screens/Connect";
+import { needsSetup } from "./screens/EndpointEditor";
 import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
@@ -88,8 +90,7 @@ function Shell() {
   const [modelDone, setModelDone] = useState(false);
   // A step the user went back to, when the usual order would skip it.
   const [forced, setForced] = useState<"name" | "model" | null>(null);
-  const chat = endpoints?.roles?.chat;
-  const modelMissing = endpoints !== null && (!chat || endpoints.profiles.some((p) => p.profile.name === chat.profile && !p.has_key));
+  const modelMissing = endpoints !== null && needsSetup(endpoints);
   usePresence();
   useTheme();
   // Native controls and screen readers follow the document's language.
@@ -139,7 +140,7 @@ function Shell() {
   if (firstRun.current && !avatarDone) return <AvatarStep onDone={() => setAvatarDone(true)} onBack={() => setForced("name")} />;
   if (firstRun.current && (forced === "model" || (!modelDone && modelMissing))) {
     return (
-      <ModelStep
+      <ConnectStep
         onDone={() => {
           setModelDone(true);
           setForced(null);

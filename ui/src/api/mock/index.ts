@@ -529,6 +529,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     return null;
   };
 
+  const keys = new Map<string, string>();
   let endpoints: EndpointsView = library
     ? { profiles: [], roles: null, presets: PRESETS }
     : {
@@ -1186,6 +1187,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     endpoints: () => ok(structuredClone(endpoints)),
     addProfile: (profile) => {
       if (!profile.name.trim()) return fail({ code: "invalid", field: "name" });
+      if (!/^https?:\/\/\S+$/.test(profile.base_url.trim())) return fail({ code: "invalid", field: "base_url" });
       if (endpoints.profiles.some((p) => p.profile.name === profile.name)) return fail({ code: "invalid", field: "name" });
       endpoints = { ...endpoints, profiles: [...endpoints.profiles, { profile, has_key: false }] };
       return ok(null);
@@ -1195,19 +1197,18 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(null);
     },
     removeProfile: (name) => {
-      const roles = endpoints.roles;
-      endpoints = {
-        ...endpoints,
-        profiles: endpoints.profiles.filter((p) => p.profile.name !== name),
-        roles: roles && roles.chat.profile === name ? null : roles && roles.tts?.profile === name ? { ...roles, tts: null } : roles,
-      };
-      if (!endpoints.roles) library = true;
+      // As the engine: a profile a role points at stays until the role moves.
+      const r = endpoints.roles;
+      if (r && [r.chat, r.host, r.tts, r.persona].some((x) => x?.profile === name)) return fail({ code: "invalid", field: "profile" });
+      endpoints = { ...endpoints, profiles: endpoints.profiles.filter((p) => p.profile.name !== name) };
+      keys.delete(name);
       return ok(null);
     },
     fetchModels: (name) => {
       const p = endpoints.profiles.find((x) => x.profile.name === name);
       if (!p) return fail({ code: "not_found" });
-      if (!p.has_key && !p.profile.base_url.startsWith("http://127.0.0.1")) {
+      if (p.profile.base_url.includes("unreachable.invalid")) return fail({ code: "endpoint", detail: `error sending request for url (${p.profile.base_url}/models)` });
+      if ((!p.has_key && !p.profile.base_url.startsWith("http://127.0.0.1")) || keys.get(name) === "bad-key") {
         return fail({ code: "endpoint", detail: '401 Unauthorized: {"error":{"message":"Authentication failed: missing or invalid API key","type":"authentication_error"}}' });
       }
       if (name === "primary") return ok(["model-a", "model-b", "tts-1"]);
@@ -1215,7 +1216,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     },
     setKey: (name, key) => {
       if (!key.trim()) return fail({ code: "invalid", field: "key" });
-      // The key is dropped on the floor: the mock has no keychain, and nothing returns it.
+      // Kept only to tell the key the tests call bad; nothing returns it.
+      keys.set(name, key.trim());
       endpoints = { ...endpoints, profiles: endpoints.profiles.map((p) => (p.profile.name === name ? { ...p, has_key: true } : p)) };
       return ok(null);
     },
