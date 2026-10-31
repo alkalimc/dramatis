@@ -155,7 +155,7 @@ class RunInfo:
 
     stage: str
     pack: str
-    pack_version: int
+    pack_version: str
     forge_version: str = __version__
     started_at: str = field(default_factory=lambda: dt.datetime.now(dt.UTC).isoformat(timespec="seconds"))
     code_revision: str = "unknown"
@@ -163,7 +163,7 @@ class RunInfo:
     host: str = field(default_factory=lambda: f"{platform.system()} {platform.machine()}")
 
     @classmethod
-    def create(cls, stage: str, pack: str, pack_version: int) -> RunInfo:
+    def create(cls, stage: str, pack: str, pack_version: str) -> RunInfo:
         return cls(
             stage=stage,
             pack=pack,

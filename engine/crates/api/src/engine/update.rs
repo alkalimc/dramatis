@@ -26,6 +26,11 @@ impl Engine {
                     licence: clean(&c.licence),
                 })
                 .filter(|c| c.by.is_some() || c.licence.is_some()),
+            corpus_version: self
+                .corpus
+                .as_ref()
+                .map(|c| c.manifest.pack_version.trim().to_owned())
+                .filter(|v| !v.is_empty()),
             ..AppInfo::current()
         }
     }

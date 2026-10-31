@@ -50,6 +50,8 @@ pub struct AppInfo {
     pub license: String,
     /// Who built the open corpus, when it says so.
     pub corpus_credits: Option<CorpusCredits>,
+    /// The open corpus's pack release, when it gives one.
+    pub corpus_version: Option<String>,
 }
 
 /// A corpus's credit line, from its manifest.
@@ -78,6 +80,7 @@ impl AppInfo {
             repository: crate::update::REPOSITORY.into(),
             license: env!("CARGO_PKG_LICENSE").into(),
             corpus_credits: None,
+            corpus_version: None,
         }
     }
 }

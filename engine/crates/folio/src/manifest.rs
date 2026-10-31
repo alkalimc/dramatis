@@ -39,7 +39,8 @@ pub struct Credits {
 pub struct Manifest {
     pub format_version: i64,
     pub pack: String,
-    pub pack_version: i64,
+    /// The pack's release as the pack writes it (`1.1.0`); empty when the file has none.
+    pub pack_version: String,
     pub parser_version: i64,
     /// `name/version`, e.g. `jieba/0.42.1`. **Query-side segmentation must match**, or
     /// BM25 silently degrades: the index holds tokens produced by that exact segmenter.
@@ -70,6 +71,15 @@ pub struct Manifest {
     /// Absent, or not the expected shape: empty. It is a credit line, so a bad value never
     /// refuses the corpus.
     pub credits: Credits,
+}
+
+/// A version as text: a string as it is, a number (what older packs wrote) in digits.
+fn version_text(raw: Option<serde_json::Value>) -> String {
+    match raw {
+        Some(serde_json::Value::String(s)) => s,
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    }
 }
 
 fn get<T: DeserializeOwned>(conn: &Connection, key: &'static str) -> Result<Option<T>> {
@@ -110,7 +120,7 @@ impl Manifest {
         Ok(Self {
             format_version,
             pack: get(conn, "pack")?.unwrap_or_default(),
-            pack_version: get(conn, "pack_version")?.unwrap_or(0),
+            pack_version: version_text(get(conn, "pack_version")?),
             parser_version: get(conn, "parser_version")?.unwrap_or(0),
             segmenter: get(conn, "segmenter")?.unwrap_or_default(),
             stopwords: get(conn, "stopwords")?.unwrap_or_default(),
@@ -183,6 +193,18 @@ mod tests {
             (manifest.user_placeholder.as_str(), manifest.year_offset),
             ("", 0)
         );
+    }
+
+    #[test]
+    fn the_pack_version_reads_as_text_whether_written_as_a_string_or_a_number() {
+        let read = |raw: Option<&str>| {
+            let mut pairs = vec![("format_version", "2")];
+            pairs.extend(raw.map(|v| ("pack_version", v)));
+            Manifest::load(&manifest_with(&pairs)).unwrap().pack_version
+        };
+        assert_eq!(read(Some(r#""1.1.0""#)), "1.1.0");
+        assert_eq!(read(Some("1")), "1");
+        assert_eq!(read(None), "");
     }
 
     #[test]

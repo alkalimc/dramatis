@@ -819,7 +819,8 @@ class WikiConfig:
 @dataclass(frozen=True)
 class Pack:
     name: str
-    version: int
+    #: The pack's own release, `major.minor.patch`; stamped into the folio as `pack_version`.
+    version: str
     wiki: WikiConfig
     seeds: tuple[SeedSet, ...]
     routes: tuple[Route, ...]

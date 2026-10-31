@@ -2889,6 +2889,9 @@ impl Session {
                 self.term.line(url);
             }
         }
+        if let Some(v) = &info.corpus_version {
+            said("cli.about.corpus_version", &[("version", v)]);
+        }
         let status = match self.engine.check_update(now).await {
             Ok(s) => Some(s),
             Err(_) => self.engine.update_status().await.ok(),

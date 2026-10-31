@@ -433,6 +433,8 @@ export type AppInfo = {
 	license: string,
 	/**  Who built the open corpus, when it says so. */
 	corpus_credits: CorpusCredits | null,
+	/**  The open corpus's pack release, when it gives one. */
+	corpus_version: string | null,
 };
 
 export type AppStatus = {
