@@ -266,11 +266,17 @@ impl Default for Session {
 #[serde(default)]
 pub struct Wrapup {
     pub max_facts: u32,
+    /// A memory whose text overlaps a live one of the same author and subject by this
+    /// percent of character pairs or more is not stored again.
+    pub similar: u32,
 }
 
 impl Default for Wrapup {
     fn default() -> Self {
-        Self { max_facts: 2 }
+        Self {
+            max_facts: 2,
+            similar: 45,
+        }
     }
 }
 

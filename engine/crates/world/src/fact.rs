@@ -208,6 +208,35 @@ pub fn find_duplicate(conn: &Connection, new: &NewFact) -> Result<Option<Fact>> 
     Ok(same.into_iter().find(|f| normalize(&f.text) == key))
 }
 
+/// The share of two texts' character pairs (after [`normalize`]) that they have in
+/// common, 0 to 100: pairs in both over pairs in either.
+pub fn overlap_percent(a: &str, b: &str) -> u32 {
+    let pairs = |t: &str| -> BTreeSet<(char, char)> {
+        let chars: Vec<char> = normalize(t).chars().collect();
+        chars.windows(2).map(|w| (w[0], w[1])).collect()
+    };
+    let (a, b) = (pairs(a), pairs(b));
+    let either = a.union(&b).count();
+    if either == 0 {
+        return 0;
+    }
+    (a.intersection(&b).count() * 100 / either) as u32
+}
+
+/// A live fact by the same author, of the same kind and about the same subject, whose
+/// text overlaps the new one by at least `percent` ([`overlap_percent`]): the same thing
+/// said again in other words. Retracted facts and other kinds do not count.
+pub fn find_similar(conn: &Connection, new: &NewFact, percent: u32) -> Result<Option<Fact>> {
+    let same = query(
+        conn,
+        "kind = ?1 AND author = ?2 AND retracted = 0",
+        (new.kind, &new.author),
+    )?;
+    Ok(same
+        .into_iter()
+        .find(|f| f.about == new.about && overlap_percent(&f.text, &new.text) >= percent))
+}
+
 /// Write a fact unless it repeats an existing one, retracted ones included.
 pub fn write(conn: &Connection, new: &NewFact, now: i64) -> Result<Written> {
     if normalize(&new.text).is_empty() {

@@ -91,9 +91,10 @@ pub struct AskHost {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Wrapup {
-    /// What is worth remembering: what the user said of their own life, what was decided or
-    /// agreed, what passed between you, one or two short lines. Empty only when nothing but
-    /// greetings were exchanged.
+    /// What will still be worth knowing days from now: lasting facts about the user, what was
+    /// decided or promised, what changed between you; one or two short lines. Empty is the
+    /// normal result of an ordinary chat. Not what was said in this conversation, greetings,
+    /// reminders, or anything already among the memories shown.
     #[serde(default)]
     pub facts: Vec<WrapupFact>,
     /// Only for clear cruelty, insult, humiliation or betrayal aimed at a person.
@@ -276,8 +277,8 @@ pub struct Recent {
 
 // ---- daily event ----
 
-/// Make up one small happening of the day, for the user to hear about. Everyday and small,
-/// told in two or three short sentences about the listed people only, without retelling
+/// Make up one small happening of the day, for the user to hear about. Everyday, small and
+/// pleasant or neutral, told in two or three short sentences about the listed people only, without retelling
 /// the story or lore.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

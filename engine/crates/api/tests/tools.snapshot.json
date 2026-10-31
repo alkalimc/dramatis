@@ -3,7 +3,7 @@
     "chat": [
       {
         "function": {
-          "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
+          "description": "Make up one small happening of the day, for the user to hear about. Everyday, small and\npleasant or neutral, told in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
           "name": "make_event",
           "parameters": {
             "additionalProperties": false,
@@ -70,7 +70,7 @@
     ],
     "messages": [
       {
-        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
+        "description": "Make up one small happening of the day, for the user to hear about. Everyday, small and\npleasant or neutral, told in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
         "input_schema": {
           "additionalProperties": false,
           "properties": {
@@ -135,7 +135,7 @@
     ],
     "responses": [
       {
-        "description": "Make up one small happening of the day, for the user to hear about. Everyday and small,\ntold in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
+        "description": "Make up one small happening of the day, for the user to hear about. Everyday, small and\npleasant or neutral, told in two or three short sentences about the listed people only, without retelling\nthe story or lore.",
         "name": "make_event",
         "parameters": {
           "additionalProperties": false,
@@ -1208,7 +1208,7 @@
             "properties": {
               "facts": {
                 "default": [],
-                "description": "What is worth remembering: what the user said of their own life, what was decided or\nagreed, what passed between you, one or two short lines. Empty only when nothing but\ngreetings were exchanged.",
+                "description": "What will still be worth knowing days from now: lasting facts about the user, what was\ndecided or promised, what changed between you; one or two short lines. Empty is the\nnormal result of an ordinary chat. Not what was said in this conversation, greetings,\nreminders, or anything already among the memories shown.",
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -1411,7 +1411,7 @@
           "properties": {
             "facts": {
               "default": [],
-              "description": "What is worth remembering: what the user said of their own life, what was decided or\nagreed, what passed between you, one or two short lines. Empty only when nothing but\ngreetings were exchanged.",
+              "description": "What will still be worth knowing days from now: lasting facts about the user, what was\ndecided or promised, what changed between you; one or two short lines. Empty is the\nnormal result of an ordinary chat. Not what was said in this conversation, greetings,\nreminders, or anything already among the memories shown.",
               "items": {
                 "additionalProperties": false,
                 "properties": {
@@ -1614,7 +1614,7 @@
           "properties": {
             "facts": {
               "default": [],
-              "description": "What is worth remembering: what the user said of their own life, what was decided or\nagreed, what passed between you, one or two short lines. Empty only when nothing but\ngreetings were exchanged.",
+              "description": "What will still be worth knowing days from now: lasting facts about the user, what was\ndecided or promised, what changed between you; one or two short lines. Empty is the\nnormal result of an ordinary chat. Not what was said in this conversation, greetings,\nreminders, or anything already among the memories shown.",
               "items": {
                 "additionalProperties": false,
                 "properties": {

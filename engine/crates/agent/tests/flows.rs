@@ -342,6 +342,37 @@ async fn wrapup_closes(wire: WireApi) {
 }
 
 #[tokio::test]
+async fn the_wrapup_shows_the_memories_already_held_after_the_cached_prefix() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.fake
+        .push([say("Mm."), call("wrapup", json!({"facts": []}))]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    e.agent.with_world(|w| {
+        let held = |who: Actor, aud, text: &str| {
+            fact::write(w, &NewFact::new(who, aud, FactKind::Fact, text), T0).unwrap();
+        };
+        held(
+            Actor::User,
+            Audience::Own(p("ann")),
+            "ann holds a jasmine habit",
+        );
+        held(
+            Actor::User,
+            Audience::Own(p("bob")),
+            "bob holds a mint habit",
+        );
+    });
+    e.agent.wrapup(ch).await.unwrap();
+    let bodies = e.fake.bodies();
+    assert_prefix_chain(&bodies);
+    let last = String::from_utf8(bodies.last().unwrap().clone()).unwrap();
+    assert!(last.contains("Memories already held"));
+    assert!(last.contains("ann holds a jasmine habit"));
+    assert!(!last.contains("bob holds a mint habit"));
+}
+
+#[tokio::test]
 async fn material_past_the_threshold_rolls_over_after_a_wrapup() {
     for wire in WIRES {
         rolls_over(wire).await;
@@ -3810,7 +3841,7 @@ async fn an_idle_wrapup_that_fails_or_writes_nothing_leaves_a_line_and_stops_not
 }
 
 #[tokio::test]
-async fn the_wrapup_asks_for_memories_of_what_the_user_shared_and_agreed() {
+async fn the_wrapup_asks_only_for_what_stays_worth_knowing() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
     e.fake.push([say("hi")]);
@@ -3828,7 +3859,9 @@ async fn the_wrapup_asks_for_memories_of_what_the_user_shared_and_agreed() {
         .unwrap()
         .to_string();
     assert!(
-        ask.contains("what Doc told you of their own life") && ask.contains("even when small"),
+        ask.contains("worth knowing days from now")
+            && ask.contains("Writing nothing is the normal result")
+            && !ask.contains("even when small"),
         "{ask}"
     );
     assert_eq!(

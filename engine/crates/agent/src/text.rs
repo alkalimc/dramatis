@@ -246,27 +246,37 @@ const DEFAULTS: &[(&str, &str)] = &[
     (
         "harness.wrapup",
         "The conversation is closing. Step out of the scene and do not answer as the \
-         character. Give only the wrap-up: write what is worth remembering as short \
-         memories, such as what {user} told you of their own life, what was decided or \
-         agreed, and what passed between you, even when small; anything either of you said \
-         you would do, and can do within a talk with {user}, becomes a promise with its \
-         date, in the calendar the context line shows. Going elsewhere, asking others or \
-         checking other chats is not something a person can promise. Write none only if nothing but \
-         greetings were exchanged. Use the wrapup call if it is available; otherwise reply \
+         character. Give only the wrap-up: write only what will still be \
+         worth knowing days from now, as short memories: a lasting fact about {user} (a \
+         preference, a plan, circumstances, a relationship), something agreed or promised, \
+         or something that changed between you. What was said in this conversation, \
+         greetings, small talk, reminders someone gave, anyone's own intention to keep \
+         caring, and anything already among the memories listed below are not memories. \
+         Writing nothing is the normal result of an ordinary chat. Anything either of you \
+         said you would do, and can do within a talk with {user}, becomes a promise with \
+         its date, in the calendar the context line shows. Going elsewhere, asking others \
+         or checking other chats is not something a person can promise. Use the wrapup call if it is available; otherwise reply \
          with just the JSON object the schema describes.",
     ),
     (
         "harness.wrapup.summary",
         "The conversation moves to a new log. Step out of the scene and do not answer as the \
-         character. Give only the wrap-up: write what is worth remembering as short \
-         memories, such as what {user} told you of their own life, what was decided or \
-         agreed, and what passed between you, even when small; anything either of you said \
-         you would do, and can do within a talk with {user}, becomes a promise with its \
-         date, in the calendar the context line shows. Going elsewhere, asking others or \
-         checking other chats is not something a person can promise. Write none only if nothing but \
-         greetings were exchanged. Add a summary of the conversation so far. Use the \
+         character. Give only the wrap-up: write only what will still be \
+         worth knowing days from now, as short memories: a lasting fact about {user} (a \
+         preference, a plan, circumstances, a relationship), something agreed or promised, \
+         or something that changed between you. What was said in this conversation, \
+         greetings, small talk, reminders someone gave, anyone's own intention to keep \
+         caring, and anything already among the memories listed below are not memories. \
+         Writing nothing is the normal result of an ordinary chat. Anything either of you \
+         said you would do, and can do within a talk with {user}, becomes a promise with \
+         its date, in the calendar the context line shows. Going elsewhere, asking others \
+         or checking other chats is not something a person can promise. Add a summary of the conversation so far. Use the \
          wrapup call if it is available; otherwise reply with just the JSON object the \
          schema describes.",
+    ),
+    (
+        "harness.wrapup.known",
+        "Memories already held, which need no second entry:\n{list}",
     ),
     (
         "harness.wrapup.shape",
@@ -308,9 +318,10 @@ const DEFAULTS: &[(&str, &str)] = &[
         "harness.event.ask",
         "Make up one small happening for today, {date}, for {user} to hear about. \
          Requirements:\n\
-         - It is an ordinary moment of daily life: a meal, a chore, practice, the weather, \
-         a small favour, a hobby. One event in one scene, with no twist, no punchline and \
-         no loose end.\n\
+         - It is a pleasant or neutral moment of daily life: a meal, a chore, practice, the \
+         weather, a small favour, a hobby, and it ends warmly or calmly, with nothing lost, \
+         broken, hurt, argued over or left unsettled. One event in one scene, with no twist \
+         and no punchline.\n\
          - Two or three short sentences, natural and fluent, the way someone would mention \
          it over a meal.\n\
          - Only the people listed below, one or two of them. Name nobody else.\n\
@@ -340,16 +351,16 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("events.fact", "{title}: {text}"),
     (
         "events.topics",
-        "someone took a second helping at the canteen|a dish sold out at the canteen|\
-         someone tidying their room|a broken lamp waiting to be fixed|\
-         someone borrowed something and has not returned it|a favour run for a colleague|\
-         practice that ran long|a rest in the corridor after training|\
-         a small mismatch in the supply count|a windy day on the deck|a rainy day indoors|\
-         sunshine and someone out in it|someone looking after a plant|\
+        "someone took a second helping at the canteen|the canteen's best dish of the week|\
+         someone tidying their room and finding an old keepsake|a freshly mended lamp glowing in the dorm|\
+         someone lending a book that came back with a note inside|a favour run for a colleague|\
+         practice that went especially well|a rest in the corridor after training|\
+         a tidy supply shelf and a satisfied smile|a breezy day on the deck|a rainy day indoors with tea|\
+         sunshine and someone out in it|someone looking after a plant that just bloomed|\
          someone reading or listening to music|someone busy with a hobby|\
-         someone sleepy after a late night|a queue at the medical check|\
+         someone well rested and in a good mood|a friendly chat in the queue at the medical check|\
          a game of cards or chess in the lounge|a small gift for a colleague|\
-         someone learning something new, slowly",
+         someone learning something new, bit by bit",
     ),
     // The kinds of unit that tell who a person is, which the event's material is drawn
     // from; none listed means any kind of the person's own units.

@@ -42,6 +42,9 @@ const EARLIER_QUERY_CHARS: usize = 300;
 /// Most characters of a quoted message the model is told.
 const REPLY_SNIPPET_CHARS: usize = 40;
 
+/// Most memories the wrap-up shows as already held.
+const WRAPUP_KNOWN_MAX: usize = 16;
+
 /// Where a message is forwarded to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Forward {
@@ -1583,6 +1586,9 @@ impl Agent {
             "harness.wrapup"
         };
         let mut line = self.corpus.wording.fill(key, &names, &[]);
+        if let Some(known) = self.wrapup_known(ch, &author, &names)? {
+            line = format!("{line}\n\n{known}");
+        }
         if emulated {
             // The endpoint may not enforce the response schema, so the request text
             // shows the shape itself, built from the schema.
@@ -1649,6 +1655,38 @@ impl Agent {
         }
         self.changed(changes);
         Ok(if summary { outcome.summary } else { None })
+    }
+
+    /// The memories the author already holds in this channel (the latest few), listed
+    /// after the wrap-up line so a repeat can be left out. Added at the end of the
+    /// request, so the cached prefix is unchanged.
+    fn wrapup_known(
+        &self,
+        ch: ChannelId,
+        author: &PersonId,
+        names: &Names,
+    ) -> Result<Option<String>> {
+        let conn = self.db();
+        let mut known: Vec<_> = world::fact::visible_to(&conn, Some(author), ch)?
+            .into_iter()
+            .filter(|f| f.kind != world::types::FactKind::Hurt)
+            .collect();
+        let keep = WRAPUP_KNOWN_MAX;
+        if known.len() > keep {
+            known.drain(..known.len() - keep);
+        }
+        if known.is_empty() {
+            return Ok(None);
+        }
+        let list: Vec<String> = known
+            .iter()
+            .map(|f| format!("- {}", names.sub(f.text.trim())))
+            .collect();
+        Ok(Some(self.corpus.wording.fill(
+            "harness.wrapup.known",
+            names,
+            &[("list", &list.join("\n"))],
+        )))
     }
 
     /// One line in the diagnostics log about a wrap-up that wrote no memory.
