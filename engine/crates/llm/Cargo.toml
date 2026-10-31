@@ -18,8 +18,8 @@ thiserror.workspace = true
 tokio = { version = "=1.53.1", features = ["time"] }
 # Platform TLS, like the rest of the workspace; only the byte transport lives here.
 reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls", "http2"] }
-# Apple keychain only: the one supported platform. Elsewhere keyring falls back to its
-# in-memory mock store, which keeps the workspace building on CI hosts.
+# Apple keychain, and Windows Credential Manager below. Elsewhere keyring falls back to
+# its in-memory mock store, which keeps the workspace building on CI hosts.
 keyring = { version = "=3.6.3", features = ["apple-native"] }
 
 [dev-dependencies]
@@ -29,3 +29,6 @@ tokio = { version = "=1.53.1", features = ["rt", "macros", "time"] }
 # Same version keyring already pulls in.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "=2.11.1"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "=3.6.3", features = ["windows-native"] }

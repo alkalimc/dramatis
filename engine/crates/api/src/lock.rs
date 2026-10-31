@@ -27,9 +27,29 @@ fn ident(path: &Path) -> Option<Ident> {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn ident(path: &Path) -> Option<Ident> {
-    // No inode to compare: the file's length and age stand in, which still sees a swap.
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    // No access asked: only attributes are read, so SQLite's sharing mode is no obstacle.
+    let file = OpenOptions::new().access_mode(0).open(path).ok()?;
+    // SAFETY: an all-zero struct of integers is valid, and the handle is open for the call.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return None;
+    }
+    Some(Ident {
+        dev: u64::from(info.dwVolumeSerialNumber),
+        ino: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn ident(path: &Path) -> Option<Ident> {
+    // No file identity to compare: the file's age stands in, which still sees a swap.
     let m = std::fs::metadata(path).ok()?;
     let age = m
         .created()
@@ -37,7 +57,7 @@ fn ident(path: &Path) -> Option<Ident> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?;
     Some(Ident {
-        dev: m.len(),
+        dev: 0,
         ino: age.as_nanos() as u64,
     })
 }
@@ -93,8 +113,54 @@ fn flock(file: &File, mode: Mode, wait: bool) -> ApiResult<()> {
     })
 }
 
+/// `LockFileEx` on the first byte; the lock goes when the handle closes.
+#[cfg(windows)]
+fn flock(file: &File, mode: Mode, wait: bool) -> ApiResult<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
+    use windows_sys::Win32::Storage::FileSystem::{
+        LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx,
+    };
+    use windows_sys::Win32::System::IO::OVERLAPPED;
+    let flags = match mode {
+        Mode::Shared => 0,
+        Mode::Exclusive => LOCKFILE_EXCLUSIVE_LOCK,
+    } | if wait { 0 } else { LOCKFILE_FAIL_IMMEDIATELY };
+    // SAFETY: the handle is open for as long as `file` is borrowed; the zeroed OVERLAPPED
+    // (offset 0) lives across the call, which is synchronous on a handle opened without
+    // FILE_FLAG_OVERLAPPED.
+    let mut at: OVERLAPPED = unsafe { std::mem::zeroed() };
+    if unsafe { LockFileEx(file.as_raw_handle(), flags, 0, 1, 0, &mut at) } != 0 {
+        return Ok(());
+    }
+    let e = io::Error::last_os_error();
+    Err(if e.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
+        ApiError::OpenElsewhere
+    } else {
+        ApiError::Io {
+            detail: e.to_string(),
+        }
+    })
+}
+
+/// Let go of the lock on the first byte, for a downgrade (`LockFileEx` cannot convert).
+#[cfg(windows)]
+fn unlock(file: &File) -> ApiResult<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::UnlockFileEx;
+    use windows_sys::Win32::System::IO::OVERLAPPED;
+    // SAFETY: as in `flock`.
+    let mut at: OVERLAPPED = unsafe { std::mem::zeroed() };
+    if unsafe { UnlockFileEx(file.as_raw_handle(), 0, 1, 0, &mut at) } != 0 {
+        return Ok(());
+    }
+    Err(ApiError::Io {
+        detail: io::Error::last_os_error().to_string(),
+    })
+}
+
 /// No advisory locks here: the poller's check of the file is all there is.
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn flock(_: &File, _: Mode, _: bool) -> ApiResult<()> {
     Ok(())
 }
@@ -130,6 +196,10 @@ impl SaveLock {
 
     /// Back to a shared lock once the rewrite is done, remembering the file now there.
     pub fn downgrade(mut self) -> ApiResult<Self> {
+        // Windows cannot convert a lock in place: let go, then wait for a shared one. Another
+        // process may take the lock exclusively in between; it is then waited out.
+        #[cfg(windows)]
+        unlock(&self.file)?;
         flock(&self.file, Mode::Shared, true)?;
         self.opened = ident(&self.save);
         Ok(self)
@@ -183,6 +253,8 @@ mod tests {
             ApiError::OpenElsewhere
         );
         let held = all.downgrade().unwrap();
+        assert!(!held.moved());
+        std::fs::write(&save, b"longer").unwrap();
         assert!(!held.moved());
         std::fs::write(dir.join("b"), b"y").unwrap();
         std::fs::rename(dir.join("b"), &save).unwrap();

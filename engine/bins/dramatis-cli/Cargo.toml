@@ -28,6 +28,10 @@ rpassword = "=7.4.0"
 rustyline = { version = "=19.0.0", default-features = false, features = ["custom-bindings"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 
+[target.'cfg(windows)'.dependencies]
+# Memory counters for `bench`, and a UTF-8 console with escape sequences on.
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
 [dev-dependencies]
 agent = { path = "../../crates/agent" }
 llm = { path = "../../crates/llm" }

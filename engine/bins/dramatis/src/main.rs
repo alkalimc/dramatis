@@ -14,7 +14,9 @@
 mod presence;
 mod shell;
 
-use tauri::{Manager, RunEvent, WindowEvent};
+#[cfg(target_os = "macos")]
+use tauri::RunEvent;
+use tauri::{Manager, WindowEvent};
 
 fn main() {
     let bindings = api::builder();
@@ -41,8 +43,11 @@ fn main() {
         .expect("the app failed to start")
         .run(|app, event| {
             // Clicking the Dock icon brings the hidden window back.
+            #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = event {
                 shell::show(app);
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
         });
 }

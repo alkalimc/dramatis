@@ -223,7 +223,7 @@ Tab completes command names, the fixed words some commands take (`/tier`, `/quie
 `/invite`, `/remove`, `/who`, `/mode`, `/memories`) and save names (`/save`).
 
 Anything else is sent to the current channel (`//text` sends a message that starts with a slash). In a group, `@name` addresses that member.
-Enter starts a new line and Alt-Enter (Option set as Meta on macOS) sends; a line that starts with a slash is a command and Enter runs it. When the
+Enter starts a new line and Alt-Enter (Option set as Meta on macOS) sends; Windows Terminal keeps Alt-Enter for full screen, so use Ctrl-Enter there or remove that binding in its settings. A line that starts with a slash is a command and Enter runs it. When the
 chat opens and after each message the terminal runs what the app runs on a timer (idle
 conversations are wrapped up, due openings written), so a person who has something to say shows up
 then; there is no background loop. Replies stream as they are written; scene lines

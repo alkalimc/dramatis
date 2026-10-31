@@ -182,7 +182,29 @@ enum Command {
     },
 }
 
+/// A UTF-8 console that reads escape sequences; a console that refuses keeps its settings.
+#[cfg(windows)]
+fn console() {
+    use windows_sys::Win32::System::Console::{
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE,
+        SetConsoleCP, SetConsoleMode, SetConsoleOutputCP,
+    };
+    const UTF8: u32 = 65001;
+    // SAFETY: plain calls on this process's own console; failures are ignored.
+    unsafe {
+        SetConsoleOutputCP(UTF8);
+        SetConsoleCP(UTF8);
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut mode = 0;
+        if GetConsoleMode(out, &mut mode) != 0 {
+            SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    #[cfg(windows)]
+    console();
     let cli = Cli::parse();
     match cli.command {
         Command::Chat(args) => return chat::run(cli.folio, args),

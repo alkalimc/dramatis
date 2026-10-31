@@ -75,11 +75,7 @@ pub fn refusal(e: &folio::Error) -> CorpusState {
 
 /// A path as typed: a leading `~/` is the home directory, surrounding spaces and quotes go.
 fn typed_path(text: &str) -> std::path::PathBuf {
-    let text = text.trim().trim_matches(['"', '\'']);
-    match (text.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => Path::new(&home).join(rest),
-        _ => text.into(),
-    }
+    crate::home::expand_tilde(text.trim().trim_matches(['"', '\'']))
 }
 
 /// The file a user named as their corpus, checked: it exists and is a corpus this version

@@ -377,6 +377,8 @@ fn editor(typing: &Typing) -> rustyline::Result<Editor> {
         EventHandler::Conditional(Box::new(EnterKey)),
     );
     editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::ALT), Cmd::AcceptLine);
+    // Ctrl-Enter too: Windows Terminal keeps Alt-Enter for full screen.
+    editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::CTRL), Cmd::AcceptLine);
     // Ctrl-J is the same byte as a line feed: it must not send either.
     editor.bind_sequence(KeyEvent::ctrl('J'), Cmd::Newline);
     Ok(editor)

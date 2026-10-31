@@ -669,6 +669,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1);
+        drop(copy);
         drop(w);
         std::fs::remove_dir_all(dir).unwrap();
     }

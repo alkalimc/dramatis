@@ -218,6 +218,8 @@ fn set_badge(app: &AppHandle, unseen: u32) {
     let Some(tray) = app.tray_by_id(TRAY) else {
         return;
     };
+    // A title beside the icon shows only on macOS; the tooltip carries the number elsewhere.
+    #[cfg(target_os = "macos")]
     let _ = tray.set_title(presence::badge(unseen));
     let _ = tray.set_tooltip(Some(match unseen {
         0 => "dramatis".to_owned(),
