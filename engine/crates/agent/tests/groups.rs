@@ -481,3 +481,88 @@ async fn an_emulated_host_in_a_group_still_calls_tools_by_fenced_block() {
     let last = e.agent.history(g, None, 1).unwrap().pop().unwrap();
     assert_eq!(last.author, api::types::Author::Host);
 }
+
+/// An enabled group of two enabled members who each opened once in a direct chat today,
+/// silent for longer than the tier's quiet period, in the waking day with the band open:
+/// a member speaks up in the group (its channel, not a direct one), and a second word
+/// waits for the next quiet period.
+#[tokio::test]
+async fn an_enabled_quiet_group_gets_a_members_opening_in_its_channel_and_the_next_waits() {
+    use world::clock::{HOUR_MS, MINUTE_MS};
+    let e = env(WireApi::Chat);
+    let pace = world::params::Pace::default();
+    let quiet = i64::from(pace.group_quiet_hours) * HOUR_MS;
+    let g = e.agent.with_world(|w| {
+        for who in ["ann", "bo"] {
+            world::bond::set_mode(w, &p(who), world::Mode::Enabled).unwrap();
+        }
+        let g = channel::create_group(w, &[p("ann"), p("bo")], None, world::Origin::User).unwrap();
+        channel::set_mode(w, g, world::Mode::Enabled).unwrap();
+        world::message::append(
+            w,
+            g,
+            &world::Actor::User,
+            "hi all",
+            None,
+            None,
+            T0 - quiet - HOUR_MS,
+        )
+        .unwrap();
+        // Each already opened once today, in their own chats, earlier in the morning.
+        for (who, at) in [("ann", T0 - 2 * HOUR_MS), ("bo", T0 - HOUR_MS)] {
+            let o = world::seed::Opening {
+                person: p(who),
+                channel: channel::direct(w, &p(who)).unwrap(),
+                kind: world::seed::SeedKind::Visit(20260310, None),
+                material: Vec::new(),
+                fact: None,
+            };
+            let m = world::message::append(
+                w,
+                o.channel,
+                &world::Actor::Person(p(who)),
+                "hello",
+                None,
+                None,
+                at,
+            )
+            .unwrap();
+            world::seed::delivered(w, &o, m, at).unwrap();
+            world::session::close_channel(w, o.channel, at + MINUTE_MS).unwrap();
+        }
+        g
+    });
+    to_slot_of_part(&e, "23:00", "09:00");
+    e.fake.push([say("Anyone for tea?")]);
+    let (first, ch) = e.agent.on_daily().await.unwrap().expect("a group opening");
+    assert_eq!(ch, g, "delivered into the group channel");
+    assert_eq!(
+        e.agent.history(g, None, 5).unwrap().last().unwrap().text,
+        "Anyone for tea?"
+    );
+    let day = now_of(&e).local_day_start();
+    let n: i64 = e.agent.with_world(|w| {
+        w.query_row(
+            "SELECT count(*) FROM seed WHERE channel = ?1 AND delivered_at >= ?2",
+            (g, day),
+            |r| r.get(0),
+        )
+        .unwrap()
+    });
+    assert_eq!(n, 1);
+    // The group was just spoken in: nobody speaks again soon.
+    e.clock.advance(HOUR_MS);
+    assert!(e.agent.on_daily().await.unwrap().is_none());
+    // Silent for the quiet period again, in a later part: the other member speaks.
+    e.clock.advance(quiet);
+    to_slot_of_part(&e, "23:00", "09:00");
+    e.fake.push([say("Still quiet here.")]);
+    let (second, ch) = e
+        .agent
+        .on_daily()
+        .await
+        .unwrap()
+        .expect("the next group opening");
+    assert_eq!(ch, g);
+    assert_ne!(first, second, "one word a day per member and group");
+}

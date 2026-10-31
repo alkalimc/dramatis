@@ -1614,6 +1614,7 @@ async fn presence_opens_with_a_seed_as_a_harness_turn() {
     let first = e.agent.presence(true).await.unwrap();
     assert!(first.host_spoke && first.opened.is_none() && e.fake.bodies().is_empty());
     e.clock.advance(31 * 60_000);
+    to_slot_of_part(&e, "23:00", "09:00");
     e.fake
         .push([say("Ann's birthday."), say("Happy birthday, Dr.Doc.")]);
     let out = e.agent.presence(true).await.unwrap();
@@ -3855,6 +3856,7 @@ async fn an_enabled_person_opens_on_a_tick_once_the_user_is_idle_and_not_before(
     // idle and about, the enabled person drops by on the first tick.
     assert_eq!(e.agent.tick(true).await.unwrap(), None);
     e.clock.advance(2 * 86_400_000);
+    to_slot_of_part(&e, "23:00", "09:00");
     e.fake.push([say("Doc, have you a moment?")]);
     let opened = e.agent.tick(true).await.unwrap();
     assert_eq!(opened.map(|o| o.0), Some(p("ann")));

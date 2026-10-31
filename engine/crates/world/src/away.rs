@@ -20,11 +20,13 @@ const AWAY: &str = "away";
 /// Setting: what the last stretch away spent.
 const SPENT: &str = "away.spent";
 
-/// Slots spent on one local day, and until when the event slot of the part now in is spent.
+/// Slots spent on one local day, and until when the visit and the event slot of the part
+/// now in are spent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Spent {
     day: i32,
     slots: u32,
+    visits_until: i64,
     events_until: i64,
 }
 
@@ -61,6 +63,12 @@ pub fn spent_slots(conn: &Connection, now: Now) -> Result<u32> {
     })
 }
 
+/// Whether the visit slot of the part now is in was spent away.
+pub fn visit_slot_spent(conn: &Connection, now: Now) -> Result<bool> {
+    let spent: Spent = settings::get(conn, SPENT)?.unwrap_or_default();
+    Ok(now.ms < spent.visits_until)
+}
+
 /// Whether the event slot of the part now is in was spent away.
 pub fn event_slot_spent(conn: &Connection, now: Now) -> Result<bool> {
     let spent: Spent = settings::get(conn, SPENT)?.unwrap_or_default();
@@ -82,7 +90,11 @@ pub fn end(conn: &Connection, now: Now, params: &Params) -> Result<Option<Vec<St
     }
     spent.day = day_key(now);
     let pace = params.pacing.get(settings::intensity(conn)?);
-    spent.slots += Slots::new(quiet.as_ref(), now, pace.daily_total, 0).passed_since(now, since);
+    let visits = Slots::new(quiet.as_ref(), now, pace.daily_total, 0);
+    spent.slots += visits.passed_since(now, since);
+    if let Some(end) = visits.part_spent_since(now, since) {
+        spent.visits_until = spent.visits_until.max(end);
+    }
     let per_day = settings::events_per_day(conn, &pace)?;
     if per_day > 0
         && let Some(end) = event::slots(quiet.as_ref(), now, per_day).part_spent_since(now, since)

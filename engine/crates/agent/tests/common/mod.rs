@@ -840,3 +840,25 @@ pub fn segments(agent: &Agent, ch: ChannelId) -> Vec<world::log::Segment> {
             .collect()
     })
 }
+
+pub fn now_of(e: &Env) -> world::clock::Now {
+    world::clock::Now::utc(e.clock.0.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+/// Minutes forward from the clock's start until the slot of the part of the waking day it
+/// is in has come.
+pub fn to_slot_of_part(e: &Env, from: &str, to: &str) {
+    let quiet = Some(world::params::QuietHours {
+        from: from.into(),
+        to: to.into(),
+    });
+    let pace = world::params::Pace::default();
+    loop {
+        let now = now_of(e);
+        let slots = world::seed::Slots::new(quiet.as_ref(), now, pace.daily_total, 0);
+        if slots.current(now).2 {
+            return;
+        }
+        e.clock.advance(world::clock::MINUTE_MS);
+    }
+}
