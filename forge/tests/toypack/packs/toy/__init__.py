@@ -117,7 +117,7 @@ def resolve_identity(pages, roster):
 
 PACK = Pack(
     name="toy",
-    version=1,
+    version="1.0.0",
     wiki=WikiConfig(
         api="https://toy.invalid/api.php",
         contact="maintainer@example.invalid",

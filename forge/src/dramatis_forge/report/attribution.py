@@ -40,7 +40,7 @@ class Attribution:
     synced_at: str = ""
     fingerprint: str = ""
     parser_version: int = 0
-    pack_version: int = 0
+    pack_version: str = ""
 
     @property
     def page_count(self) -> int:
@@ -69,7 +69,7 @@ def collect(archive: Archive, folio: Folio, pack: Pack | None = None) -> Attribu
         synced_at=str(archive.get_meta("synced_at") or ""),
         fingerprint=str(folio.get_meta("build_fingerprint") or ""),
         parser_version=int(folio.get_meta("parser_version") or 0),
-        pack_version=int(folio.get_meta("pack_version") or 0),
+        pack_version=str(folio.get_meta("pack_version") or ""),
     )
 
     row = folio.db.execute(
@@ -139,7 +139,7 @@ def values(attribution: Attribution, pack: Pack) -> dict[str, str]:
         "SYNCED_AT": attribution.synced_at or "—",
         "BUILD_FINGERPRINT": attribution.fingerprint or "—",
         "PARSER_VERSION": str(attribution.parser_version),
-        "PACK_VERSION": str(attribution.pack_version),
+        "PACK_VERSION": attribution.pack_version or "\u2014",
         "ISSUE_URL": pack.publication.issue_url or unset,
         "CONTACT_EMAIL": pack.publication.contact_email or unset,
         "CREDIT_BY": pack.publication.credit_by or unset,

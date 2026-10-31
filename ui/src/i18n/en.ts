@@ -337,6 +337,7 @@ export const en = {
   "about.corpus.by": "Corpus built by {by}",
   "about.corpus.project": "Corpus project",
   "about.corpus.licence": "Corpus licence: {licence}",
+  "about.corpus.version": "Corpus pack {version}",
   "about.update.title": "Updates",
   "about.update.check": "Check now",
   "about.update.checking": "Checking…",

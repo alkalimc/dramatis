@@ -46,6 +46,7 @@ export function AboutPage() {
         <>
           <p>{info.author_url ? <ExternalLink href={info.author_url}>{t("about.made_by", { author: info.author })}</ExternalLink> : t("about.made_by", { author: info.author })}</p>
           {info.corpus_credits && <CorpusLine t={t} credits={info.corpus_credits} />}
+          {info.corpus_version && <p>{t("about.corpus.version", { version: info.corpus_version })}</p>}
           <ul className="about-links">
             <li>
               <ExternalLink href={info.repository}>{t("about.repository")}</ExternalLink>

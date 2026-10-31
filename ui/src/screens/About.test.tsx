@@ -12,7 +12,7 @@ async function openAbout(user: ReturnType<typeof userEvent.setup>) {
   return screen.findByRole("region", { name: "About" });
 }
 
-test("the drawer footer opens About: name, version, author, links, licence and the corpus credit", async () => {
+test("the drawer footer opens About: name, version, author, links, licence, the corpus credit and its pack version", async () => {
   const user = userEvent.setup();
   renderApp();
   const page = await openAbout(user);
@@ -26,6 +26,7 @@ test("the drawer footer opens About: name, version, author, links, licence and t
   const corpus = within(page).getByRole("link", { name: "Corpus built by the demo team · CC BY-NC-SA 4.0" });
   expect(corpus.getAttribute("href")).toBe("https://example.org/demo-team");
   expect(within(page).getByRole("link", { name: "Corpus project" }).getAttribute("href")).toBe("https://example.org/demo-corpus");
+  expect(within(page).getByText("Corpus pack 1.0.0")).toBeDefined();
 });
 
 test("Check now shows the newer release with its page, and the drawer says so", async () => {

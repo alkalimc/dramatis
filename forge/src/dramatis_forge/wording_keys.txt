@@ -2,6 +2,7 @@ about.corpus
 about.corpus.by
 about.corpus.licence
 about.corpus.project
+about.corpus.version
 about.issues
 about.license
 about.made_by
@@ -98,6 +99,7 @@ citation.stale
 citation.unavailable
 cli.about.author
 cli.about.corpus
+cli.about.corpus_version
 cli.about.current
 cli.about.license
 cli.about.newer
