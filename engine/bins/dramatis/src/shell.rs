@@ -19,7 +19,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::banner::{self, Banner};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 use crate::grid;
 use crate::presence;
 
@@ -148,18 +148,18 @@ impl AppSink {
         let unseen = arrivals.unseen.fetch_add(1, Ordering::Relaxed) + 1;
         set_badge(&self.app, unseen);
         // Cached pictures only: a notification never waits for a fetch. Choosing and
-        // drawing the picture reads files, so on macOS (the one place a picture shows) it
+        // drawing the picture reads files, so where a picture shows (macOS, Windows) it
         // runs off this thread together with the send.
         let author = m.author.clone();
         let channel = m.channel.clone();
         let logs = engine.home().logs();
         let (title, body, app) = (found.title, found.body, self.app.clone());
         let send = move || {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             let group = engine
                 .group_faces(&channel)
                 .map(|faces| || grid::group_image(&engine, faces));
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(any(target_os = "macos", windows)))]
             let group = {
                 let _ = &channel;
                 None::<fn() -> Option<std::path::PathBuf>>
@@ -179,9 +179,9 @@ impl AppSink {
                 eprintln!("dramatis: notification failed: {e}");
             });
         };
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         tauri::async_runtime::spawn_blocking(send);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         send();
     }
 }

@@ -1,11 +1,13 @@
-//! Showing one system notification. Everywhere but macOS this is the notification
-//! plugin. On macOS it is the library under the plugin, called directly, because the
-//! plugin has no way to attach the sender's picture. The picture goes at the banner's
-//! right: current macOS ignores a replacement for the app's icon at the left.
+//! Showing one system notification. On macOS and Windows this calls the library under
+//! the notification plugin directly, because the plugin has no way to attach the sender's
+//! picture: on macOS the picture goes at the banner's right (current macOS ignores a
+//! replacement for the app's icon at the left), on Windows in the toast's round logo at
+//! the left. Elsewhere it is the plugin, without a picture.
 //!
 //! The plugin sends a banner and forgets it: it does not wait for a click, and a click
 //! brings the app forward, which reaches `RunEvent::Reopen` and shows the window. The
-//! macOS path sends the same way (no `wait_for_click`), so a click does the same.
+//! macOS path sends the same way (no `wait_for_click`), so a click does the same. A click
+//! on a Windows toast starts nothing: the app is already running and stays as it is.
 
 use std::path::PathBuf;
 
@@ -15,8 +17,9 @@ use tauri::AppHandle;
 pub struct Banner {
     pub title: String,
     pub body: String,
-    /// A picture on this machine; `None` leaves the app's own icon. Only macOS shows it.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// A picture on this machine; `None` leaves the app's own icon. Shown on macOS and
+    /// Windows.
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     pub image: Option<PathBuf>,
 }
 
@@ -32,7 +35,7 @@ pub enum Place {
 
 /// Show `banner`; a failure after this returns (the send runs off the calling thread, as
 /// the plugin's does) goes to `on_error`.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn show(app: &AppHandle, banner: Banner, on_error: impl FnOnce(String) + Send + 'static) {
     use tauri_plugin_notification::NotificationExt;
 
@@ -45,6 +48,32 @@ pub fn show(app: &AppHandle, banner: Banner, on_error: impl FnOnce(String) + Sen
         .show()
     {
         on_error(e.to_string());
+    }
+}
+
+/// Show `banner` with the picture in the round logo at the left. The caller is already off
+/// the UI thread; the system takes the toast at once.
+#[cfg(windows)]
+pub fn show(app: &AppHandle, banner: Banner, on_error: impl FnOnce(String) + Send + 'static) {
+    use tauri_winrt_notification::{IconCrop, Toast};
+    // As the plugin does: only the installed app has its identifier registered with the
+    // system; a build run from `target\` borrows PowerShell's, or nothing would show.
+    let installed = tauri::utils::platform::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.to_path_buf()))
+        .is_some_and(|dir| !(dir.ends_with("target/debug") || dir.ends_with("target/release")));
+    let identifier = app.config().identifier.clone();
+    let id = if installed {
+        identifier.as_str()
+    } else {
+        Toast::POWERSHELL_APP_ID
+    };
+    let mut toast = Toast::new(id).title(&banner.title).text1(&banner.body);
+    if let Some(path) = banner.image.as_deref() {
+        toast = toast.icon(path, IconCrop::Circular, "");
+    }
+    if let Err(e) = toast.show() {
+        on_error(format!("{e:?}"));
     }
 }
 

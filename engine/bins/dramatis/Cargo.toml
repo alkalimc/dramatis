@@ -25,13 +25,21 @@ tauri-plugin-notification = "=2.4.0"
 tauri-plugin-dialog = "=2.7.3"
 tokio = { version = "=1.53.1", features = ["time"] }
 
-# The notification plugin cannot set the banner's left-hand picture, so macOS calls the
-# library under it directly; same version as the plugin's, from the lock file.
+# The notification plugin cannot attach a picture, so macOS and Windows call the library
+# under it directly; same versions as the plugin's, from the lock file.
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "=0.6.15"
 # Draws a group's picture for a notification. The lock file has this version already,
 # for tauri; PNG is the only format the cached pictures and the user's own are stored in,
 # so no other codec is built.
+image = { version = "=0.25.9", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "=0.7.3"
+image = { version = "=0.25.9", default-features = false, features = ["png"] }
+
+# `grid` is also built for tests on every platform, so its tests run everywhere.
+[dev-dependencies]
 image = { version = "=0.25.9", default-features = false, features = ["png"] }
 
 [build-dependencies]
