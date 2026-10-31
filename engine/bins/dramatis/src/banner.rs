@@ -1,7 +1,7 @@
 //! Showing one system notification. Everywhere but macOS this is the notification
 //! plugin. On macOS it is the library under the plugin, called directly, because the
-//! plugin has no way to set the picture at the banner's left (where the app's icon
-//! sits), which is where a message's sender belongs.
+//! plugin has no way to attach the sender's picture. The picture goes at the banner's
+//! right: current macOS ignores a replacement for the app's icon at the left.
 //!
 //! The plugin sends a banner and forgets it: it does not wait for a click, and a click
 //! brings the app forward, which reaches `RunEvent::Reopen` and shows the window. The
@@ -48,10 +48,10 @@ pub fn show(app: &AppHandle, banner: Banner, on_error: impl FnOnce(String) + Sen
     }
 }
 
-/// Show `banner` with the picture in place of the app's icon.
+/// Show `banner` with the picture as a thumbnail at the right.
 #[cfg(target_os = "macos")]
 pub fn show(app: &AppHandle, banner: Banner, on_error: impl FnOnce(String) + Send + 'static) {
-    show_at(app, banner, Place::Icon, on_error);
+    show_at(app, banner, Place::Thumbnail, on_error);
 }
 
 #[cfg(target_os = "macos")]
