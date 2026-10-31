@@ -326,6 +326,7 @@ mod tests {
         let w = World::open(left.join("a.sqlite")).unwrap();
         let x: i64 = w.query_row("SELECT x FROM mine", [], |r| r.get(0)).unwrap();
         assert_eq!(x, 7, "what was in the log is in the file");
+        drop(w);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

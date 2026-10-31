@@ -38,6 +38,34 @@ pub enum Start {
     },
 }
 
+/// The user's home directory: `%USERPROFILE%` on Windows, `$HOME` elsewhere.
+pub fn user_home() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let var = "USERPROFILE";
+    #[cfg(not(windows))]
+    let var = "HOME";
+    std::env::var_os(var)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// What follows a leading `~/` (also `~\` on Windows), if the path starts with one.
+pub fn tilde_rest(path: &str) -> Option<&str> {
+    #[cfg(windows)]
+    if let Some(rest) = path.strip_prefix("~\\") {
+        return Some(rest);
+    }
+    path.strip_prefix("~/")
+}
+
+/// A path as typed: a leading `~/` (also `~\` on Windows) is the user's home directory.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    match (tilde_rest(path), user_home()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => path.into(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Home {
     root: PathBuf,
@@ -53,8 +81,8 @@ impl Home {
         if let Some(dir) = std::env::var_os(HOME_ENV).filter(|v| !v.is_empty()) {
             return Self::new(dir);
         }
-        let user = std::env::var_os("HOME").unwrap_or_else(|| ".".into());
-        Self::new(Path::new(&user).join(".dramatis"))
+        let user = user_home().unwrap_or_else(|| ".".into());
+        Self::new(user.join(".dramatis"))
     }
 
     /// Create the directory layout (idempotent).
@@ -268,6 +296,21 @@ impl Home {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tilde_is_the_user_home() {
+        assert_eq!(tilde_rest("~/x/y"), Some("x/y"));
+        assert_eq!(tilde_rest("x/~/y"), None);
+        assert_eq!(tilde_rest("~x"), None);
+        #[cfg(windows)]
+        assert_eq!(tilde_rest("~\\x"), Some("x"));
+        #[cfg(not(windows))]
+        assert_eq!(tilde_rest("~\\x"), None);
+        if let Some(home) = user_home() {
+            assert_eq!(expand_tilde("~/a"), home.join("a"));
+        }
+        assert_eq!(expand_tilde("/a/b"), PathBuf::from("/a/b"));
+    }
 
     #[test]
     fn layout_and_folio_discovery() {

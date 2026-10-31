@@ -152,10 +152,7 @@ fn now_ms() -> i64 {
 
 /// A path as typed in a shell: a leading `~/` is the home directory.
 fn expand(path: &str) -> String {
-    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => std::path::Path::new(&home).join(rest).display().to_string(),
-        _ => path.to_owned(),
-    }
+    api::home::expand_tilde(path).display().to_string()
 }
 
 /// A passage's heading: its header, else its page.

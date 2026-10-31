@@ -644,7 +644,7 @@ def _external(spec: FigureSpec, paths: Paths, fingerprint: object) -> list[Figur
         return [Figure(spec.key, None, "\u2b1c", f"{spec.note} ({why})".strip(), "", None)]
 
     if not path.exists():
-        return missing(f"no {path.relative_to(paths.pack_dir)}; run the tool that writes it")
+        return missing(f"no {path.relative_to(paths.pack_dir).as_posix()}; run the tool that writes it")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

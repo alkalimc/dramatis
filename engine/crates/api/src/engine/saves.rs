@@ -224,6 +224,8 @@ impl Engine {
             &mut *world,
             World::in_memory().map_err(world_err)?,
         ));
+        // The agent's connection goes too: Windows will not replace a file that is open.
+        self.ports.agent.switch_world(Path::new(""), None);
         let done = match (old.as_deref(), new.as_deref()) {
             (None, Some(n)) => world::cipher::encrypt(&path, n),
             (Some(o), Some(n)) => world::cipher::rekey(&path, o, n),
@@ -237,6 +239,7 @@ impl Engine {
         } else {
             self.password_of(open)
         };
+        self.ports.agent.switch_world(&path, key.as_deref());
         let reopened = World::open_with(&path, key.as_deref()).map_err(world_err);
         match reopened {
             Ok(w) => *world = w,
@@ -256,7 +259,6 @@ impl Engine {
             other => world_err(other),
         })?;
         self.remember(open, new.as_deref());
-        self.ports.agent.switch_world(&path, new.as_deref());
         Ok(())
     }
 
@@ -308,6 +310,8 @@ impl Engine {
             }
             .map_err(world_err)
         };
+        // The agent's connection goes too: Windows will not move a file that is open.
+        self.ports.agent.switch_world(Path::new(""), None);
         let moved = saves::rename(&self.home, from, to);
         // The new name takes hold only once the file reopens under it and the name for
         // the next start is written; any failure before that puts everything back.
@@ -322,6 +326,9 @@ impl Engine {
                 if moved.is_ok() {
                     let _ = saves::rename(&self.home, to, from);
                 }
+                self.ports
+                    .agent
+                    .switch_world(&self.home.save_path(from), key.as_deref());
                 match reopen(from) {
                     Ok(w) => *world = w,
                     // Nothing writable is open: say so rather than let writes vanish.

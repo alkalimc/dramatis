@@ -285,6 +285,12 @@ textarea {
   padding: var(--s-1) var(--s-3);
   max-width: 100%;
 }
+/* The list a select opens is painted from the select's own background, so a transparent
+   select would open a white list under light text. */
+select option {
+  background: var(--raised);
+  color: var(--ink);
+}
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);

@@ -8,12 +8,14 @@ use api::types::Author;
 
 /// Whether the Dock shows the app: only while the main window is open. Hidden, the app
 /// lives in the menu bar alone.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dock {
     Shown,
     Hidden,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn dock_for(window_visible: bool) -> Dock {
     if window_visible {
         Dock::Shown
@@ -120,6 +122,7 @@ pub fn preview(text: &str, scene: (&str, &str)) -> String {
 }
 
 /// The tray's text next to the icon: the number of arrivals nobody has looked at yet.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn badge(unread: u32) -> Option<String> {
     (unread > 0).then(|| unread.to_string())
 }

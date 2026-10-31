@@ -1975,6 +1975,10 @@ async fn a_confirmation_is_the_prompt_and_an_unclear_answer_is_asked_once_more()
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(
+    windows,
+    ignore = "Windows refuses to rename or replace a file SQLite has open"
+)]
 async fn a_save_changed_in_another_window_is_reopened_or_the_list_comes_back() {
     let mut r = rig().await;
     let file = r._home.0.join("saves/default.sqlite");

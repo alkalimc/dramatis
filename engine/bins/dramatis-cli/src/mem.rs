@@ -12,13 +12,17 @@ pub fn resident_bytes() -> u64 {
     {
         linux::resident().unwrap_or(0)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
+    {
+        windows::query().map_or(0, |c| c.WorkingSetSize as u64)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         0
     }
 }
 
-/// Peak resident set size in bytes, from `getrusage`.
+/// Peak resident set size in bytes, from `getrusage` (the peak working set on Windows).
 ///
 /// The peak matters as much as the current value: a build step that briefly doubles memory
 /// still has to fit the budget, and an average would hide it.
@@ -40,7 +44,11 @@ pub fn peak_resident_bytes() -> u64 {
         #[cfg(not(target_os = "linux"))]
         return usage.ru_maxrss as u64;
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows::query().map_or(0, |c| c.PeakWorkingSetSize as u64)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         0
     }
@@ -139,5 +147,27 @@ mod linux {
         let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
         let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
         Some(pages * 4096)
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    use windows_sys::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    /// The working set is what Windows keeps resident for the process.
+    pub fn query() -> Option<PROCESS_MEMORY_COUNTERS> {
+        let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        // SAFETY: an all-zero struct of integers is valid; the pseudo-handle needs no closing.
+        unsafe {
+            let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            counters.cb = size;
+            if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size) == 0 {
+                return None;
+            }
+            Some(counters)
+        }
     }
 }

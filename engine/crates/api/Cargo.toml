@@ -41,6 +41,10 @@ tokio = { version = "=1.53.1", features = ["rt", "sync", "time"] }
 # `flock` for the per-save advisory lock (std's file locks need a newer toolchain).
 libc = "=0.2.189"
 
+[target.'cfg(windows)'.dependencies]
+# `LockFileEx` for the same lock, and the file index that identifies an opened save.
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+
 [dev-dependencies]
 folio = { path = "../folio", features = ["fixture"] }
 tokio = { version = "=1.53.1", features = ["rt", "macros"] }

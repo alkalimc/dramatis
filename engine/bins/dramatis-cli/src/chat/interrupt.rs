@@ -42,23 +42,43 @@ impl Interrupt {
         let task = this.clone();
         tokio::spawn(async move {
             while sigint.recv().await.is_some() {
-                if task.hit() == Hit::Exit {
-                    if let Some(dir) = &home {
-                        let _ = std::fs::remove_dir_all(dir);
-                    }
-                    println!();
-                    std::process::exit(130);
-                }
-                if let Some(bridge) = task.bridge.get() {
-                    bridge.cancel();
-                }
+                task.on_signal(home.as_deref());
             }
         });
         Ok(this)
     }
 
-    /// Without a Unix signal to own, the default action stays.
-    #[cfg(not(unix))]
+    /// As on Unix, with the console's Ctrl-C event as the signal.
+    #[cfg(windows)]
+    pub fn install(home: Option<PathBuf>) -> std::io::Result<Arc<Self>> {
+        let mut sigint = tokio::signal::windows::ctrl_c()?;
+        let this = Arc::new(Self::default());
+        let task = this.clone();
+        tokio::spawn(async move {
+            while sigint.recv().await.is_some() {
+                task.on_signal(home.as_deref());
+            }
+        });
+        Ok(this)
+    }
+
+    /// One Ctrl-C: cancel the turn in flight, or leave if the last one was not taken.
+    #[cfg(any(unix, windows))]
+    fn on_signal(&self, home: Option<&std::path::Path>) {
+        if self.hit() == Hit::Exit {
+            if let Some(dir) = home {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            println!();
+            std::process::exit(130);
+        }
+        if let Some(bridge) = self.bridge.get() {
+            bridge.cancel();
+        }
+    }
+
+    /// Without a signal to own, the default action stays.
+    #[cfg(not(any(unix, windows)))]
     pub fn install(_: Option<PathBuf>) -> std::io::Result<Arc<Self>> {
         Ok(Arc::new(Self::default()))
     }

@@ -2942,6 +2942,10 @@ async fn rewriting_a_save_is_refused_while_another_process_has_it_open() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows refuses to rename or replace a file SQLite has open"
+)]
 async fn a_save_replaced_by_another_process_is_noticed_and_never_written_again() {
     let r = rig();
     let e = &r.engine;
@@ -2999,6 +3003,10 @@ async fn a_save_replaced_by_another_process_is_noticed_and_never_written_again()
 }
 
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows refuses to rename or replace a file SQLite has open"
+)]
 async fn a_renamed_or_deleted_save_is_noticed_too() {
     let r = rig();
     let e = &r.engine;

@@ -14,12 +14,17 @@
 mod presence;
 mod shell;
 
-use tauri::{Manager, RunEvent, WindowEvent};
+#[cfg(target_os = "macos")]
+use tauri::RunEvent;
+use tauri::{Manager, WindowEvent};
 
 fn main() {
     let bindings = api::builder();
-    tauri::Builder::default()
-        .menu(shell::app_menu)
+    let builder = tauri::Builder::default();
+    // The menu bar is macOS's; elsewhere it would sit inside the window.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(shell::app_menu);
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         // The placeholder until `shell::start` opens the real engine.
@@ -41,8 +46,11 @@ fn main() {
         .expect("the app failed to start")
         .run(|app, event| {
             // Clicking the Dock icon brings the hidden window back.
+            #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = event {
                 shell::show(app);
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
         });
 }
