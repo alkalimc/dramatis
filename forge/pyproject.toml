@@ -1,6 +1,6 @@
 [project]
 name = "dramatis-forge"
-version = "1.0.4"
+version = "1.0.5"
 description = "Offline forge: turn a collaborative wiki into a retrieval-grounded character corpus"
 requires-python = ">=3.13"
 license = "Apache-2.0"
