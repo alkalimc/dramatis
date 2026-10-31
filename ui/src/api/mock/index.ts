@@ -51,7 +51,7 @@ import type {
   ToolAction,
   UpdateStatus,
   Waiting,
-} from "../../api.gen";
+} from "../gen";
 import { version } from "../../../package.json";
 import type { Commands, Events } from "..";
 import { createBus } from "./bus";

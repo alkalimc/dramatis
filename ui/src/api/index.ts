@@ -1,11 +1,11 @@
 // The one seam between the screens and the engine. Inside the Tauri webview these are the
 // generated bindings; anywhere else (browser preview, tests) an in-memory mock with the
-// same signatures. Screens import from here only, never from `api.gen` directly.
+// same signatures. Screens import from here only, never from `gen` directly.
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
-import * as gen from "../api.gen";
+import * as gen from "./gen";
 import { createMock, type MockOptions } from "./mock";
 
-export type * from "../api.gen";
+export type * from "./gen";
 
 export type Commands = typeof gen.commands;
 

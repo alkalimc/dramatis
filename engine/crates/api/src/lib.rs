@@ -2,7 +2,7 @@
 //!
 //! The UI and the engine share one process; the UI reaches the engine only through the
 //! commands in [`commands`] and hears from it only through [`events`]. Those types exist
-//! once, here: the TypeScript side (`ui/src/api.gen.ts`) is generated from them, and CI
+//! once, here: the TypeScript side (`ui/src/api/gen.ts`) is generated from them, and CI
 //! fails if the committed file differs from a fresh export.
 //!
 //! No user-visible sentence is composed on this side. Errors are codes, activities and

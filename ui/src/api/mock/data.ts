@@ -1,5 +1,5 @@
 // Invented demo content for the mock api. Nothing here comes from any corpus.
-import type { Citation, Mode, Passage } from "../../api.gen";
+import type { Citation, Mode, Passage } from "../gen";
 
 export interface MockPerson {
   id: string;

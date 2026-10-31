@@ -16,17 +16,17 @@ export function createBus() {
     return source;
   };
   return {
-    awayChanged: make<import("../../api.gen").AwayChanged>(),
-    messageAdded: make<import("../../api.gen").MessageAdded>(),
-    messageDelta: make<import("../../api.gen").MessageDelta>(),
-    modeChanged: make<import("../../api.gen").ModeChanged>(),
-    notification: make<import("../../api.gen").Notification>(),
-    quotaChanged: make<import("../../api.gen").QuotaChanged>(),
-    rewound: make<import("../../api.gen").Rewound>(),
-    rosterChanged: make<import("../../api.gen").RosterChanged>(),
-    toolCalled: make<import("../../api.gen").ToolCalled>(),
-    turnActivity: make<import("../../api.gen").TurnActivity>(),
-    worldChanged: make<import("../../api.gen").WorldChanged>(),
+    awayChanged: make<import("../gen").AwayChanged>(),
+    messageAdded: make<import("../gen").MessageAdded>(),
+    messageDelta: make<import("../gen").MessageDelta>(),
+    modeChanged: make<import("../gen").ModeChanged>(),
+    notification: make<import("../gen").Notification>(),
+    quotaChanged: make<import("../gen").QuotaChanged>(),
+    rewound: make<import("../gen").Rewound>(),
+    rosterChanged: make<import("../gen").RosterChanged>(),
+    toolCalled: make<import("../gen").ToolCalled>(),
+    turnActivity: make<import("../gen").TurnActivity>(),
+    worldChanged: make<import("../gen").WorldChanged>(),
   } satisfies Events;
 }
 

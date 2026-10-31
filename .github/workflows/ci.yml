@@ -117,4 +117,4 @@ jobs:
       - name: Regenerate
         working-directory: engine
         run: cargo test -p dramatis --test bindings
-      - run: git diff --exit-code ui/src/api.gen.ts
+      - run: git diff --exit-code ui/src/api/gen.ts

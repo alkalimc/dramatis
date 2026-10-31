@@ -300,11 +300,11 @@ cd forge && DRAMATIS_PACKS=<dir holding packs/> ./forge report wording ../ui/wor
 cd ui && pnpm dev                            # the mock picks up ui/wording.local.json
 ```
 
-`ui/src/api.gen.ts` is generated from `engine/crates/api`; never edit it. After changing
+`ui/src/api/gen.ts` is generated from `engine/crates/api`; never edit it. After changing
 a command or event type:
 
 ```sh
-cd engine && cargo test -p dramatis --test bindings   # rewrites ui/src/api.gen.ts
+cd engine && cargo test -p dramatis --test bindings   # rewrites ui/src/api/gen.ts
 ```
 
 The model-facing tool schemas are snapshotted in `engine/crates/api/tests/tools.snapshot.json`;
