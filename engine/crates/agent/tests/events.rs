@@ -463,6 +463,7 @@ async fn one_of_them_may_bring_it_up_as_an_opening_within_the_usual_limits() {
     e.agent.tick(true).await.unwrap();
     // A user who is not mid-conversation, back after a while.
     e.clock.advance(2 * HOUR_MS);
+    to_slot_of_part(&e, "23:00", "08:00");
     e.fake.push([
         say("It is ann's birthday today."),
         say("About that tea, Doc."),
