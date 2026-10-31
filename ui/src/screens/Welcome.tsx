@@ -1,7 +1,6 @@
 import { useEffect, useId, useState } from "react";
-import { settle, type ApiError, type CorpusState, type Failure, type WireApi } from "../api";
+import { settle, type CorpusState, type Failure } from "../api";
 import { useT } from "../i18n";
-import type { Key } from "../i18n";
 import { useActions, useApi, useStore } from "../store";
 import { readAvatar } from "../lib/image";
 import { UserAvatar } from "../ui/Avatar";
@@ -149,8 +148,6 @@ export function UpdateStep({ onBack }: { onBack?: () => void }) {
   );
 }
 
-const WIRES: WireApi[] = ["chat", "responses", "messages"];
-
 /** After the name on a first run: a picture to upload, or the default portrait. Skippable. */
 export function AvatarStep({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const t = useT();
@@ -185,127 +182,6 @@ export function AvatarStep({ onDone, onBack }: { onDone: () => void; onBack?: ()
           </button>
         </p>
       </div>
-    </main>
-  );
-}
-
-/** The last first-run step: one endpoint form (or just the key), skippable. */
-export function ModelStep({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
-  const t = useT();
-  const api = useApi();
-  const endpoints = useStore((s) => s.endpoints);
-  const id = useId();
-  const chat = endpoints?.roles?.chat;
-  const keyless = chat ? endpoints?.profiles.find((p) => p.profile.name === chat.profile && !p.has_key) : undefined;
-  const presets = endpoints?.presets ?? [];
-  const [name, setName] = useState("main");
-  const [url, setUrl] = useState("");
-  const [wire, setWire] = useState<WireApi>("chat");
-  const [model, setModel] = useState(chat?.model ?? "");
-  const [host, setHost] = useState("");
-  const [key, setKey] = useState("");
-  const [error, setError] = useState<ApiError | Failure | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const preset = (pick: string) => {
-    const p = presets.find((x) => x.name === pick);
-    if (!p) return;
-    setName(p.name);
-    setUrl(p.base_url);
-    setWire(p.wire_api);
-  };
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    const r = keyless
-      ? await settle(api.commands.setKey(keyless.profile.name, key))
-      : await settle(api.commands.setupEndpoint({ name, base_url: url, wire_api: wire, model, host_model: host.trim() || null, key: key.trim() || null }));
-    setBusy(false);
-    if (r.ok) onDone();
-    else setError(r.error);
-  };
-
-  const field = error?.code === "invalid" ? error.field : null;
-  const invalid = field ? (`model.invalid.${field}` as Key) : null;
-  const known = ["name", "base_url", "model", "host_model", "key"];
-
-  return (
-    <main className="first-open setup">
-      <form
-        className="card"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        {onBack && <StepBack onBack={onBack} />}
-        <h1>{t("model.title")}</h1>
-        <Credit />
-        {keyless ? <p>{t("model.key.only", { name: keyless.profile.name })}</p> : <p>{t("model.intro")}</p>}
-        {!keyless && (
-          <>
-            {presets.length > 0 && (
-              <div className="underline-field">
-                <label htmlFor={`${id}-preset`}>{t("model.preset")}</label>
-                <select id={`${id}-preset`} defaultValue="" onChange={(e) => preset(e.target.value)}>
-                  <option value="">{t("model.preset.none")}</option>
-                  {presets.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className="underline-field">
-              <label htmlFor={`${id}-name`}>{t("model.name")}</label>
-              <input id={`${id}-name`} value={name} autoComplete="off" onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="underline-field">
-              <label htmlFor={`${id}-url`}>{t("model.url")}</label>
-              <input id={`${id}-url`} value={url} placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false} onChange={(e) => setUrl(e.target.value)} />
-            </div>
-            <div className="underline-field">
-              <label htmlFor={`${id}-wire`}>{t("model.wire")}</label>
-              <select id={`${id}-wire`} value={wire} onChange={(e) => setWire(e.target.value as WireApi)}>
-                {WIRES.map((w) => (
-                  <option key={w} value={w}>
-                    {t(`endpoints.wire.${w}`)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="underline-field">
-              <label htmlFor={`${id}-model`}>{t("model.model")}</label>
-              <input id={`${id}-model`} value={model} autoComplete="off" spellCheck={false} onChange={(e) => setModel(e.target.value)} />
-            </div>
-            <div className="underline-field">
-              <label htmlFor={`${id}-host`}>{t("model.host")}</label>
-              <input id={`${id}-host`} value={host} autoComplete="off" spellCheck={false} onChange={(e) => setHost(e.target.value)} />
-            </div>
-          </>
-        )}
-        <div className="underline-field">
-          <label htmlFor={`${id}-key`}>{t("model.key")}</label>
-          <input id={`${id}-key`} type="password" value={key} autoComplete="off" onChange={(e) => setKey(e.target.value)} />
-        </div>
-        {error && field && invalid && known.includes(field) ? (
-          <p className="inline-error" role="alert">
-            {t(invalid)}
-          </p>
-        ) : (
-          error && <InlineError error={error as Failure} />
-        )}
-        <p className="row end">
-          <button type="button" className="ghost" onClick={onDone}>
-            {t("model.skip")}
-          </button>
-          <button type="submit" disabled={busy || (keyless ? !key.trim() : !url.trim() || !model.trim())}>
-            {t("model.save")}
-          </button>
-        </p>
-      </form>
     </main>
   );
 }

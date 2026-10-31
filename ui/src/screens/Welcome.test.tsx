@@ -90,36 +90,75 @@ test("a file dialog fills the path; without one the field says to type it", asyn
   expect(await screen.findByText("No file dialog is available here. Type the path instead.")).toBeDefined();
 });
 
-test("first run ends with the model step, then the host speaks first", async () => {
-  const user = userEvent.setup();
-  renderApp("first=1&form=library");
+/** Through the name and picture steps to the endpoint step. */
+async function toConnect(user: ReturnType<typeof userEvent.setup>) {
   await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
   await user.click(screen.getByRole("button", { name: "Continue" }));
   await user.click(await screen.findByRole("button", { name: "Keep the default" }));
   expect(await screen.findByRole("heading", { name: "Connect a language model" })).toBeDefined();
+}
 
-  await user.type(screen.getByLabelText("Address (base URL)"), "api.example.com");
-  await user.type(screen.getByLabelText("Model for the people"), "model-a");
-  await user.click(screen.getByRole("button", { name: "Save and continue" }));
-  expect(await screen.findByText("The address must start with http:// or https:// and contain no spaces.")).toBeDefined();
+test("first run ends with the endpoint step: preset, key, check, model, then the host speaks first", async () => {
+  const user = userEvent.setup();
+  renderApp("first=1&form=library");
+  await toConnect(user);
 
-  const url = screen.getByLabelText("Address (base URL)");
-  await user.clear(url);
-  await user.type(url, "https://api.example.com/v1");
+  await user.click(screen.getByRole("radio", { name: "deepseek" }));
+  expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("https://api.deepseek.com");
+  // No model is asked for before the endpoint has been checked, and a missing key is named.
+  expect(screen.queryByLabelText("Model for chat")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  expect(await screen.findByText("This address needs a key. Enter it.")).toBeDefined();
+
   await user.type(screen.getByLabelText("API key"), "sk-test");
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  const model = (await screen.findByLabelText("Model for chat")) as HTMLSelectElement;
+  expect(screen.getByText("Models found: 2")).toBeDefined();
+  expect(model.value).toBe("deepseek-chat");
+  expect(screen.queryByDisplayValue("sk-test")).toBeNull();
+  await user.selectOptions(model, "deepseek-reasoner");
   await user.click(screen.getByRole("button", { name: "Save and continue" }));
   await user.click(await screen.findByRole("button", { name: "Not now" }));
   expect(await within(await screen.findByRole("log")).findByText(/Hello, Rowan\./)).toBeDefined();
 });
 
-test("the model step can be skipped, and picking a starting point fills the form", async () => {
+test("a key the endpoint refuses and an address that does not answer are told apart; a model can be typed", async () => {
   const user = userEvent.setup();
   renderApp("first=1&form=library");
-  await user.type(await screen.findByLabelText("What should they call you?"), "Rowan");
-  await user.click(screen.getByRole("button", { name: "Continue" }));
-  await user.click(await screen.findByRole("button", { name: "Keep the default" }));
-  await user.selectOptions(await screen.findByLabelText("Start from"), "local");
-  expect((screen.getByLabelText("Address (base URL)") as HTMLInputElement).value).toBe("http://127.0.0.1:8080/v1");
+  await toConnect(user);
+
+  await user.click(screen.getByRole("radio", { name: "deepseek" }));
+  await user.type(screen.getByLabelText("API key"), "bad-key");
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  expect(await screen.findByText(/401 Unauthorized/)).toBeDefined();
+  expect(screen.getByText(/did not accept the key/)).toBeDefined();
+  // The key was stored and is not shown again; replacing it is one click away.
+  expect(screen.getByText("Stored in keychain")).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Replace key" }));
+  await user.type(screen.getByLabelText("API key"), "sk-good");
+  await user.click(screen.getByRole("button", { name: "Refresh models" }));
+  expect(await screen.findByText("Models found: 2")).toBeDefined();
+
+  await user.click(screen.getByRole("radio", { name: "Custom" }));
+  await user.type(screen.getByLabelText("Base URL"), "https://unreachable.invalid/v1");
+  await user.type(screen.getByLabelText("API key"), "sk-x");
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  expect(await screen.findByText(/No usable answer from the address/)).toBeDefined();
+  await user.type(screen.getByLabelText("Model for chat"), "my-model");
+  await user.click(screen.getByRole("button", { name: "Save and continue" }));
+  await user.click(await screen.findByRole("button", { name: "Not now" }));
+  expect(await within(await screen.findByRole("log")).findByText(/Hello, Rowan\./)).toBeDefined();
+});
+
+test("a local server needs no key; the endpoint step can be skipped", async () => {
+  const user = userEvent.setup();
+  renderApp("first=1&form=library");
+  await toConnect(user);
+  await user.click(screen.getByRole("radio", { name: "local" }));
+  expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("http://127.0.0.1:8080/v1");
+  expect(screen.getByText(/needs no key/)).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  expect(await screen.findByDisplayValue("local-model")).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Skip for now" }));
   await user.click(await screen.findByRole("button", { name: "Not now" }));
   expect(await screen.findByText(/Not connected\./)).toBeDefined();

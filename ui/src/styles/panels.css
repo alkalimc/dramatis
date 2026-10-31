@@ -405,38 +405,136 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .profile.active {
   border-color: var(--accent);
 }
+.profile header {
+  flex-wrap: wrap;
+}
 .profile header h4 {
   margin: 0;
 }
 .url {
   word-break: break-all;
 }
-.fetch-error p {
-  color: var(--warn);
-}
-.key-stored {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-.add {
+.profiles-section {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
 }
-.add .chip input {
-  position: absolute;
+.profiles-section > header h4 {
+  margin: 0;
 }
-.roles {
+.fetch-error {
+  border-left: 2px solid var(--warn);
+  padding-left: var(--s-3);
+}
+.fetch-error > p:first-child {
+  color: var(--warn);
+}
+.key-stored {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  min-height: var(--ctl);
+  color: var(--muted);
+}
+.key-missing {
+  color: var(--warn);
+}
+/* The editor of a profile, first run and settings alike: a label over each control. */
+form.endpoint-form {
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
 }
-.role-row {
+.endpoint-form .field > input,
+.endpoint-form .field > select,
+.endpoint-form .field-row > input,
+.endpoint-form .field-row > select {
+  min-width: 0;
+}
+.endpoint-form .field-row > input,
+.endpoint-form .field-row > select,
+.endpoint-form .key-stored {
+  flex: 1;
+}
+.endpoint-form .field-row > button {
+  flex: none;
+}
+.endpoint-form .field-row {
+  flex-wrap: nowrap;
+}
+.endpoint-form fieldset.presets legend {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw);
+}
+.chip:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+details.more > summary {
+  cursor: pointer;
+  color: var(--accent);
   display: flex;
-  gap: var(--s-2);
   align-items: center;
-  flex-wrap: wrap;
-  margin: var(--s-1) 0;
+  min-height: var(--ctl-sm);
+}
+details.more[open] > summary {
+  margin-bottom: var(--s-2);
+}
+details.more > .field + .field,
+.model-list > li + li {
+  margin-top: var(--s-2);
+}
+.model-list > li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.add {
+  margin: 0;
+}
+.connect .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  width: min(var(--card-w), 100%);
+}
+.roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.roles h4 {
+  margin: 0;
+}
+.roles-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.roles-table th,
+.roles-table td {
+  padding: var(--s-1) var(--s-2) var(--s-1) 0;
+  text-align: left;
+  vertical-align: middle;
+}
+.roles-table thead th {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw);
+  color: var(--muted);
+}
+.roles-table tbody th {
+  width: 22%;
+  font-weight: var(--fw-strong);
+}
+.roles-table td:last-child {
+  width: 30%;
+  padding-right: 0;
+}
+.roles-table select {
+  width: 100%;
+  min-width: 0;
 }
 .save-list {
   margin: var(--s-2) 0 var(--s-4);
