@@ -316,26 +316,27 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.event.ask",
-        "Make up one small happening for today, {date}, for {user} to hear about. \
-         Requirements:\n\
-         - It is a pleasant or neutral moment of daily life: a meal, a chore, practice, the \
-         weather, a small favour, a hobby, and it ends warmly or calmly, with nothing lost, \
-         broken, hurt, argued over or left unsettled. One event in one scene, with no twist \
-         and no punchline.\n\
-         - Two or three short sentences, natural and fluent, the way someone would mention \
-         it over a meal.\n\
-         - Only the people listed below, one or two of them. Name nobody else.\n\
-         - Use the material only to know what these people are like (habits, temperament, \
-         how they get along). Do not retell its plot, lore, secrets or story events, do not \
-         join several pieces of it into one story, and do not invent anything that would \
-         need the archives to explain.\n\
-         You may suggest that a few of them gather for a reason, or that {user} talk to \
-         someone about it, but neither is required.\n\nA direction for today: \
-         {topic}\n\nMaterial about the people:\n{material}\n\nPeople it may involve \
-         (id: name):\n{people}\n{extra}\n\nReply with a title, the text, the ids of the \
-         people involved, a gathering (its members' ids and its purpose) or null, and the \
-         ids of people {user} might talk to.",
+        "Think of one small thing that happened on board today, {date}, for {user} to hear \
+         about. What it is, is yours to choose: someone's small habit, a bit of good luck, an \
+         understanding between two people, something new in a department, a delivery that \
+         came, a small celebration, or anything else these people would plausibly do; the \
+         more particular and the more like them, the better.\n\
+         The direction is only this:\n\
+         - The tone is pleasant or calm, easy to read, and it ends settled.\n\
+         - It is one small everyday scene, told in a few natural sentences, the way someone \
+         would mention it over a meal.\n\
+         - Only the people listed below appear, one or two of them; nobody else is named.\n\
+         - The material is only for knowing these people (habits, temperament, how they get \
+         along); its plot, lore and secrets stay in it.\n\
+         - It differs from the recent ones listed: another place, another activity, another \
+         mood.\n\
+         A reason for a few of them to gather, or people {user} might talk to about it, are \
+         welcome and not needed.\n\nMaterial about the people:\n{material}\n\nPeople it \
+         may involve (id: name):\n{people}\n{extra}\n\nReply with a title, the text, the \
+         ids of the people involved, a gathering (its members' ids and its purpose) or null, \
+         and the ids of people {user} might talk to.",
     ),
+    ("harness.event.past", "Told lately:\n{past}"),
     (
         "harness.event.recent",
         "Topics of the groups {user} started lately:\n{recent}",
@@ -349,19 +350,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("events.label.purpose", "Purpose"),
     ("events.label.talk", "{user} could talk to"),
     ("events.fact", "{title}: {text}"),
-    (
-        "events.topics",
-        "someone took a second helping at the canteen|the canteen's best dish of the week|\
-         someone tidying their room and finding an old keepsake|a freshly mended lamp glowing in the dorm|\
-         someone lending a book that came back with a note inside|a favour run for a colleague|\
-         practice that went especially well|a rest in the corridor after training|\
-         a tidy supply shelf and a satisfied smile|a breezy day on the deck|a rainy day indoors with tea|\
-         sunshine and someone out in it|someone looking after a plant that just bloomed|\
-         someone reading or listening to music|someone busy with a hobby|\
-         someone well rested and in a good mood|a friendly chat in the queue at the medical check|\
-         a game of cards or chess in the lounge|a small gift for a colleague|\
-         someone learning something new, bit by bit",
-    ),
     // The kinds of unit that tell who a person is, which the event's material is drawn
     // from; none listed means any kind of the person's own units.
     ("events.material", ""),

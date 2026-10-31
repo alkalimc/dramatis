@@ -560,7 +560,6 @@ events.label.text
 events.label.title
 events.material
 events.per_day
-events.topics
 favorites.empty
 favorites.subtitle
 favorites.title
@@ -649,6 +648,7 @@ harness.error.unavailable
 harness.error.wrapup_only
 harness.event
 harness.event.ask
+harness.event.past
 harness.event.recent
 harness.event.tool
 harness.find_mark

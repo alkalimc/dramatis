@@ -179,11 +179,34 @@ async fn the_request_is_a_tool_call_where_tools_are_native_and_json_where_they_a
     let text = |b: &Value| b["messages"][0]["content"].to_string();
     assert!(!text(n).contains("\"title\""), "{}", text(n));
     assert!(text(m).contains("title"), "{}", text(m));
-    // The theme comes from the rotating list, and the people from the roster.
+    // The people come from the roster; what happens is the model's to choose.
     assert!(text(n).contains("ann: ann"));
     // The call made the event.
     assert_eq!(native.agent.daily_events().unwrap().len(), 1);
     assert!(posts(&native)[0].text.contains(TEA));
+}
+
+#[tokio::test]
+async fn the_next_request_lists_what_was_told_lately_and_gives_no_set_theme() {
+    let e = setup(endpoints(WireApi::Chat, true, None));
+    e.agent
+        .with_world(|w| settings::set(w, settings::EVENTS_PER_DAY, &2).unwrap());
+    to_slot(&e, 2, 0);
+    e.fake
+        .push([say(&reply()), say(&reply().replace(TEA, "Later"))]);
+    e.agent.tick(true).await.unwrap();
+    to_slot(&e, 2, 1);
+    e.agent.tick(true).await.unwrap();
+    let bodies = e.fake.bodies();
+    assert_eq!(bodies.len(), 2);
+    let first = body_text(&bodies[0]);
+    let second = body_text(&bodies[1]);
+    assert!(!first.contains("Told lately"), "{first}");
+    assert!(
+        second.contains("Told lately") && second.contains(TEA),
+        "{second}"
+    );
+    assert!(!second.contains("A direction for today"), "{second}");
 }
 
 #[tokio::test]
