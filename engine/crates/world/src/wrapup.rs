@@ -1,7 +1,7 @@
 //! Wrap-up: store what the forced `wrapup` call extracted from a conversation. At most
 //! `wrapup.max_facts` memories (a fact, or a commitment with a due time), at most one
 //! hurt, and on a rollover a summary. Everything is deduplicated against every memory,
-//! deleted ones included, and scoped to the channel's participants.
+//! deleted ones included, a fact that restates a live one of the same author is dropped, and scoped to the channel's participants.
 
 use rusqlite::Connection;
 
@@ -55,6 +55,11 @@ pub enum Skipped {
     },
     /// Repeats an existing memory (live or deleted).
     Duplicate {
+        text: String,
+        existing: FactId,
+    },
+    /// Says again, in other words, a live memory of the same author about the same subject.
+    Similar {
         text: String,
         existing: FactId,
     },
@@ -127,6 +132,15 @@ pub fn apply(
                         .due(due)
                 }
             };
+            if m.kind == MemoryKind::Fact
+                && let Some(near) = fact::find_similar(conn, &new, params.similar)?
+            {
+                out.skipped.push(Skipped::Similar {
+                    text: text.into(),
+                    existing: near.id,
+                });
+                continue;
+            }
             match fact::write(conn, &new, now.ms)? {
                 Written::New(id) => out.facts.push(id),
                 Written::Duplicate { existing, .. } => out.skipped.push(Skipped::Duplicate {
@@ -295,6 +309,84 @@ mod tests {
         .unwrap();
         assert!(again.facts.is_empty());
         assert!(matches!(again.skipped[0], Skipped::Duplicate { .. }));
+    }
+
+    #[test]
+    fn a_restated_fact_by_the_same_author_is_not_stored_again() {
+        let w = world();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        let d = channel::direct(&w, &p("b")).unwrap();
+        let facts = |texts: &[&str]| Args {
+            facts: texts
+                .iter()
+                .map(|t| mem(MemoryKind::Fact, t, None))
+                .collect(),
+            ..Args::default()
+        };
+        let run = |ch, who: &str, texts: &[&str]| {
+            apply(
+                &w,
+                ch,
+                &Actor::Person(p(who)),
+                &facts(texts),
+                at(T0),
+                &WrapupParams::default(),
+                &Trust::default(),
+            )
+            .unwrap()
+        };
+        let first = run(
+            c,
+            "a",
+            &["The user said they are watching their sleep lately."],
+        );
+        assert_eq!(first.facts.len(), 1);
+        // Same author, other words and punctuation, another conversation.
+        let again = run(
+            c,
+            "a",
+            &["The user said they are watching their sleep lately, again."],
+        );
+        assert!(again.facts.is_empty());
+        assert!(
+            matches!(again.skipped[0], Skipped::Similar { existing, .. } if existing == first.facts[0])
+        );
+        // A different thing from the same author is kept.
+        assert_eq!(
+            run(c, "a", &["Plans to visit the harbor on Sunday."])
+                .facts
+                .len(),
+            1
+        );
+        // Another author may write the same thing down.
+        assert_eq!(
+            run(
+                d,
+                "b",
+                &["The user said they are watching their sleep lately, again."]
+            )
+            .facts
+            .len(),
+            1
+        );
+        // A deleted one no longer counts as similar (exact repeats are still refused).
+        fact::retract(&w, first.facts[0]).unwrap();
+        assert_eq!(
+            run(
+                c,
+                "a",
+                &["The user said they are watching their sleep lately!!"]
+            )
+            .facts
+            .len(),
+            0
+        );
+        assert_eq!(
+            run(c, "a", &["The user is watching their sleep these days."])
+                .facts
+                .len(),
+            1
+        );
     }
 
     #[test]

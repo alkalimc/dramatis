@@ -728,6 +728,7 @@ harness.tone.guarded
 harness.tone.normal
 harness.topic
 harness.wrapup
+harness.wrapup.known
 harness.wrapup.shape
 harness.wrapup.summary
 host.alias
