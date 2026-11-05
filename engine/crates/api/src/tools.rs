@@ -392,7 +392,7 @@ impl HostCall {
 /// One tool as offered to a model.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ToolSpec {
-    pub name: &'static str,
+    pub name: String,
     pub description: String,
     pub parameters: Value,
 }
@@ -435,7 +435,7 @@ fn spec<T: JsonSchema>(key: &str, name: &'static str, overrides: &Descriptions) 
         .or(default)
         .unwrap_or_default();
     ToolSpec {
-        name,
+        name: name.to_owned(),
         description,
         parameters,
     }

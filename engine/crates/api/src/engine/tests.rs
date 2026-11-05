@@ -3381,6 +3381,42 @@ async fn the_update_check_asks_at_most_once_a_day() {
 }
 
 #[tokio::test]
+async fn plugins_are_listed_off_and_can_be_turned_on_and_off() {
+    let r = rig_with(release("v99.0.0"));
+    let e = &r.engine;
+    assert!(e.plugins().await.unwrap().is_empty());
+    let dir = e.home.plugins();
+    std::fs::create_dir_all(dir.join("demo")).unwrap();
+    std::fs::write(
+        dir.join("demo/plugin.toml"),
+        "name = \"demo\"\nversion = \"1\"\nprotocol = 1\ncommand = [\"x\"]\nhooks = [\"prompt\"]\n[[tools]]\nname = \"t\"\ndescription = \"d\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("broken")).unwrap();
+    std::fs::write(dir.join("broken/plugin.toml"), "name = \"other\"").unwrap();
+    let list = e.plugins().await.unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].name, "broken");
+    assert!(list[0].problem.is_some() && !list[0].enabled);
+    assert_eq!(list[1].tools, vec!["demo__t"]);
+    assert_eq!(list[1].hooks, vec!["prompt"]);
+    // Off until turned on.
+    assert!(!list[1].enabled);
+    e.set_plugin_enabled("demo".into(), true).await.unwrap();
+    assert!(e.plugins().await.unwrap()[1].enabled);
+    e.set_plugin_enabled("demo".into(), false).await.unwrap();
+    assert!(!e.plugins().await.unwrap()[1].enabled);
+    assert!(matches!(
+        e.set_plugin_enabled("broken".into(), true).await,
+        Err(ApiError::Invalid { .. })
+    ));
+    assert!(matches!(
+        e.set_plugin_enabled("nope".into(), true).await,
+        Err(ApiError::NotFound)
+    ));
+}
+
+#[tokio::test]
 async fn the_off_switch_stops_automatic_checks_only() {
     let net = release("v99.0.0");
     let r = rig_with(net.clone());

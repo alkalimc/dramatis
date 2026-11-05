@@ -988,6 +988,15 @@ picture.change
 picture.default
 picture.failed
 picture.remove
+plugins.folder
+plugins.hint
+plugins.hooks
+plugins.intro
+plugins.none
+plugins.problem
+plugins.status
+plugins.tools
+plugins.warn
 privacy.again
 privacy.change
 privacy.change.hint
@@ -1134,6 +1143,7 @@ settings.page.chat
 settings.page.endpoints
 settings.page.language
 settings.page.network
+settings.page.plugins
 settings.page.privacy
 settings.page.quiet
 settings.page.quota

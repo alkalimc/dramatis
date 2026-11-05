@@ -198,6 +198,8 @@ pub struct Agent {
     pub(crate) daily_planned: Mutex<Option<i64>>,
     /// Posts the host asked for during a turn, sent when the turn is over.
     pub(crate) posts: Mutex<Vec<HostPost>>,
+    /// The plugin host, when the front end wires one ([`Agent::with_plugins`]).
+    pub(crate) plugins: Option<Arc<plugin::Host>>,
 }
 
 impl Agent {
@@ -248,6 +250,7 @@ impl Agent {
             sightless: Mutex::new(HashSet::new()),
             daily_planned: Mutex::new(None),
             posts: Mutex::new(Vec::new()),
+            plugins: None,
         })
     }
 
@@ -297,6 +300,10 @@ impl Agent {
     }
 
     pub(crate) fn emit(&self, e: Event) {
+        // Plugin hook `message`: observe what is posted.
+        if let Event::MessageAdded(added) = &e {
+            self.plugin_message(&added.message);
+        }
         self.sink.emit(e);
     }
 

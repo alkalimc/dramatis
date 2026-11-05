@@ -6,6 +6,7 @@ members = [
     "crates/eval",
     "crates/world",
     "crates/agent",
+    "crates/plugin",
     "crates/api",
     "crates/runtime",
     "crates/llm",

@@ -101,6 +101,11 @@ impl Runtime {
             None => Arc::new(ports::http_for(&home.network())?),
         };
         let client = llm::Llm::new(http.clone(), Retry::default());
+        let plugins = Arc::new(plugin::Host::new(
+            home.plugins(),
+            Some(home.logs()),
+            api::update::VERSION,
+        ));
         let mut ports = Ports {
             llm: Arc::new(ports::Models(client.clone())),
             keys: Arc::new(ports::Keys),
@@ -111,6 +116,7 @@ impl Runtime {
             choose_file: options.choose_file,
             choose_folder: options.choose_folder,
             open_url: options.open_url,
+            plugins: Some(plugins.clone()),
             ..Ports::default()
         };
         let bridge = folio
@@ -128,6 +134,7 @@ impl Runtime {
                     quiet: options.quiet,
                     frontend: options.frontend,
                     password: options.password.clone(),
+                    plugins: Some(plugins),
                 })
             })
             .transpose()?;
