@@ -32,9 +32,28 @@ const TEXT_MAX: usize = 600;
 /// Most people a suggested gathering brings together (the host's offer to the user).
 const GATHERING_MAX: usize = 5;
 /// Longest stretch of a unit given to the model, in characters.
-const UNIT_MAX: usize = 320;
+const UNIT_MAX: usize = 260;
+/// Longest stretch of a scene the two share, in characters; it is cut at a line.
+const SCENE_MAX: usize = 420;
 /// How many of a person's closest colleagues the event may pair them with.
 const PARTNERS: usize = 8;
+/// A scene with at most this many people in it counts as the two being together; the
+/// crowded chapters of the story do not.
+const SMALL_SCENE: i64 = 4;
+/// How many places the model is offered to choose from.
+const PLACES: usize = 6;
+/// A bond by small scenes counts for this many at most, so one long partnership does not
+/// shut out the rest.
+const BOND_SCENES_CAP: i64 = 30;
+/// What each unit of a person's own that names the other adds to the bond, up to three.
+const BOND_NAMED: i64 = 8;
+/// The least a bond must come to, and how many of the strongest are drawn from.
+const BOND_MIN: i64 = 3;
+const BOND_TOP: usize = 6;
+/// Most units about one person the model is given.
+const ABOUT_MAX: usize = 3;
+/// People tried as the first of a pair before the pair falls back to a looser one.
+const FIRST_TRIES: usize = 8;
 
 /// Up to `n` of `items`, drawn at random (std's per-instance random hash keys; no ordering
 /// survives between calls).
@@ -349,6 +368,43 @@ fn cut(s: &str, max: usize) -> String {
     s.trim().chars().take(max).collect::<String>()
 }
 
+/// The lines of `s` that fit in `max` characters, whole; the first line alone when it is
+/// longer than that, cut.
+fn cut_lines(s: &str, max: usize) -> String {
+    let mut out = String::new();
+    for line in s.trim().lines() {
+        let used = out.chars().count();
+        if used > 0 && used + line.chars().count() + 1 > max {
+            break;
+        }
+        if used > 0 {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    cut(&out, max)
+}
+
+/// Up to [`ABOUT_MAX`] of a person's units for the model: one that speaks of `other` (a
+/// name in the text) first, then one of each kind the corpus lists, at random.
+fn about_units(have: Vec<folio::Unit>, other: &str, kinds: &[String]) -> Vec<folio::Unit> {
+    let mut out: Vec<folio::Unit> = Vec::new();
+    let (named, rest): (Vec<_>, Vec<_>) = have
+        .into_iter()
+        .partition(|u| other.chars().count() >= 2 && u.text.contains(other));
+    out.extend(random_pick(named, 1));
+    for kind in kinds {
+        let of_kind: Vec<folio::Unit> = rest
+            .iter()
+            .filter(|u| &u.template == kind)
+            .cloned()
+            .collect();
+        out.extend(random_pick(of_kind, 1));
+    }
+    out.truncate(ABOUT_MAX);
+    out
+}
+
 impl Agent {
     /// The ended facts go. Cheap enough to run wherever facts are read for a log.
     pub(crate) fn sweep(&self) {
@@ -379,7 +435,7 @@ impl Agent {
             }
             settings::set(&conn, settings::EVENTS_TRIED, &now.ms)?;
         }
-        self.make_event().await
+        self.make_event(false).await
     }
 
     /// Make an event now, whatever the day's count and the clock say, for trying the wording
@@ -389,14 +445,14 @@ impl Agent {
         if self.chat().is_err() {
             return Ok(false);
         }
-        self.make_event().await
+        self.make_event(true).await
     }
 
-    async fn make_event(&self) -> Result<bool> {
+    async fn make_event(&self, any_hour: bool) -> Result<bool> {
         if !self.decide(CallKind::Opening)?.allowed() {
             return Ok(false);
         }
-        let Some((material, request)) = self.event_request()? else {
+        let Some((material, request)) = self.event_request(any_hour)? else {
             return Ok(false);
         };
         let Some(draft) = self.event_draft(request).await? else {
@@ -406,7 +462,7 @@ impl Agent {
     }
 
     /// The ids of the units the request draws on, and the request.
-    fn event_request(&self) -> Result<Option<(Vec<String>, Request)>> {
+    fn event_request(&self, any_hour: bool) -> Result<Option<(Vec<String>, Request)>> {
         let now = self.now();
         let names = self.names()?;
         let w = &self.corpus.wording;
@@ -427,9 +483,9 @@ impl Agent {
             .filter(|t| !t.trim().is_empty())
             .take(2)
             .collect();
-        // Two people who really know each other, chosen at random: a person the recent
-        // events were not about, and one of the people they share scenes with. What
-        // happens between them is the model's to write; the place and the hour are given.
+        // Two people who really know each other: a person the recent events were not
+        // about, and one they have small scenes with or speak of. What happens between
+        // them is the model's to write; the place and the hour are given.
         let lately: std::collections::HashSet<&str> = recent
             .iter()
             .flat_map(|e| e.persons.iter().map(PersonId::as_str))
@@ -442,91 +498,85 @@ impl Agent {
         if firsts.is_empty() {
             firsts = offerable.clone();
         }
-        let first = random_pick(firsts, 1).remove(0);
-        let mut friends: Vec<String> = self
-            .partners(&first)
-            .into_iter()
-            .filter(|p| *p != first && offerable.contains(p))
-            .collect();
-        if friends.is_empty() {
-            friends = offerable.iter().filter(|p| **p != first).cloned().collect();
+        let split = |key: &str| -> Vec<String> {
+            w.get(key)
+                .split('|')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned)
+                .collect()
+        };
+        let (kinds, titles) = (split("events.material"), split("events.titles"));
+        let mut pair = None;
+        let firsts = random_pick(firsts, usize::MAX);
+        for first in firsts.iter().take(FIRST_TRIES) {
+            let own = self.own_units(first, &kinds, &titles, &used)?;
+            if let Some(second) = self.bonded(first, &offerable, &own)? {
+                pair = Some((first.clone(), own, second));
+                break;
+            }
         }
-        let pool: Vec<String> = std::iter::once(first.clone())
-            .chain(random_pick(friends, 1))
-            .collect();
-        let places: Vec<&str> = w
-            .get("events.places")
-            .split('|')
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-            .collect();
-        let place = random_pick(places, 1).into_iter().next().unwrap_or("");
-        // Who they are: each one's own units of the kinds the corpus lists, one picked at
-        // random; and, when there is one, a scene the two share. Never a search over the
-        // whole story: the event is a small moment, and the model should not retell what
-        // it reads.
-        let kinds: Vec<String> = w
-            .get("events.material")
-            .split('|')
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(str::to_owned)
-            .collect();
+        let (first, own, second) = match pair {
+            Some(p) => p,
+            None => {
+                // No pair with a bond worth the name: the first one's closest colleagues
+                // by shared scenes, else anyone.
+                let first = firsts[0].clone();
+                let own = self.own_units(&first, &kinds, &titles, &used)?;
+                let mut friends: Vec<String> = self
+                    .partners(&first)
+                    .into_iter()
+                    .filter(|p| *p != first && offerable.contains(p))
+                    .collect();
+                if friends.is_empty() {
+                    friends = offerable.iter().filter(|p| **p != first).cloned().collect();
+                }
+                let second = random_pick(friends, 1).into_iter().next();
+                let Some(second) = second else {
+                    return Ok(None);
+                };
+                (first, own, second)
+            }
+        };
+        let pool = [first.clone(), second.clone()];
+        let (shown_a, shown_b) = (self.display(&first)?, self.display(&second)?);
+        let places = random_pick(split("events.places"), PLACES);
+        // Who they are: units of their own of the kinds the corpus lists, those that speak
+        // of the other first; and, when there is one, a small scene the two share. Never a
+        // search over the whole story: the event is a small moment, and the model should
+        // not retell what it reads.
         let mut units: Vec<folio::Unit> = Vec::new();
         let mut about = Vec::new();
-        for person in &pool {
-            let mut req = index::SearchRequest::new(&self.display(person)?);
-            req.filters.templates = kinds.clone();
-            req.filters.persons = vec![person.clone()];
-            req.exclude = used
-                .iter()
-                .cloned()
-                .chain(units.iter().map(|u| u.id.clone()))
-                .collect();
-            let Ok(resp) = self.ix().search(&req) else {
-                continue;
+        let mut mine = Some(own);
+        for (person, other) in [(&first, &shown_b), (&second, &shown_a)] {
+            let have = match mine.take() {
+                Some(own) => own,
+                None => self.own_units(person, &kinds, &titles, &used)?,
             };
-            let hits: Vec<folio::Unit> = resp
-                .hits
-                .iter()
-                .filter(|h| !req.exclude.iter().any(|x| x == h.item.id()))
-                .filter_map(|h| h.item.unit().cloned())
-                .collect();
-            let picked = random_pick(hits, 1);
-            let text = picked
-                .first()
-                .map(|u| cut(names.sub(u.text.trim()).as_ref(), UNIT_MAX))
-                .unwrap_or_default();
-            about.push(w.fill(
-                "events.who",
-                &names,
-                &[("name", &self.display(person)?), ("about", &text)],
-            ));
+            let name = self.display(person)?;
+            let picked = about_units(have, other, &kinds);
+            for u in &picked {
+                about.push(w.fill(
+                    "events.who",
+                    &names,
+                    &[
+                        ("name", &name),
+                        ("about", &cut(names.sub(u.text.trim()).as_ref(), UNIT_MAX)),
+                    ],
+                ));
+            }
             units.extend(picked);
         }
-        if let [a, b] = &pool[..] {
-            let mut req =
-                index::SearchRequest::new(format!("{} {}", self.display(a)?, self.display(b)?));
-            req.filters.templates = vec!["dialogue".into()];
-            req.filters.persons = vec![a.clone()];
-            req.exclude = used.clone();
-            if let Ok(resp) = self.ix().search(&req) {
-                let together: Vec<folio::Unit> = resp
-                    .hits
-                    .iter()
-                    .filter_map(|h| h.item.unit().cloned())
-                    .filter(|u| u.persons.iter().any(|p| p == b) && !used.contains(&u.id))
-                    .take(3)
-                    .collect();
-                if let Some(u) = random_pick(together, 1).into_iter().next() {
-                    about.push(w.fill(
-                        "events.together",
-                        &names,
-                        &[("scene", &cut(names.sub(u.text.trim()).as_ref(), UNIT_MAX))],
-                    ));
-                    units.push(u);
-                }
-            }
+        if let Some(u) = self.shared_scene(&first, &second, &used)? {
+            about.push(w.fill(
+                "events.together",
+                &names,
+                &[(
+                    "scene",
+                    &cut_lines(names.sub(u.text.trim()).as_ref(), SCENE_MAX),
+                )],
+            ));
+            units.push(u);
         }
         let material = about.join("\n\n");
         let mut people = Vec::new();
@@ -535,13 +585,24 @@ impl Agent {
         }
         let d = world::clock::in_world_date(now, self.corpus.year_offset);
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
-        let part = match now.local_minute() / 60 {
-            22..=23 | 0..=4 => "night",
-            5..=10 => "morning",
-            11..=13 => "noon",
-            14..=17 => "afternoon",
-            _ => "evening",
+        // The hour the event stands in is the real one; a trial made by hand may be made
+        // at any hour of the user's day, so it asks for any part of the waking day.
+        let part = if any_hour {
+            random_pick(vec!["morning", "noon", "afternoon", "evening"], 1)[0]
+        } else {
+            match now.local_minute() / 60 {
+                22..=23 | 0..=4 => "night",
+                5..=10 => "morning",
+                11..=13 => "noon",
+                14..=17 => "afternoon",
+                _ => "evening",
+            }
         };
+        let telling = random_pick(split("events.tellings"), 1)
+            .into_iter()
+            .next()
+            .map(|t| w.fill_text(&t, &names, &[("a", &shown_a), ("b", &shown_b)]))
+            .unwrap_or_default();
         let (role, _) = self.role_for(LogKind::Person)?;
         let schema = schema();
         let mut extra = Vec::new();
@@ -572,7 +633,10 @@ impl Agent {
             &[
                 ("date", &date),
                 ("part", w.get(&format!("daypart.{part}"))),
-                ("place", place),
+                ("places", &places.join("\u{3001}")),
+                ("a", &shown_a),
+                ("b", &shown_b),
+                ("telling", &telling),
                 ("material", &material),
                 ("people", &people.join("\n")),
                 ("extra", &extra.join("\n")),
@@ -777,6 +841,107 @@ impl Agent {
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         self.changed(vec![WorldChange::Digest]);
         Ok(true)
+    }
+
+    /// A person's own units of the listed kinds whose titles contain one of `titles` (any
+    /// when none are listed), without the ones already used.
+    fn own_units(
+        &self,
+        person: &str,
+        kinds: &[String],
+        titles: &[String],
+        used: &[String],
+    ) -> Result<Vec<folio::Unit>> {
+        let ix = self.ix();
+        let folio = ix.folio();
+        let mut ords: Vec<i64> = Vec::new();
+        for kind in kinds {
+            let mut stmt = folio.conn().prepare_cached(
+                "SELECT c.ord FROM chunks c JOIN unit_persons u ON u.chunk_id = c.id \
+                 WHERE u.person_id = ?1 AND c.template = ?2 ORDER BY c.ord",
+            )?;
+            let found = stmt
+                .query_map(rusqlite::params![person, kind], |r| r.get::<_, i64>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            ords.extend(found);
+        }
+        Ok(folio
+            .units_by_ord(&ords)?
+            .into_iter()
+            .filter(|u| titles.is_empty() || titles.iter().any(|t| u.title.contains(t.as_str())))
+            .filter(|u| !used.contains(&u.id))
+            .collect())
+    }
+
+    /// The person `first` is bound to: by small scenes shared, and by being named in
+    /// `first`'s own units. One of the few most bound, at random; `None` when nobody is
+    /// bound closely enough.
+    fn bonded(
+        &self,
+        first: &str,
+        offerable: &[String],
+        own: &[folio::Unit],
+    ) -> Result<Option<String>> {
+        let mut score: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        {
+            let ix = self.ix();
+            let mut stmt = ix.folio().conn().prepare_cached(
+                "SELECT o.person_id, count(*) FROM unit_persons m \
+                 JOIN chunks c ON c.id = m.chunk_id AND c.template = 'dialogue' \
+                 JOIN unit_persons o ON o.chunk_id = m.chunk_id AND o.person_id <> m.person_id \
+                 WHERE m.person_id = ?1 \
+                 AND (SELECT count(*) FROM unit_persons x WHERE x.chunk_id = m.chunk_id) <= ?2 \
+                 GROUP BY o.person_id",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![first, SMALL_SCENE], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (p, n) = row?;
+                score.insert(p, n.min(BOND_SCENES_CAP));
+            }
+        }
+        for p in offerable.iter().filter(|p| p.as_str() != first) {
+            let name = self.display(p)?;
+            if name.chars().count() < 2 {
+                continue;
+            }
+            let said = own.iter().filter(|u| u.text.contains(&name)).count() as i64;
+            if said > 0 {
+                *score.entry(p.clone()).or_default() += BOND_NAMED * said.min(3);
+            }
+        }
+        let mut ranked: Vec<(String, i64)> = score
+            .into_iter()
+            .filter(|(p, n)| *n >= BOND_MIN && offerable.contains(p))
+            .collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        ranked.truncate(BOND_TOP);
+        Ok(random_pick(ranked, 1).into_iter().next().map(|(p, _)| p))
+    }
+
+    /// A small scene the two are in together, not used by an earlier event.
+    fn shared_scene(&self, a: &str, b: &str, used: &[String]) -> Result<Option<folio::Unit>> {
+        let ix = self.ix();
+        let folio = ix.folio();
+        let ords = {
+            let mut stmt = folio.conn().prepare_cached(
+                "SELECT c.ord FROM chunks c \
+                 JOIN unit_persons x ON x.chunk_id = c.id AND x.person_id = ?1 \
+                 JOIN unit_persons y ON y.chunk_id = c.id AND y.person_id = ?2 \
+                 WHERE c.template = 'dialogue' \
+                 AND (SELECT count(*) FROM unit_persons z WHERE z.chunk_id = c.id) <= ?3 \
+                 ORDER BY c.ord",
+            )?;
+            stmt.query_map(rusqlite::params![a, b, SMALL_SCENE], |r| r.get::<_, i64>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let units: Vec<folio::Unit> = folio
+            .units_by_ord(&ords)?
+            .into_iter()
+            .filter(|u| !used.contains(&u.id))
+            .collect();
+        Ok(random_pick(units, 1).into_iter().next())
     }
 
     /// The people who share the most scenes with `person` in the corpus, most first.

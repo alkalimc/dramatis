@@ -405,24 +405,27 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.event.ask",
-        "Today, {date}, {part}, in {place}, a small thing happened between the two people \
-         below; tell it to {user}.\n\
+        "Today, {date}, {part}, a small thing happened between {a} and {b}; tell it to \
+         {user}.\n\
+         How it is told: {telling}\n\
          The direction is only this:\n\
-         - One ordinary scene in two or three short sentences: who is doing what, and one \
-         thing one of them says, the way someone would mention it over a meal.\n\
-         - How the people act and what lies between them comes from the material, so it \
-         reads like them.\n\
-         - The things in the scene are ordinary on board, and so is what happens; nobody \
-         thinks of it afterwards.\n\
-         - The tone is pleasant or calm, and it ends settled.\n\
+         - Choose the place that fits the two of them and the time of day (for example \
+         {places}), and let the hour show in what is going on.\n\
+         - What happens comes from the material: something one of them likes, does or \
+         says, or how they are with each other, in one concrete thing or action.\n\
+         - Three or four short sentences: a small cause, one natural exchange written out \
+         in quotes, and an ending on a concrete thing or action.\n\
+         - The title is the most concrete thing, line or action in it, a few words, and \
+         begins differently from the recent ones.\n\
+         - The tone is pleasant or calm; what happens is ordinary on board.\n\
          - Only these two appear; other people, new equipment or creatures, and the plot, \
          lore and secrets of the material stay out.\n\
          - It differs from the recent ones listed.\n\
          A reason for a few of them to gather, or people {user} might talk to about it, are \
          welcome and not needed.\n\nMaterial about the people:\n{material}\n\nPeople it \
-         may involve (id: name):\n{people}\n{extra}\n\nReply with a title (a few words), \
-         the text, the ids of the people involved, a gathering (its members' ids and its \
-         purpose) or null, and the ids of people {user} might talk to.",
+         may involve (id: name):\n{people}\n{extra}\n\nReply with a title, the text, the \
+         ids of the people involved, a gathering (its members' ids and its purpose) or \
+         null, and the ids of people {user} might talk to.",
     ),
     ("harness.event.past", "Told lately:\n{past}"),
     (
@@ -441,8 +444,13 @@ const DEFAULTS: &[(&str, &str)] = &[
     // The kinds of unit that tell who a person is, which the event's material is drawn
     // from; none listed means any kind of the person's own units.
     ("events.material", ""),
-    // Places an event may happen in, `|` between them.
+    // Words in the title of a unit that mark it as telling who a person is, `|` between
+    // them; none listed means any unit of those kinds.
+    ("events.titles", ""),
+    // Places an event may happen in, `|` between them; a few are offered each time.
     ("events.places", "the deck"),
+    // How an event is told, one per event, `|` between them; `{a}` and `{b}` are the two.
+    ("events.tellings", "briefly, by the host"),
     ("events.who", "{name}, in their own words or file: {about}"),
     ("events.together", "A scene the two appear in:\n{scene}"),
     ("harness.digest", "Since {user} last looked:"),
