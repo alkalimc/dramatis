@@ -9,7 +9,7 @@ use crate::assemble;
 use crate::text::Wording;
 
 /// Wording keys whose filled text the harness puts in front of a turn.
-const KEYS: [&str; 10] = [
+const KEYS: [&str; 11] = [
     "harness.speaker",
     "harness.interject",
     "harness.chorus",
@@ -17,6 +17,7 @@ const KEYS: [&str; 10] = [
     "harness.nothing_found",
     "harness.context",
     "harness.context.gap",
+    "harness.context.days",
     "harness.joined",
     "harness.left",
     "harness.said",

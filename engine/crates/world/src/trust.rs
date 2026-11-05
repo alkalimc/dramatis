@@ -1,5 +1,6 @@
-//! Trust: grows with shared turns and finished requests (less above 100), drops only by
-//! a hurt, never with absence. Only its tone band reaches a session.
+//! Trust: grows with shared turns and, in bigger steps, with a talk that left something
+//! worth remembering; both shrink towards the top of the range. It drops only by a hurt
+//! (heavier for a closer person), never with absence. Only its tone band reaches a session.
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -45,18 +46,37 @@ pub fn tone(trust: u8, params: &Trust) -> Tone {
     }
 }
 
-/// The diminishing factor: full below 100, shrinking linearly to nothing at 200.
+/// The diminishing factor: full up to the start (100), then shrinking along a parabola to
+/// nothing at 200, so the last stretch to the top is slow. Below the start growth is
+/// full: a pair of colleagues that begins at 0, or a person who has been hurt, builds back
+/// at the ordinary rate.
 pub fn f(trust: f64) -> f64 {
-    if trust < 100.0 {
+    if trust <= 100.0 {
         1.0
     } else {
-        ((200.0 - trust) / 100.0).max(0.0)
+        let u = (trust - 100.0) / 100.0;
+        (1.0 - u * u).max(0.0)
     }
 }
 
 /// One growth step from `trust` with gain `g`.
 pub fn grow(trust: f64, g: f64) -> f64 {
     (trust + g * f(trust)).clamp(0.0, 200.0)
+}
+
+/// How much heavier or lighter a hurt weighs at this trust: half the base where nobody
+/// has anything to lose, one and a half at the top, exactly the base at the start.
+fn hurt_weight(trust: f64) -> f64 {
+    0.5 + trust.clamp(0.0, 200.0) / 200.0
+}
+
+/// A talk that left a memory worth keeping (a promise, a change between the two): a step of
+/// `trust.g2`, once per wrap-up whatever the number of memories. Rare, so it is large next
+/// to a turn's.
+pub fn moment(conn: &Connection, person: &PersonId, params: &Trust) -> Result<()> {
+    bond::ensure_user_bond(conn, person)?;
+    let b = bond::user_bond(conn, person)?;
+    apply(conn, &b, grow(b.trust_exact, params.g2))
 }
 
 fn apply(conn: &Connection, b: &Bond, exact: f64) -> Result<()> {
@@ -126,7 +146,7 @@ pub(crate) fn take_hurt(conn: &Connection, fact: &Fact, params: &Trust) -> Resul
     };
     bond::ensure_user_bond(conn, &p)?;
     let b = bond::user_bond(conn, &p)?;
-    let after = (b.trust_exact - params.h).max(0.0);
+    let after = (b.trust_exact - params.h * hurt_weight(b.trust_exact)).max(0.0);
     apply(conn, &b, after)?;
     conn.execute(
         "UPDATE fact SET trust_delta = ?2 WHERE id = ?1",
@@ -190,16 +210,48 @@ mod tests {
     }
 
     #[test]
-    fn growth_diminishes_above_100_and_never_passes_200() {
-        assert_eq!(grow(50.0, 2.0), 52.0);
-        assert_eq!(grow(100.0, 2.0), 102.0);
-        assert_eq!(grow(150.0, 2.0), 151.0);
+    fn growth_diminishes_towards_the_top_and_never_passes_200() {
+        assert_eq!(f(100.0), 1.0);
+        assert_eq!(
+            f(0.0),
+            1.0,
+            "a fallen person is won back at the ordinary rate"
+        );
+        assert!(f(150.0) < f(120.0) && f(190.0) < f(150.0));
+        assert_eq!(f(200.0), 0.0);
+        assert_eq!(f(150.0), 0.75, "gentle at first, steep at the end");
         assert_eq!(grow(200.0, 2.0), 200.0);
         let mut t = 100.0;
         for _ in 0..100_000 {
             t = grow(t, 2.0);
         }
         assert!(t <= 200.0 && t > 199.0);
+        // The same turn is worth less the closer to the top.
+        assert!(grow(180.0, 1.0) - 180.0 < grow(120.0, 1.0) - 120.0);
+    }
+
+    #[test]
+    fn a_moment_is_larger_than_a_turn_and_also_shrinks() {
+        let w = world();
+        let params = Trust::default();
+        let c = channel::direct(&w, &p("a")).unwrap();
+        shared_turn(&w, c, &p("a"), &params).unwrap();
+        let after_turn = bond::user_bond(&w, &p("a")).unwrap().trust_exact;
+        moment(&w, &p("a"), &params).unwrap();
+        let after_moment = bond::user_bond(&w, &p("a")).unwrap().trust_exact;
+        assert!(after_moment - after_turn > 5.0 * (after_turn - 100.0));
+        for _ in 0..200 {
+            moment(&w, &p("a"), &params).unwrap();
+        }
+        assert!(bond::user_bond(&w, &p("a")).unwrap().trust_exact < 200.0);
+    }
+
+    #[test]
+    fn a_hurt_weighs_more_the_closer_the_person() {
+        assert_eq!(hurt_weight(100.0), 1.0);
+        assert!(hurt_weight(180.0) > hurt_weight(100.0));
+        assert!(hurt_weight(20.0) < hurt_weight(100.0));
+        assert_eq!(hurt_weight(0.0), 0.5);
     }
 
     #[test]
@@ -211,8 +263,8 @@ mod tests {
             shared_turn(&w, c, &p("a"), &params).unwrap();
         }
         let b = bond::user_bond(&w, &p("a")).unwrap();
-        // 0.5 per turn with f shrinking a little above 100.
-        assert!((b.trust_exact - 101.99).abs() < 0.01, "{}", b.trust_exact);
+        // 0.5 per turn with f shrinking a little away from 100.
+        assert!((b.trust_exact - 102.0).abs() < 0.01, "{}", b.trust_exact);
         assert_eq!(b.trust, 102);
     }
 
@@ -261,8 +313,8 @@ mod tests {
         };
         let trust = || bond::user_bond(&w, &p("a")).unwrap().trust_exact;
         let h1 = hurt("one");
-        assert_eq!(trust(), 85.0);
-        for i in 0..6 {
+        assert_eq!(trust(), 85.0, "the base at the start");
+        for i in 0..20 {
             hurt(&format!("more {i}"));
         }
         assert_eq!(trust(), 0.0, "clamped at 0");

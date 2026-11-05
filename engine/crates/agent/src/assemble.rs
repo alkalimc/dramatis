@@ -199,6 +199,9 @@ pub struct Opening<'a> {
     pub topic: Option<&'a str>,
     /// Memories the readers may all see, oldest first; `shared` when several read them.
     pub memories: &'a [Fact],
+    /// The day each memory was written, as the corpus's calendar names it, in step with
+    /// `memories`; empty when the days are not shown.
+    pub memory_days: Vec<String>,
     pub memory_owner: Option<&'a str>,
     pub summary: Option<&'a str>,
     /// `(author, text)` of the last messages, oldest first.
@@ -284,7 +287,16 @@ pub fn block_c(ctx: &Ctx<'_>, o: &Opening<'_>) -> String {
         let lines: Vec<String> = o
             .memories
             .iter()
-            .map(|f| format!("[#{}] {}", memory_id(f), ctx.names.sub(f.text.trim())))
+            .enumerate()
+            .map(|(i, f)| {
+                let line = format!("[#{}] {}", memory_id(f), ctx.names.sub(f.text.trim()));
+                match o.memory_days.get(i) {
+                    Some(day) => {
+                        format!("{line}{}", ctx.fill("harness.memory.day", &[("day", day)]))
+                    }
+                    None => line,
+                }
+            })
             .collect();
         parts.push(format!("{head}\n{}", lines.join("\n")));
     }
@@ -331,15 +343,22 @@ fn unit_block(ctx: &Ctx<'_>, u: &Unit) -> String {
     }
 }
 
+/// The line that marks passages as possibly unrelated.
+pub(crate) fn low_note(ctx: &Ctx<'_>) -> String {
+    ctx.fill("harness.low_match", &[])
+}
+
 /// Render a search response. `seen` is what the session already carries; ids sent here
 /// are added to it. At low confidence only the best `low_hits` passages go out, without
-/// neighbours and marked as possibly unrelated; when nothing came back, only the plain
-/// statement of that.
+/// neighbours; the first such turn of a segment (`note_low`) says they may be unrelated,
+/// and the segment keeps that line, so later turns do not repeat it. When nothing came
+/// back, only the plain statement of that.
 pub fn material(
     ctx: &Ctx<'_>,
     resp: &SearchResponse,
     seen: &mut HashSet<String>,
     low_hits: usize,
+    note_low: bool,
 ) -> Material {
     let level = resp.confidence.level;
     let low = level == Level::Low;
@@ -355,8 +374,8 @@ pub fn material(
         ..Material::default()
     };
     let mut blocks = Vec::new();
-    if low {
-        blocks.push(ctx.fill("harness.low_match", &[]));
+    if low && note_low {
+        blocks.push(low_note(ctx));
     }
     let push_unit =
         |u: &Unit, out: &mut Material, blocks: &mut Vec<String>, seen: &mut HashSet<String>| {

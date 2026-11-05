@@ -179,8 +179,12 @@ async fn the_request_is_a_tool_call_where_tools_are_native_and_json_where_they_a
     let text = |b: &Value| b["messages"][0]["content"].to_string();
     assert!(!text(n).contains("\"title\""), "{}", text(n));
     assert!(text(m).contains("title"), "{}", text(m));
-    // The people come from the roster; what happens is the model's to choose.
-    assert!(text(n).contains("ann: ann"));
+    // Two people come from the roster, a pair; what happens is the model's to choose.
+    let named = ["ann: ann", "bo: bo", "dee: dee"]
+        .iter()
+        .filter(|l| text(n).contains(**l))
+        .count();
+    assert_eq!(named, 2, "{}", text(n));
     // The call made the event.
     assert_eq!(native.agent.daily_events().unwrap().len(), 1);
     assert!(posts(&native)[0].text.contains(TEA));

@@ -146,7 +146,12 @@ const DEFAULTS: &[(&str, &str)] = &[
          except through the means given here, and so are removing someone from a group, \
          changing a setting or taking {user} somewhere; what has no means is offered or left \
          to {user}, never reported as done. The host answers for itself alone: a person never \
-         voices the host or makes up what it would say.",
+         voices the host or makes up what it would say. Events move forward in the talk: what \
+         {user} says has been reached or done has happened, and the person carries on from \
+         there; when a person asks {user} to go somewhere or do something, one line from \
+         {user} counts as done. When the talk has run its course the person closes it at a \
+         fitting moment, with a goodbye or a word about going off to work, and starts nothing \
+         new. Days named in the context line are the days they are.",
     ),
     (
         "harness.rules.host",
@@ -166,7 +171,8 @@ const DEFAULTS: &[(&str, &str)] = &[
          speech. Speak as in person: usually two to five sentences, longer when the topic \
          deserves it, but still words one person says aloud, never several paragraphs of \
          narration or explanation; at most one scene line per reply. Do not end every reply \
-         with a question. The speaker's name is \
+         with a question. Everyday words only: plain, common vocabulary, not rare words or \
+         formal stock phrases. The speaker's name is \
          never written before a reply.",
     ),
     (
@@ -197,6 +203,11 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("harness.summary", "Earlier in this conversation: {summary}"),
     ("harness.recent", "The last things said:"),
     ("harness.context", "[{date} {weekday} {time}, {part}]"),
+    (
+        "harness.context.days",
+        "(yesterday was {yesterday}, the day before {before})",
+    ),
+    ("harness.memory.day", " (noted {day})"),
     ("harness.context.gap", "({user} last spoke {span} ago)"),
     ("span.hours", "{n} hours"),
     ("span.days", "{n} days"),
@@ -214,6 +225,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("daypart.evening", "evening"),
     ("harness.host_offline", "{when}"),
     ("harness.nothing_found", "Nothing came back for this."),
+    // Words that mean the user asks about the speaker's own past; none by default.
+    ("harness.past_cues", ""),
     (
         "harness.low_match",
         "These passages may be unrelated to the question. Use one only if it really fits.",
@@ -233,7 +246,9 @@ const DEFAULTS: &[(&str, &str)] = &[
          within your own role and abilities. Only when the matter is clearly outside what \
          you know or can do, or {user} asks you to find someone or set up a group, you can \
          offer {user} a choice through the host; nothing happens until {user} takes it, and \
-         it sits under your reply, so never say you sent or arranged anything. To point \
+         it sits under your reply, so never say you sent or arranged anything. When {user} \
+         wants you to come along to meet a colleague, or to talk with several people, offer \
+         a group: being in one group is meeting. To point \
          {user} to particular colleagues, end the reply with one final line that starts with \
          {find} followed by their names, separated by commas, at most three, and if you like \
          a bar and what it is about in a few words, which the one {user} goes to is told. \
@@ -338,6 +353,16 @@ const DEFAULTS: &[(&str, &str)] = &[
          schema describes.",
     ),
     (
+        "harness.wrapup.again",
+        "The talk comes to another pause. Step out of the role as before and hand in the \
+         tidy-up again, only what is new since the last one.",
+    ),
+    (
+        "harness.wrapup.again.summary",
+        "The talk moves into a new log. Step out of the role as before and hand in the \
+         tidy-up again, only what is new since the last one, plus a summary of the talk so far.",
+    ),
+    (
         "harness.wrapup.known",
         "Memories already held, which need no second entry:\n{list}",
     ),
@@ -353,8 +378,9 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.opening.commitment",
-        "A promise is due: {text} Act on it within your own means: say it to {user}, or ask \
-         {user} for what you need.",
+        "A promise has come due: {text} You carry it forward now: say plainly what happens next, \
+         do in the talk whatever you can do yourself, and ask {user} for the one step you \
+         need, checking that now suits {user}.",
     ),
     ("harness.opening.birthday", "Today is {user}'s birthday."),
     (
@@ -379,25 +405,24 @@ const DEFAULTS: &[(&str, &str)] = &[
     ),
     (
         "harness.event.ask",
-        "Think of one small thing that happened on board today, {date}, for {user} to hear \
-         about. What it is, is yours to choose: someone's small habit, a bit of good luck, an \
-         understanding between two people, something new in a department, a delivery that \
-         came, a small celebration, or anything else these people would plausibly do; the \
-         more particular and the more like them, the better.\n\
+        "Today, {date}, {part}, in {place}, a small thing happened between the two people \
+         below; tell it to {user}.\n\
          The direction is only this:\n\
-         - The tone is pleasant or calm, easy to read, and it ends settled.\n\
-         - It is one small everyday scene, told in a few natural sentences, the way someone \
-         would mention it over a meal.\n\
-         - Only the people listed below appear, one or two of them; nobody else is named.\n\
-         - The material is only for knowing these people (habits, temperament, how they get \
-         along); its plot, lore and secrets stay in it.\n\
-         - It differs from the recent ones listed: another place, another activity, another \
-         mood.\n\
+         - One ordinary scene in two or three short sentences: who is doing what, and one \
+         thing one of them says, the way someone would mention it over a meal.\n\
+         - How the people act and what lies between them comes from the material, so it \
+         reads like them.\n\
+         - The things in the scene are ordinary on board, and so is what happens; nobody \
+         thinks of it afterwards.\n\
+         - The tone is pleasant or calm, and it ends settled.\n\
+         - Only these two appear; other people, new equipment or creatures, and the plot, \
+         lore and secrets of the material stay out.\n\
+         - It differs from the recent ones listed.\n\
          A reason for a few of them to gather, or people {user} might talk to about it, are \
          welcome and not needed.\n\nMaterial about the people:\n{material}\n\nPeople it \
-         may involve (id: name):\n{people}\n{extra}\n\nReply with a title, the text, the \
-         ids of the people involved, a gathering (its members' ids and its purpose) or null, \
-         and the ids of people {user} might talk to.",
+         may involve (id: name):\n{people}\n{extra}\n\nReply with a title (a few words), \
+         the text, the ids of the people involved, a gathering (its members' ids and its \
+         purpose) or null, and the ids of people {user} might talk to.",
     ),
     ("harness.event.past", "Told lately:\n{past}"),
     (
@@ -416,6 +441,10 @@ const DEFAULTS: &[(&str, &str)] = &[
     // The kinds of unit that tell who a person is, which the event's material is drawn
     // from; none listed means any kind of the person's own units.
     ("events.material", ""),
+    // Places an event may happen in, `|` between them.
+    ("events.places", "the deck"),
+    ("events.who", "{name}, in their own words or file: {about}"),
+    ("events.together", "A scene the two appear in:\n{scene}"),
     ("harness.digest", "Since {user} last looked:"),
     (
         "harness.digest.none",

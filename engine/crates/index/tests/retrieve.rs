@@ -106,6 +106,11 @@ fn params() -> Retrieve {
     Retrieve {
         top_k: 4,
         neighbours: 0,
+        // The grading of material is off; its own tests turn it on.
+        kind_weight: Default::default(),
+        shown_weight: 1.0,
+        floor: 0.0,
+        neighbour_ratio: 0.0,
         ..Retrieve::default()
     }
 }
@@ -443,4 +448,103 @@ fn a_memory_scores_exactly_as_the_unit_it_copies() {
         (unit - memory).abs() < 1e-6 * unit,
         "unit {unit} vs memory {memory}"
     );
+}
+
+#[test]
+fn a_unit_the_session_carries_counts_less_and_returns_only_when_much_closer() {
+    let file = corpus();
+    let graded = |shown_weight| Retrieve {
+        shown_weight,
+        ..params()
+    };
+    let ask = |index: &Index, shown: &[&str]| {
+        let request = SearchRequest {
+            as_person: Some("ann".into()),
+            exclude: shown.iter().map(|s| s.to_string()).collect(),
+            ..SearchRequest::new("lantern")
+        };
+        index.search(&request).unwrap()
+    };
+    let flat = open(&file, graded(1.0));
+    let first = ask(&flat, &[]).hits[0].item.id().to_string();
+    // Weighted as before, the shown unit keeps first place (listed, not returned).
+    let kept = ask(&flat, &[&first]);
+    assert_eq!(kept.excluded, std::slice::from_ref(&first));
+    // Weighted down hard, it falls behind the new material and out of the window's top.
+    let down = open(&file, graded(0.01));
+    let fresh = ask(&down, &[&first]);
+    assert_ne!(fresh.hits[0].item.id(), first);
+    assert!(
+        fresh.hits.iter().all(|h| h.item.id() != first),
+        "a shown unit is never returned in full"
+    );
+}
+
+#[test]
+fn a_weak_trailing_hit_is_cut() {
+    let file = corpus();
+    let request = SearchRequest {
+        as_person: Some("ann".into()),
+        ..SearchRequest::new("lantern")
+    };
+    let all = open(&file, params()).search(&request).unwrap();
+    let cut = open(
+        &file,
+        Retrieve {
+            floor: 0.9,
+            ..params()
+        },
+    )
+    .search(&request)
+    .unwrap();
+    assert!(cut.hits.len() < all.hits.len(), "the trailing ones go");
+    assert_eq!(cut.hits[0].item.id(), all.hits[0].item.id());
+}
+
+#[test]
+fn only_hits_near_the_best_are_widened_to_neighbours() {
+    let file = corpus();
+    let request = SearchRequest {
+        as_person: Some("ann".into()),
+        filters: Filters {
+            persons: vec!["ben".into(), "cid".into()],
+            ..Default::default()
+        },
+        ..SearchRequest::new("lantern boats")
+    };
+    let wide = |ratio| {
+        let index = open(
+            &file,
+            Retrieve {
+                neighbours: 1,
+                neighbour_ratio: ratio,
+                ..params()
+            },
+        );
+        let hits = index.search(&request).unwrap().hits;
+        hits.iter().filter(|h| !h.neighbours.is_empty()).count()
+    };
+    assert!(wide(0.0) >= 1);
+    assert_eq!(wide(1.5), 0, "nothing reaches a ratio above the best");
+}
+
+#[test]
+fn a_kind_weight_lifts_one_shape_over_another() {
+    let file = corpus();
+    let index = open(
+        &file,
+        Retrieve {
+            kind_weight: [("lore".to_owned(), 100.0)].into(),
+            ..params()
+        },
+    );
+    let request = SearchRequest {
+        as_person: Some("ann".into()),
+        ..SearchRequest::new("lantern")
+    };
+    let first = index.search(&request).unwrap().hits[0]
+        .item
+        .id()
+        .to_string();
+    assert!(first == "l1" || first == "l2", "{first}");
 }
