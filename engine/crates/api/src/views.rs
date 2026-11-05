@@ -141,6 +141,106 @@ pub enum InterfaceLanguage {
     English,
 }
 
+/// Where the app keeps its files (the home directory) and where that came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct HomeLocation {
+    /// The folder in use now.
+    pub path: String,
+    /// `~/.dramatis` spelled out, to offer a way back.
+    pub default_path: String,
+    pub source: HomeSource,
+    /// The folder the user chose that could not be used, when that is why `path` is the
+    /// default.
+    pub unavailable: Option<String>,
+    /// Whether the app can change it (not when `$DRAMATIS_HOME` or `--home` fixes it).
+    pub can_change: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HomeSource {
+    Default,
+    Chosen,
+    /// Fixed from outside the app.
+    Fixed,
+}
+
+/// What happens to the files already kept when the home moves. The old folder is never
+/// deleted either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HomeData {
+    /// Copy saves, endpoints, settings, pictures and the corpus to the new folder first.
+    /// The new folder must hold none of them yet.
+    Copy,
+    /// Use the new folder as it is: empty to start fresh, or with an earlier copy in it.
+    Empty,
+}
+
+/// How connections leave this machine.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkMode {
+    /// No proxy, whatever the environment or the system says.
+    Direct,
+    /// The proxy environment variables and, on macOS and Windows, the system settings.
+    #[default]
+    System,
+    /// The proxy below.
+    Manual,
+}
+
+/// The network choice. Read for model calls, update checks and picture downloads alike.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(default)]
+pub struct NetworkSetting {
+    pub mode: NetworkMode,
+    /// `http://`, `https://`, `socks5://` or `socks5h://` and an address, with no login in
+    /// it (the login has its own fields).
+    pub proxy: String,
+    pub username: String,
+    /// Hosts, domains (`.corp`), addresses and networks that skip the proxy, comma
+    /// separated.
+    pub no_proxy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NetworkView {
+    pub setting: NetworkSetting,
+    /// A proxy password is in the keychain. It is never returned.
+    pub has_password: bool,
+}
+
+/// Why an endpoint test failed, in the words a person acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TestFailure {
+    /// The key is missing or refused.
+    Key,
+    /// Nothing answered there, or what answered is not a model endpoint.
+    Address,
+    /// The endpoint does not know the model.
+    Model,
+    /// No answer in time.
+    Timeout,
+    /// Anything else: a rate limit, a server error.
+    Other,
+}
+
+/// The outcome of one short test message. A failed test is a result, not an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct EndpointTest {
+    pub ok: bool,
+    /// From sending to the whole reply (or the failure), in milliseconds.
+    pub latency_ms: u32,
+    /// The first words of the reply; empty when the model answered with nothing to show
+    /// (a reasoning model can spend the small budget thinking) or the test failed.
+    pub reply: String,
+    pub failure: Option<TestFailure>,
+    /// The endpoint's own text for a failure; never a key.
+    pub detail: String,
+}
+
 /// Runtime phrasing from the corpus manifest, keyed like the UI's i18n keys; a missing
 /// key falls back to the UI's neutral default.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]

@@ -3588,3 +3588,293 @@ async fn unlocking_a_save_of_other_versions_goes_to_the_picker_instead_of_openin
             .is_empty()
     );
 }
+
+/// Records the networks it is told to use; the engine's other fetches are not the point.
+#[derive(Default)]
+struct RecNet {
+    seen: Mutex<Vec<NetworkSetting>>,
+    refuse: AtomicBool,
+}
+
+#[async_trait]
+impl NetPort for RecNet {
+    async fn get(&self, _: &str) -> Result<Option<Vec<u8>>, String> {
+        Err("offline".into())
+    }
+    async fn reachable(&self, _: &str) -> bool {
+        false
+    }
+    fn set_network(&self, setting: &NetworkSetting) -> Result<(), String> {
+        if self.refuse.load(Ordering::Relaxed) {
+            return Err("refused".into());
+        }
+        self.seen.lock().unwrap().push(setting.clone());
+        Ok(())
+    }
+}
+
+fn manual(proxy: &str) -> NetworkSetting {
+    NetworkSetting {
+        mode: NetworkMode::Manual,
+        proxy: proxy.into(),
+        username: " me ".into(),
+        no_proxy: "localhost, .corp".into(),
+    }
+}
+
+#[tokio::test]
+async fn the_network_choice_is_checked_applied_at_once_and_kept_without_its_password() {
+    let net = Arc::new(RecNet::default());
+    let keys = Arc::new(MemoryKeys::default());
+    let home = temp_home();
+    let ports = Ports {
+        net: net.clone(),
+        keys: keys.clone(),
+        ..Ports::default()
+    };
+    let e = Engine::open(home.clone(), None, ports).unwrap();
+    // Nothing chosen: the system's way, no password.
+    let view = e.network().await.unwrap();
+    assert_eq!(view.setting.mode, NetworkMode::System);
+    assert!(!view.has_password);
+
+    for (bad, field) in [
+        (manual(""), "proxy"),
+        (manual("proxy.example:8080"), "proxy"),
+        (manual("ftp://proxy.example:8080"), "proxy"),
+        (manual("http://user:pw@proxy.example:8080"), "proxy"),
+        (manual("http://proxy.example:99999"), "proxy"),
+        (manual("http://proxy.example/path"), "proxy"),
+        (manual("http://"), "proxy"),
+        (manual("http://[::1"), "proxy"),
+        (
+            NetworkSetting {
+                username: "a:b".into(),
+                ..manual("http://p.example:1")
+            },
+            "username",
+        ),
+    ] {
+        assert_eq!(
+            e.set_network(bad, Some("pw".into())).await,
+            Err(ApiError::Invalid {
+                field: field.into()
+            })
+        );
+    }
+    // None of that reached the transport, the keychain or the file.
+    assert!(net.seen.lock().unwrap().is_empty());
+    assert!(!keys.has(crate::port::PROXY_ACCOUNT) && !home.root().join("network.toml").exists());
+
+    for good in [
+        "http://127.0.0.1:7890",
+        "https://proxy.example",
+        "socks5://10.0.0.2:1080/",
+        "socks5h://[::1]:1080",
+    ] {
+        e.set_network(manual(good), None).await.unwrap();
+    }
+    e.set_network(manual("http://127.0.0.1:7890"), Some("s3cret".into()))
+        .await
+        .unwrap();
+    let seen = net.seen.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(seen.username, "me");
+    assert_eq!(seen.no_proxy, "localhost, .corp");
+    let view = e.network().await.unwrap();
+    assert_eq!(view.setting, seen);
+    assert!(view.has_password);
+    // The password lives in the keychain only: not in the file, not in the view.
+    let file = std::fs::read_to_string(home.root().join("network.toml")).unwrap();
+    assert!(
+        !file.contains("s3cret") && file.contains("127.0.0.1:7890"),
+        "{file}"
+    );
+    assert!(!format!("{view:?}").contains("s3cret"));
+
+    // A refusal from the transport changes nothing that was kept.
+    net.refuse.store(true, Ordering::Relaxed);
+    assert_eq!(
+        e.set_network(manual("http://other.example:1"), None).await,
+        Err(ApiError::Invalid {
+            field: "proxy".into()
+        })
+    );
+    assert_eq!(e.network().await.unwrap().setting, seen);
+    // Going direct keeps the proxy typed, for the way back; an empty password removes it.
+    net.refuse.store(false, Ordering::Relaxed);
+    let direct = NetworkSetting {
+        mode: NetworkMode::Direct,
+        ..seen.clone()
+    };
+    e.set_network(direct, Some(String::new())).await.unwrap();
+    let view = e.network().await.unwrap();
+    assert_eq!(view.setting.mode, NetworkMode::Direct);
+    assert_eq!(view.setting.proxy, "http://127.0.0.1:7890");
+    assert!(!view.has_password);
+    // A later process reads the same choice from the home.
+    assert_eq!(home.network(), view.setting);
+    std::fs::remove_dir_all(home.root()).unwrap();
+}
+
+/// Answers every test with a fixed outcome and notes what it was asked.
+struct Probing(Mutex<Vec<(String, String)>>);
+
+#[async_trait]
+impl crate::port::LlmPort for Probing {
+    async fn models(&self, _: &Profile) -> ApiResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    async fn voices(&self, _: &Profile, _: &str) -> ApiResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    async fn probe(&self, profile: &Profile, model: &str) -> ApiResult<EndpointTest> {
+        self.0
+            .lock()
+            .unwrap()
+            .push((profile.name.clone(), model.to_owned()));
+        Ok(EndpointTest {
+            ok: true,
+            latency_ms: 12,
+            reply: "ready".into(),
+            failure: None,
+            detail: String::new(),
+        })
+    }
+    async fn speech(
+        &self,
+        _: &Profile,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+    ) -> ApiResult<crate::port::Speech> {
+        Err(ApiError::NotImplemented)
+    }
+}
+
+#[tokio::test]
+async fn the_endpoint_test_needs_a_saved_profile_and_a_model_and_changes_nothing() {
+    let llm = Arc::new(Probing(Mutex::default()));
+    let home = temp_home();
+    let ports = Ports {
+        llm: llm.clone(),
+        ..Ports::default()
+    };
+    let e = Engine::open(home.clone(), None, ports).unwrap();
+    assert_eq!(
+        e.test_endpoint("mine".into(), "m".into()).await,
+        Err(ApiError::NotFound)
+    );
+    e.setup_endpoint(setup("m1")).await.unwrap();
+    let before = std::fs::read(home.endpoints()).unwrap();
+    for model in ["", "  ", "two words"] {
+        assert_eq!(
+            e.test_endpoint("mine".into(), model.into()).await,
+            Err(ApiError::Invalid {
+                field: "model".into()
+            })
+        );
+    }
+    let got = e.test_endpoint("mine".into(), " m1 ".into()).await.unwrap();
+    assert!(got.ok && got.latency_ms == 12 && got.reply == "ready");
+    assert_eq!(
+        *llm.0.lock().unwrap(),
+        [("mine".to_string(), "m1".to_string())]
+    );
+    // A test writes nothing: the endpoints file is as it was.
+    assert_eq!(std::fs::read(home.endpoints()).unwrap(), before);
+    std::fs::remove_dir_all(home.root()).unwrap();
+}
+
+#[tokio::test]
+async fn moving_the_home_copies_or_starts_empty_keeps_the_old_one_and_asks_for_a_reopen() {
+    let reopened = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = reopened.clone();
+    let base = std::env::temp_dir().join(format!("dramatis-relocate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (old, config) = (base.join("old"), base.join("config"));
+    let ports = Ports {
+        restart: Arc::new(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+        }),
+        ..Ports::default()
+    };
+    let home = Home::with_pointer(&old, &config);
+    home.create().unwrap();
+    drop(world::World::open(home.save_path("default")).unwrap());
+    std::fs::write(home.endpoints(), "# mine").unwrap();
+    let e = Engine::open(home.clone(), None, ports.clone()).unwrap();
+    let pointer = |c: &std::path::Path| std::fs::read_to_string(c.join("home")).ok();
+
+    let there = base.join("elsewhere");
+    let shown = e.home_location().await.unwrap();
+    assert!(shown.can_change && shown.source == HomeSource::Default && shown.unavailable.is_none());
+    // A path that is not absolute, or is inside the folder in use, is no place to move to.
+    for bad in ["relative", "", old.join("inside").to_str().unwrap()] {
+        assert_eq!(
+            e.set_home_location(Some(bad.into()), HomeData::Copy).await,
+            Err(ApiError::Invalid {
+                field: "path".into()
+            })
+        );
+    }
+    assert_eq!(pointer(&config), None);
+
+    e.set_home_location(Some(there.display().to_string()), HomeData::Copy)
+        .await
+        .unwrap();
+    assert_eq!(reopened.load(Ordering::Relaxed), 1);
+    assert_eq!(pointer(&config).as_deref(), Some(there.to_str().unwrap()));
+    assert!(there.join("saves/default.sqlite").is_file());
+    assert_eq!(
+        std::fs::read_to_string(there.join("endpoints.toml")).unwrap(),
+        "# mine"
+    );
+    // The old folder is whole.
+    assert!(old.join("saves/default.sqlite").is_file() && old.join("endpoints.toml").is_file());
+    // The next start is there, and the app says so.
+    let next = Home::locate(Some(config.clone()));
+    assert_eq!(next.root(), there);
+    assert_eq!(
+        Engine::open(next, None, ports.clone())
+            .unwrap()
+            .home_location()
+            .await
+            .unwrap()
+            .source,
+        HomeSource::Chosen
+    );
+
+    // Copying onto files already there is refused and changes nothing.
+    assert_eq!(
+        e.set_home_location(Some(there.display().to_string()), HomeData::Copy)
+            .await,
+        Err(ApiError::Exists)
+    );
+    // Starting empty somewhere else leaves the old data where it is.
+    let blank = base.join("blank");
+    e.set_home_location(Some(blank.display().to_string()), HomeData::Empty)
+        .await
+        .unwrap();
+    assert_eq!(pointer(&config).as_deref(), Some(blank.to_str().unwrap()));
+    assert!(std::fs::read_dir(&blank).unwrap().next().is_none());
+    // Back to the default removes the pointer and writes nothing there.
+    e.set_home_location(None, HomeData::Empty).await.unwrap();
+    assert_eq!(pointer(&config), None);
+
+    // A home that is fixed from outside cannot be moved by the app.
+    let fixed = Engine::open(Home::new(base.join("fixed")), None, ports).unwrap();
+    assert!(!fixed.home_location().await.unwrap().can_change);
+    assert_eq!(
+        fixed
+            .set_home_location(Some(there.display().to_string()), HomeData::Empty)
+            .await,
+        Err(ApiError::Invalid {
+            field: "home".into()
+        })
+    );
+    assert_eq!(
+        fixed.choose_home_folder().await,
+        Err(ApiError::NotImplemented)
+    );
+    std::fs::remove_dir_all(&base).unwrap();
+}

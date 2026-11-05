@@ -31,6 +31,7 @@ import type {
   Wording,
 } from "../api";
 import { makeT, type T } from "../i18n";
+import type { SendKey } from "../lib/keys";
 import { NO_FILTER, type RosterFilter } from "../lib/roster";
 
 /** The pages beside chats and the library: each fills the main area. */
@@ -49,7 +50,7 @@ export type Drawer =
 export type ProfileMode = "view" | "edit";
 
 /** The pages of the settings card; `root` is its list. */
-export type SystemPage = "root" | "language" | "quota" | "quiet" | "endpoints" | "saves" | "privacy" | "storage" | "about";
+export type SystemPage = "root" | "language" | "quota" | "quiet" | "endpoints" | "network" | "chat" | "saves" | "privacy" | "storage" | "about";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -145,6 +146,8 @@ export interface State {
   /** Chats kept at the top of the list; local to this window. */
   pinned: ChannelId[];
   theme: Theme;
+  /** Which Enter sends a message; the other adds a line. */
+  sendKey: SendKey;
   listView: ListView;
   /** The list was switched to the archived view by opening an archived conversation, so leaving it switches back. */
   listAuto: boolean;
@@ -223,6 +226,7 @@ export function initialState(): State {
     temp: null,
     pinned: [],
     theme: "system",
+    sendKey: "mod",
     listView: "chats",
     listAuto: false,
     menuOpen: false,
@@ -273,7 +277,8 @@ export type Action =
   | { type: "history"; channel: ChannelId; messages: Message[]; older: boolean; done: boolean; merge?: boolean }
   | { type: "userAvatar"; avatar: MediaFile | null }
   | { type: "temp"; row: ChannelSummary | null }
-  | { type: "prefs"; pinned: ChannelId[]; theme: Theme }
+  | { type: "prefs"; pinned: ChannelId[]; theme: Theme; sendKey: SendKey }
+  | { type: "sendKey"; sendKey: SendKey }
   | { type: "pin"; channel: ChannelId; on: boolean }
   | { type: "theme"; theme: Theme }
   | { type: "listView"; view: ListView }

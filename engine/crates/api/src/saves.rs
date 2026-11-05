@@ -203,6 +203,29 @@ pub fn copy(home: &Home, from: &str, to: &str, key: Option<&str>) -> ApiResult<(
     copied
 }
 
+/// A consistent copy of the save `name` of `home` as the save of the same name in `dest`,
+/// under the same `key`. `dest` must not have it.
+pub fn copy_into(home: &Home, name: &str, dest: &Home, key: Option<&str>) -> ApiResult<()> {
+    let src = path_of(home, name)?;
+    if taken(dest, name) {
+        return Err(ApiError::Exists);
+    }
+    std::fs::create_dir_all(dest.saves()).map_err(io)?;
+    let target = dest.save_path(name);
+    let part = staging(&target);
+    let copied = world::copy_file(&src, &part, key).map_err(world_err);
+    if copied.is_ok() {
+        std::fs::rename(&part, &target).map_err(io)?;
+    }
+    remove_files(&part);
+    copied
+}
+
+/// The names of the saves in `home`.
+pub fn all_names(home: &Home) -> Vec<String> {
+    names(home)
+}
+
 /// Give a save another name (its files move together).
 pub fn rename(home: &Home, from: &str, to: &str) -> ApiResult<()> {
     let src = path_of(home, from)?;

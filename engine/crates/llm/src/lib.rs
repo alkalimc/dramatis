@@ -19,5 +19,5 @@ pub mod types;
 pub use client::{Llm, Retry};
 pub use error::{Error, Result};
 pub use render::{Rendered, auth_headers, render, render_stream};
-pub use transport::{Canned, Http, MemoryTransport, Transport};
+pub use transport::{Canned, Http, MemoryTransport, Network, Proxy, Transport, redact_proxy};
 pub use types::*;

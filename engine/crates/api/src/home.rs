@@ -1,4 +1,10 @@
-//! `$DRAMATIS_HOME` (default `~/.dramatis`): everything the app keeps on this machine.
+//! The home directory (default `~/.dramatis`): everything the app keeps on this machine.
+//!
+//! Where it is, in order: `$DRAMATIS_HOME`; else the folder the user chose in the app,
+//! written as a one-line pointer file `home` in the platform's per-user config folder
+//! ([`config_dir`]: `~/Library/Application Support/dramatis` on macOS, `%APPDATA%\dramatis`
+//! on Windows, `$XDG_CONFIG_HOME/dramatis` or `~/.config/dramatis` elsewhere); else
+//! `~/.dramatis`. The pointer cannot live in the home, which is what it locates.
 //!
 //! ```text
 //! endpoints.toml   profiles and roles (no secrets; keys live in the keychain)
@@ -8,6 +14,7 @@
 //! interface_language  `corpus` or `en`: the words the interface speaks (absent: never chosen)
 //! update_check     `on` or `off`: automatic update checks (absent: off, and not yet asked)
 //! update_cache.json  the last successful update check: time, version, release page
+//! network.toml     optional: direct, system or manual proxy (the proxy's password is in the keychain)
 //! corpus_path      optional: the full path of the corpus the user chose in the app
 //! uploads/         pictures the user chose (theirs, a group's), named by content hash
 //! media/           avatars and read-aloud audio: a bounded cache, never archived
@@ -19,7 +26,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::update::Checked;
-use crate::views::InterfaceLanguage;
+use crate::views::{InterfaceLanguage, NetworkSetting};
 
 /// Overrides the home directory.
 pub const HOME_ENV: &str = "DRAMATIS_HOME";
@@ -27,6 +34,10 @@ pub const HOME_ENV: &str = "DRAMATIS_HOME";
 pub const DEFAULT_SAVE: &str = "default";
 /// Overrides which corpus is opened.
 pub const FOLIO_ENV: &str = "DRAMATIS_FOLIO";
+/// Overrides the folder that holds the pointer to a chosen home (portable setups, tests).
+pub const CONFIG_ENV: &str = "DRAMATIS_CONFIG";
+/// The pointer file in [`config_dir`].
+const POINTER: &str = "home";
 
 /// Which save a process starts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +60,40 @@ pub fn user_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// The platform's per-user config folder for this app, where the pointer to a chosen home
+/// is kept. `$DRAMATIS_CONFIG` replaces it.
+pub fn config_dir() -> Option<PathBuf> {
+    std::env::var_os(CONFIG_ENV)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(platform_config_dir)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_config_dir() -> Option<PathBuf> {
+    user_home().map(|h| {
+        h.join("Library")
+            .join("Application Support")
+            .join("dramatis")
+    })
+}
+
+#[cfg(windows)]
+fn platform_config_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA")
+        .filter(|v| !v.is_empty())
+        .map(|a| PathBuf::from(a).join("dramatis"))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn platform_config_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| user_home().map(|h| h.join(".config")))
+        .map(|d| d.join("dramatis"))
+}
+
 /// What follows a leading `~/` (also `~\` on Windows), if the path starts with one.
 pub fn tilde_rest(path: &str) -> Option<&str> {
     #[cfg(windows)]
@@ -66,23 +111,121 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     }
 }
 
+/// Where a home came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// `~/.dramatis`.
+    Default,
+    /// The folder the user chose in the app.
+    Chosen,
+    /// `$DRAMATIS_HOME` or a path given on the command line: the app cannot move it.
+    Override,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Home {
     root: PathBuf,
+    source: Source,
+    /// Where the pointer to a chosen home is kept; `None`: the home cannot be moved.
+    config: Option<PathBuf>,
+    /// The chosen folder that could not be used (gone, or on a drive that is not there);
+    /// the default home is in use instead.
+    unavailable: Option<PathBuf>,
+}
+
+/// `~/.dramatis`.
+pub fn default_root() -> PathBuf {
+    user_home().unwrap_or_else(|| ".".into()).join(".dramatis")
 }
 
 impl Home {
+    /// A home at exactly `root`, which the app does not move.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            source: Source::Override,
+            config: None,
+            unavailable: None,
+        }
     }
 
-    /// `$DRAMATIS_HOME`, else `~/.dramatis`.
+    /// `$DRAMATIS_HOME`, else the folder the user chose, else `~/.dramatis`.
     pub fn from_env() -> Self {
         if let Some(dir) = std::env::var_os(HOME_ENV).filter(|v| !v.is_empty()) {
             return Self::new(dir);
         }
-        let user = user_home().unwrap_or_else(|| ".".into());
-        Self::new(user.join(".dramatis"))
+        Self::locate(config_dir())
+    }
+
+    /// The home the pointer in `config` names, else `~/.dramatis`. A pointer to a folder
+    /// that is not there leaves the default in use and is remembered in
+    /// [`unavailable`](Self::unavailable): starting empty somewhere else without a word
+    /// would look like lost data.
+    pub fn locate(config: Option<PathBuf>) -> Self {
+        let chosen = config
+            .as_ref()
+            .and_then(|dir| std::fs::read_to_string(dir.join(POINTER)).ok())
+            .map(|text| text.trim().to_owned())
+            .filter(|text| !text.is_empty())
+            .map(|text| expand_tilde(&text));
+        let (root, source, unavailable) = match chosen {
+            Some(path) if path.is_absolute() && path.is_dir() => (path, Source::Chosen, None),
+            Some(path) => (default_root(), Source::Default, Some(path)),
+            None => (default_root(), Source::Default, None),
+        };
+        Self {
+            root,
+            source,
+            config,
+            unavailable,
+        }
+    }
+
+    pub fn source(&self) -> Source {
+        self.source
+    }
+
+    pub fn unavailable(&self) -> Option<&Path> {
+        self.unavailable.as_deref()
+    }
+
+    /// Whether the app may point the next start somewhere else.
+    pub fn can_relocate(&self) -> bool {
+        self.source != Source::Override && self.config.is_some()
+    }
+
+    /// Point the next start at `root`; `None` returns to `~/.dramatis`. The pointer is
+    /// written whole, then renamed in; it is the one file this removes, and only to
+    /// return to the default.
+    pub fn choose_root(&self, root: Option<&Path>) -> io::Result<()> {
+        let config = self
+            .config
+            .as_ref()
+            .filter(|_| self.source != Source::Override)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "the home is fixed"))?;
+        let file = config.join(POINTER);
+        match root {
+            Some(root) => {
+                std::fs::create_dir_all(config)?;
+                let tmp = config.join(format!("{POINTER}.{}.tmp", std::process::id()));
+                std::fs::write(&tmp, root.to_string_lossy().as_bytes())?;
+                std::fs::rename(&tmp, file)
+            }
+            None => match std::fs::remove_file(file) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+        }
+    }
+
+    /// A home at `root` whose pointer lives in `config`; as `locate` would build it.
+    pub fn with_pointer(root: impl Into<PathBuf>, config: impl Into<PathBuf>) -> Self {
+        Self {
+            root: root.into(),
+            source: Source::Default,
+            config: Some(config.into()),
+            unavailable: None,
+        }
     }
 
     /// Create the directory layout (idempotent).
@@ -207,6 +350,19 @@ impl Home {
 
     pub fn set_auto_update_check(&self, auto: bool) -> io::Result<()> {
         self.write_whole("update_check", if auto { "on" } else { "off" }.as_bytes())
+    }
+
+    /// How connections leave this machine; the system's way until the user chooses.
+    pub fn network(&self) -> NetworkSetting {
+        std::fs::read_to_string(self.root.join("network.toml"))
+            .ok()
+            .and_then(|text| toml::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn set_network(&self, setting: &NetworkSetting) -> io::Result<()> {
+        let text = toml::to_string(setting).map_err(io::Error::other)?;
+        self.write_whole("network.toml", text.as_bytes())
     }
 
     /// The last successful update check, if one was kept and is readable.

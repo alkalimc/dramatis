@@ -68,6 +68,15 @@ impl Llm {
         Self { transport, retry }
     }
 
+    /// The same client for a single attempt: a test that asks "does it answer?" wants the
+    /// first failure, not the fourth.
+    pub fn once(&self) -> Self {
+        Self {
+            transport: self.transport.clone(),
+            retry: Retry::none(),
+        }
+    }
+
     pub fn http() -> Result<Self> {
         Ok(Self::new(Arc::new(Http::new()?), Retry::default()))
     }

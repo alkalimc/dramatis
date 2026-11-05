@@ -45,6 +45,8 @@ const PATHS = {
   info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.01",
   copy: "M9 8h11v12H9zM5 16V4h11",
   reply: "M10 6L4 11.5 10 17M4 11.5h9a7 7 0 0 1 7 7",
+  network: "M3 9a13 13 0 0 1 18 0M6 12.5a8.5 8.5 0 0 1 12 0M9 16a4 4 0 0 1 6 0M12 19.5v.01",
+  keyboard: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14.5h8",
   forward: "M14 6l6 5.5-6 5.5M20 11.5h-9a7 7 0 0 0-7 7",
 } as const;
 

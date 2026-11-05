@@ -63,7 +63,7 @@ export function reduce(s: State, a: Action): State {
   switch (a.type) {
     case "reset":
       // The words are the person's, not the world's: they stay while the next world loads.
-      return { ...initialState(), theme: s.theme, pinned: s.pinned, rosterFilter: s.rosterFilter, wording: s.wording, language: s.language, t: s.t };
+      return { ...initialState(), theme: s.theme, sendKey: s.sendKey, pinned: s.pinned, rosterFilter: s.rosterFilter, wording: s.wording, language: s.language, t: s.t };
     case "status":
       return { ...s, status: a.status };
     case "wording":
@@ -300,7 +300,9 @@ export function reduce(s: State, a: Action): State {
     case "temp":
       return { ...s, temp: a.row };
     case "prefs":
-      return { ...s, pinned: a.pinned, theme: a.theme };
+      return { ...s, pinned: a.pinned, theme: a.theme, sendKey: a.sendKey };
+    case "sendKey":
+      return { ...s, sendKey: a.sendKey };
     case "pin":
       return { ...s, pinned: a.on ? [...s.pinned.filter((c) => c !== a.channel), a.channel] : s.pinned.filter((c) => c !== a.channel) };
     case "theme":

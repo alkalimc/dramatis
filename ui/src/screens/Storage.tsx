@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { StorageKind, StorageUsage } from "../api";
 import { useT, type T } from "../i18n";
 import { useActions, useApi } from "../store";
+import { LocationForm } from "./Location";
 
 /** Kilobytes as a short size, in the corpus's own unit words. */
 export function sizeText(t: T, kb: number): string {
@@ -34,11 +35,21 @@ function Donut({ parts, label, centre }: { parts: { kind: StorageKind; pct: numb
   );
 }
 
-/**
- * Advanced, data and storage: what the app keeps on disk by kind, with the caches (which
- * are fetched or made again when needed) clearable. Saves and the corpus are only shown.
- */
+/** Advanced, data and storage: where the files are kept, then what they are. */
 export function StoragePage() {
+  return (
+    <>
+      <LocationForm />
+      <Usage />
+    </>
+  );
+}
+
+/**
+ * What the app keeps on disk by kind, with the caches (which are fetched or made again
+ * when needed) clearable. Saves and the corpus are only shown.
+ */
+function Usage() {
   const t = useT();
   const api = useApi();
   const actions = useActions();

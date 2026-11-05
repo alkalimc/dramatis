@@ -328,6 +328,26 @@ export const commands = {
 	 */
 	clearStorage: (categories: StorageKind[]) => typedError<StorageUsage, ApiError>(__TAURI_INVOKE("clear_storage", { categories })),
 	/**
+	 *  The folder the app keeps its files in (saves, endpoints, settings, pictures, caches,
+	 *  logs, and the corpus when it sits there) and how it was chosen.
+	 */
+	homeLocation: () => typedError<HomeLocation, ApiError>(__TAURI_INVOKE("home_location")),
+	/**
+	 *  Show the system's folder dialog. The path chosen, or `None` when it was cancelled.
+	 *  `NotImplemented` where there is no dialog: the user types the path instead.
+	 */
+	chooseHomeFolder: () => typedError<string | null, ApiError>(__TAURI_INVOKE("choose_home_folder")),
+	/**
+	 *  Keep the app's files in `path` from the next start (`None`: back to `~/.dramatis`),
+	 *  with `data` saying what happens to what is kept now, then ask the front end to open
+	 *  again. The old folder is never deleted. `Invalid` with field `path` (not a usable
+	 *  absolute folder, or this one, or inside it), `home` (fixed from outside the app),
+	 *  `Exists` when `Copy` would overwrite files already there, `Busy` while a turn runs,
+	 *  `Locked` for an encrypted save that was not unlocked in this session. Nothing
+	 *  changes when any of that happens.
+	 */
+	setHomeLocation: (path: string | null, data: HomeData) => typedError<null, ApiError>(__TAURI_INVOKE("set_home_location", { path, data })),
+	/**
 	 *  Open the encrypted save `name` with its password and remember the password until
 	 *  this process ends (a switch to it then needs no asking). `WrongPassword` leaves
 	 *  everything as it was.
@@ -356,6 +376,23 @@ export const commands = {
 	fetchModels: (profile: string) => typedError<string[], ApiError>(__TAURI_INVOKE("fetch_models", { profile })),
 	/**  Store the key in the keychain. It is never returned by any command. */
 	setKey: (profile: string, key: string) => typedError<null, ApiError>(__TAURI_INVOKE("set_key", { profile, key })),
+	/**
+	 *  Send one short message (a few tokens) to `model` on the saved profile and answer
+	 *  what came back or why not, with the time it took. A failure is a result (`ok` false
+	 *  and a class), not an error; `NotFound` is a profile that does not exist and
+	 *  `Invalid` a model that is empty or has spaces. The test is not a turn: it never
+	 *  counts toward the quota meter, and nothing of it is kept.
+	 */
+	testEndpoint: (profile: string, model: string) => typedError<EndpointTest, ApiError>(__TAURI_INVOKE("test_endpoint", { profile, model })),
+	/**  How connections leave this machine (model calls, update checks, picture downloads). */
+	network: () => typedError<NetworkView, ApiError>(__TAURI_INVOKE("network")),
+	/**
+	 *  Change it; later requests follow at once. The password goes to the keychain and
+	 *  nowhere else (`None`: leave it, empty: remove it). `Invalid` with field `proxy`
+	 *  (not an http, https or socks5 address with a host, or one that carries a login),
+	 *  `no_proxy` or `username`. Nothing changes on an error.
+	 */
+	setNetwork: (setting: NetworkSetting, password: string | null) => typedError<null, ApiError>(__TAURI_INVOKE("set_network", { setting, password })),
 	/**
 	 *  `None` switches the role off (read-aloud) or back to the default (host: the chat
 	 *  role); the chat role itself cannot be removed.
@@ -677,6 +714,21 @@ export type EndpointSetup = {
 	key: string | null,
 };
 
+/**  The outcome of one short test message. A failed test is a result, not an error. */
+export type EndpointTest = {
+	ok: boolean,
+	/**  From sending to the whole reply (or the failure), in milliseconds. */
+	latency_ms: number,
+	/**
+	 *  The first words of the reply; empty when the model answered with nothing to show
+	 *  (a reasoning model can spend the small budget thinking) or the test failed.
+	 */
+	reply: string,
+	failure: TestFailure | null,
+	/**  The endpoint's own text for a failure; never a key. */
+	detail: string,
+};
+
 export type EndpointsView = {
 	profiles: ProfileView[],
 	roles: Roles | null,
@@ -733,6 +785,39 @@ export type ForwardTo =
 { kind: "host" } | 
 /**  The user's favorites: kept, nobody answers. */
 { kind: "favorites" };
+
+/**
+ *  What happens to the files already kept when the home moves. The old folder is never
+ *  deleted either way.
+ */
+export type HomeData = 
+/**
+ *  Copy saves, endpoints, settings, pictures and the corpus to the new folder first.
+ *  The new folder must hold none of them yet.
+ */
+"copy" | 
+/**  Use the new folder as it is: empty to start fresh, or with an earlier copy in it. */
+"empty";
+
+/**  Where the app keeps its files (the home directory) and where that came from. */
+export type HomeLocation = {
+	/**  The folder in use now. */
+	path: string,
+	/**  `~/.dramatis` spelled out, to offer a way back. */
+	default_path: string,
+	source: HomeSource,
+	/**
+	 *  The folder the user chose that could not be used, when that is why `path` is the
+	 *  default.
+	 */
+	unavailable: string | null,
+	/**  Whether the app can change it (not when `$DRAMATIS_HOME` or `--home` fixes it). */
+	can_change: boolean,
+};
+
+export type HomeSource = "default" | "chosen" | 
+/**  Fixed from outside the app. */
+"fixed";
 
 /**  An image the user attaches; sent to the model as a multimodal part. */
 export type ImagePart = {
@@ -876,6 +961,37 @@ export type Model = {
 export type MonthDay = {
 	month: number,
 	day: number,
+};
+
+/**  How connections leave this machine. */
+export type NetworkMode = 
+/**  No proxy, whatever the environment or the system says. */
+"direct" | 
+/**  The proxy environment variables and, on macOS and Windows, the system settings. */
+"system" | 
+/**  The proxy below. */
+"manual";
+
+/**  The network choice. Read for model calls, update checks and picture downloads alike. */
+export type NetworkSetting = {
+	mode?: NetworkMode,
+	/**
+	 *  `http://`, `https://`, `socks5://` or `socks5h://` and an address, with no login in
+	 *  it (the login has its own fields).
+	 */
+	proxy?: string,
+	username?: string,
+	/**
+	 *  Hosts, domains (`.corp`), addresses and networks that skip the proxy, comma
+	 *  separated.
+	 */
+	no_proxy?: string,
+};
+
+export type NetworkView = {
+	setting: NetworkSetting,
+	/**  A proxy password is in the keychain. It is never returned. */
+	has_password: boolean,
 };
 
 /**
@@ -1179,6 +1295,19 @@ export type StorageUsage = {
 };
 
 export type Target = { kind: "person"; id: PersonId } | { kind: "channel"; id: ChannelId };
+
+/**  Why an endpoint test failed, in the words a person acts on. */
+export type TestFailure = 
+/**  The key is missing or refused. */
+"key" | 
+/**  Nothing answered there, or what answered is not a model endpoint. */
+"address" | 
+/**  The endpoint does not know the model. */
+"model" | 
+/**  No answer in time. */
+"timeout" | 
+/**  Anything else: a rate limit, a server error. */
+"other";
 
 /**  The intensity slider: the only quota control. */
 export type Tier = "low" | "middle" | "high" | "extra_high" | "max" | 

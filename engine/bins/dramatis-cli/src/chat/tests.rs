@@ -277,6 +277,7 @@ async fn rig_setup(
             password: None,
             restart: None,
             choose_file: None,
+            choose_folder: None,
             open_url: None,
         },
     )

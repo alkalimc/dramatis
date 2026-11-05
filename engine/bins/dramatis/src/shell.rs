@@ -308,6 +308,11 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
         Arc::new(move || {
             let (app, home) = (app.clone(), home.clone());
             tauri::async_runtime::spawn(async move {
+                // The user moved the home: a new process starts from the pointer, so the
+                // webview's file scope, the tray and the watchers all follow it.
+                if Home::from_env().root() != home.root() {
+                    app.restart();
+                }
                 let folio = home.resolve_folio();
                 match open(&app, home, folio) {
                     Ok(()) => reload(&app),
@@ -327,10 +332,21 @@ pub fn open(app: &AppHandle, home: Home, folio: Option<PathBuf>) -> ApiResult<()
                 .map(|p| p.display().to_string())
         })
     };
+    let folder = {
+        let app = app.clone();
+        Arc::new(move || {
+            app.dialog()
+                .file()
+                .blocking_pick_folder()
+                .and_then(|p| p.into_path().ok())
+                .map(|p| p.display().to_string())
+        })
+    };
     let options = Options {
         password,
         restart: Some(again),
         choose_file: Some(dialog),
+        choose_folder: Some(folder),
         open_url: Some(Arc::new(open_in_browser)),
         ..Options::default()
     };
@@ -420,8 +436,8 @@ pub fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(AwayItem::default());
     let home = Home::from_env();
     // The webview may read the cached media and the pictures the user chose, and nothing
-    // else; the home can be moved by `DRAMATIS_HOME`, so the scope
-    // is not static.
+    // else; the home can be moved (`DRAMATIS_HOME`, or the folder chosen in the app), so
+    // the scope is not static.
     let scope = app.asset_protocol_scope();
     for dir in [home.media(), home.uploads()] {
         // The scope canonicalizes its paths, so they must exist (a fresh home has none of them yet).

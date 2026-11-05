@@ -14,7 +14,7 @@ const DIALOGS = new Set(["alert", "confirm", "prompt"]);
 const LOCALE_CALLS = /^toLocale(Date|Time)?String$/;
 const FORMATTERS = new Set(["DateTimeFormat", "NumberFormat", "RelativeTimeFormat", "ListFormat", "PluralRules"]);
 /** Literal text that may stand as it is: example values, not prose. */
-const ALLOW = new Set<string>(["~/corpus/archive.folio", "https://api.example.com/v1"]);
+const ALLOW = new Set<string>(["~/corpus/archive.folio", "https://api.example.com/v1", "http://127.0.0.1:7890", "~/dramatis"]);
 
 const hasWords = (s: string) => /\p{L}/u.test(s) && !ALLOW.has(s.trim());
 

@@ -5,7 +5,9 @@ import { Icon, type IconName } from "../ui/Icon";
 import { UserAvatar } from "../ui/Avatar";
 import { AboutPage } from "./About";
 import { EndpointsPage } from "./Endpoints";
+import { ChatPage, comboText } from "./ChatSettings";
 import { LanguagePage } from "./Language";
+import { NetworkPage } from "./Network";
 import { QuietSection, QuotaSection } from "./Quota";
 import { PrivacyPage } from "./Privacy";
 import { SavesPage } from "./Saves";
@@ -20,7 +22,10 @@ const GROUPS: PageDef[][] = [
     { page: "quota", icon: "gauge" },
     { page: "quiet", icon: "bell" },
   ],
-  [{ page: "endpoints", icon: "server" }],
+  [
+    { page: "endpoints", icon: "server" },
+    { page: "network", icon: "network" },
+  ],
   [
     { page: "saves", icon: "bookmark" },
     { page: "storage", icon: "archive" },
@@ -28,6 +33,7 @@ const GROUPS: PageDef[][] = [
   ],
   [
     { page: "language", icon: "language" },
+    { page: "chat", icon: "keyboard" },
     { page: "about", icon: "info" },
   ],
 ];
@@ -52,6 +58,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
   const tier = useStore((s) => s.quota?.tier);
   const newer = useStore((s) => s.update?.newer ?? false);
   const language = useStore((s) => s.language);
+  const sendKey = useStore((s) => s.sendKey);
   const save = useCurrentSave();
   const close = () => dispatch({ type: "drawer", drawer: null });
   const go = (p: SystemPage) => dispatch({ type: "drawer", drawer: { kind: "system", tab: p } });
@@ -59,7 +66,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
   const status = statusLine(t, settings?.user_name ?? null);
   const label = (p: Exclude<SystemPage, "root">) => t(`settings.page.${p}`);
   const valueOf = (p: Exclude<SystemPage, "root">) =>
-    p === "quota" && tier ? t(`quota.tier.${tier}`) : p === "saves" ? (save ?? undefined) : p === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : p === "about" && newer ? t("menu.update") : undefined;
+    p === "quota" && tier ? t(`quota.tier.${tier}`) : p === "saves" ? (save ?? undefined) : p === "language" ? t(language === "english" ? "lang.english" : "lang.corpus") : p === "chat" ? (sendKey === "enter" ? t("chat.send.value.enter") : comboText(t)) : p === "about" && newer ? t("menu.update") : undefined;
 
   return (
     <Dialog title={t("menu.settings")} onClose={close} className="settings-card" hideTitle>
@@ -99,6 +106,8 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           {page === "quiet" && <QuietSection />}
           {page === "language" && <LanguagePage />}
           {page === "endpoints" && <EndpointsPage />}
+          {page === "network" && <NetworkPage />}
+          {page === "chat" && <ChatPage />}
           {page === "saves" && <SavesPage />}
           {page === "privacy" && <PrivacyPage />}
           {page === "storage" && <StoragePage />}

@@ -11,6 +11,11 @@ const INVALID: Record<string, Key> = {
   base_url: "error.invalid.base_url",
   model: "error.invalid.model",
   host_model: "error.invalid.host_model",
+  proxy: "error.invalid.proxy",
+  username: "error.invalid.username",
+  no_proxy: "error.invalid.no_proxy",
+  path: "error.invalid.path",
+  home: "error.invalid.home",
 };
 
 export function errorText(e: Failure, t: T, names: Names): { text: string; detail?: string } {

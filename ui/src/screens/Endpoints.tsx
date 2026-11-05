@@ -1,9 +1,10 @@
 import { useId, useState } from "react";
 import { type EndpointsView, type ProfileView, type Role, type RoleKind } from "../api";
 import { useT } from "../i18n";
-import { useActions, useApi, useStore } from "../store";
+import { useActions, useApi, useDispatch, useStore } from "../store";
 import { InlineError } from "../ui/ErrorBar";
 import { EndpointEditor, isLocal } from "./EndpointEditor";
+import { EndpointTester } from "./EndpointTest";
 
 const REASONING = ["low", "medium", "high"] as const;
 const KINDS = ["chat", "host", "tts"] as const;
@@ -14,6 +15,8 @@ export function EndpointsPage() {
   const view = useStore((s) => s.endpoints);
   const loadError = useStore((s) => s.loadErrors.endpoints);
   const actions = useActions();
+  const dispatch = useDispatch();
+  const toNetwork = () => dispatch({ type: "drawer", drawer: { kind: "system", tab: "network" } });
   const [adding, setAdding] = useState(false);
   // A profile the add form has already written, while that form is still open.
   const [draft, setDraft] = useState<string | null>(null);
@@ -37,7 +40,7 @@ export function EndpointsPage() {
     <section className="endpoints" aria-labelledby="endpoints-h">
       <h3 id="endpoints-h">{t("endpoints.title")}</h3>
       {loadError && <InlineError error={loadError} onRetry={() => void actions.refreshEndpoints()} />}
-      {listed.length > 0 && <Roles view={view} />}
+      {listed.length > 0 && <Roles view={view} onNetwork={toNetwork} />}
       <section className="profiles-section" aria-labelledby="endpoints-list-h">
         <header className="row">
           <h4 id="endpoints-list-h">{t("endpoints.list")}</h4>
@@ -51,12 +54,12 @@ export function EndpointsPage() {
         {open && (
           <div className="card add">
             {view.profiles.length === 0 && <p className="muted">{t("endpoints.empty")}</p>}
-            <EndpointEditor view={view} focus={adding} onSaved={setDraft} onDone={close} onCancel={view.profiles.length > 0 ? close : undefined} />
+            <EndpointEditor view={view} focus={adding} onSaved={setDraft} onNetwork={toNetwork} onDone={close} onCancel={view.profiles.length > 0 ? close : undefined} />
           </div>
         )}
         <ul className="profiles">
           {listed.map((p) => (
-            <ProfileCard key={p.profile.name} view={p} all={view} />
+            <ProfileCard key={p.profile.name} view={p} all={view} onNetwork={toNetwork} />
           ))}
         </ul>
       </section>
@@ -64,7 +67,7 @@ export function EndpointsPage() {
   );
 }
 
-function ProfileCard({ view, all }: { view: ProfileView; all: EndpointsView }) {
+function ProfileCard({ view, all, onNetwork }: { view: ProfileView; all: EndpointsView; onNetwork: () => void }) {
   const t = useT();
   const api = useApi();
   const actions = useActions();
@@ -95,7 +98,7 @@ function ProfileCard({ view, all }: { view: ProfileView; all: EndpointsView }) {
         ))}
       </header>
       {editing ? (
-        <EndpointEditor view={all} profile={view} focus onDone={() => setEditing(false)} onCancel={() => setEditing(false)} />
+        <EndpointEditor view={all} profile={view} focus onNetwork={onNetwork} onDone={() => setEditing(false)} onCancel={() => setEditing(false)} />
       ) : (
         <>
           <p className="muted small url">{p.base_url}</p>
@@ -147,7 +150,7 @@ const parse = (v: string) => {
 };
 
 /** One row per role the user may set; the maintainer-only persona role never shows. */
-function Roles({ view }: { view: EndpointsView }) {
+function Roles({ view, onNetwork }: { view: EndpointsView; onNetwork: () => void }) {
   const t = useT();
   const api = useApi();
   const actions = useActions();
@@ -177,6 +180,7 @@ function Roles({ view }: { view: EndpointsView }) {
             <th scope="col">{t("endpoints.role")}</th>
             <th scope="col">{t("endpoints.model")}</th>
             <th scope="col">{t("endpoints.reasoning")}</th>
+            <th scope="col">{t("endpoints.test.col")}</th>
           </tr>
         </thead>
         <tbody>
@@ -224,6 +228,15 @@ function Roles({ view }: { view: EndpointsView }) {
                         </option>
                       ))}
                     </select>
+                  ) : (
+                    <span className="muted" aria-hidden="true">
+                      –
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {current && kind !== "tts" ? (
+                    <EndpointTester profile={current.profile} model={current.model} label={t("endpoints.test.of", { role: label })} onNetwork={onNetwork} />
                   ) : (
                     <span className="muted" aria-hidden="true">
                       –

@@ -42,7 +42,7 @@ impl Engine {
     }
 
     fn check(profile: &Profile) -> ApiResult<()> {
-        if profile.name.trim().is_empty() {
+        if profile.name.trim().is_empty() || profile.name == crate::port::PROXY_ACCOUNT {
             return Err(invalid("name"));
         }
         let url = profile.base_url.trim();

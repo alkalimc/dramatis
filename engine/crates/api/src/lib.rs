@@ -27,6 +27,7 @@ pub mod media;
 pub mod meta;
 pub mod params;
 pub mod port;
+pub mod relocate;
 pub mod saves;
 pub mod tools;
 pub mod types;

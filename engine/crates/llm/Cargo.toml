@@ -17,7 +17,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { version = "=1.53.1", features = ["time"] }
 # Platform TLS, like the rest of the workspace; only the byte transport lives here.
-reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls", "http2"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls", "http2", "socks", "system-proxy"] }
 # Apple keychain, and Windows Credential Manager below. Elsewhere keyring falls back to
 # its in-memory mock store, which keeps the workspace building on CI hosts.
 keyring = { version = "=3.6.3", features = ["apple-native"] }
