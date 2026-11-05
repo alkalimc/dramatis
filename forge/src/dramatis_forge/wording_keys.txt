@@ -608,6 +608,8 @@ events.label.title
 events.material
 events.per_day
 events.places
+events.tellings
+events.titles
 events.together
 events.who
 favorites.empty
