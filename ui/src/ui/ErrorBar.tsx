@@ -16,6 +16,9 @@ const INVALID: Record<string, Key> = {
   no_proxy: "error.invalid.no_proxy",
   path: "error.invalid.path",
   home: "error.invalid.home",
+  busy: "error.busy",
+  regenerate_latest: "error.invalid.regenerate_latest",
+  regenerate_question: "error.invalid.regenerate_question",
 };
 
 export function errorText(e: Failure, t: T, names: Names): { text: string; detail?: string } {

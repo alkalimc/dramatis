@@ -499,6 +499,20 @@ test("Write again asks the engine for the latest reply once", async () => {
   expect(again).toHaveBeenCalledWith("dm:oren", "o2");
 });
 
+test("Write again that the engine refuses says why in plain words", async () => {
+  const user = userEvent.setup();
+  const { container, api, store } = await withOnly("dm:oren", [
+    { ...base, channel: "dm:oren", id: "o1", author: { kind: "user" }, text: "Hi." },
+    { ...base, channel: "dm:oren", id: "o2", text: "A line." },
+  ]);
+  vi.spyOn(api.commands, "regenerate").mockResolvedValue({ status: "error", error: { code: "invalid", field: "regenerate_question" } });
+  await user.pointer({ keys: "[MouseRight]", target: container.querySelector("#m-o2")! });
+  await user.click(await screen.findByRole("menuitem", { name: "Write again" }));
+  await waitFor(() => expect(store.getState().error).toEqual({ code: "invalid", field: "regenerate_question" }));
+  // The old reply stays: nothing was taken out.
+  expect(container.querySelector("#m-o2")).not.toBeNull();
+});
+
 test("Reply from the menu opens the reply bar and the focus goes to the box", async () => {
   const user = userEvent.setup();
   const { container, store } = await withHistory("dm:mira", [{ ...base, id: "m1", text: "Hello." }]);

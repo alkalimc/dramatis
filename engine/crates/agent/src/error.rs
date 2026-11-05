@@ -75,6 +75,10 @@ pub enum Error {
     /// A command or tool argument that cannot be honoured.
     #[error("invalid: {0}")]
     Invalid(String),
+
+    /// A reply that cannot be written again; the field names the reason for the app.
+    #[error("cannot write this reply again: {0}")]
+    NotRegenerable(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -141,6 +145,9 @@ impl From<Error> for ApiError {
             },
             Error::Invalid(_) => ApiError::Invalid {
                 field: "request".into(),
+            },
+            Error::NotRegenerable(field) => ApiError::Invalid {
+                field: field.into(),
             },
             Error::Busy => ApiError::Invalid {
                 field: "busy".into(),

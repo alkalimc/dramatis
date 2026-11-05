@@ -7,7 +7,7 @@ use std::time::Duration;
 use api::endpoints::WireApi;
 use common::*;
 use serde_json::json;
-use world::{ChannelId, MessageId, settings};
+use world::{ChannelId, MessageId, channel, settings};
 
 fn direct(e: &Env, who: &str) -> ChannelId {
     e.agent.open_direct(&p(who)).unwrap()
@@ -199,4 +199,179 @@ async fn a_failed_try_brings_the_old_reply_back() {
     let back = id_of(&e, ch, "The first reply.");
     e.agent.regenerate(ch, back).await.unwrap();
     assert_eq!(texts(&e, ch), ["hello there", "The second reply."]);
+}
+
+/// The owner's setup: chat on a model whose tools are emulated in text.
+fn emulated() -> Env {
+    let mut ep = endpoints(WireApi::Chat, true, None);
+    ep.profiles[0].models[0].native_tools = Some(false);
+    env_with(ep, |_| {})
+}
+
+const WRAPUP_DOC: &str = r#"{"facts":[],"hurt":{},"summary":""}"#;
+
+async fn again(e: &Env, ch: ChannelId, text: &str, next: &str) {
+    let old = id_of(e, ch, text);
+    e.fake.push([say(next)]);
+    e.agent
+        .regenerate(ch, old)
+        .await
+        .unwrap_or_else(|err| panic!("regenerating {text:?}: {err:?}"));
+    assert_eq!(texts(e, ch).last().unwrap(), next);
+}
+
+#[tokio::test]
+async fn a_reply_on_emulated_tools_is_written_again() {
+    let e = emulated();
+    let ch = direct(&e, "ann");
+    e.fake.push([say("First try.")]);
+    e.agent.send(ch, "hello there", None).await.unwrap();
+    again(&e, ch, "First try.", "Second try.").await;
+    again(&e, ch, "Second try.", "Third try.").await;
+}
+
+#[tokio::test]
+async fn a_reply_is_written_again_after_the_conversation_was_wrapped_up() {
+    for emulated in [false, true] {
+        let mut ep = endpoints(WireApi::Chat, true, None);
+        if emulated {
+            ep.profiles[0].models[0].native_tools = Some(false);
+        }
+        let e = env_with(ep, |_| {});
+        let ch = direct(&e, "ann");
+        e.fake.push([say("First try."), say(WRAPUP_DOC)]);
+        e.agent.send(ch, "hello there", None).await.unwrap();
+        if emulated {
+            e.agent.wrapup(ch).await.unwrap();
+        } else {
+            e.fake
+                .push([call("wrapup", json!({"facts": [], "summary": ""}))]);
+            e.agent.wrapup(ch).await.unwrap();
+        }
+        again(&e, ch, "First try.", "Second try.").await;
+        let sent = last_request(&e);
+        assert!(
+            sent.contains("hello there") && !sent.contains("First try."),
+            "{sent}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_reply_is_written_again_after_a_resend_and_after_a_delete() {
+    let e = emulated();
+    let ch = direct(&e, "ann");
+    e.fake.push([say("One."), say("Two.")]);
+    e.agent.send(ch, "first", None).await.unwrap();
+    e.agent.send(ch, "second", None).await.unwrap();
+    // Delete the earlier reply; the latest one can still be written again.
+    let one = id_of(&e, ch, "One.");
+    e.agent.delete_message(ch, one).unwrap();
+    again(&e, ch, "Two.", "Two again.").await;
+    // Take the user's last words back and send them anew.
+    let second = id_of(&e, ch, "second");
+    let words = e.agent.rewind(ch, second).unwrap();
+    e.fake.push([say("Fresh.")]);
+    e.agent.send(ch, &words, None).await.unwrap();
+    again(&e, ch, "Fresh.", "Fresh again.").await;
+}
+
+#[tokio::test]
+async fn a_group_reply_is_written_again() {
+    let e = emulated();
+    let g = e
+        .agent
+        .create_group(&[p("ann"), p("bo")], Some("smithing"))
+        .unwrap();
+    e.fake.push([say("Bo: steel from the north.")]);
+    e.agent
+        .send(g, "where does the steel come from?", None)
+        .await
+        .unwrap();
+    let first = e.agent.history(g, None, 5).unwrap().pop().unwrap().text;
+    again(&e, g, &first, "from the east.").await;
+}
+
+#[tokio::test]
+async fn the_hosts_reply_is_written_again_also_after_a_tool_call() {
+    let e = emulated();
+    let host = e.agent.with_world(|w| channel::host(w).unwrap());
+    e.fake.push([
+        call(
+            "set_mode",
+            json!({"target_kind": "person", "target": "ann", "mode": "enabled"}),
+        ),
+        say("Ann is enabled."),
+    ]);
+    e.agent.send(host, "please enable ann", None).await.unwrap();
+    again(&e, host, "Ann is enabled.", "Done, Ann is enabled.").await;
+}
+
+#[tokio::test]
+async fn a_wrapup_an_older_version_left_in_the_log_is_not_taken_for_the_question() {
+    for emulated in [false, true] {
+        let mut ep = endpoints(WireApi::Chat, true, None);
+        if emulated {
+            ep.profiles[0].models[0].native_tools = Some(false);
+        }
+        let e = env_with(ep, |_| {});
+        let ch = direct(&e, "ann");
+        e.fake.push([say("First try.")]);
+        e.agent.send(ch, "hello there", None).await.unwrap();
+        // What a build without the cut-off left at the end of the segment.
+        e.agent.with_world(|w| {
+            let seg = world::log::current(w, ch).unwrap().unwrap().id;
+            let put = |role, json: serde_json::Value| {
+                world::log::append(w, seg, role, json.to_string().as_bytes(), T0).unwrap();
+            };
+            put(
+                world::log::Role::User,
+                json!({"role": "user", "parts": [{"part": "text", "text":
+                    "The conversation is closing. Step out of the scene and do not answer as the character. Give only the wrap-up."}]}),
+            );
+            put(
+                world::log::Role::Assistant,
+                json!({"role": "assistant", "parts": [{"part": "text", "text": WRAPUP_DOC}]}),
+            );
+        });
+        again(&e, ch, "First try.", "Second try.").await;
+        let sent = last_request(&e);
+        assert!(
+            sent.contains("hello there") && !sent.contains("First try."),
+            "{sent}"
+        );
+        assert!(!sent.contains("The conversation is closing"), "{sent}");
+    }
+}
+
+#[tokio::test]
+async fn a_reply_is_written_again_after_the_log_rolled_over() {
+    let e = emulated();
+    let ch = direct(&e, "ann");
+    e.fake.push([say("First try.")]);
+    e.agent.send(ch, "hello there", None).await.unwrap();
+    e.agent
+        .with_world(|w| settings::set_user_name(w, Some("Rhea")).unwrap());
+    e.fake
+        .push([say(r#"{"facts":[],"hurt":{},"summary":"tea"}"#)]);
+    e.agent.on_rename().await.unwrap();
+    assert_eq!(segments(&e.agent, ch).len(), 2);
+    let block = segments(&e.agent, ch)[1].prefix_c.clone();
+    // A failed try leaves the block and the reply as they were.
+    let old = id_of(&e, ch, "First try.");
+    e.fake.push([Reply::Fail("boom".into())]);
+    assert!(e.agent.regenerate(ch, old).await.is_err());
+    assert_eq!(texts(&e, ch), ["hello there", "First try."]);
+    assert_eq!(segments(&e.agent, ch)[1].prefix_c, block);
+    let kept = e.agent.with_world(|w| {
+        let seg = world::log::current(w, ch).unwrap().unwrap().id;
+        world::log::entries(w, seg).unwrap().len()
+    });
+    assert_eq!(kept, 0);
+    again(&e, ch, "First try.", "Second try.").await;
+    let sent = last_request(&e);
+    assert!(
+        sent.contains("hello there") && !sent.contains("First try."),
+        "{sent}"
+    );
 }

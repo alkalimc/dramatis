@@ -769,6 +769,8 @@ export const en = {
   "error.invalid.no_proxy": "That list of addresses to skip cannot be used.",
   "error.invalid.path": "That folder cannot be used. Give a full path to a folder you can write to that is not inside the current one.",
   "error.invalid.home": "The folder is fixed from outside the app (DRAMATIS_HOME or --home), so it cannot be changed here.",
+  "error.invalid.regenerate_latest": "Only the latest reply of a person can be written again, and only while nothing was said after it.",
+  "error.invalid.regenerate_question": "This reply cannot be written again because the words it answered are no longer at hand.",
   "error.exists": "That name is already taken.",
   "error.open_elsewhere": "This save is open in another window. Close it there first.",
   "error.locked": "This save is encrypted. Enter its password first.",

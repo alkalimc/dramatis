@@ -39,6 +39,8 @@ struct Taken {
     entries: Vec<log::Entry>,
     seeds: Vec<i64>,
     segment: SegmentId,
+    /// The segment's opening block as it was, when the question had to be taken from it.
+    block: Option<Vec<u8>>,
 }
 
 impl Agent {
@@ -154,7 +156,7 @@ impl Agent {
                 || api::meta::MessageMeta::of(m.attachment.as_ref()).service
                 || message::last(&conn, ch)?.is_none_or(|l| l.id != id)
             {
-                return Err(Error::Invalid("not the latest reply".into()));
+                return Err(Error::NotRegenerable("regenerate_latest"));
             }
             let before = message::history(&conn, ch, Some(id), 1)?.pop();
             (m, before, c.kind)
@@ -173,7 +175,7 @@ impl Agent {
         if let Decision::Exhausted { release_at } = self.decide(CallKind::UserInitiated)? {
             return Err(Error::QuotaExhausted { release_at });
         }
-        let taken = self.take(&m, seeds)?;
+        let taken = self.take(&m, before.as_ref(), seeds)?;
         self.emit(Event::MessageRemoved(MessageRemoved {
             channel: view::channel_id(ch),
             message: view::message_id(id),
@@ -231,17 +233,33 @@ impl Agent {
     }
 
     /// Cut `m` and the log entries after the entry that asked for it out of the channel.
-    fn take(&self, m: &message::Message, seeds: Vec<i64>) -> Result<Taken> {
-        let conn = self.db();
-        let seg = log::current(&conn, m.channel)?
-            .ok_or_else(|| Error::Invalid("nothing to answer".into()))?
-            .id;
-        let entries = log::entries(&conn, seg)?;
-        let asked = entries
-            .iter()
-            .rposition(|e| e.role == Role::User)
-            .ok_or_else(|| Error::Invalid("the question is not in the log any more".into()))?;
+    fn take(
+        &self,
+        m: &message::Message,
+        before: Option<&message::Message>,
+        seeds: Vec<i64>,
+    ) -> Result<Taken> {
+        let (seg, entries) = {
+            let conn = self.db();
+            let seg = log::current(&conn, m.channel)?
+                .ok_or_else(|| Error::Invalid("nothing to answer".into()))?
+                .id;
+            (seg, log::entries(&conn, seg)?)
+        };
+        // A wrap-up request an older build left behind is not the question; it goes with
+        // the old reply.
+        let mut asked = None;
+        for (i, e) in entries.iter().enumerate().rev() {
+            if e.role == Role::User && !self.is_wrapup_request(seg, &e.bytes)? {
+                asked = Some(i);
+                break;
+            }
+        }
+        let Some(asked) = asked else {
+            return self.take_from_block(m, before, seg, seeds);
+        };
         let removed: Vec<log::Entry> = entries[asked + 1..].to_vec();
+        let conn = self.db();
         if let Some(first) = removed.first() {
             log::truncate(&conn, seg, first.seq)?;
         }
@@ -251,6 +269,51 @@ impl Agent {
             entries: removed,
             seeds,
             segment: seg,
+            block: None,
+        })
+    }
+
+    /// The reply sits in the opening block of a segment that has no turn of its own yet
+    /// (the log rolled over after it was written): both it and the user's words it
+    /// answered leave the block, and those words are asked again as the segment's first
+    /// entry.
+    fn take_from_block(
+        &self,
+        m: &message::Message,
+        before: Option<&message::Message>,
+        seg: SegmentId,
+        seeds: Vec<i64>,
+    ) -> Result<Taken> {
+        let asked = before
+            .filter(|b| b.author == Actor::User)
+            .ok_or(Error::NotRegenerable("regenerate_question"))?;
+        let block = log::current(&self.db(), m.channel)?
+            .map(|s| s.prefix_c)
+            .unwrap_or_default();
+        let text = String::from_utf8_lossy(&block).into_owned();
+        let cut = without_recent(&text, &m.text)
+            .and_then(|t| without_recent(&t, &asked.text))
+            .ok_or(Error::NotRegenerable("regenerate_question"))?;
+        log::replace_prefix_c(&self.db(), seg, cut.as_bytes())?;
+        let posted = crate::flows::Posted {
+            channel: m.channel,
+            message: asked.id,
+            text: asked.text.clone(),
+            image: None,
+            authorized: false,
+            reply_to: asked.reply_to,
+        };
+        if let Err(e) = self.user_entry(seg, &posted, &[]) {
+            log::replace_prefix_c(&self.db(), seg, &block)?;
+            return Err(e);
+        }
+        message::remove(&self.db(), m.id)?;
+        Ok(Taken {
+            message: m.clone(),
+            entries: Vec::new(),
+            seeds,
+            segment: seg,
+            block: Some(block),
         })
     }
 
@@ -260,6 +323,10 @@ impl Agent {
         let m = &taken.message;
         let conn = self.db();
         if log::current(&conn, m.channel)?.is_some_and(|s| s.id == taken.segment) {
+            if let Some(block) = &taken.block {
+                log::truncate(&conn, taken.segment, 0)?;
+                log::replace_prefix_c(&conn, taken.segment, block)?;
+            }
             for e in &taken.entries {
                 log::append(&conn, taken.segment, e.role, &e.bytes, e.at)?;
             }
