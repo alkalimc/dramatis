@@ -96,11 +96,12 @@ pub struct SearchRequest {
     /// Whose knowledge weights the ranking, and who may receive memories. `None` is the
     /// maintainer surface: every unit unweighted, no memories.
     pub as_person: Option<PersonId>,
-    /// Units (and memory ids) already in the session. One that ranks inside the window
-    /// keeps its place but is not returned in full: it is listed in
-    /// [`SearchResponse::excluded`] so the caller can cite it by id. The window is not
-    /// refilled from further down, since a follow-up on the same topic would otherwise
-    /// pull in ever weaker material each turn.
+    /// Units (and memory ids) already in the session. Their score is scaled by
+    /// `retrieve.shown_weight`, so they come back only when much closer to the question
+    /// than anything new. One that still ranks inside the window is not returned in full:
+    /// it is listed in [`SearchResponse::excluded`] so the caller can cite it by id. The
+    /// window is not refilled from further down, since a follow-up on the same topic would
+    /// otherwise pull in ever weaker material each turn.
     pub exclude: Vec<ChunkId>,
     pub rerank: RerankPolicy,
 }
@@ -251,6 +252,14 @@ pub struct People {
 }
 
 impl People {
+    /// Keep the people scoring at least `ratio` of the best one; the best always stays.
+    #[must_use]
+    pub fn most_relevant(mut self, ratio: f64) -> Self {
+        let best = self.persons.first().map_or(0.0, |p| p.score);
+        self.persons.retain(|p| p.score >= best * ratio);
+        self
+    }
+
     pub fn get(&self, person: &str) -> Option<&PersonMatch> {
         self.persons.iter().find(|p| p.person == person)
     }
@@ -439,7 +448,7 @@ impl Index {
                 for (unit, source) in units.into_iter().zip(sources) {
                     let unweighted = score[&unit.ord];
                     ranked.push(Hit {
-                        score: unweighted * self.weight(source),
+                        score: unweighted * self.weight(source) * self.kind(&unit),
                         item: Item::Unit(unit),
                         source: Some(source),
                         unweighted,
@@ -459,6 +468,17 @@ impl Index {
             &self.params.confidence,
         );
 
+        // What the session already carries counts less: only a much closer match is worth
+        // the same place again. The maintainer surface has no session to weigh.
+        if request.as_person.is_some() && !request.exclude.is_empty() {
+            let shown: HashSet<&str> = request.exclude.iter().map(String::as_str).collect();
+            for hit in &mut ranked {
+                if shown.contains(hit.item.id()) {
+                    hit.score *= self.params.shown_weight;
+                }
+            }
+        }
+
         // Deterministic order: score, then unweighted score, then id.
         ranked.sort_by(|a, b| {
             b.score
@@ -467,13 +487,18 @@ impl Index {
                 .then_with(|| a.item.id().cmp(b.item.id()))
         });
         ranked.truncate(top_k);
+        // Quality: what trails far behind the best is not worth a place.
+        let best = ranked.first().map_or(0.0, |h| h.score);
+        if request.as_person.is_some() {
+            ranked.retain(|h| h.score >= best * self.params.floor);
+        }
         let exclude: HashSet<&str> = request.exclude.iter().map(String::as_str).collect();
         let (skipped, mut hits): (Vec<Hit>, Vec<Hit>) = ranked
             .into_iter()
             .partition(|hit| exclude.contains(hit.item.id()));
 
         let started = Instant::now();
-        self.expand(&mut hits, &exclude)?;
+        self.expand(&mut hits, &exclude, best)?;
         trace.expand_us = started.elapsed().as_micros();
 
         Ok(SearchResponse {
@@ -633,6 +658,12 @@ impl Index {
         }
     }
 
+    /// The multiplier on a unit's score by the shape of its template.
+    fn kind(&self, unit: &Unit) -> f64 {
+        let shape = self.folio.manifest().shape_of(&unit.template);
+        self.params.kind_weight.get(shape).copied().unwrap_or(1.0)
+    }
+
     fn weight(&self, source: Source) -> f64 {
         let w = &self.params.scope_weight;
         match source {
@@ -692,7 +723,7 @@ impl Index {
 
     /// Widen returned unit hits to their neighbours. Neighbours that are themselves hits,
     /// or already in the session, are dropped: they would be sent twice.
-    fn expand(&self, hits: &mut [Hit], excluded: &HashSet<&str>) -> Result<()> {
+    fn expand(&self, hits: &mut [Hit], excluded: &HashSet<&str>, best: f64) -> Result<()> {
         let n = self.params.neighbours;
         if n <= 0 {
             return Ok(());
@@ -702,6 +733,10 @@ impl Index {
             let Item::Unit(unit) = &hit.item else {
                 continue;
             };
+            // Context is for the hits that answer the question best; the rest stand alone.
+            if hit.source.is_some() && hit.score < best * self.params.neighbour_ratio {
+                continue;
+            }
             let mut around = self.folio.neighbours(unit, n, n)?;
             around.retain(|u| !returned.contains(&u.id) && !excluded.contains(u.id.as_str()));
             hit.neighbours = around;

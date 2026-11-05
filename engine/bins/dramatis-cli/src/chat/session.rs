@@ -2321,6 +2321,21 @@ impl Session {
             Ok(q) => q.events_max,
             Err(e) => return self.fail(&e),
         };
+        if arg.is_some_and(|a| a.trim().eq_ignore_ascii_case("now")) {
+            let bridge = self.bridge.clone();
+            let made = self
+                .interruptible(async move {
+                    let made = bridge.event_now().await;
+                    bridge.idle().await;
+                    made
+                })
+                .await;
+            if made != Some(true) {
+                self.term.note(&self.msg("cli.events.not_made"));
+            }
+            self.report_failures();
+            return;
+        }
         let n = match arg.map(|a| a.trim().to_lowercase()).as_deref() {
             None => settings.events_per_day,
             Some("off") => 0,

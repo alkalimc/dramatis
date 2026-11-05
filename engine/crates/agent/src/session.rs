@@ -255,6 +255,7 @@ impl Agent {
                     tones: Vec::new(),
                     topic: None,
                     memories: &[],
+                    memory_days: Vec::new(),
                     memory_owner: None,
                     summary: summary.map(|s| s.text.as_str()),
                     recent: &recent,
@@ -368,6 +369,10 @@ impl Agent {
                 } else {
                     None
                 },
+                memory_days: memories
+                    .iter()
+                    .map(|f| self.day_label(f.created_at))
+                    .collect(),
                 memories: &memories,
                 memory_owner: owner,
                 summary: summary.map(|s| s.text.as_str()),
@@ -567,6 +572,19 @@ impl Agent {
         Ok(out)
     }
 
+    /// Whether the segment already carries the line that marks passages as possibly
+    /// unrelated: said once, it holds for the rest of the log.
+    pub(crate) fn low_noted(&self, seg: SegmentId) -> Result<bool> {
+        let names = self.segment_names(seg)?;
+        let note = assemble::low_note(&self.ctx(&names));
+        let log = self.log(seg)?;
+        Ok(log
+            .items
+            .iter()
+            .flat_map(request::harness_texts)
+            .any(|t| t.contains(&note)))
+    }
+
     pub(crate) fn append(&self, seg: SegmentId, item: &Message) -> Result<()> {
         log::append(
             &self.db(),
@@ -597,6 +615,30 @@ impl Agent {
         })
     }
 
+    /// The weekday word of the local day an instant falls in.
+    fn weekday_word(&self, ms: i64) -> String {
+        let at = self.now().at(ms);
+        let local_minutes = at.ms.div_euclid(world::clock::MINUTE_MS) + i64::from(at.offset_min);
+        // 1970-01-01 was a Thursday.
+        let weekday = WEEKDAYS[(local_minutes.div_euclid(24 * 60) + 3).rem_euclid(7) as usize];
+        self.corpus
+            .wording
+            .get(&format!("weekday.{weekday}"))
+            .to_owned()
+    }
+
+    /// The in-world date and weekday of the day an instant falls in.
+    pub(crate) fn day_label(&self, ms: i64) -> String {
+        let d = world::clock::in_world_date(self.now().at(ms), self.corpus.year_offset);
+        format!(
+            "{:04}-{:02}-{:02} {}",
+            d.year,
+            d.month,
+            d.day,
+            self.weekday_word(ms)
+        )
+    }
+
     /// The harness context line of one turn: the in-world date, the weekday and time of
     /// day where the user is, and, when it is long, how long ago the user last wrote
     /// (`since`, the instant of that message). It goes in the user's entry, never in the
@@ -608,9 +650,6 @@ impl Agent {
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
         let names = self.segment_names(seg)?;
         let w = &self.corpus.wording;
-        let local_minutes = now.ms.div_euclid(world::clock::MINUTE_MS) + i64::from(now.offset_min);
-        // 1970-01-01 was a Thursday.
-        let weekday = WEEKDAYS[(local_minutes.div_euclid(24 * 60) + 3).rem_euclid(7) as usize];
         let part = match now.local_minute() / 60 {
             22..=23 | 0..=4 => "night",
             5..=10 => "morning",
@@ -618,15 +657,25 @@ impl Agent {
             14..=17 => "afternoon",
             _ => "evening",
         };
-        let (weekday, part) = (format!("weekday.{weekday}"), format!("daypart.{part}"));
+        let part = format!("daypart.{part}");
+        let weekday = self.weekday_word(now.ms);
         let time = world::clock::local_time(now);
         let fields = [
             ("date", date.as_str()),
-            ("weekday", w.get(&weekday)),
+            ("weekday", weekday.as_str()),
             ("time", time.as_str()),
             ("part", w.get(&part)),
         ];
         let mut line = w.fill("harness.context", &names, &fields);
+        // The two days before, named by date, so "yesterday" and "the day before" in the
+        // user's words land on the right day whatever the hour.
+        let before = |days: i64| self.day_label(now.ms - days * world::clock::DAY_MS);
+        line.push(' ');
+        line.push_str(&w.fill(
+            "harness.context.days",
+            &names,
+            &[("yesterday", &before(1)), ("before", &before(2))],
+        ));
         let hours = since.map_or(0, |at| (now.ms - at).max(0) / world::clock::HOUR_MS);
         if hours >= i64::from(self.config.agent.context.gap_hours) {
             let span = if hours >= 48 {

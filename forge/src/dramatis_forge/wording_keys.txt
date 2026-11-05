@@ -149,6 +149,7 @@ cli.delete.done
 cli.delete.in_use
 cli.error
 cli.events.none
+cli.events.not_made
 cli.events.off
 cli.events.on
 cli.export.replace
@@ -560,6 +561,9 @@ events.label.text
 events.label.title
 events.material
 events.per_day
+events.places
+events.together
+events.who
 favorites.empty
 favorites.subtitle
 favorites.title
@@ -619,6 +623,7 @@ harness.chorus
 harness.citation
 harness.collective
 harness.context
+harness.context.days
 harness.context.gap
 harness.digest
 harness.digest.birthday
@@ -707,6 +712,7 @@ harness.lines
 harness.low_match
 harness.memories
 harness.memories.shared
+harness.memory.day
 harness.next
 harness.next_mark
 harness.nothing_found
@@ -719,6 +725,7 @@ harness.opening.memory
 harness.opening.visit
 harness.opening.words
 harness.output
+harness.past_cues
 harness.persona
 harness.picture_unseen
 harness.posted
@@ -754,6 +761,8 @@ harness.tone.guarded
 harness.tone.normal
 harness.topic
 harness.wrapup
+harness.wrapup.again
+harness.wrapup.again.summary
 harness.wrapup.known
 harness.wrapup.shape
 harness.wrapup.summary

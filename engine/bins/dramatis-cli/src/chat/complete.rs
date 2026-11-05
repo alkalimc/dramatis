@@ -71,7 +71,7 @@ const FIXED: &[(&[&str], &[&str])] = &[
         &["low", "middle", "high", "extra_high", "max", "ultra"],
     ),
     (&["quiet"], &["on", "off"]),
-    (&["events"], &["on", "off"]),
+    (&["events"], &["on", "off", "now"]),
     (&["away"], &["on", "off"]),
     (&["lang"], &["corpus", "en"]),
     (&["library", "lib"], &["off"]),

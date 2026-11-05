@@ -43,6 +43,8 @@ const EARLIER_QUERY_CHARS: usize = 300;
 const REPLY_SNIPPET_CHARS: usize = 40;
 
 /// Most memories the wrap-up shows as already held.
+/// How much of the full wrap-up instruction identifies it in a log, in characters.
+const WRAPUP_HEAD: usize = 24;
 const WRAPUP_KNOWN_MAX: usize = 16;
 
 /// Where a message is forwarded to.
@@ -491,7 +493,7 @@ impl Agent {
             );
         }
         let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
-        lines.extend(self.attachment(seg, &mut turn, &query, Vec::new())?);
+        lines.extend(self.attachment(seg, &mut turn, &query, &posted.text, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, std::slice::from_ref(person))?);
         self.user_entry(seg, posted, &lines)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
@@ -536,30 +538,62 @@ impl Agent {
         })
     }
 
-    /// The retrieval attachment of a turn for its speaker.
+    /// The retrieval attachment of a turn for its speaker. When the user asks about the
+    /// speaker's own past (`latest` holds one of the corpus's `harness.past_cues`), the
+    /// search runs over the speaker's own units first, so the answer rests on their story
+    /// and dossier and not on whatever else matched the words; this does not depend on the
+    /// endpoint offering a search tool. With nothing of their own to find it falls back to
+    /// the general search.
     fn attachment(
         &self,
         seg: world::SegmentId,
         turn: &mut Turn,
         query: &str,
+        latest: &str,
         persons: Vec<String>,
     ) -> Result<Vec<String>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
         let mut seen = self.seen(seg)?;
-        let resp = self.retrieve(turn.channel, &turn.speaker, query, persons, &seen)?;
+        let own = turn
+            .speaker
+            .person()
+            .filter(|_| self.asks_about_past(latest))
+            .map(|p| vec![p.as_str().to_owned()]);
+        let mut resp = None;
+        if let Some(own) = own {
+            let r = self.retrieve(turn.channel, &turn.speaker, latest, own, &seen)?;
+            if !r.hits.is_empty() || !r.excluded.is_empty() {
+                resp = Some(r);
+            }
+        }
+        let resp = match resp {
+            Some(r) => r,
+            None => self.retrieve(turn.channel, &turn.speaker, query, persons, &seen)?,
+        };
         let names = self.segment_names(seg)?;
         let m = assemble::material(
             &self.ctx(&names),
             &resp,
             &mut seen,
             self.config.agent.retrieve.low_hits as usize,
+            !self.low_noted(seg)?,
         );
         turn.level = m.level;
         turn.shown.extend(m.shown);
         turn.material = m.text.clone();
         Ok(vec![m.text])
+    }
+
+    /// Whether the text asks about the speaker's own past: it holds one of the corpus's
+    /// `harness.past_cues` (whitespace separated).
+    fn asks_about_past(&self, text: &str) -> bool {
+        self.corpus
+            .wording
+            .get("harness.past_cues")
+            .split_whitespace()
+            .any(|w| text.contains(w))
     }
 
     /// He replied: the session spends a reply and trust grows by a shared turn.
@@ -1006,7 +1040,7 @@ impl Agent {
                     .fill("harness.speaker", &names, &[("name", &name)]),
             ];
         let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
-        lines.extend(self.attachment(seg, &mut turn, &query, Vec::new())?);
+        lines.extend(self.attachment(seg, &mut turn, &query, &posted.text, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, &members)?);
         self.user_entry(seg, posted, &lines)?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
@@ -1218,7 +1252,7 @@ impl Agent {
             None => String::new(),
         };
         let mut lines = vec![self.corpus.wording.fill(key, &names, &[("name", &name)])];
-        lines.extend(self.attachment(seg, &mut turn, &last_user, vec![person.0.clone()])?);
+        lines.extend(self.attachment(seg, &mut turn, &last_user, "", vec![person.0.clone()])?);
         lines.push(self.context_line(seg, None)?);
         self.append_user(
             seg,
@@ -1580,10 +1614,13 @@ impl Agent {
             return Ok(None);
         };
         let names = self.segment_names(seg.id)?;
-        let key = if summary {
-            "harness.wrapup.summary"
-        } else {
-            "harness.wrapup"
+        // The full instruction is said once to a segment; a later wrap-up of the same
+        // segment points back at it and keeps only what differs.
+        let key = match (summary, self.wrapup_asked(seg.id, &names)?) {
+            (true, false) => "harness.wrapup.summary",
+            (false, false) => "harness.wrapup",
+            (true, true) => "harness.wrapup.again.summary",
+            (false, true) => "harness.wrapup.again",
         };
         let mut line = self.corpus.wording.fill(key, &names, &[]);
         if let Some(known) = self.wrapup_known(ch, &author, &names)? {
@@ -1687,6 +1724,21 @@ impl Agent {
             names,
             &[("list", &list.join("\n"))],
         )))
+    }
+
+    /// Whether the segment already carries a full wrap-up instruction.
+    fn wrapup_asked(&self, seg: world::SegmentId, names: &Names) -> Result<bool> {
+        let w = &self.corpus.wording;
+        let heads: Vec<String> = ["harness.wrapup", "harness.wrapup.summary"]
+            .iter()
+            .map(|k| w.fill(k, names, &[]).chars().take(WRAPUP_HEAD).collect())
+            .collect();
+        let log = self.log(seg)?;
+        Ok(log.items.iter().flat_map(request::harness_texts).any(|t| {
+            heads
+                .iter()
+                .any(|h| !h.is_empty() && t.starts_with(h.as_str()))
+        }))
     }
 
     /// One line in the diagnostics log about a wrap-up that wrote no memory.

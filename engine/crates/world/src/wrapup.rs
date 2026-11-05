@@ -150,6 +150,12 @@ pub fn apply(
             }
         }
 
+        if !out.facts.is_empty()
+            && let Some(person) = ch.person()
+        {
+            trust::moment(conn, person, trust_params)?;
+        }
+
         if let Some(h) = &args.hurt {
             let quote = h.quote.trim();
             let target = h.person.clone().or_else(|| ch.person().cloned());

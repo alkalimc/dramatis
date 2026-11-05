@@ -31,8 +31,10 @@ const TITLE_MAX: usize = 60;
 const TEXT_MAX: usize = 600;
 /// Most people a suggested gathering brings together (the host's offer to the user).
 const GATHERING_MAX: usize = 5;
-/// How many of the day's people the material is drawn from.
-const MATERIAL_PEOPLE: usize = 2;
+/// Longest stretch of a unit given to the model, in characters.
+const UNIT_MAX: usize = 320;
+/// How many of a person's closest colleagues the event may pair them with.
+const PARTNERS: usize = 8;
 
 /// Up to `n` of `items`, drawn at random (std's per-instance random hash keys; no ordering
 /// survives between calls).
@@ -377,6 +379,20 @@ impl Agent {
             }
             settings::set(&conn, settings::EVENTS_TRIED, &now.ms)?;
         }
+        self.make_event().await
+    }
+
+    /// Make an event now, whatever the day's count and the clock say, for trying the wording
+    /// by hand. The quota band and the endpoint still apply.
+    pub async fn make_event_now(&self) -> Result<bool> {
+        self.sweep();
+        if self.chat().is_err() {
+            return Ok(false);
+        }
+        self.make_event().await
+    }
+
+    async fn make_event(&self) -> Result<bool> {
         if !self.decide(CallKind::Opening)?.allowed() {
             return Ok(false);
         }
@@ -411,26 +427,44 @@ impl Agent {
             .filter(|t| !t.trim().is_empty())
             .take(2)
             .collect();
-        // Who it may involve: a fresh random handful each time, leaving out whoever the
-        // recent events were about while there are others to choose from. What happens is
-        // the model's to choose; only the direction is given.
-        let pool_max = (self.config.world.events.pool as usize).max(1);
+        // Two people who really know each other, chosen at random: a person the recent
+        // events were not about, and one of the people they share scenes with. What
+        // happens between them is the model's to write; the place and the hour are given.
         let lately: std::collections::HashSet<&str> = recent
             .iter()
             .flat_map(|e| e.persons.iter().map(PersonId::as_str))
             .collect();
-        let mut candidates: Vec<String> = offerable
+        let mut firsts: Vec<String> = offerable
             .iter()
             .filter(|p| !lately.contains(p.as_str()))
             .cloned()
             .collect();
-        if candidates.len() < pool_max {
-            candidates = offerable.clone();
+        if firsts.is_empty() {
+            firsts = offerable.clone();
         }
-        let pool = random_pick(candidates, pool_max);
-        // The material is a few of their own units of the kinds the corpus lists, picked at
-        // random, and never a search over the whole story: the event is a small moment,
-        // and the model should not retell what it reads.
+        let first = random_pick(firsts, 1).remove(0);
+        let mut friends: Vec<String> = self
+            .partners(&first)
+            .into_iter()
+            .filter(|p| *p != first && offerable.contains(p))
+            .collect();
+        if friends.is_empty() {
+            friends = offerable.iter().filter(|p| **p != first).cloned().collect();
+        }
+        let pool: Vec<String> = std::iter::once(first.clone())
+            .chain(random_pick(friends, 1))
+            .collect();
+        let places: Vec<&str> = w
+            .get("events.places")
+            .split('|')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect();
+        let place = random_pick(places, 1).into_iter().next().unwrap_or("");
+        // Who they are: each one's own units of the kinds the corpus lists, one picked at
+        // random; and, when there is one, a scene the two share. Never a search over the
+        // whole story: the event is a small moment, and the model should not retell what
+        // it reads.
         let kinds: Vec<String> = w
             .get("events.material")
             .split('|')
@@ -439,7 +473,8 @@ impl Agent {
             .map(str::to_owned)
             .collect();
         let mut units: Vec<folio::Unit> = Vec::new();
-        for person in pool.iter().take(MATERIAL_PEOPLE) {
+        let mut about = Vec::new();
+        for person in &pool {
             let mut req = index::SearchRequest::new(&self.display(person)?);
             req.filters.templates = kinds.clone();
             req.filters.persons = vec![person.clone()];
@@ -457,21 +492,57 @@ impl Agent {
                 .filter(|h| !req.exclude.iter().any(|x| x == h.item.id()))
                 .filter_map(|h| h.item.unit().cloned())
                 .collect();
-            units.extend(random_pick(hits, 1));
+            let picked = random_pick(hits, 1);
+            let text = picked
+                .first()
+                .map(|u| cut(names.sub(u.text.trim()).as_ref(), UNIT_MAX))
+                .unwrap_or_default();
+            about.push(w.fill(
+                "events.who",
+                &names,
+                &[("name", &self.display(person)?), ("about", &text)],
+            ));
+            units.extend(picked);
         }
-        let material = if units.is_empty() {
-            String::new()
-        } else {
-            let mut seen = std::collections::HashSet::new();
-            assemble::units(&self.ctx(&names), &units, &mut seen).text
-        };
+        if let [a, b] = &pool[..] {
+            let mut req =
+                index::SearchRequest::new(format!("{} {}", self.display(a)?, self.display(b)?));
+            req.filters.templates = vec!["dialogue".into()];
+            req.filters.persons = vec![a.clone()];
+            req.exclude = used.clone();
+            if let Ok(resp) = self.ix().search(&req) {
+                let together: Vec<folio::Unit> = resp
+                    .hits
+                    .iter()
+                    .filter_map(|h| h.item.unit().cloned())
+                    .filter(|u| u.persons.iter().any(|p| p == b) && !used.contains(&u.id))
+                    .take(3)
+                    .collect();
+                if let Some(u) = random_pick(together, 1).into_iter().next() {
+                    about.push(w.fill(
+                        "events.together",
+                        &names,
+                        &[("scene", &cut(names.sub(u.text.trim()).as_ref(), UNIT_MAX))],
+                    ));
+                    units.push(u);
+                }
+            }
+        }
+        let material = about.join("\n\n");
         let mut people = Vec::new();
         for p in &pool {
             people.push(format!("{p}: {}", self.display(p)?));
         }
         let d = world::clock::in_world_date(now, self.corpus.year_offset);
         let date = format!("{:04}-{:02}-{:02}", d.year, d.month, d.day);
-        let (role, _) = self.role_for(LogKind::Host)?;
+        let part = match now.local_minute() / 60 {
+            22..=23 | 0..=4 => "night",
+            5..=10 => "morning",
+            11..=13 => "noon",
+            14..=17 => "afternoon",
+            _ => "evening",
+        };
+        let (role, _) = self.role_for(LogKind::Person)?;
         let schema = schema();
         let mut extra = Vec::new();
         if !recent.is_empty() {
@@ -500,6 +571,8 @@ impl Agent {
             &names,
             &[
                 ("date", &date),
+                ("part", w.get(&format!("daypart.{part}"))),
+                ("place", place),
                 ("material", &material),
                 ("people", &people.join("\n")),
                 ("extra", &extra.join("\n")),
@@ -544,7 +617,7 @@ impl Agent {
     /// event.
     async fn event_draft(&self, request: Request) -> Result<Option<Draft>> {
         let names = self.names()?;
-        let (role, ep) = self.role_for(LogKind::Host)?;
+        let (role, ep) = self.role_for(LogKind::Person)?;
         let reply = match self.llm.complete(&ep, &request).await {
             Ok(r) => r,
             Err(e) => {
@@ -553,7 +626,7 @@ impl Agent {
             }
         };
         let host = channel::host(&self.db())?;
-        let model = self.shape_for(&role, LogKind::Host, &names).model;
+        let model = self.shape_for(&role, LogKind::Person, &names).model;
         crate::meter::record(
             &self.db(),
             self.now().ms,
@@ -704,6 +777,20 @@ impl Agent {
         self.emit(Event::MessageAdded(MessageAdded { message: shown }));
         self.changed(vec![WorldChange::Digest]);
         Ok(true)
+    }
+
+    /// The people who share the most scenes with `person` in the corpus, most first.
+    fn partners(&self, person: &str) -> Vec<String> {
+        let ix = self.ix();
+        let Ok(mut stmt) = ix.folio().conn().prepare(
+            "SELECT CASE WHEN a = ?1 THEN b ELSE a END FROM cooccur \
+             WHERE a = ?1 OR b = ?1 ORDER BY scenes DESC, 1 LIMIT ?2",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(rusqlite::params![person, PARTNERS as i64], |r| r.get(0))
+            .map(|rows| rows.filter_map(std::result::Result::ok).collect())
+            .unwrap_or_default()
     }
 
     fn person_refs(&self, people: &[PersonId]) -> Result<Vec<api::types::PersonRef>> {

@@ -254,6 +254,22 @@ impl AgentBridge {
         }
     }
 
+    /// Make one daily event now, whatever the count and the clock say (a maintainer's way
+    /// to try the wording). It is posted in the host's channel like any other; `false`
+    /// when none came of it.
+    pub async fn event_now(self: &Arc<Self>) -> bool {
+        match self.agent().await {
+            Ok(a) => match a.make_event_now().await {
+                Ok(made) => made,
+                Err(e) => {
+                    self.failed("event", e);
+                    false
+                }
+            },
+            Err(_) => false,
+        }
+    }
+
     /// One scheduled step: idle conversations wrap up, due seeds may open. `present`: the
     /// user is about (the window shown, the terminal in use), so the day's daily event may
     /// be made.

@@ -286,8 +286,6 @@ impl Default for Wrapup {
 pub struct Events {
     /// Past happenings a listing shows, and how far back the units used are avoided.
     pub list: u32,
-    /// People offered to the model as those a happening may involve.
-    pub pool: u32,
     /// Most people one happening involves.
     pub max_persons: u32,
     /// Minutes before another try when one made nothing.
@@ -298,7 +296,6 @@ impl Default for Events {
     fn default() -> Self {
         Self {
             list: 5,
-            pool: 8,
             max_persons: 3,
             retry_min: 60,
         }
@@ -311,7 +308,9 @@ impl Default for Events {
 pub struct Trust {
     /// Growth per shared turn, before the diminishing factor.
     pub g1: f64,
-    /// Loss per hurt.
+    /// Growth when a talk leaves a memory worth keeping, before the diminishing factor.
+    pub g2: f64,
+    /// Loss per hurt at the start, before the weight by closeness.
     pub h: f64,
     /// Lower bounds of `normal`, `close` and `deep`; below the first is `guarded`.
     pub bands: [u8; 3],
@@ -321,6 +320,7 @@ impl Default for Trust {
     fn default() -> Self {
         Self {
             g1: 0.5,
+            g2: 4.0,
             h: 15.0,
             bands: [60, 100, 150],
         }

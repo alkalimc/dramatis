@@ -205,6 +205,7 @@ impl Agent {
                     &resp,
                     &mut seen,
                     self.config.agent.retrieve.low_hits as usize,
+                    !self.low_noted(seg)?,
                 );
                 turn.level = m.level;
                 turn.shown.extend(m.shown);
@@ -696,12 +697,10 @@ impl Agent {
                 if let Some(p) = self.person_named(f.topic.trim(), &offer)? {
                     return self.talk_offer(turn, p.as_str(), names);
                 }
-                let people = self.ix().find_people(
-                    &f.topic,
-                    Some(&offer),
-                    self.config.find_people.k,
-                    &[],
-                )?;
+                let people = self
+                    .ix()
+                    .find_people(&f.topic, Some(&offer), self.config.find_people.k, &[])?
+                    .most_relevant(self.config.find_people.keep_ratio);
                 let here = {
                     let ch = channel::get(&self.db(), turn.channel)?;
                     (ch.kind == world::ChannelKind::Group).then(|| ch.persons())
@@ -882,6 +881,7 @@ impl Agent {
                     &resp,
                     &mut seen,
                     self.config.agent.retrieve.low_hits as usize,
+                    !self.low_noted(seg)?,
                 );
                 turn.shown.extend(m.shown);
                 Ok(Ok(m.text))

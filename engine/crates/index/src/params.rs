@@ -3,6 +3,8 @@
 //! they are written; use sites take the struct as an argument. Missing keys in a
 //! `params.toml` fall back to these defaults field by field.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 /// `retrieve.*`
@@ -17,6 +19,16 @@ pub struct Retrieve {
     pub scope_weight: ScopeWeights,
     /// Neighbouring units fetched on each side of every returned hit.
     pub neighbours: i64,
+    /// Multipliers on a unit's score by the shape of its template (`dialogue`, `profile`,
+    /// ...); a shape not listed counts 1. Weighting reorders; it never removes a hit.
+    pub kind_weight: BTreeMap<String, f64>,
+    /// Multiplier on the score of a unit or memory the session already carries: it comes
+    /// back only when it is much closer to the question than anything new.
+    pub shown_weight: f64,
+    /// A hit scoring under this share of the best one (after all weights) is not returned.
+    pub floor: f64,
+    /// Only hits scoring at least this share of the best one are widened to neighbours.
+    pub neighbour_ratio: f64,
 }
 
 impl Default for Retrieve {
@@ -27,6 +39,10 @@ impl Default for Retrieve {
             confidence: ConfidenceBands::default(),
             scope_weight: ScopeWeights::default(),
             neighbours: 1,
+            kind_weight: [("dialogue".to_owned(), 0.85), ("profile".to_owned(), 1.1)].into(),
+            shown_weight: 0.5,
+            floor: 0.55,
+            neighbour_ratio: 0.85,
         }
     }
 }
@@ -99,13 +115,19 @@ impl Default for ScopeWeights {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct FindPeople {
-    /// People returned.
+    /// People returned at most.
     pub k: usize,
+    /// When people are offered to the user, those scoring under this share of the best one
+    /// are left out: a crowd of weak matches is noise next to the one or two who fit.
+    pub keep_ratio: f64,
 }
 
 impl Default for FindPeople {
     fn default() -> Self {
-        Self { k: 5 }
+        Self {
+            k: 3,
+            keep_ratio: 0.7,
+        }
     }
 }
 

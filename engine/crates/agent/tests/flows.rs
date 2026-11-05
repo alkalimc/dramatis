@@ -1907,7 +1907,7 @@ async fn a_due_commitment_opens_on_its_own_log_even_for_a_frozen_person() {
     assert_eq!(opened, Some((p("ann"), ch)));
     let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
     assert!(
-        entry.contains("A promise is due: Tea together at noon"),
+        entry.contains("A promise has come due: Tea together at noon"),
         "{entry}"
     );
     assert_eq!(meter(&e.agent)[0].0, "opening");
@@ -2584,17 +2584,17 @@ async fn every_user_entry_carries_the_clock_and_a_long_silence() {
     let texts = user_texts(&e);
     assert_eq!(texts.len(), 3);
     assert!(
-        texts[0].ends_with("[2026-03-10 Tuesday 12:00, midday]"),
+        texts[0].ends_with("[2026-03-10 Tuesday 12:00, midday] (yesterday was 2026-03-09 Monday, the day before 2026-03-08 Sunday)"),
         "{}",
         texts[0]
     );
     assert!(
-        texts[1].ends_with("[2026-03-10 Tuesday 12:20, midday]"),
+        texts[1].ends_with("[2026-03-10 Tuesday 12:20, midday] (yesterday was 2026-03-09 Monday, the day before 2026-03-08 Sunday)"),
         "{}",
         texts[1]
     );
     assert!(
-        texts[2].ends_with("[2026-03-11 Wednesday 18:20, evening] (Doc last spoke 30 hours ago)"),
+        texts[2].ends_with("[2026-03-11 Wednesday 18:20, evening] (yesterday was 2026-03-10 Tuesday, the day before 2026-03-09 Monday) (Doc last spoke 30 hours ago)"),
         "{}",
         texts[2]
     );
@@ -2613,12 +2613,12 @@ async fn a_late_hour_reads_as_night_and_days_are_counted_from_two() {
     e.agent.send(ch, "still there?", None).await.unwrap();
     let last = user_texts(&e).pop().unwrap();
     assert!(
-        last.ends_with("[2026-03-13 Friday 23:30, night] (Doc last spoke 3 days ago)"),
+        last.ends_with("[2026-03-13 Friday 23:30, night] (yesterday was 2026-03-12 Thursday, the day before 2026-03-11 Wednesday) (Doc last spoke 3 days ago)"),
         "{last}"
     );
 }
 
-const CLOCK_NOON: &str = "[2026-03-10 Tuesday 12:00, midday]";
+const CLOCK_NOON: &str = "[2026-03-10 Tuesday 12:00, midday] (yesterday was 2026-03-09 Monday, the day before 2026-03-08 Sunday)";
 
 #[tokio::test]
 async fn the_clock_line_is_in_group_and_interject_entries_and_never_in_the_prefix() {
@@ -2657,7 +2657,7 @@ async fn the_clock_line_is_in_group_and_interject_entries_and_never_in_the_prefi
     assert!(last(1).contains("may add one line"), "{}", last(1));
     for i in [2, 3] {
         assert!(
-            last(i).ends_with("[2026-03-10 Tuesday 12:20, midday]\""),
+            last(i).ends_with("[2026-03-10 Tuesday 12:20, midday] (yesterday was 2026-03-09 Monday, the day before 2026-03-08 Sunday)\""),
             "{}",
             last(i)
         );
@@ -3660,7 +3660,10 @@ async fn a_promise_is_a_due_commitment_for_a_named_person_with_limits() {
     let opened = e.agent.on_event().await.unwrap();
     assert_eq!(opened.map(|o| o.0), Some(p("ann")));
     let entry = last_entry(&e);
-    assert!(entry.contains("A promise is due: call home"), "{entry}");
+    assert!(
+        entry.contains("A promise has come due: call home"),
+        "{entry}"
+    );
 
     // At most twenty wait at once.
     let full = env(WireApi::Chat);
@@ -4438,4 +4441,110 @@ async fn writing_ends_away_and_a_due_reminder_is_said_before_the_reply() {
     // Delivered by the line, not again by a reminder turn.
     assert_eq!(e.agent.tick(true).await.unwrap(), None);
     assert_eq!(e.fake.bodies().len(), 1);
+}
+
+#[tokio::test]
+async fn the_low_match_line_is_said_once_to_a_segment() {
+    let mut weak = retrieve();
+    weak.confidence.low_top1 = 1000.0;
+    weak.confidence.high_top1 = 1000.0;
+    let e = env_retrieving(endpoints(WireApi::Chat, true, None), weak, |_| {});
+    let ch = direct(&e, "ann");
+    e.fake.push([say("a"), say("b")]);
+    e.agent.send(ch, "jasmine tea", None).await.unwrap();
+    e.agent.send(ch, "forge blade", None).await.unwrap();
+    let json = e.fake.json();
+    let first = list(&json[0]).last().unwrap().to_string();
+    let second = list(&json[1]).last().unwrap().to_string();
+    assert!(first.contains("may be unrelated"), "{first}");
+    assert!(!second.contains("may be unrelated"), "{second}");
+    assert!(second.contains("Bo "), "the passages still come: {second}");
+}
+
+#[tokio::test]
+async fn the_context_line_names_yesterday_and_the_day_before() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("a")]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    let entry = list(&e.fake.json()[0]).last().unwrap().to_string();
+    assert!(entry.contains("yesterday was "), "{entry}");
+    assert!(entry.contains("the day before "), "{entry}");
+}
+
+#[tokio::test]
+async fn material_comes_back_in_full_after_the_log_rolled_over() {
+    let e = env_with(endpoints(WireApi::Chat, true, None), |c| {
+        c.agent.roll.k = 10.0
+    });
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        say("Cooler water."),
+        call(
+            "wrapup",
+            json!({"facts": [], "summary": "They talked about brewing tea."}),
+        ),
+        say("Again: cooler."),
+    ]);
+    e.agent
+        .send(ch, "how should I brew jasmine tea?", None)
+        .await
+        .unwrap();
+    e.agent
+        .send(ch, "jasmine tea once more?", None)
+        .await
+        .unwrap();
+    assert_eq!(segments(&e.agent, ch).len(), 2);
+    let bodies = e.fake.bodies();
+    let new_turn = body_text(&bodies[2]);
+    // The first segment's material is gone from the new log, so it is sent again in
+    // full and not as a bare id.
+    assert!(new_turn.contains("poured the jasmine tea"), "{new_turn}");
+}
+
+#[tokio::test]
+async fn a_question_about_the_speakers_past_searches_their_own_units() {
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("a"), say("b")]);
+    e.agent.send(ch, "jasmine forge blade", None).await.unwrap();
+    let general = list(&e.fake.json()[0]).last().unwrap().to_string();
+    assert!(general.contains("Bo hammered the blade"), "{general}");
+    let e = env(WireApi::Chat);
+    let ch = direct(&e, "ann");
+    e.fake.push([say("a")]);
+    e.agent
+        .send(ch, "about your past jasmine forge blade", None)
+        .await
+        .unwrap();
+    let own = list(&e.fake.json()[0]).last().unwrap().to_string();
+    assert!(own.contains("jasmine tea"), "{own}");
+    assert!(!own.contains("Bo hammered the blade"), "{own}");
+}
+
+#[tokio::test]
+async fn a_second_wrapup_in_a_segment_points_back_at_the_first() {
+    let e = env(WireApi::Responses);
+    let ch = direct(&e, "ann");
+    e.fake.push([
+        say("Mm."),
+        call("wrapup", json!({"facts": []})),
+        say("Mm again."),
+        call("wrapup", json!({"facts": []})),
+    ]);
+    e.agent.send(ch, "hello", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    e.agent.send(ch, "hello again", None).await.unwrap();
+    e.agent.wrapup(ch).await.unwrap();
+    let bodies = e.fake.bodies();
+    assert_prefix_chain(&bodies);
+    let last = body_text(bodies.last().unwrap());
+    assert_eq!(
+        last.matches("only what is new since the last one").count(),
+        1
+    );
+    assert_eq!(
+        last.matches("Writing nothing is the normal result").count(),
+        1
+    );
 }

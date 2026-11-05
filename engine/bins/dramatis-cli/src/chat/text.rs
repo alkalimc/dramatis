@@ -111,8 +111,9 @@ anything else       send it to the current channel
                     extra_high, max, ultra; a higher level also means more visits and
                     happenings a day
 /quiet [on|off|HH:MM-HH:MM]  hours when nobody comes to you unprompted
-/events [on|off|n]  the small happenings of the day the host tells of: list them, switch
-                    them, or set how many a day (up to what the tier allows)
+/events [on|off|n|now]  the small happenings of the day the host tells of: list them,
+                    switch them, set how many a day (up to what the tier allows), or
+                    make one now to try the wording
 /away [on|off]      away mode: while on nobody comes to you, nothing is sent, and the
                     visits and happenings that fall due count as spent; writing a message
                     turns it off
@@ -392,6 +393,7 @@ line is one message.",
     ("cli.quiet.on", "quiet hours on, {from} to {to}"),
     ("cli.quiet.off", "quiet hours off"),
     ("cli.usage.events", "usage: /events [on|off|0 to {max}]"),
+    ("cli.events.not_made", "No happening came of it."),
     ("cli.usage.away", "usage: /away [on|off]"),
     (
         "cli.away.on",
