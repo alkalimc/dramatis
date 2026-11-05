@@ -325,6 +325,23 @@ commands! {
     /// that is not a cache is `Invalid`; saves and the corpus are never touched.
     fn clear_storage(categories: Vec<StorageKind>) -> StorageUsage;
 
+    // ---- where files live ----
+
+    /// The folder the app keeps its files in (saves, endpoints, settings, pictures, caches,
+    /// logs, and the corpus when it sits there) and how it was chosen.
+    fn home_location() -> HomeLocation;
+    /// Show the system's folder dialog. The path chosen, or `None` when it was cancelled.
+    /// `NotImplemented` where there is no dialog: the user types the path instead.
+    fn choose_home_folder() -> Option<String>;
+    /// Keep the app's files in `path` from the next start (`None`: back to `~/.dramatis`),
+    /// with `data` saying what happens to what is kept now, then ask the front end to open
+    /// again. The old folder is never deleted. `Invalid` with field `path` (not a usable
+    /// absolute folder, or this one, or inside it), `home` (fixed from outside the app),
+    /// `Exists` when `Copy` would overwrite files already there, `Busy` while a turn runs,
+    /// `Locked` for an encrypted save that was not unlocked in this session. Nothing
+    /// changes when any of that happens.
+    fn set_home_location(path: Option<String>, data: HomeData) -> ();
+
     // ---- encryption ----
 
     /// Open the encrypted save `name` with its password and remember the password until
@@ -356,6 +373,22 @@ commands! {
     fn fetch_models(profile: String) -> Vec<String>;
     /// Store the key in the keychain. It is never returned by any command.
     fn set_key(profile: String, key: String) -> ();
+    /// Send one short message (a few tokens) to `model` on the saved profile and answer
+    /// what came back or why not, with the time it took. A failure is a result (`ok` false
+    /// and a class), not an error; `NotFound` is a profile that does not exist and
+    /// `Invalid` a model that is empty or has spaces. The test is not a turn: it never
+    /// counts toward the quota meter, and nothing of it is kept.
+    fn test_endpoint(profile: String, model: String) -> EndpointTest;
+    /// How connections leave this machine (model calls, update checks, picture downloads).
+    fn network() -> NetworkView = Ok(NetworkView {
+        setting: NetworkSetting::default(),
+        has_password: false,
+    });
+    /// Change it; later requests follow at once. The password goes to the keychain and
+    /// nowhere else (`None`: leave it, empty: remove it). `Invalid` with field `proxy`
+    /// (not an http, https or socks5 address with a host, or one that carries a login),
+    /// `no_proxy` or `username`. Nothing changes on an error.
+    fn set_network(setting: NetworkSetting, password: Option<String>) -> ();
     /// `None` switches the role off (read-aloud) or back to the default (host: the chat
     /// role); the chat role itself cannot be removed.
     fn set_role(kind: RoleKind, role: Option<Role>) -> ();

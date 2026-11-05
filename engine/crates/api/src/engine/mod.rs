@@ -11,6 +11,7 @@ mod external;
 mod facts;
 mod library;
 mod people;
+mod place;
 mod saves;
 mod storage;
 mod update;
@@ -63,6 +64,9 @@ pub struct Ports {
     /// Shows the system's file dialog for a corpus and answers the path chosen (`None`:
     /// cancelled). Absent where there is no dialog; the user types the path instead.
     pub choose_file: Option<ChooseFile>,
+    /// Shows the system's folder dialog and answers the path chosen; absent where there
+    /// is none.
+    pub choose_folder: Option<ChooseFile>,
     /// Opens a web address in the system browser. Absent where there is none.
     pub open_url: Option<OpenUrl>,
 }
@@ -86,6 +90,7 @@ impl Default for Ports {
             seen: Arc::default(),
             restart: Arc::new(|| {}),
             choose_file: None,
+            choose_folder: None,
             open_url: None,
         }
     }
@@ -829,6 +834,33 @@ impl Api for Engine {
             .ok_or(ApiError::NotImplemented)?;
         // The dialog blocks until the user answers.
         tokio::task::spawn_blocking(move || ask()).await.map_err(io)
+    }
+    async fn home_location(&self) -> ApiResult<HomeLocation> {
+        Ok(self.home_location_impl())
+    }
+    async fn choose_home_folder(&self) -> ApiResult<Option<String>> {
+        let ask = self
+            .ports
+            .choose_folder
+            .clone()
+            .ok_or(ApiError::NotImplemented)?;
+        tokio::task::spawn_blocking(move || ask()).await.map_err(io)
+    }
+    async fn set_home_location(&self, path: Option<String>, data: HomeData) -> ApiResult<()> {
+        self.set_home_location_impl(path, data)
+    }
+    async fn network(&self) -> ApiResult<NetworkView> {
+        Ok(self.network_view())
+    }
+    async fn set_network(
+        &self,
+        setting: NetworkSetting,
+        password: Option<String>,
+    ) -> ApiResult<()> {
+        self.set_network_impl(setting, password)
+    }
+    async fn test_endpoint(&self, profile: String, model: String) -> ApiResult<EndpointTest> {
+        self.test_endpoint_impl(&profile, &model).await
     }
     async fn open_external(&self, url: String) -> ApiResult<()> {
         self.open_external_impl(&url)

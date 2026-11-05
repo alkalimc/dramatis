@@ -4,7 +4,7 @@ import { useT, useUserName } from "../i18n";
 import { channelTitle } from "../lib/chats";
 import { authorName, dayKey, dayLabel, sameAuthor, typingText } from "../lib/format";
 import { pastedImage, readImage } from "../lib/image";
-import { isMac, isSendKey } from "../lib/keys";
+import { insertNewline, isMac, isNewlineKey, isSendKey } from "../lib/keys";
 import { filterMembers, insertMention, mentionAt } from "../lib/mention";
 import { isBlank, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
@@ -205,6 +205,7 @@ function snippetOf(m: Message, marker: { open: string; close: string }, picture:
 
 export function Composer({ channel }: { channel: ChannelId }) {
   const t = useT();
+  const sendKey = useStore((s) => s.sendKey);
   const api = useApi();
   const actions = useActions();
   const dispatch = useDispatch();
@@ -404,7 +405,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
             id={id}
             rows={1}
             aria-describedby={`${id}-hint`}
-            aria-keyshortcuts={isMac() ? "Meta+Enter" : "Control+Enter"}
+            aria-keyshortcuts={sendKey === "enter" ? "Enter" : isMac() ? "Meta+Enter" : "Control+Enter"}
             aria-autocomplete={members ? "list" : undefined}
             aria-activedescendant={listing ? `${id}-m${chosen}` : undefined}
             value={text}
@@ -424,9 +425,15 @@ export function Composer({ channel }: { channel: ChannelId }) {
               void readImage(f).then(setImage, () => undefined);
             }}
             onKeyDown={(e) => {
-              if (isSendKey(e)) {
+              // A bare Enter that sends still picks from the mention list when it is open.
+              if (isSendKey(e, sendKey) && !(listing && sendKey === "enter")) {
                 e.preventDefault();
                 void send();
+                return;
+              }
+              if (isNewlineKey(e, sendKey)) {
+                e.preventDefault();
+                insertNewline(e.currentTarget, (value) => setText(value));
                 return;
               }
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -457,7 +464,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
         </button>
       </div>
       <p id={`${id}-hint`} className="sr-only">
-        {t(isMac() ? "composer.hint.mac" : "composer.hint.other")}
+        {t(`composer.hint.${sendKey === "enter" ? "enter." : ""}${isMac() ? "mac" : "other"}` as const)}
       </p>
     </form>
   );

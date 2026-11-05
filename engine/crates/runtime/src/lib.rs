@@ -50,6 +50,8 @@ pub struct Options {
     pub restart: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The system's file dialog for a corpus, where the front end has one.
     pub choose_file: Option<api::engine::ChooseFile>,
+    /// The system's folder dialog, where the front end has one.
+    pub choose_folder: Option<api::engine::ChooseFile>,
     /// Opens a web address in the system browser, where the front end can.
     pub open_url: Option<api::engine::OpenUrl>,
 }
@@ -95,7 +97,7 @@ impl Runtime {
         let params = Params::load(&home.params()).map_err(|detail| api::ApiError::Io { detail })?;
         let http: Arc<dyn Transport> = match options.transport {
             Some(t) => t,
-            None => Arc::new(llm::Http::new().map_err(ports::failed)?),
+            None => Arc::new(ports::http_for(&home.network())?),
         };
         let client = llm::Llm::new(http.clone(), Retry::default());
         let mut ports = Ports {
@@ -106,6 +108,7 @@ impl Runtime {
             seen,
             restart: options.restart.unwrap_or_else(|| Arc::new(|| {})),
             choose_file: options.choose_file,
+            choose_folder: options.choose_folder,
             open_url: options.open_url,
             ..Ports::default()
         };

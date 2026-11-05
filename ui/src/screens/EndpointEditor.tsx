@@ -3,6 +3,7 @@ import { settle, type EndpointsView, type Failure, type Model, type Profile, typ
 import { useT } from "../i18n";
 import { useActions, useApi } from "../store";
 import { errorText, InlineError } from "../ui/ErrorBar";
+import { EndpointTester } from "./EndpointTest";
 import { ModelList } from "./EndpointModels";
 
 export const WIRES: WireApi[] = ["chat", "responses", "messages"];
@@ -64,6 +65,7 @@ export function EndpointEditor({
   guided = false,
   focus = false,
   onSaved,
+  onNetwork,
   onDone,
   onCancel,
 }: {
@@ -75,6 +77,8 @@ export function EndpointEditor({
   focus?: boolean;
   /** The profile now exists under this name, though the editor is still open. */
   onSaved?: (name: string) => void;
+  /** Where a failed test sends the person to look at the network settings. */
+  onNetwork?: () => void;
   onDone: () => void;
   onCancel?: () => void;
 }) {
@@ -211,6 +215,18 @@ export function EndpointEditor({
     if (guided) return;
     await actions.refreshEndpoints();
     await actions.refreshStatus();
+  };
+
+  /** The test goes to the saved profile, so what is typed is written first. */
+  const prepare = async (): Promise<boolean> => {
+    if (problem && problem !== "pick") {
+      flag(problem);
+      return false;
+    }
+    setFailure(null);
+    if ((await persist(clean(models))) === null) return false;
+    if (!guided) await actions.refreshEndpoints();
+    return true;
   };
 
   const check = async () => {
@@ -459,6 +475,7 @@ export function EndpointEditor({
           )}
         </div>
       )}
+      {checked && saved !== null && (wanted || ids[0]) && <EndpointTester profile={saved} model={wanted || ids[0] || ""} prepare={prepare} onNetwork={onNetwork} />}
       {shownFail && (
         <div className="fetch-error" role="alert">
           <p>{t(picker ? "endpoints.fetch.failed.known" : "endpoints.fetch.failed")}</p>

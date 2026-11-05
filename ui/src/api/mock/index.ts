@@ -27,11 +27,14 @@ import type {
   Confidence,
   EndpointSetup,
   EndpointsView,
+  EndpointTest,
   FactFilter,
   FactId,
   FactList,
   FactView,
+  HomeLocation,
   MediaFile,
+  NetworkSetting,
   Message,
   Mode,
   PersonId,
@@ -47,6 +50,7 @@ import type {
   StorageUsage,
   RosterRow,
   Settings,
+  TestFailure,
   Tier,
   ToolAction,
   UpdateStatus,
@@ -151,6 +155,9 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     corpus_version: "1.0.0",
   };
   const found = (auto: boolean): UpdateStatus => ({ current: version, latest: "99.0.0", url: `${repository}/releases/tag/v99.0.0`, newer: true, checked_at: iso(), auto, asked: true });
+  let home: HomeLocation = { path: "/Users/demo/.dramatis", default_path: "/Users/demo/.dramatis", source: params.get("home") === "fixed" ? "fixed" : "default", unavailable: null, can_change: params.get("home") !== "fixed" };
+  let network: NetworkSetting = { mode: "system", proxy: "", username: "", no_proxy: "" };
+  let networkPassword = false;
   let update: UpdateStatus = params.get("update") === "1" ? found(true) : { current: version, latest: null, url: null, newer: false, checked_at: null, auto: false, asked: params.get("first") !== "1" && params.get("update") !== "ask" };
   let locked = params.get("locked") === "1";
   // `?changed=1` starts as if another window had replaced the open save's file.
@@ -595,6 +602,36 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!p.endsWith(".folio")) return fail({ code: "invalid", field: "corpus" });
       corpusLoaded = true;
       return ok(null);
+    },
+    homeLocation: () => ok(home),
+    chooseHomeFolder: () => (params.get("dialog") === "1" ? ok<string | null>("/Volumes/Data/dramatis") : fail({ code: "not_implemented" })),
+    setHomeLocation: (path, data) => {
+      if (!home.can_change) return fail({ code: "invalid", field: "home" });
+      if (path !== null && !path.startsWith("/")) return fail({ code: "invalid", field: "path" });
+      if (path !== null && data === "copy" && path.includes("taken")) return fail({ code: "exists" });
+      home = path === null ? { ...home, path: home.default_path, source: "default", unavailable: null } : { ...home, path, source: "chosen", unavailable: null };
+      return ok(null);
+    },
+    network: () => ok({ setting: network, has_password: networkPassword }),
+    setNetwork: (setting, password) => {
+      const proxy = (setting.proxy ?? "").trim();
+      if ((setting.mode === "manual" || proxy) && !/^(https?|socks5h?):\/\/[^/@\s]+\/?$/.test(proxy)) return fail({ code: "invalid", field: "proxy" });
+      if (password !== null) networkPassword = password !== "";
+      network = { ...setting, proxy };
+      return ok(null);
+    },
+    // A fixed script: the address names how it goes.
+    testEndpoint: (name, model) => {
+      const p = endpoints.profiles.find((x) => x.profile.name === name);
+      if (!p) return fail({ code: "not_found" });
+      if (!model.trim() || /\s/.test(model)) return fail({ code: "invalid", field: "model" });
+      const url = p.profile.base_url;
+      const failed = (failure: TestFailure, detail: string): Result<EndpointTest> => ok({ ok: false, latency_ms: 40, reply: "", failure, detail });
+      if (url.includes("unreachable.invalid")) return failed("address", "error sending request");
+      if (url.includes("slow.invalid")) return failed("timeout", "");
+      if ((!p.has_key && !url.startsWith("http://127.0.0.1")) || keys.get(name) === "bad-key") return failed("key", "HTTP 401: invalid API key");
+      if (model.includes("retired")) return failed("model", `HTTP 404: The model \`${model}\` does not exist`);
+      return ok({ ok: true, latency_ms: 420, reply: model.includes("quiet") ? "" : "ready", failure: null, detail: "" });
     },
     chooseCorpus: () => (params.get("dialog") === "1" ? ok<string | null>("/Users/demo/corpus/demo.folio") : fail({ code: "not_implemented" })),
     logOut: () => {
@@ -1213,7 +1250,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
         return fail({ code: "endpoint", detail: '401 Unauthorized: {"error":{"message":"Authentication failed: missing or invalid API key","type":"authentication_error"}}' });
       }
       if (name === "primary") return ok(["model-a", "model-b", "tts-1"]);
-      return ok(p.profile.base_url.includes("deepseek") ? ["deepseek-chat", "deepseek-reasoner"] : ["local-model"]);
+      return ok(p.profile.base_url.includes("deepseek") ? ["deepseek-chat", "deepseek-reasoner"] : ["local-model", "retired-model"]);
     },
     setKey: (name, key) => {
       if (!key.trim()) return fail({ code: "invalid", field: "key" });

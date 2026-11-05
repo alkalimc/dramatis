@@ -256,3 +256,37 @@ test("the favorites take notes: a different prompt, and nothing is awaited", asy
   await waitFor(() => expect(r.store.getState().messages.favorites.some((m) => m.text === "remember the stairs")).toBe(true));
   expect(r.store.getState().awaiting.favorites).toBeUndefined();
 });
+
+test("with Enter set to send, Enter sends and Cmd/Ctrl+Enter or Shift+Enter add a line", async () => {
+  const user = userEvent.setup();
+  const { api, actions } = await mounted();
+  actions.setSendKey("enter");
+  const sent = vi.spyOn(api.commands, "sendMessage");
+  expect(await screen.findByText(/^Enter sends, .*Enter adds a line$/)).toBeDefined();
+  await user.type(box(), "one");
+  await user.keyboard("{Meta>}{Enter}{/Meta}");
+  await user.type(box(), "two");
+  await user.keyboard("{Control>}{Enter}{/Control}");
+  await user.type(box(), "three{Shift>}{Enter}{/Shift}four");
+  expect(sent).not.toHaveBeenCalled();
+  expect(box().value).toBe("one\ntwo\nthree\nfour");
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+  expect(sent.mock.calls[0][1]).toBe("one\ntwo\nthree\nfour");
+  // The choice is the window's: it is kept for the next start.
+  expect(JSON.parse(localStorage.getItem("ui.prefs")!).sendKey).toBe("enter");
+});
+
+test("the new line goes where the caret is, and an input method's Enter still never sends", async () => {
+  const user = userEvent.setup();
+  const { api, actions } = await mounted();
+  actions.setSendKey("enter");
+  const sent = vi.spyOn(api.commands, "sendMessage");
+  await user.type(box(), "ab");
+  box().setSelectionRange(1, 1);
+  await user.keyboard("{Meta>}{Enter}{/Meta}");
+  expect(box().value).toBe("a\nb");
+  fireEvent.keyDown(box(), { key: "Enter", isComposing: true });
+  fireEvent.keyDown(box(), { key: "Enter", keyCode: 229 });
+  expect(sent).not.toHaveBeenCalled();
+});

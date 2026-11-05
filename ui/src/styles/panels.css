@@ -349,8 +349,24 @@ button.member:hover {
   padding-inline: var(--s-4);
 }
 .settings-page > section.privacy,
+.settings-page > section.location,
 .settings-page > section.storage {
   padding-inline: 0;
+}
+.settings-page > section.location {
+  padding-bottom: var(--s-4);
+}
+.endpoint-test {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+.endpoint-test .fetch-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-1);
 }
 .settings-page > section > h3 {
   margin: 0;

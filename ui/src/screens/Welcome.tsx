@@ -8,6 +8,7 @@ import { Credit } from "../ui/Credit";
 import { Icon } from "../ui/Icon";
 import { ErrorBar, InlineError } from "../ui/ErrorBar";
 import { PictureButtons } from "./Profile";
+import { LocationForm } from "./Location";
 import { FolderNote, SavesPage } from "./Saves";
 
 /** The first-run screens: the corpus, the save, the model. Each says what it needs and checks the answer. */
@@ -21,6 +22,18 @@ export function StepBack({ onBack }: { onBack: () => void }) {
     <button type="button" className="icon step-back" aria-label={t("chatlist.back")} title={t("chatlist.back")} onClick={onBack}>
       <Icon name="back" size={22} />
     </button>
+  );
+}
+
+/** First-run cards: where the files are kept, folded away behind a heading for the few who need it. */
+function WhereFiles() {
+  const t = useT();
+  return (
+    <details className="more">
+      <summary>{t("location.first")}</summary>
+      <p className="muted small">{t("location.first.hint")}</p>
+      <LocationForm compact />
+    </details>
   );
 }
 
@@ -92,6 +105,9 @@ export function CorpusSetup({ corpus }: { corpus: CorpusState }) {
         </p>
         {status && <FolderNote text={t("setup.folder")} path={status.home_dir} />}
       </form>
+      <div className="card">
+        <WhereFiles />
+      </div>
     </main>
   );
 }
@@ -112,6 +128,7 @@ export function SavePicker({ onSwitched = reload }: { onSwitched?: () => void })
         {missing && <p role="alert">{t("picker.missing", { name: missing })}</p>}
         {first && <p>{t("picker.first.hint")}</p>}
         <SavesPage picker onSwitched={onSwitched} onCount={setCount} />
+        {first && <WhereFiles />}
       </div>
       <ErrorBar />
     </main>

@@ -26,7 +26,7 @@ use crate::events::{
     RosterChanged, ToolCalled, TurnActivity, WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId};
-use crate::views::{ForwardTo, ImagePart};
+use crate::views::{EndpointTest, ForwardTo, ImagePart, NetworkSetting};
 
 /// What changed about a group, with the new value (`None`: it was cleared).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +153,9 @@ pub trait LlmPort: Send + Sync + 'static {
     async fn models(&self, profile: &Profile) -> ApiResult<Vec<String>>;
     /// The voices the read-aloud endpoint offers; empty when it lists none.
     async fn voices(&self, profile: &Profile, model: &str) -> ApiResult<Vec<String>>;
+    /// One short message to `model` on `profile`: what came back or why not, and how long
+    /// it took. Sent once, without retries, outside any turn.
+    async fn probe(&self, profile: &Profile, model: &str) -> ApiResult<EndpointTest>;
     /// `POST {base_url}/audio/speech` for one message's speech.
     async fn speech(
         &self,
@@ -179,7 +182,17 @@ pub trait NetPort: Send + Sync + 'static {
     async fn get(&self, url: &str) -> Result<Option<Vec<u8>>, String>;
     /// Whether a connection to the endpoint's host can be opened. Sends nothing.
     async fn reachable(&self, base_url: &str) -> bool;
+    /// Make later requests (model calls included, when they share this transport) leave
+    /// the machine the way `setting` says. The proxy password, if any, is in the keychain
+    /// under [`PROXY_ACCOUNT`]. The `Err` says why the setting cannot be used.
+    fn set_network(&self, _setting: &NetworkSetting) -> Result<(), String> {
+        Ok(())
+    }
 }
+
+/// The keychain account of the manual proxy's password (a profile name cannot be this:
+/// profile names are plain words).
+pub const PROXY_ACCOUNT: &str = "(proxy)";
 
 /// Everything the engine pushes to the window, as the seam's event types.
 #[derive(Debug, Clone, PartialEq)]
@@ -381,6 +394,10 @@ impl LlmPort for Unwired {
     }
 
     async fn voices(&self, _: &Profile, _: &str) -> ApiResult<Vec<String>> {
+        Err(ApiError::NotImplemented)
+    }
+
+    async fn probe(&self, _: &Profile, _: &str) -> ApiResult<EndpointTest> {
         Err(ApiError::NotImplemented)
     }
 

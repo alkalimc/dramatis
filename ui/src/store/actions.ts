@@ -2,6 +2,7 @@ import { asFailure, settle, type Api, type ChannelId, type ChannelSummary, type 
 import { clearFresh, type Fresh } from "../lib/fresh";
 import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Store } from ".";
+import type { SendKey } from "../lib/keys";
 import type { LoadKey, Theme } from "./state";
 
 const PAGE = 50;
@@ -131,7 +132,7 @@ export function createActions(api: Api, store: Store) {
     if (settings) d({ type: "settings", settings });
     if (coldstart) d({ type: "coldstart", candidates: coldstart });
     const prefs = loadPrefs();
-    d({ type: "prefs", pinned: prefs.pinned, theme: prefs.theme });
+    d({ type: "prefs", pinned: prefs.pinned, theme: prefs.theme, sendKey: prefs.sendKey });
     await Promise.all([refreshEndpoints(), refreshRoster(), refreshChannels(), refreshQuota(), refreshAway(), refreshClock(), refreshUserAvatar()]);
     await refreshStatus();
     void loadAbout();
@@ -276,12 +277,18 @@ export function createActions(api: Api, store: Store) {
   function pin(channel: ChannelId, on: boolean) {
     d({ type: "pin", channel, on });
     const s = store.getState();
-    savePrefs({ pinned: s.pinned, theme: s.theme });
+    savePrefs({ pinned: s.pinned, theme: s.theme, sendKey: s.sendKey });
   }
 
   function setTheme(theme: Theme) {
     d({ type: "theme", theme });
-    savePrefs({ pinned: store.getState().pinned, theme });
+    savePrefs({ pinned: store.getState().pinned, theme, sendKey: store.getState().sendKey });
+  }
+
+  function setSendKey(sendKey: SendKey) {
+    d({ type: "sendKey", sendKey });
+    const s = store.getState();
+    savePrefs({ pinned: s.pinned, theme: s.theme, sendKey });
   }
 
   /** A conversation nobody has spoken in is not in the list: its stand-in row follows the change. */
@@ -387,6 +394,7 @@ export function createActions(api: Api, store: Store) {
     markUnread,
     pin,
     setTheme,
+    setSendKey,
     archive,
     rename,
     setChannelAvatar,

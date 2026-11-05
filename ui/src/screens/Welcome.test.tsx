@@ -324,3 +324,62 @@ test("cancelling a save made from another one goes back to that one and deletes 
   expect(readFresh()).toBeNull();
   clearFresh();
 });
+
+test("the endpoint test names a missing key, an unknown model and an address that does not answer, and succeeds on a good one", async () => {
+  const user = userEvent.setup();
+  const { api } = renderApp("first=1&form=library");
+  const probe = vi.spyOn(api.commands, "testEndpoint");
+  await toConnect(user);
+
+  await user.click(screen.getByRole("radio", { name: "deepseek" }));
+  // Nothing to test before the endpoint has been checked.
+  expect(screen.queryByRole("button", { name: "Send a test message" })).toBeNull();
+  await user.type(screen.getByLabelText("API key"), "sk-test");
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  await screen.findByLabelText("Model for chat");
+
+  await user.click(screen.getByRole("button", { name: "Send a test message" }));
+  expect(await screen.findByText("It works. Answered in 420 ms: ready")).toBeDefined();
+  expect(probe).toHaveBeenLastCalledWith("deepseek", "deepseek-chat");
+
+  // A new answer replaces the old one, and a changed model clears it.
+  await user.selectOptions(screen.getByLabelText("Model for chat"), "deepseek-reasoner");
+  expect(screen.queryByText(/It works/)).toBeNull();
+
+  await user.click(screen.getByRole("radio", { name: "Custom" }));
+  await user.type(screen.getByLabelText("Base URL"), "https://unreachable.invalid/v1");
+  await user.type(screen.getByLabelText("API key"), "sk-x");
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  await user.type(await screen.findByLabelText("Model for chat"), "my-model");
+  await user.click(screen.getByRole("button", { name: "Send a test message" }));
+  expect(await screen.findByText(/Nothing at that address answers like a model endpoint/)).toBeDefined();
+  // A route problem points at the network settings on this card.
+  const details = screen.getByText("Network settings", { selector: "summary" }).closest("details") as HTMLDetailsElement;
+  expect(details.open).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Network settings" }));
+  await waitFor(() => expect(details.open).toBe(true));
+  expect(await within(details).findByRole("radio", { name: /^System proxy/ })).toBeDefined();
+});
+
+test("a model the endpoint does not know and a refused key are told apart in the test", async () => {
+  const user = userEvent.setup();
+  renderApp("first=1&form=library");
+  await toConnect(user);
+  await user.click(screen.getByRole("radio", { name: "local" }));
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+  await user.selectOptions(await screen.findByLabelText("Model for chat"), "retired-model");
+  await user.click(screen.getByRole("button", { name: "Send a test message" }));
+  expect(await screen.findByText("The endpoint does not know this model. Pick one from the list.")).toBeDefined();
+  expect(screen.getByText(/does not exist/)).toBeDefined();
+});
+
+test("the first card that needs a corpus offers where the files are kept, folded away", async () => {
+  const user = userEvent.setup();
+  renderApp("corpus=missing");
+  await screen.findByRole("heading", { name: /corpus/i });
+  const summary = screen.getByText("Where files are kept", { selector: "summary" });
+  const details = summary.closest("details") as HTMLDetailsElement;
+  expect(details.open).toBe(false);
+  await user.click(summary);
+  expect(await within(details).findByLabelText("Folder path")).toBeDefined();
+});
