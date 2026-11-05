@@ -127,6 +127,25 @@ pub(crate) struct Corpus {
     /// The corpus is written in CJK text: a reply with none is not the person's.
     pub cjk: bool,
     pub descriptions: Descriptions,
+    /// What the model-facing bytes of a segment depend on: this build, the pack and its
+    /// wording. A stored segment under another digest is dropped ([`world::log::discard_stale`]).
+    pub digest: String,
+}
+
+/// The digest of the prompt material this build and pack produce.
+fn prompt_digest(manifest: &folio::Manifest) -> String {
+    let wording = manifest
+        .wording
+        .iter()
+        .flat_map(|(k, v)| [k.as_str(), v.as_str()]);
+    let head = [
+        api::update::VERSION,
+        manifest.pack.as_str(),
+        manifest.pack_version.as_str(),
+        manifest.build_fingerprint.as_str(),
+        manifest.user_placeholder.as_str(),
+    ];
+    world::meta::fingerprint(head.into_iter().chain(wording))
 }
 
 /// The model a listing call names: any, since `GET /models` takes none.
@@ -204,8 +223,13 @@ impl Agent {
                     .values()
                     .any(|v| v.chars().any(assemble::is_cjk)),
             descriptions,
+            digest: prompt_digest(manifest),
             wording,
         };
+        // The log is a cache: what an earlier build or pack wrote is dropped before the
+        // first turn, best effort (a segment missed here is caught when its channel next
+        // takes a turn).
+        let _ = world::log::discard_stale(&parts.world, &corpus.digest);
         Ok(Self {
             world: Mutex::new(parts.world),
             index: Mutex::new(parts.index),

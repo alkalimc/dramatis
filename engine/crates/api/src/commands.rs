@@ -295,6 +295,12 @@ commands! {
     fn saves() -> Vec<SaveInfo> = Ok(Vec::new());
     /// An empty save. `Exists` when the name is taken (ignoring case).
     fn new_save(name: String) -> ();
+    /// What opening save `name` would change: the versions it was last opened with next to
+    /// the running ones. Reads the file and writes nothing, so a front end can warn first;
+    /// `changes` is empty when they agree. An encrypted save not yet unlocked is `Locked`.
+    /// `switch_save` is "load anyway": it opens the save, and once that succeeds records
+    /// the running versions in it.
+    fn check_save(name: String) -> SaveCheck;
     /// Close the current world and open another. `Busy` while a reply or request is
     /// being written. The caller reloads what it shows. Another process (the terminal
     /// next to the app) keeps the save it has open until it is restarted.

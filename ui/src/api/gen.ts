@@ -259,6 +259,14 @@ export const commands = {
 	/**  An empty save. `Exists` when the name is taken (ignoring case). */
 	newSave: (name: string) => typedError<null, ApiError>(__TAURI_INVOKE("new_save", { name })),
 	/**
+	 *  What opening save `name` would change: the versions it was last opened with next to
+	 *  the running ones. Reads the file and writes nothing, so a front end can warn first;
+	 *  `changes` is empty when they agree. An encrypted save not yet unlocked is `Locked`.
+	 *  `switch_save` is "load anyway": it opens the save, and once that succeeds records
+	 *  the running versions in it.
+	 */
+	checkSave: (name: string) => typedError<SaveCheck, ApiError>(__TAURI_INVOKE("check_save", { name })),
+	/**
 	 *  Close the current world and open another. `Busy` while a reply or request is
 	 *  being written. The caller reloads what it shows. Another process (the terminal
 	 *  next to the app) keeps the save it has open until it is restarted.
@@ -1026,6 +1034,17 @@ export type RosterRow = {
 };
 
 /**
+ *  What opening a save would change: its recorded versions next to the running ones.
+ *  `changes` is empty when they agree, and the save can be opened without asking.
+ */
+export type SaveCheck = {
+	name: string,
+	saved: VersionStamp,
+	running: VersionStamp,
+	changes: VersionChange[],
+};
+
+/**
  *  One save: a whole world (channels, memories, bonds, requests, usage). Endpoints, keys,
  *  the corpus and the media cache are shared by every save.
  */
@@ -1193,6 +1212,33 @@ export type UpdateStatus = {
 	auto: boolean,
 	/**  Whether the user has answered the question about checking by themselves. */
 	asked: boolean,
+};
+
+/**  How a save's versions differ from the running ones. */
+export type VersionChange = 
+/**  The save has no record: it was last written by a build from before the record. */
+"unrecorded" | 
+/**  The save was last opened with a newer app than this one. */
+"newer_app" | 
+/**  The save was last opened with an older app. */
+"older_app" | 
+/**  The app version is not comparable (not a version number). */
+"other_app" | 
+/**  The save was last opened with another corpus pack. */
+"other_pack" | 
+/**  The same pack, another release of it. */
+"other_pack_version";
+
+/**
+ *  The versions a save was last opened with, or the ones running now. `None`: not
+ *  recorded (a save from before the record, or no corpus open to name a pack).
+ */
+export type VersionStamp = {
+	app: string | null,
+	pack: string | null,
+	pack_version: string | null,
+	/**  The save's database schema; this build's own for the running side. */
+	schema: number,
 };
 
 export type Waiting = {

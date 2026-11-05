@@ -159,6 +159,31 @@ out and an endpoint that refuses a picture is remembered until the next start; s
 `vision = false` for a model or proxy that cannot take images. Set `max_image_bytes` for an
 endpoint that caps the size of a request.
 
+## Saves and versions
+
+A save records the app version and the corpus pack (name and version) it was last opened with.
+When you open a save whose record differs from the running app or pack (or has none), the app and
+the terminal show both versions and ask: load anyway, or go back. Loading brings the save up to
+date and records the running versions. A save written by a newer data format than the build is
+refused. A save keeps only what was generated (messages, memories, events, settings, bonds); the
+prompt text sent to the model is rebuilt from the code and the pack, and the stored model log is
+a cache that is dropped when it was written by another build or pack.
+
+Converting a save from an earlier release is done by a separate tool, not by the app:
+
+```sh
+cargo run --release -p dramatis-migrate -- ~/.dramatis/saves/default.sqlite \
+    --folio ~/.dramatis/<pack>.folio            # writes default.v2.sqlite beside it
+cargo run --release -p dramatis-migrate -- <save> --folio <pack>.folio --in-place   # keeps <save>.bak
+```
+
+Close the app and the terminal first. The original file is never changed (the tool works on a
+copy and writes a new file; `--in-place` moves the original to `<save>.bak` only after the new
+file is checked). An encrypted save asks for its password with hidden input and stays encrypted
+under it. The tool upgrades the schema, strips the stored prompt material, carries the
+conversation summaries over (this needs `--folio`, the pack the save was played with), and writes
+the version record. Every message, memory, event, bond, setting and picture is kept.
+
 ## Terminal
 
 Talk to the persons of a corpus from a shell. The terminal and the desktop app are two front ends

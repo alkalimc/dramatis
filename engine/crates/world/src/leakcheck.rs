@@ -227,7 +227,16 @@ fn rollover_summary(s: &Scene) -> Result<(), String> {
     )?;
     require(
         "the summary opened another channel's segment",
-        log::open_segment(&s.w, s.group, [b"A", b"B", b"C"], "{}", Some(&summary), 2).is_err(),
+        log::open_segment(
+            &s.w,
+            s.group,
+            [b"A", b"B", b"C"],
+            "{}",
+            Some(&summary),
+            "d",
+            2,
+        )
+        .is_err(),
     )?;
     log::open_segment(
         &s.w,
@@ -235,6 +244,7 @@ fn rollover_summary(s: &Scene) -> Result<(), String> {
         [b"A", b"B", b"C"],
         "{}",
         Some(&summary),
+        "d",
         2,
     )
     .map_err(err)?;

@@ -5,9 +5,9 @@ import { renderWith } from "../test/render";
 import { readFresh } from "../lib/fresh";
 import { SavesPage } from "./Saves";
 
-async function open(onSwitched = vi.fn()) {
+async function open(onSwitched = vi.fn(), query = "") {
   const user = userEvent.setup();
-  const view = renderWith(<SavesPage onSwitched={onSwitched} />);
+  const view = renderWith(<SavesPage onSwitched={onSwitched} />, { query });
   await screen.findByText("second try");
   return { user, onSwitched, ...view };
 }
@@ -26,6 +26,31 @@ test("opening another save reloads what is on screen", async () => {
   const { user, onSwitched } = await open();
   await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
   await waitFor(() => expect(onSwitched).toHaveBeenCalledOnce());
+});
+
+test("a save last opened with other versions asks before loading, and going back opens nothing", async () => {
+  const { user, onSwitched, api } = await open(vi.fn(), "drift=1");
+  const switched = vi.spyOn(api.commands, "switchSave");
+  await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
+  const dialog = await screen.findByRole("dialog", { name: /second try was last opened with other versions/ });
+  expect(within(dialog).getByText("App 1.0.4")).toBeDefined();
+  expect(within(dialog).getByText("Data format 7")).toBeDefined();
+  expect(within(dialog).getByText("It was last opened with an older app.")).toBeDefined();
+  expect(within(dialog).getByText("It was last opened with another release of the corpus pack.")).toBeDefined();
+  await user.click(within(dialog).getByRole("button", { name: "Go back" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(switched).not.toHaveBeenCalled();
+  expect(onSwitched).not.toHaveBeenCalled();
+});
+
+test("loading anyway opens the save, and it is not asked about again", async () => {
+  const { user, onSwitched, api } = await open(vi.fn(), "drift=1");
+  await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Load anyway" }));
+  await waitFor(() => expect(onSwitched).toHaveBeenCalledOnce());
+  const again = await api.commands.checkSave("second try");
+  expect(again.status === "ok" && again.data.changes).toEqual([]);
 });
 
 test("new, copy and rename go through the engine's naming rules", async () => {

@@ -11,6 +11,7 @@ use api::types::{Author, ChannelId, FactId, MessageId, Mode, PersonId, Target, T
 use api::views::{
     Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, ForwardTo,
     InterfaceLanguage, Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage,
+    VersionChange, VersionStamp,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -123,9 +124,14 @@ struct Asking {
 
 /// A destructive step waiting for a yes.
 enum Pending {
+    /// A save last opened with other versions, loaded on a yes.
+    LoadSave(String),
     DeleteSave(String),
     DeleteGroup(ChannelId),
-    Overwrite { name: String, path: String },
+    Overwrite {
+        name: String,
+        path: String,
+    },
     PasswordOn,
     PasswordOff,
     ClearStorage(Vec<StorageKind>),
@@ -335,7 +341,8 @@ impl Session {
         if self.save_changed().await {
             return Flow::Continue;
         }
-        if self.picking {
+        // A question asked at the picker (load a save of other versions) is answered first.
+        if self.picking && self.pending.is_none() {
             return self.pick(line).await;
         }
         let Some(mut asking) = self.pending.take() else {
@@ -2451,13 +2458,65 @@ impl Session {
     /// Close this world and open another: what the session held about the old one (the
     /// channel, the choices the host offered, the numbered memories, the call counts) goes.
     async fn switch_save(&mut self, name: &str) {
-        let mut switched = self.engine.switch_save(name.to_owned()).await;
-        if switched == Err(api::ApiError::Locked) {
+        let mut checked = self.engine.check_save(name.to_owned()).await;
+        if checked == Err(api::ApiError::Locked) {
             if !self.unlock(name).await {
                 return;
             }
-            switched = self.engine.switch_save(name.to_owned()).await;
+            checked = self.engine.check_save(name.to_owned()).await;
         }
+        match checked {
+            Err(e) => return self.term.line(&self.why(&e)),
+            // Versions differ: say how, and load on a yes.
+            Ok(check) if !check.changes.is_empty() => {
+                self.term
+                    .line(&self.names.say("cli.save.drift", &[("name", &name)]));
+                self.term
+                    .line(&self.stamp_line("cli.save.drift.saved", &check.saved));
+                self.term
+                    .line(&self.stamp_line("cli.save.drift.running", &check.running));
+                for change in &check.changes {
+                    let key = match change {
+                        VersionChange::Unrecorded => "cli.save.drift.unrecorded",
+                        VersionChange::NewerApp => "cli.save.drift.newer_app",
+                        VersionChange::OlderApp => "cli.save.drift.older_app",
+                        VersionChange::OtherApp => "cli.save.drift.other_app",
+                        VersionChange::OtherPack => "cli.save.drift.other_pack",
+                        VersionChange::OtherPackVersion => "cli.save.drift.other_pack_version",
+                    };
+                    self.term.line(&self.msg(key));
+                }
+                self.confirm(
+                    self.msg("cli.save.drift.ask"),
+                    Pending::LoadSave(name.to_owned()),
+                );
+                return;
+            }
+            Ok(_) => {}
+        }
+        self.load_save(name).await;
+    }
+
+    /// One side of a version comparison as a line.
+    fn stamp_line(&self, key: &str, stamp: &VersionStamp) -> String {
+        let unknown = self.msg("cli.save.drift.unknown");
+        let pack = match &stamp.pack {
+            Some(name) => format!("{name} {}", stamp.pack_version.as_deref().unwrap_or("")),
+            None => unknown.clone(),
+        };
+        self.names.say(
+            key,
+            &[
+                ("app", &stamp.app.as_deref().unwrap_or(&unknown)),
+                ("pack", &pack.trim()),
+                ("schema", &stamp.schema.to_string()),
+            ],
+        )
+    }
+
+    /// Open the save, whatever its recorded versions say.
+    async fn load_save(&mut self, name: &str) {
+        let switched = self.engine.switch_save(name.to_owned()).await;
         if let Err(e) = switched {
             return self.term.line(&self.why(&e));
         }
@@ -2612,6 +2671,10 @@ impl Session {
             }
         };
         self.switch_save(&chosen).await;
+        if self.pending.is_some() {
+            // Waiting for a yes to load a save of other versions.
+            return Flow::Continue;
+        }
         let opened = self
             .engine
             .app_status()
@@ -2719,6 +2782,21 @@ impl Session {
 
     async fn confirmed(&mut self, pending: Pending) {
         match pending {
+            Pending::LoadSave(name) => {
+                self.load_save(&name).await;
+                let opened = self
+                    .engine
+                    .app_status()
+                    .await
+                    .is_ok_and(|s| s.save.is_some());
+                if self.picking && opened {
+                    self.picking = false;
+                    self.refresh_completions().await;
+                    self.arrivals(true).await;
+                } else if self.picking {
+                    self.show_picker().await;
+                }
+            }
             Pending::DeleteSave(name) => match self.engine.delete_save(name.clone()).await {
                 Ok(()) => self
                     .term

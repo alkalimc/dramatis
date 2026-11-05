@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { settle, type Failure, type SaveInfo } from "../api";
+import { settle, type Failure, type SaveCheck, type SaveInfo, type VersionChange, type VersionStamp } from "../api";
 import { useT } from "../i18n";
 import { markFresh } from "../lib/fresh";
 import { when } from "../lib/format";
@@ -31,31 +31,87 @@ export function FolderNote({ text, path }: { text: string; path: string }) {
 
 type Prompt = { title: string; submit: (password: string) => Promise<Failure | null> };
 
+/** One side of a version comparison: what a save was last opened with, or what runs now. */
+function StampLines({ stamp }: { stamp: VersionStamp }) {
+  const t = useT();
+  const unknown = t("saves.drift.unknown");
+  return (
+    <ul className="muted small">
+      <li>{t("saves.drift.app", { version: stamp.app ?? unknown })}</li>
+      <li>{t("saves.drift.pack", { name: stamp.pack ?? "", version: stamp.pack ? (stamp.pack_version ?? unknown) : unknown })}</li>
+      <li>{t("saves.drift.schema", { n: stamp.schema })}</li>
+    </ul>
+  );
+}
+
+/** The warning before a save last opened with other versions is loaded. */
+export function VersionDialog({ check, onLoad, onBack }: { check: SaveCheck; onLoad: () => void; onBack: () => void }) {
+  const t = useT();
+  return (
+    <Dialog title={t("saves.drift.title", { name: check.name })} onClose={onBack}>
+      <div className="row wrap">
+        <div>
+          <strong>{t("saves.drift.saved")}</strong>
+          <StampLines stamp={check.saved} />
+        </div>
+        <div>
+          <strong>{t("saves.drift.running")}</strong>
+          <StampLines stamp={check.running} />
+        </div>
+      </div>
+      <ul>
+        {check.changes.map((c: VersionChange) => (
+          <li key={c}>{t(`saves.drift.${c}`)}</li>
+        ))}
+      </ul>
+      <p className="muted small">{t("saves.drift.hint")}</p>
+      <div className="row">
+        <button type="button" onClick={onLoad}>
+          {t("saves.drift.load")}
+        </button>
+        <button type="button" className="ghost" onClick={onBack}>
+          {t("saves.drift.back")}
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
 /**
- * Open a save by name. An encrypted one not yet unlocked in this window asks for its
- * password first; `onSwitched` runs once it is open, and the window reloads by default.
+ * Open a save by name. The save's recorded versions are checked first: when they differ
+ * from the running ones, `drift` holds the comparison until the user loads it anyway or
+ * goes back. An encrypted save not yet unlocked in this window asks for its password
+ * first; `onSwitched` runs once it is open, and the window reloads by default.
  */
 export function useOpenSave(onSwitched: () => void, refresh: () => Promise<void> = async () => undefined) {
   const t = useT();
   const api = useApi();
   const dispatch = useDispatch();
   const [prompt, setPrompt] = useState<Prompt | null>(null);
-  const open = async (name: string) => {
+  const [drift, setDrift] = useState<SaveCheck | null>(null);
+  const load = async (name: string) => {
+    setDrift(null);
     const r = await settle(api.commands.switchSave(name));
     if (r.ok) {
       await refresh();
       onSwitched();
+    } else {
+      dispatch({ type: "error", error: r.error });
+    }
+  };
+  const open = async (name: string): Promise<void> => {
+    const r = await settle(api.commands.checkSave(name));
+    if (r.ok) {
+      if (r.data.changes.length > 0) setDrift(r.data);
+      else await load(name);
     } else if (r.error.code === "locked") {
       setPrompt({
         title: t("saves.unlock.title", { name }),
         submit: async (password) => {
           const unlocked = await settle(api.commands.unlock(name, password));
           if (!unlocked.ok) return unlocked.error;
-          const switched = await settle(api.commands.switchSave(name));
-          if (!switched.ok) return switched.error;
           setPrompt(null);
-          await refresh();
-          onSwitched();
+          await open(name);
           return null;
         },
       });
@@ -63,7 +119,7 @@ export function useOpenSave(onSwitched: () => void, refresh: () => Promise<void>
       dispatch({ type: "error", error: r.error });
     }
   };
-  return { open, prompt, setPrompt };
+  return { open, prompt, setPrompt, drift, load, back: () => setDrift(null) };
 }
 
 type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
@@ -99,7 +155,7 @@ export function SavesPage({ onSwitched = () => window.location.reload(), picker 
     onCount?.(list.length);
   }, [actions, api, onCount]);
 
-  const { open: openNamed, prompt, setPrompt } = useOpenSave(onSwitched, refresh);
+  const { open: openNamed, prompt, setPrompt, drift, load, back } = useOpenSave(onSwitched, refresh);
   // Saves made in this window: opening one starts the first-run steps, which can undo it.
   const made = useRef(new Set<string>());
   const open = async (name: string) => {
@@ -253,6 +309,7 @@ export function SavesPage({ onSwitched = () => window.location.reload(), picker 
       </p>
 
       {prompt && <PasswordDialog title={prompt.title} submit={prompt.submit} onClose={() => setPrompt(null)} />}
+      {drift && <VersionDialog check={drift} onLoad={() => void load(drift.name)} onBack={back} />}
 
       {ask && (
         <Dialog title={t(`saves.${ask.kind}.title`, { name: ask.save.name })} onClose={() => setAsk(null)}>

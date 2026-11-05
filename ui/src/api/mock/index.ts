@@ -42,6 +42,8 @@ import type {
   Roster,
   RosterBand,
   SaveInfo,
+  VersionChange,
+  VersionStamp,
   StorageCategory,
   StorageKind,
   StorageUsage,
@@ -162,6 +164,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
           { name: "default", size_kb: 412, played_at: iso(5), current: true, encrypted: locked },
           { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false, encrypted: false },
         ];
+  // `?drift=1`: the save "second try" was last opened with an older app and another pack release.
+  const running: VersionStamp = { app: version, pack: "demo", pack_version: info.corpus_version, schema: 8 };
+  const stamps = new Map<string, VersionStamp>(saves.map((s) => [s.name, running]));
+  if (params.get("drift") === "1") stamps.set("second try", { app: "1.0.4", pack: "demo", pack_version: "0.9.0", schema: 7 });
   /** The two caches the user may clear; the other kinds are fixed sizes. */
   const cache = { avatars: { kb: 2300, files: 24 }, audio: { kb: 5200, files: 9 } };
   const storageUsage = (): StorageUsage => {
@@ -1111,10 +1117,21 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       known.add(name);
       return ok(null);
     },
+    checkSave: (name) => {
+      const target = saves.find((s) => s.name === name);
+      if (!target) return fail({ code: "not_found" });
+      if (target.encrypted && !known.has(name)) return fail({ code: "locked" });
+      const saved = stamps.get(name) ?? running;
+      const changes: VersionChange[] = [];
+      if (saved.app !== running.app) changes.push("older_app");
+      if (saved.pack_version !== running.pack_version) changes.push("other_pack_version");
+      return ok({ name, saved, running, changes });
+    },
     switchSave: (name) => {
       const target = saves.find((s) => s.name === name);
       if (!target) return fail({ code: "not_found" });
       if (target.encrypted && !known.has(name)) return fail({ code: "locked" });
+      stamps.set(name, running);
       openSave = name;
       changedElsewhere = false;
       return ok(null);

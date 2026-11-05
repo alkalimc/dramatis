@@ -819,7 +819,7 @@ pub fn segments(agent: &Agent, ch: ChannelId) -> Vec<world::log::Segment> {
         ids.into_iter()
             .map(|id| {
                 w.query_row(
-                    "SELECT id, channel, seq, prefix_a, prefix_b, prefix_c, shape, opened_at
+                    "SELECT id, channel, seq, prefix_a, prefix_b, prefix_c, shape, opened_at, digest
                      FROM log_segment WHERE id = ?1",
                     [id],
                     |r| {
@@ -832,6 +832,7 @@ pub fn segments(agent: &Agent, ch: ChannelId) -> Vec<world::log::Segment> {
                             prefix_c: r.get(5)?,
                             shape: r.get(6)?,
                             opened_at: r.get(7)?,
+                            digest: r.get(8)?,
                         })
                     },
                 )
