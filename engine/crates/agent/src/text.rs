@@ -12,6 +12,69 @@ use std::collections::BTreeMap;
 /// Fallbacks for every key the harness reads. `{field}` placeholders are filled by the
 /// caller; `{user}` is always the user's name (or the corpus's word for "you").
 const DEFAULTS: &[(&str, &str)] = &[
+    // What an endpoint answers instead of a reply, one rule per line, matched without
+    // regard to case. `start`: how a reply opens (a scene in brackets before it does not
+    // count). `any`: a phrase anywhere in a short reply, as a whole word. `whole`: the
+    // entire reply, with `*` for any run of characters. A corpus adds its own language.
+    (
+        "boilerplate.start",
+        "as a large language model\n\
+         as an ai\n\
+         as a language model\n\
+         i'm a large language model\n\
+         i am a large language model\n\
+         i'm just a language model\n\
+         i'm an ai\n\
+         i am an ai\n\
+         i'm gemini\n\
+         i am gemini\n\
+         i'm bard\n\
+         i am bard\n\
+         i'm sorry, but i can't\n\
+         i'm sorry, but i cannot\n\
+         i cannot fulfill\n\
+         i can't fulfill\n\
+         i'm unable to\n\
+         i am unable to\n\
+         sorry, i can't help\n\
+         sorry, i cannot help\n\
+         sorry, something went wrong\n\
+         i apologize, but i",
+    ),
+    (
+        "boilerplate.any",
+        "something went wrong\n\
+         try your request again\n\
+         encountering an error\n\
+         encountered an error\n\
+         an error occurred\n\
+         i seem to be encountering\n\
+         hard time fulfilling\n\
+         can i help you with something else\n\
+         could you try again\n\
+         language model\n\
+         trained by google\n\
+         google search\n\
+         google scholar\n\
+         search results\n\
+         rate limit\n\
+         quota exceeded",
+    ),
+    (
+        "boilerplate.whole",
+        "error\n\
+         server error\n\
+         internal server error\n\
+         bad gateway\n\
+         service unavailable\n\
+         gateway timeout\n\
+         null\n\
+         undefined\n\
+         [empty]\n\
+         (empty)\n\
+         no response*\n\
+         no reply*",
+    ),
     ("user.you", "you"),
     ("host.name", "Host"),
     ("host.alias", ""),

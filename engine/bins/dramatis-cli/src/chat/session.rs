@@ -393,7 +393,8 @@ impl Session {
             Command::Topic(text) => self.topic(&text).await,
             Command::Fav => self.fav().await,
             Command::Forward(n, to) => self.forward(n, &to).await,
-            Command::Delete(n) => self.delete_saved(n).await,
+            Command::Delete(n) => self.delete(n).await,
+            Command::Regen => self.regen().await,
             Command::Invite(who) => self.invite(&who).await,
             Command::Remove(who) => self.remove(&who).await,
             Command::Leave => self.leave(),
@@ -1733,7 +1734,65 @@ impl Session {
         }
     }
 
-    /// `/delete`: take message `n` of the last `/history` out of the favorites.
+    /// `/delete`: take message `n` of the last `/history` out of the favorites, or out of
+    /// the chat and what the model sees anywhere else.
+    async fn delete(&mut self, n: usize) {
+        if self.in_favorites() {
+            return self.delete_saved(n).await;
+        }
+        let Some(id) = self.numbered_message(n) else {
+            return;
+        };
+        let Some(channel) = self.current_channel().await else {
+            return;
+        };
+        match self.engine.delete_message(channel, id).await {
+            Ok(()) => {
+                self.numbered.clear();
+                self.term.note(&self.msg("cli.delete.message.done"));
+            }
+            Err(api::ApiError::Invalid { field }) if field == "busy" => {
+                self.term.note(&self.msg("cli.resend.busy"));
+            }
+            Err(e) => self.fail(&e),
+        }
+    }
+
+    /// `/regen`: write the latest reply of a person or the host again.
+    async fn regen(&mut self) {
+        let Some(channel) = self.current_channel().await else {
+            return;
+        };
+        let last = match self.engine.history(channel.clone(), None, 1).await {
+            Ok(mut m) => m.pop(),
+            Err(e) => return self.fail(&e),
+        };
+        let Some(last) = last.filter(|m| m.author != Author::User && !m.service) else {
+            return self.term.note(&self.msg("cli.regen.none"));
+        };
+        let (started, at) = (Instant::now(), now_ms());
+        let (engine, bridge) = (self.engine.clone(), self.bridge.clone());
+        let result = self
+            .interruptible(async move {
+                engine.regenerate(channel, last.id).await?;
+                bridge.idle().await;
+                Ok::<(), api::ApiError>(())
+            })
+            .await;
+        match result {
+            Some(Err(api::ApiError::Invalid { field })) if field == "busy" => {
+                self.term.note(&self.msg("cli.resend.busy"));
+            }
+            Some(Err(e)) => self.fail(&e),
+            _ => {}
+        }
+        self.report_failures();
+        self.offer();
+        self.footer(at, started).await;
+        self.arrivals(false).await;
+    }
+
+    /// `/delete` in the favorites: take message `n` of the last `/history` out of them.
     async fn delete_saved(&mut self, n: usize) {
         if !self.in_favorites() {
             return self.term.line(&self.msg("cli.unsave.only_fav"));

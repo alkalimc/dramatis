@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Message } from "../api";
 import { renderWith } from "../test/render";
@@ -434,8 +434,69 @@ test("the context menu lists reply, copy, forward, send again for one's own, sou
     await user.keyboard("{Escape}");
     return out;
   };
-  expect(await labels("m1")).toEqual(["Reply", "Copy text", "Forward", "Sources (1)"]);
-  expect(await labels("m2")).toEqual(["Reply", "Copy text", "Forward", "Send again"]);
+  expect(await labels("m1")).toEqual(["Reply", "Copy text", "Forward", "Sources (1)", "Delete"]);
+  expect(await labels("m2")).toEqual(["Reply", "Copy text", "Forward", "Send again", "Delete"]);
+});
+
+/** A channel with exactly these messages: the mock's own history for it is left out. */
+async function withOnly(channel: string, messages: Message[]) {
+  const r = renderWith(<ChannelView channel={channel} />, {
+    patch: (api) => ({ ...api, commands: { ...api.commands, history: async () => ({ status: "ok" as const, data: [] }) } }),
+  });
+  await act(async () => {
+    r.store.dispatch({ type: "names", persons: [{ id: "mira", name: "Mira" }] });
+    r.store.dispatch({ type: "history", channel, messages, older: false, done: true });
+  });
+  return r;
+}
+
+test("only the latest reply of a person can be written again, and any message can be deleted", async () => {
+  const user = userEvent.setup();
+  const { container } = await withOnly("dm:oren", [
+    { ...base, channel: "dm:oren", id: "o1", text: "First." },
+    { ...base, channel: "dm:oren", id: "o2", author: { kind: "user" }, text: "Mine." },
+    { ...base, channel: "dm:oren", id: "o3", text: "Second." },
+  ]);
+  const labels = async (id: string) => {
+    await user.pointer({ keys: "[MouseRight]", target: container.querySelector(`#m-${id}`)! });
+    const menu = await screen.findByRole("menu", { name: "Actions for this message" });
+    const out = within(menu).getAllByRole("menuitem").map((i) => i.textContent);
+    await user.keyboard("{Escape}");
+    return out;
+  };
+  expect(await labels("o1")).toEqual(["Reply", "Copy text", "Forward", "Delete"]);
+  expect(await labels("o2")).toEqual(["Reply", "Copy text", "Forward", "Send again", "Delete"]);
+  expect(await labels("o3")).toEqual(["Reply", "Copy text", "Forward", "Write again", "Delete"]);
+});
+
+test("Delete asks first, then removes the message from the chat", async () => {
+  const user = userEvent.setup();
+  const { container, api, store } = await withOnly("dm:oren", [
+    { ...base, channel: "dm:oren", id: "o1", text: "A bad first line." },
+    { ...base, channel: "dm:oren", id: "o2", text: "A fine one." },
+  ]);
+  const deleted = vi.spyOn(api.commands, "deleteMessage").mockResolvedValue({ status: "ok", data: null });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  for (let i = 0; i < 2; i++) {
+    await user.pointer({ keys: "[MouseRight]", target: container.querySelector("#m-o1")! });
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  }
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect(deleted).toHaveBeenCalledTimes(1);
+  expect(deleted).toHaveBeenCalledWith("dm:oren", "o1");
+  await waitFor(() => expect(store.getState().messages["dm:oren"].map((m) => m.id)).toEqual(["o2"]));
+});
+
+test("Write again asks the engine for the latest reply once", async () => {
+  const user = userEvent.setup();
+  const { container, api } = await withOnly("dm:oren", [
+    { ...base, channel: "dm:oren", id: "o1", author: { kind: "user" }, text: "Hi." },
+    { ...base, channel: "dm:oren", id: "o2", text: "A bad first line." },
+  ]);
+  const again = vi.spyOn(api.commands, "regenerate").mockResolvedValue({ status: "ok", data: null });
+  await user.pointer({ keys: "[MouseRight]", target: container.querySelector("#m-o2")! });
+  await user.click(await screen.findByRole("menuitem", { name: "Write again" }));
+  expect(again).toHaveBeenCalledWith("dm:oren", "o2");
 });
 
 test("Reply from the menu opens the reply bar and the focus goes to the box", async () => {

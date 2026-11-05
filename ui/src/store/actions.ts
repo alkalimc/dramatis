@@ -220,6 +220,42 @@ export function createActions(api: Api, store: Store) {
     d({ type: "restore", restore: { channel, text } });
   }
 
+  /**
+   * Send a message again when its reply is still being written, never came, or failed: the
+   * engine abandons the reply in flight, takes the message back, and the same words go out
+   * at once. A message with a picture goes back to the composer instead (the take-back
+   * returns text only).
+   */
+  async function resendNow(channel: ChannelId, message: string) {
+    const list = store.getState().messages[channel] ?? [];
+    const kept = list.find((m) => m.id === message);
+    const text = await attempt(c.rewind(channel, message));
+    if (text === undefined) return;
+    d({ type: "rewound", event: { channel, from: message } });
+    if (kept?.attachment || kept?.picture_lost) {
+      d({ type: "restore", restore: { channel, text } });
+      return;
+    }
+    d({ type: "awaiting", channel, on: true });
+    if ((await attempt(c.sendMessage(channel, text, null, null))) === undefined) {
+      d({ type: "awaiting", channel, on: false });
+      d({ type: "restore", restore: { channel, text } });
+    }
+  }
+
+  /** Delete one message of a chat, wherever it is. The engine says so with `MessageRemoved`. */
+  async function deleteMessage(channel: ChannelId, message: string) {
+    if ((await attempt(c.deleteMessage(channel, message))) === undefined) return;
+    d({ type: "removed", channel, message });
+    await refreshChannels();
+  }
+
+  /** Have the latest reply written again. The old one goes at once; the new one streams in. */
+  async function regenerate(channel: ChannelId, message: string) {
+    if ((await attempt(c.regenerate(channel, message))) === undefined) return;
+    d({ type: "awaiting", channel, on: true });
+  }
+
   /** The favorites: their channel is looked up once, and opened like any other. */
   async function openFavorites() {
     const channel = await attempt(c.favoritesChannel());
@@ -399,6 +435,9 @@ export function createActions(api: Api, store: Store) {
     deleteSaved,
     setTopic,
     resend,
+    resendNow,
+    deleteMessage,
+    regenerate,
     setMode,
     saveSettings,
     setInterfaceLanguage,
@@ -444,6 +483,10 @@ async function listenAll(api: Api, store: Store, actions: Actions): Promise<(() 
       d({ type: "rewound", event: payload });
       void actions.refreshChannels();
       void actions.refreshDigest();
+    }),
+    e.messageRemoved.listen(({ payload }) => {
+      d({ type: "removed", channel: payload.channel, message: payload.message });
+      void actions.refreshChannels();
     }),
     e.modeChanged.listen(({ payload }) => d({ type: "modeChanged", event: payload })),
     e.rosterChanged.listen(() => {

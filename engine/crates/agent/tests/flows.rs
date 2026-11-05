@@ -128,7 +128,10 @@ async fn direct_turns_extend_one_prefix_on_every_protocol() {
 async fn deltas_stream_under_one_message_and_the_final_bytes_are_verbatim() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
-    e.fake.push([say("Steep it for three minutes, Dr.Doc.")]);
+    // The first stretch of a reply is held back while it could still be boilerplate, so
+    // a reply streams in pieces once it is longer than that.
+    let long = "Steep it for three minutes, Dr.Doc. ".repeat(16);
+    e.fake.push([say(long.trim())]);
     e.agent.send(ch, "tea?", None).await.unwrap();
     let events = e.sink.take();
     let deltas: Vec<_> = events
@@ -767,17 +770,18 @@ async fn a_name_alone_and_a_long_english_answer_are_not_held_as_boilerplate() {
 }
 
 #[tokio::test]
-async fn an_english_corpus_keeps_english_replies() {
+async fn an_english_corpus_keeps_english_replies_no_rule_matches() {
     let e = env(WireApi::Chat);
     let ch = direct(&e, "ann");
-    e.fake.push([say(REFUSAL)]);
+    let plain = "Cooler water works better, and a little patience.";
+    e.fake.push([say(plain)]);
     e.agent
         .send(ch, "how should I brew tea?", None)
         .await
         .unwrap();
     assert_eq!(
         e.agent.history(ch, None, 10).unwrap().last().unwrap().text,
-        REFUSAL
+        plain
     );
 }
 
@@ -2395,7 +2399,7 @@ async fn a_reply_can_hand_the_turn_to_another_member() {
     let e = env(WireApi::Chat);
     let g = three(&e);
     e.fake
-        .push([say("Ann: bo knows.\n\u{2192} bo"), say("Bo: steel.")]);
+        .push([say("Ann: bo knows.\n\u{2192} bo"), say("steel.")]);
     e.agent
         .send(g, "ann, where is the steel?", None)
         .await
@@ -2412,8 +2416,8 @@ async fn a_reply_can_hand_the_turn_to_another_member() {
         said.iter().all(|(_, t)| !t.contains('\u{2192}')),
         "{said:?}"
     );
-    assert!(said.iter().any(|(_, t)| t == "Ann: bo knows."));
-    assert!(said.iter().any(|(_, t)| t == "Bo: steel."));
+    assert!(said.iter().any(|(_, t)| t == "bo knows."));
+    assert!(said.iter().any(|(_, t)| t == "steel."));
     let shapes: Vec<String> = meter(&e.agent).into_iter().map(|r| r.0).collect();
     assert_eq!(shapes, ["group", "interject"]);
 }
@@ -2460,7 +2464,10 @@ async fn a_hand_off_chain_stops_at_the_cap() {
     assert_eq!(e.fake.bodies().len(), 4, "address call plus three replies");
     let said: Vec<String> = texts(&e, g).into_iter().map(|(_, t)| t).collect();
     let pos = |s: &str| said.iter().position(|t| t.starts_with(s)).unwrap();
-    assert!(pos("Ann") < pos("Bo") && pos("Bo") < pos("Dee"), "{said:?}");
+    assert!(
+        pos("to dee") < pos("second") && pos("second") < pos("third"),
+        "{said:?}"
+    );
 }
 
 #[tokio::test]
@@ -2508,7 +2515,7 @@ async fn the_hand_off_line_is_never_streamed() {
     let e = env(WireApi::Chat);
     let g = three(&e);
     e.fake
-        .push([say("Ann: bo knows.\n\u{2192} bo"), say("Bo: steel.")]);
+        .push([say("Ann: bo knows.\n\u{2192} bo"), say("steel.")]);
     e.agent
         .send(g, "ann, where is the steel?", None)
         .await
@@ -2528,10 +2535,7 @@ async fn the_hand_off_line_is_never_streamed() {
         "{streamed:?}"
     );
     let all = streamed.concat();
-    assert!(
-        all.contains("Ann: bo knows.") && all.contains("Bo: steel."),
-        "{all}"
-    );
+    assert!(all.contains("bo knows.") && all.contains("steel."), "{all}");
 }
 
 #[tokio::test]
@@ -2557,7 +2561,7 @@ async fn an_ordinary_interjection_hands_the_turn_to_nobody() {
         .unwrap();
     assert_eq!(e.fake.bodies().len(), 2);
     let said = texts(&e, g);
-    assert!(said.iter().any(|(_, t)| t == "Bo: a line."), "{said:?}");
+    assert!(said.iter().any(|(_, t)| t == "a line."), "{said:?}");
 }
 
 #[tokio::test]
@@ -2566,7 +2570,7 @@ async fn a_reply_that_opens_with_the_previous_message_keeps_only_its_own_words()
     let g = three(&e);
     e.fake.push([
         say("Ann: the steel is in the hold.\n\u{2192} bo"),
-        say("Ann: the steel is in the hold.\n\nBo: and the hold is locked.\n[#u1]\n"),
+        say("the steel is in the hold.\n\nBo: and the hold is locked.\n[#u1]\n"),
     ]);
     e.agent
         .send(g, "ann, where is the steel?", None)
@@ -2575,7 +2579,7 @@ async fn a_reply_that_opens_with_the_previous_message_keeps_only_its_own_words()
     let said = texts(&e, g);
     assert!(
         said.iter()
-            .any(|(_, t)| t.starts_with("Bo: and the hold is locked.")),
+            .any(|(_, t)| t.starts_with("and the hold is locked.")),
         "{said:?}"
     );
     assert_eq!(
@@ -2592,13 +2596,13 @@ async fn a_hand_off_line_before_the_citation_line_still_hands_the_turn_on() {
     let e = env(WireApi::Chat);
     let g = three(&e);
     e.fake
-        .push([say("Ann: ask bo.\n\u{2192} bo\n[#u1]"), say("Bo: steel.")]);
+        .push([say("Ann: ask bo.\n\u{2192} bo\n[#u1]"), say("steel.")]);
     e.agent
         .send(g, "ann, where is the steel?", None)
         .await
         .unwrap();
     let said = texts(&e, g);
-    assert!(said.iter().any(|(_, t)| t == "Bo: steel."), "{said:?}");
+    assert!(said.iter().any(|(_, t)| t == "steel."), "{said:?}");
     assert!(
         said.iter().all(|(_, t)| !t.contains('\u{2192}')),
         "{said:?}"
@@ -2731,7 +2735,7 @@ async fn a_chorus_reply_carries_the_clock_line_too() {
     let e = env(WireApi::Chat);
     let g = three(&e);
     e.fake
-        .push([say("Ann: bo knows.\n\u{2192} bo"), say("Bo: steel.")]);
+        .push([say("Ann: bo knows.\n\u{2192} bo"), say("steel.")]);
     e.agent
         .send(g, "ann, where is the steel?", None)
         .await
@@ -2764,7 +2768,7 @@ async fn a_reply_may_open_with_a_short_quote_and_a_new_round_never_trims_against
         "{said:?}"
     );
     assert!(
-        said.contains(&"Bo: and the hold is locked. I agree.".to_owned()),
+        said.contains(&"and the hold is locked. I agree.".to_owned()),
         "{said:?}"
     );
 }

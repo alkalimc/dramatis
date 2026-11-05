@@ -72,6 +72,44 @@ pub fn strip(text: &str) -> String {
         .join("\n")
 }
 
+/// `text` without the citations `keep` refuses (it gets a citation's ids): the blanks
+/// before such a mark are removed, and a line left with nothing goes with its break. Marks
+/// that name no source a reader can open are noise in a stored message.
+pub fn drop_unless(text: &str, keep: impl Fn(&[&str]) -> bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(i) = text[at..].find("[#") {
+        let start = at + i;
+        match cite_at(text, start) {
+            Some((ids, end)) if !keep(&ids) => {
+                out.push_str(text[at..start].trim_end_matches([' ', '\t']));
+                at = end;
+            }
+            Some((_, end)) => {
+                out.push_str(&text[at..end]);
+                at = end;
+            }
+            None => {
+                out.push_str(&text[at..start + 2]);
+                at = start + 2;
+            }
+        }
+    }
+    out.push_str(&text[at..]);
+    let before: Vec<&str> = text.split('\n').collect();
+    let after: Vec<&str> = out.split('\n').collect();
+    if before.len() != after.len() {
+        return out;
+    }
+    before
+        .iter()
+        .zip(&after)
+        .filter(|(b, a)| a.trim().is_empty() == b.trim().is_empty())
+        .map(|(_, a)| *a)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Whether a line holds citations and nothing else.
 pub fn is_cite_line(line: &str) -> bool {
     !ids(line).is_empty() && strip(line).trim().is_empty()
@@ -98,6 +136,15 @@ pub fn scene_inner<'a>(line: &'a str, open: &str, close: &str) -> Option<&'a str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marks_that_name_nothing_are_dropped_with_their_lines() {
+        let keep = |ids: &[&str]| ids.contains(&"u1");
+        assert_eq!(drop_unless("Fine.\n[#m4]\n[#u1]", keep), "Fine.\n[#u1]");
+        assert_eq!(drop_unless("Fine [#voice:ab] ok.", keep), "Fine ok.");
+        assert_eq!(drop_unless("A\n\nB [#m4]", keep), "A\n\nB");
+        assert_eq!(drop_unless("[#m4]", keep), "");
+    }
 
     #[test]
     fn ids_are_found_and_nonsense_skipped() {

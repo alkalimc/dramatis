@@ -170,6 +170,16 @@ commands! {
     /// while a reply is being written in the channel, and for a message that is not the
     /// user's. `Rewound` follows.
     fn rewind(channel: ChannelId, message: MessageId) -> String;
+    /// Delete one message of the channel, the user's or a person's or the host's. It
+    /// leaves the chat and what the model is shown next; replies to it stay, and so do
+    /// memories already written from the conversation. Refused while a reply is being
+    /// written in the channel. `MessageRemoved` follows.
+    fn delete_message(channel: ChannelId, message: MessageId) -> ();
+    /// Write the channel's latest reply of a person or the host again. The old reply
+    /// leaves at once (`MessageRemoved`) and the new one streams like any other; if it
+    /// fails the old one comes back. Refused for any other message, and while a reply is
+    /// being written. Returns once the new turn has started.
+    fn regenerate(channel: ChannelId, message: MessageId) -> ();
     /// Forward a message, with its picture, to a person, the host or the favorites. To a
     /// person or the host it lands in their direct channel as a forwarded copy and they
     /// answer it as they would a message; to the favorites it is kept as its original

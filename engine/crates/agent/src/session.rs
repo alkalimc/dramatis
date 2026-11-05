@@ -9,6 +9,7 @@
 //! keeps appending and only the call after the switch misses the cache.
 
 use std::collections::HashSet;
+use std::time::Duration;
 
 use api::events::{
     ActivityFailure, ActivityState, MessageAdded, MessageDelta, QuotaChanged, ToolCalled,
@@ -28,6 +29,7 @@ use crate::assemble::{self, Ctx, Member};
 use crate::diag;
 use crate::endpoint::ChatRole;
 use crate::error::{Error, Result};
+use crate::guard::{self, Guard, Verdict};
 use crate::leak::Leaks;
 use crate::meter;
 use crate::persona;
@@ -152,6 +154,7 @@ fn failure(e: &Error) -> ActivityFailure {
         Error::QuotaExhausted { .. } => ActivityFailure::QuotaExhausted,
         Error::ImageRejected { .. } => ActivityFailure::ImageUnsupported,
         Error::Refused => ActivityFailure::Refused,
+        Error::TimedOut { .. } => ActivityFailure::TimedOut,
         _ => ActivityFailure::Error,
     }
 }
@@ -724,12 +727,40 @@ impl Agent {
         };
         let mut req = build(items)?;
         let leaks = Leaks::new(&self.corpus.wording, &self.corpus.placeholder);
+        // What counts as no reply: boilerplate, a document or a tool call written as
+        // speech, nothing at all. A wrap-up is a document by design.
+        let guard = (!turn.wrapup).then(|| {
+            let mut tools: Vec<String> = shape.tools.iter().map(|t| t.name.to_owned()).collect();
+            tools.extend(
+                api::tools::shared_tools(&self.corpus.descriptions)
+                    .into_iter()
+                    .map(|t| t.name.to_owned()),
+            );
+            Guard::new(&self.corpus.wording, tools)
+        });
+        let speaker_names = self.speaker_names(turn);
+        let limits = &self.config.agent.timeout;
+        let first_wait = Duration::from_secs(limits.first_token_secs.max(1));
+        let total_wait = Duration::from_secs(limits.total_secs.max(limits.first_token_secs).max(1));
         let mut retried = false;
         let (reply, refused) = loop {
-            let mut events = match self.llm.stream(&ep, &req).await {
-                Ok(events) => events,
-                Err(e) => return Err(self.picture_refusal(e, sent_picture, &model_key)),
+            let started = tokio::time::Instant::now();
+            let first_by = started + first_wait;
+            let total_by = started + total_wait;
+            // A request sent whole (a structured wrap-up) answers inside `stream`, so only
+            // the total allowance fits it.
+            let open_by = if req.output_schema.is_some() {
+                total_by
+            } else {
+                first_by
             };
+            let mut events =
+                match tokio::time::timeout_at(open_by, self.llm.stream(&ep, &req)).await {
+                    Ok(Ok(events)) => events,
+                    Ok(Err(e)) => return Err(self.picture_refusal(e, sent_picture, &model_key)),
+                    Err(_) => return Err(self.timed_out(turn, open_by - started)),
+                };
+            let mut began = req.output_schema.is_some();
             let mut done = None;
             let mut failure = None;
             // Text that may still turn out to be a canned refusal is held back, so a
@@ -745,14 +776,31 @@ impl Agent {
             );
             let mark_list = marks.list();
             let mut hold = Holdback::default();
-            while let Some(event) = events.next().await {
+            loop {
+                let by = if began { total_by } else { first_by };
+                let event = match tokio::time::timeout_at(by, events.next()).await {
+                    Ok(Some(event)) => event,
+                    Ok(None) => break,
+                    Err(_) => {
+                        failure = Some(self.timed_out(turn, by - started));
+                        break;
+                    }
+                };
+                began = true;
                 match event {
                     Ok(LlmEvent::TextDelta(delta)) if !turn.wrapup => {
                         if holding {
                             held.push_str(&delta);
-                            if assemble::refusal(&held, self.corpus.cjk) == assemble::Refusal::No {
+                            let settled = guard
+                                .as_ref()
+                                .is_none_or(|g| g.judge(&held, false) == Verdict::Fine);
+                            if settled
+                                && assemble::refusal(&held, self.corpus.cjk)
+                                    == assemble::Refusal::No
+                            {
                                 holding = false;
-                                let all = std::mem::take(&mut held);
+                                let all =
+                                    guard::strip_names(&std::mem::take(&mut held), &speaker_names);
                                 self.stream_text(turn, &mut hold, &leaks, &mark_list, all)?;
                             }
                         } else {
@@ -789,9 +837,29 @@ impl Agent {
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&model_key);
             }
-            let refused = reply.tool_calls().next().is_none()
-                && assemble::refusal(&reply.text(), self.corpus.cjk) == assemble::Refusal::Is;
+            // The reply as it will be kept: what it reproduced of the harness cut off, its
+            // habits (own name, message tags) tidied, a call written as text adopted.
+            let reply = if turn.wrapup {
+                reply
+            } else {
+                self.cut_leak(turn, &leaks, reply)
+            };
+            let reply = if structured {
+                adopt_json_call(reply)
+            } else if role.model.emulated_tools() && !shape.tools.is_empty() {
+                adopt_text_call(reply, false, &shape.tools)
+            } else {
+                reply
+            };
+            let reply = if turn.wrapup {
+                reply
+            } else {
+                self.tidied(turn, reply, &speaker_names)
+            };
+            let why = self.rejection(turn, guard.as_ref(), &reply);
+            let refused = why.is_some();
             if !refused && !held.is_empty() {
+                let held = guard::strip_names(&held, &speaker_names);
                 self.stream_text(turn, &mut hold, &leaks, &mark_list, held)?;
             }
             // What is still held at the end is the closing line itself, harness text the
@@ -808,8 +876,8 @@ impl Agent {
                     self.stream_delta(turn, &mut hold.streamed, rest)?;
                 }
             }
-            if refused {
-                self.diagnose(turn, "refused", &reply.text());
+            if let Some(why) = why {
+                self.diagnose_why(turn, "refused", why, &reply.text());
             }
             if refused && !retried {
                 // A fresh request, paid like any other; the refusal is not kept. A long
@@ -823,18 +891,6 @@ impl Agent {
                 continue;
             }
             break (reply, refused);
-        };
-        let reply = if turn.wrapup {
-            reply
-        } else {
-            self.cut_leak(turn, &leaks, reply)
-        };
-        let reply = if structured {
-            adopt_json_call(reply)
-        } else if role.model.emulated_tools() && !shape.tools.is_empty() {
-            adopt_text_call(reply, false, &shape.tools)
-        } else {
-            reply
         };
         if refused {
             // Twice in a row: the turn fails, and the log keeps no words that are not the
@@ -857,18 +913,82 @@ impl Agent {
     /// One line in the diagnostics log: what ended the turn and the first of the endpoint's
     /// words.
     pub(crate) fn diagnose(&self, turn: &Turn, what: &str, text: &str) {
+        self.diagnose_why(turn, what, "", text);
+    }
+
+    /// [`Agent::diagnose`] with the rule that ended the reply (`why` empty: none).
+    pub(crate) fn diagnose_why(&self, turn: &Turn, what: &str, why: &str, text: &str) {
         let channel = turn.channel.to_string();
-        diag::record(
-            &self.config.logs,
-            self.now().ms,
-            &[
-                ("what", what),
-                ("channel", &channel),
-                ("speaker", turn.speaker.as_str()),
-                ("model", &turn.model),
-            ],
-            text,
+        let mut fields = vec![
+            ("what", what),
+            ("channel", channel.as_str()),
+            ("speaker", turn.speaker.as_str()),
+            ("model", turn.model.as_str()),
+        ];
+        let why = why.replace(' ', "_");
+        if !why.is_empty() {
+            fields.push(("reason", why.as_str()));
+        }
+        diag::record(&self.config.logs, self.now().ms, &fields, text);
+    }
+
+    /// The names the speaker's lines must not start with: the interface adds them.
+    fn speaker_names(&self, turn: &Turn) -> Vec<String> {
+        match &turn.speaker {
+            Actor::Person(p) => self.display(p.as_str()).ok().into_iter().collect(),
+            Actor::Host => vec![self.corpus.host_name.clone()],
+            Actor::User => Vec::new(),
+        }
+    }
+
+    /// A reply with its text tidied ([`guard::tidy`]): what the log and the message keep.
+    fn tidied(&self, turn: &Turn, mut reply: Response, names: &[String]) -> Response {
+        let marks = assemble::closing_marks(
+            &self.corpus.wording,
+            turn.in_group(),
+            matches!(turn.speaker, Actor::Person(_)),
         );
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        for part in &mut reply.parts {
+            if let Part::Text(t) = part {
+                *t = guard::tidy(t, &names, &marks.list());
+            }
+        }
+        reply
+    }
+
+    /// Why a finished reply is no reply, if it is not: a canned error, boilerplate, a
+    /// document or a call written as speech, nothing. A call made is a reply of its own.
+    fn rejection(
+        &self,
+        turn: &Turn,
+        guard: Option<&Guard>,
+        reply: &Response,
+    ) -> Option<&'static str> {
+        if reply.tool_calls().next().is_some() {
+            return None;
+        }
+        if assemble::refusal(&reply.text(), self.corpus.cjk) == assemble::Refusal::Is {
+            return Some("canned");
+        }
+        let visible =
+            assemble::visible_text(&reply.text(), (&self.corpus.scene.0, &self.corpus.scene.1));
+        match guard?.judge(&visible, true) {
+            Verdict::Bad("empty") if !turn.text.is_empty() => None,
+            Verdict::Bad(why) => Some(why),
+            _ => None,
+        }
+    }
+
+    /// A call that outlasted its allowance: the turn fails with a line in the log.
+    fn timed_out(&self, turn: &Turn, after: Duration) -> Error {
+        let e = Error::TimedOut {
+            after_secs: after.as_secs(),
+        };
+        if !turn.wrapup {
+            self.diagnose_why(turn, "timed out", "", &e.to_string());
+        }
+        e
     }
 
     /// The error of a failed call. A client error on a request that carried a picture is
@@ -1265,6 +1385,15 @@ impl Agent {
                 }
             }
         }
+        // Marks that name no source (a memory id, a tag, a made-up id) are not speech.
+        let cites = self.citations(turn.channel, &turn.text, &turn.shown)?;
+        turn.text = api::cites::drop_unless(&turn.text, |ids| {
+            ids.iter().any(|id| {
+                cites.iter().any(|c| {
+                    c.chunk_id == *id || c.chunk_id.rsplit_once(':').is_some_and(|(_, t)| t == *id)
+                })
+            })
+        });
         // No words are left (a turn that ended on a tool call, or wrote only closing
         // lines): no empty message is stored. What the turn offered is kept under a fixed
         // line; anything else is dropped.
@@ -1286,7 +1415,7 @@ impl Agent {
             self.quote(turn.channel, id, target)?;
         }
         let meta = MessageMeta {
-            cites: self.citations(turn.channel, &turn.text, &turn.shown)?,
+            cites,
             confidence: turn.level,
             ..MessageMeta::default()
         };

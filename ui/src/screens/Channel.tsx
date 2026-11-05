@@ -171,10 +171,25 @@ function TurnFailed({ channel }: { channel: ChannelId }) {
   const failure = useStore((s) => s.failures[channel]);
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
+  const actions = useActions();
+  // The user's message the failed turn answered, when nothing came after it.
+  const unanswered = useStore((s) => {
+    const list = s.messages[channel] ?? [];
+    const last = list[list.length - 1];
+    return last && last.author.kind === "user" && !last.service ? last : null;
+  });
   if (!failure) return null;
   return (
     <p className="turn-failed" role="alert">
       {t(`error.turn.${failure.reason}`, { name: authorName(failure.author, t, names, user) })}
+      {unanswered && (
+        <>
+          {" "}
+          <button type="button" className="link" onClick={() => void actions.resendNow(channel, unanswered.id)}>
+            {t("error.turn.resend")}
+          </button>
+        </>
+      )}
     </p>
   );
 }

@@ -502,6 +502,62 @@ async fn one_of_them_may_bring_it_up_as_an_opening_within_the_usual_limits() {
 }
 
 #[tokio::test]
+async fn a_bad_opening_is_written_again_and_its_seed_follows_the_new_message() {
+    let e = setup(endpoints(WireApi::Chat, true, None));
+    e.agent.with_world(|w| {
+        for who in ["ann", "bo"] {
+            world::bond::set_mode(w, &p(who), world::Mode::Enabled).unwrap();
+        }
+    });
+    let now = e.clock.0.load(std::sync::atomic::Ordering::SeqCst);
+    e.agent.with_world(|w| {
+        let ch = channel::direct(w, &p("ann")).unwrap();
+        message::append(w, ch, &Actor::User, "again", None, None, now).unwrap();
+    });
+    e.fake.push_for(ASK, [say(&reply())]);
+    e.agent.tick(true).await.unwrap();
+    e.clock.advance(2 * HOUR_MS);
+    to_slot_of_part(&e, "23:00", "08:00");
+    e.fake.push([
+        say("It is ann's birthday today."),
+        say("About that tea, Doc."),
+    ]);
+    let (_, ch) = e
+        .agent
+        .presence(true)
+        .await
+        .unwrap()
+        .opened
+        .expect("an opening");
+    let opening = e.agent.history(ch, None, 5).unwrap().pop().unwrap();
+    assert_eq!(opening.text, "About that tea, Doc.");
+    let seed_of = |id: i64| -> i64 {
+        e.agent.with_world(|w| {
+            w.query_row("SELECT count(*) FROM seed WHERE message = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        })
+    };
+    assert_eq!(seed_of(opening.id.0.parse().unwrap()), 1);
+
+    e.fake.push([say("A friendlier way in, Doc.")]);
+    e.agent
+        .regenerate(ch, world::MessageId(opening.id.0.parse().unwrap()))
+        .await
+        .unwrap();
+    let now = e.agent.history(ch, None, 5).unwrap().pop().unwrap();
+    assert_eq!(now.text, "A friendlier way in, Doc.");
+    assert_eq!(seed_of(now.id.0.parse().unwrap()), 1);
+    // The request asked for an opening again: the harness's line, not the user's words.
+    let asked = body_text(e.fake.bodies().last().unwrap());
+    assert!(
+        asked.contains("part of") && !asked.contains("About that tea"),
+        "{asked}"
+    );
+}
+
+#[tokio::test]
 async fn the_host_post_reaches_the_ui_as_one_message_with_its_offers() {
     let e = setup(endpoints(WireApi::Chat, true, None));
     e.sink.take();

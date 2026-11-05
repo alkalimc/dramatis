@@ -1,4 +1,4 @@
-//! Estimated values this crate reads (`roll`, `interject`, `group`, `reasoning`, `loop`, `retrieve`, `context`). `Default`
+//! Estimated values this crate reads (`roll`, `interject`, `group`, `reasoning`, `loop`, `timeout`, `retrieve`, `context`). `Default`
 //! carries the register's current values and is the only place they are written; use
 //! sites take the struct as an argument. Missing keys fall back field by field.
 
@@ -175,6 +175,28 @@ impl Default for Picture {
     }
 }
 
+/// `timeout.*`: how long a model call may take before the turn ends as failed. Each step
+/// of a turn is one call and gets the whole allowance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Timeout {
+    /// Seconds from sending the request to the first piece of the reply (the connection,
+    /// the endpoint's back-off between tries and its thinking included).
+    pub first_token_secs: u64,
+    /// Seconds from sending the request to the end of the reply. A reply that is not
+    /// streamed (a wrap-up asked as a JSON document) has only this one.
+    pub total_secs: u64,
+}
+
+impl Default for Timeout {
+    fn default() -> Self {
+        Self {
+            first_token_secs: 90,
+            total_secs: 240,
+        }
+    }
+}
+
 /// Every group this crate reads, as `api` composes them into its one `Params`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -185,6 +207,7 @@ pub struct Params {
     pub reasoning: Reasoning,
     #[serde(rename = "loop")]
     pub turn_loop: Loop,
+    pub timeout: Timeout,
     pub opening: Opening,
     pub retrieve: Retrieve,
     pub cost: Cost,

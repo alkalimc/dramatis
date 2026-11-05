@@ -39,7 +39,9 @@ anything else       send it to the current channel
 /forward <n> <to>   pass message n on to a person, {host} or fav (the favorites); a person
                     or {host} answers it
 /fav                open the favorites, your own place for saved messages and notes
-/delete <n>         remove message n of that list from the favorites
+/delete <n>         remove message n of that list: from the favorites, or from this chat
+                    and from what the model sees next
+/regen              write the latest reply of a person or {host} again
 /resend [n]         take back your n-th last message (default 1) and everything after it,
                     and put its text back in the input line to edit and send again
 /sources [n]        list the sources of the n-th last reply that has any (default 1), numbered
@@ -608,6 +610,12 @@ line is one message.",
         "usage: /delete <n>, n a number from /history",
     ),
     ("cli.usage.resend", "usage: /resend [n]"),
+    ("cli.usage.regen", "usage: /regen"),
+    (
+        "cli.regen.none",
+        "the latest message is not a reply to write again",
+    ),
+    ("cli.delete.message.done", "message removed"),
     ("cli.usage.sources", "usage: /sources [n] [entry]"),
     (
         "cli.usage.source",

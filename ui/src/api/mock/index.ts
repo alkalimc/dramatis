@@ -796,6 +796,28 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       setTimeout(() => bus.rewound.emit({ channel, from: message }));
       return ok(m.text);
     },
+    deleteMessage: (channel, message) => {
+      const ch = channels.get(channel);
+      const i = ch ? ch.log.findIndex((m) => m.id === message) : -1;
+      if (!ch || i < 0) return fail({ code: "not_found" });
+      ch.log.splice(i, 1);
+      setTimeout(() => bus.messageRemoved.emit({ channel, message }));
+      return ok(null);
+    },
+    regenerate: (channel, message) => {
+      const ch = channels.get(channel);
+      const i = ch ? ch.log.findIndex((m) => m.id === message) : -1;
+      if (!ch || i < 0) return fail({ code: "not_found" });
+      const old = ch.log[i];
+      if (old.author.kind === "user" || i !== ch.log.length - 1) return fail({ code: "invalid", field: "request" });
+      const asked = [...ch.log.slice(0, i)].reverse().find((m) => m.author.kind === "user");
+      ch.log.splice(i, 1);
+      setTimeout(() => {
+        bus.messageRemoved.emit({ channel, message });
+        void (ch.kind === "host" ? replyHost(asked?.text ?? "") : replyChannel(ch, asked?.text ?? ""));
+      });
+      return ok(null);
+    },
     forward: (message, to) => {
       const original = [...channels.values()].flatMap((c) => c.log).find((m) => m.id === message);
       if (!original || original.service) return fail({ code: "not_found" });

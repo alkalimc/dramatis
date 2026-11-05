@@ -209,6 +209,23 @@ impl Engine {
         self.ports.agent.rewind(ch, message).await
     }
 
+    pub(crate) async fn delete_message_impl(
+        &self,
+        ch: ChannelId,
+        message: MessageId,
+    ) -> ApiResult<()> {
+        channel::get(&self.w(), convert::world_channel(&ch)?).map_err(world_err)?;
+        self.ports.agent.delete_message(ch, message).await
+    }
+
+    pub(crate) async fn regenerate_impl(&self, ch: ChannelId, message: MessageId) -> ApiResult<()> {
+        channel::get(&self.w(), convert::world_channel(&ch)?).map_err(world_err)?;
+        if !self.has_chat() {
+            return Err(ApiError::NoEndpoint);
+        }
+        self.ports.agent.regenerate(ch, message).await
+    }
+
     pub(crate) async fn forward_impl(&self, msg: MessageId, to: ForwardTo) -> ApiResult<ChannelId> {
         let stored = message::get(&self.w(), convert::world_message(&msg)?).map_err(world_err)?;
         let meta = MessageMeta::of(stored.attachment.as_ref());

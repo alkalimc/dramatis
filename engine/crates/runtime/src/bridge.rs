@@ -62,6 +62,8 @@ pub struct BridgeParts {
 struct Tasks {
     next: u64,
     live: HashMap<u64, AbortHandle>,
+    /// The channel a task works in, for those that work in one (a reply, a regeneration).
+    channel: HashMap<u64, String>,
 }
 
 /// Removes a task from the books when it ends, whether it finished or was aborted.
@@ -74,6 +76,7 @@ impl Drop for Done {
     fn drop(&mut self) {
         let mut tasks = self.bridge.tasks.lock().unwrap_or_else(|e| e.into_inner());
         tasks.live.remove(&self.id);
+        tasks.channel.remove(&self.id);
         self.bridge.busy.send_replace(tasks.live.len());
     }
 }
@@ -216,6 +219,16 @@ impl AgentBridge {
         F: FnOnce(Arc<Agent>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = agent::Result<()>> + Send + 'static,
     {
+        self.spawn_in(None, what, f);
+    }
+
+    /// [`AgentBridge::spawn`] for work in one channel, which [`AgentBridge::cancel_channel`]
+    /// can abandon without touching the rest.
+    fn spawn_in<F, Fut>(self: &Arc<Self>, channel: Option<&ChannelId>, what: &'static str, f: F)
+    where
+        F: FnOnce(Arc<Agent>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = agent::Result<()>> + Send + 'static,
+    {
         let me = self.clone();
         // Held across the spawn so the task cannot end before it is on the books.
         let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -237,7 +250,35 @@ impl AgentBridge {
             }
         });
         tasks.live.insert(id, handle.abort_handle());
+        if let Some(c) = channel {
+            tasks.channel.insert(id, c.0.clone());
+        }
         self.busy.send_replace(tasks.live.len());
+    }
+
+    /// Abandon the replies being written in one channel and wait for them to let go of
+    /// it. What was already stored stays stored. Returns whether anything was running.
+    pub async fn cancel_channel(&self, channel: &ChannelId) -> bool {
+        let handles: Vec<AbortHandle> = {
+            let tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            tasks
+                .channel
+                .iter()
+                .filter(|(_, c)| **c == channel.0)
+                .filter_map(|(id, _)| tasks.live.get(id).cloned())
+                .collect()
+        };
+        for h in &handles {
+            h.abort();
+        }
+        // An aborted task ends at its next await; its channel lock goes with it.
+        for _ in 0..200 {
+            if handles.iter().all(AbortHandle::is_finished) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        !handles.is_empty()
     }
 
     /// Wait until no background work is running: every reply, forward and request started
@@ -316,7 +357,9 @@ impl AgentPort for Port {
         let posted = agent.post_reply(ch, &text, image.map(Into::into), reply_to)?;
         let id = MessageId(posted.message.0.to_string());
         self.0
-            .spawn("reply", move |a| async move { a.respond(posted).await });
+            .spawn_in(Some(&channel), "reply", move |a| async move {
+                a.respond(posted).await
+            });
         Ok(id)
     }
 
@@ -340,7 +383,29 @@ impl AgentPort for Port {
         let agent = self.0.agent().await?;
         let ch = world::ChannelId(parse(&channel.0)?);
         let id = world::MessageId(parse(&message.0)?);
+        // Sending again while the reply is still being written: that reply is abandoned
+        // first (its message and log entries go with the take-back).
+        self.0.cancel_channel(&channel).await;
         Ok(agent.rewind(ch, id)?)
+    }
+
+    async fn delete_message(&self, channel: ChannelId, message: MessageId) -> ApiResult<()> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        let id = world::MessageId(parse(&message.0)?);
+        Ok(agent.delete_message(ch, id)?)
+    }
+
+    async fn regenerate(&self, channel: ChannelId, message: MessageId) -> ApiResult<()> {
+        let agent = self.0.agent().await?;
+        let ch = world::ChannelId(parse(&channel.0)?);
+        let id = world::MessageId(parse(&message.0)?);
+        let started = agent.begin_regenerate(ch, id)?;
+        self.0
+            .spawn_in(Some(&channel), "regenerate", move |a| async move {
+                a.finish_regenerate(started).await
+            });
+        Ok(())
     }
 
     async fn wrapup(&self, channel: ChannelId) -> ApiResult<()> {
