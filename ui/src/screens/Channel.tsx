@@ -277,7 +277,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
     if (replyTo) box.current?.focus();
   }, [replyTo]);
 
-  // The caret goes after an inserted `@name`.
+  // The caret goes after an inserted `@name` or line break.
   useLayoutEffect(() => {
     if (after.current === null || !box.current) return;
     box.current.setSelectionRange(after.current, after.current);
@@ -448,7 +448,10 @@ export function Composer({ channel }: { channel: ChannelId }) {
               }
               if (isNewlineKey(e, sendKey)) {
                 e.preventDefault();
-                insertNewline(e.currentTarget, (value) => setText(value));
+                insertNewline(e.currentTarget, (value, at) => {
+                  after.current = at;
+                  setText(value);
+                });
                 return;
               }
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;

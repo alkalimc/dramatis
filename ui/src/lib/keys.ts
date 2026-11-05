@@ -31,10 +31,13 @@ export function isNewlineKey(e: KeyboardEvent, mode: SendKey = "mod"): boolean {
   return mode === "enter" && e.key === "Enter" && !composing(e) && (e.metaKey || e.ctrlKey);
 }
 
-/** Put a line break at the caret of a text box, keeping the browser's undo history where it can. */
-export function insertNewline(box: HTMLTextAreaElement, set: (value: string) => void) {
+/**
+ * Put a line break at the caret of a text box, keeping the browser's undo history where it
+ * can. Otherwise `set` gets the new text and where the caret goes, for the caller to place
+ * when the text is in (a later frame would be too late for keys typed meanwhile).
+ */
+export function insertNewline(box: HTMLTextAreaElement, set: (value: string, caret: number) => void) {
   if (typeof document.execCommand === "function" && document.execCommand("insertText", false, "\n")) return;
   const { selectionStart: a, selectionEnd: b, value } = box;
-  set(`${value.slice(0, a)}\n${value.slice(b)}`);
-  requestAnimationFrame(() => box.setSelectionRange(a + 1, a + 1));
+  set(`${value.slice(0, a)}\n${value.slice(b)}`, a + 1);
 }
