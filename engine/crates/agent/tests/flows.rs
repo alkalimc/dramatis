@@ -1402,6 +1402,58 @@ async fn a_rename_without_the_hook_still_rolls_on_the_next_turn() {
 }
 
 #[tokio::test]
+async fn a_log_from_another_build_is_dropped_and_rebuilt_from_what_the_save_keeps() {
+    let e = env(WireApi::Chat);
+    let ann = direct(&e, "ann");
+    e.fake.push([say("a")]);
+    e.agent.send(ann, "first words", None).await.unwrap();
+    e.agent
+        .with_world(|w| settings::set_user_name(w, Some("Rhea")).unwrap());
+    e.fake.push([
+        call(
+            "wrapup",
+            json!({"facts": [], "summary": "talked about tea"}),
+        ),
+        say("b"),
+    ]);
+    e.agent.send(ann, "second words", None).await.unwrap();
+    assert_eq!(segments(&e.agent, ann).len(), 2);
+    let digest = segments(&e.agent, ann)[1].digest.clone();
+    assert!(!digest.is_empty());
+
+    // The save is opened by another build: its segments carry another digest.
+    e.agent.with_world(|w| {
+        w.execute("UPDATE log_segment SET digest = 'other'", [])
+            .unwrap();
+    });
+    let before = e.fake.bodies().len();
+    e.fake.push([say("c")]);
+    e.agent.send(ann, "third words", None).await.unwrap();
+
+    // One request: no wrap-up ran on the old log, which is gone.
+    assert_eq!(e.fake.bodies().len(), before + 1);
+    let segs = segments(&e.agent, ann);
+    assert_eq!(segs.len(), 1);
+    assert_eq!(segs[0].digest, digest);
+    // The new opening block has the stored summary and the last messages.
+    let c = body_text(&segs[0].prefix_c);
+    assert!(c.contains("talked about tea"), "{c}");
+    assert!(
+        c.contains("second words") && c.contains("first words"),
+        "{c}"
+    );
+    // Every message is still there for the user.
+    let texts: Vec<String> = e.agent.with_world(|w| {
+        world::message::history(w, ann, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.text)
+            .collect()
+    });
+    assert_eq!(texts.iter().filter(|t| t.ends_with("words")).count(), 3);
+}
+
+#[tokio::test]
 async fn the_bio_reaches_every_log_when_set_and_nothing_is_said_when_empty() {
     let e = env(WireApi::Chat);
     let ann = direct(&e, "ann");

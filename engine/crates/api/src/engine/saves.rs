@@ -21,7 +21,28 @@ use crate::convert::world_err;
 use crate::error::{ApiError, ApiResult};
 use crate::lock::{self, SaveLock};
 use crate::saves;
-use crate::views::SaveInfo;
+use crate::update;
+use crate::views::{SaveCheck, SaveInfo, VersionStamp};
+
+/// The versions running now for a given corpus.
+pub(crate) fn running_stamp(corpus: Option<&crate::corpus::Corpus>) -> VersionStamp {
+    VersionStamp {
+        app: Some(update::VERSION.to_owned()),
+        pack: corpus.map(|c| c.manifest.pack.clone()),
+        pack_version: corpus.map(|c| c.manifest.pack_version.trim().to_owned()),
+        schema: world::SCHEMA_VERSION as u32,
+    }
+}
+
+/// A save has opened: its first reads must answer, and then it is recorded as last opened
+/// with the running versions. Failing to record (a file that cannot be written) does not
+/// stop play; it only leaves the old record, so the next open asks again.
+pub(crate) fn stamp_opened(w: &World, corpus: Option<&crate::corpus::Corpus>) -> ApiResult<()> {
+    world::meta::probe(w).map_err(world_err)?;
+    let pack = corpus.map(|c| (c.manifest.pack.as_str(), c.manifest.pack_version.trim()));
+    let _ = world::meta::write(w, update::VERSION, pack);
+    Ok(())
+}
 
 impl Engine {
     pub(crate) fn open_save(&self) -> String {
@@ -73,6 +94,26 @@ impl Engine {
         *self.held.lock().unwrap_or_else(|e| e.into_inner()) = exclusive.downgrade().ok();
     }
 
+    /// The versions running now: this app, and the open corpus's pack when there is one.
+    pub(crate) fn running_stamp(&self) -> VersionStamp {
+        running_stamp(self.corpus.as_deref())
+    }
+
+    pub(crate) fn check_save_impl(&self, name: &str) -> ApiResult<SaveCheck> {
+        let path = saves::path_of(&self.home, name)?;
+        let key = self
+            .password_of(name)
+            .filter(|_| world::cipher::is_encrypted(&path));
+        let saved = saves::stamp_view(world::meta::peek(&path, key.as_deref()).map_err(world_err)?);
+        let running = self.running_stamp();
+        Ok(SaveCheck {
+            name: name.to_owned(),
+            changes: saves::changes(&saved, &running),
+            saved,
+            running,
+        })
+    }
+
     pub(crate) fn saves_impl(&self) -> Vec<SaveInfo> {
         saves::list(&self.home, &self.open_save(), self.now())
     }
@@ -119,6 +160,7 @@ impl Engine {
                 return Err(world_err(e));
             }
         };
+        stamp_opened(&next, self.corpus.as_deref())?;
         self.home.set_current_save(name).map_err(io)?;
         *self.missing_save.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.w() = next;
@@ -155,16 +197,29 @@ impl Engine {
 
     pub(crate) fn unlock_impl(&self, name: &str, password: String) -> ApiResult<()> {
         let path = saves::path_of(&self.home, name)?;
-        let open = self.save.lock().unwrap_or_else(|e| e.into_inner());
+        let mut open = self.save.lock().unwrap_or_else(|e| e.into_inner());
         if !world::cipher::is_encrypted(&path) {
             return Ok(());
         }
-        let next = World::open_with(&path, Some(&password)).map_err(|e| match e {
+        // The password is tried by reading the record, which writes nothing: opening would
+        // run schema steps on a save the user has not yet agreed to load.
+        let saved = world::meta::peek(&path, Some(&password)).map_err(|e| match e {
             world::Error::Locked => ApiError::WrongPassword,
             other => world_err(other),
         })?;
         self.remember(name, Some(&password));
         if open.as_str() == name && self.locked.load(Ordering::Relaxed) {
+            let waits =
+                !saves::changes(&saves::stamp_view(saved), &self.running_stamp()).is_empty();
+            if waits {
+                // Back to the picker, where choosing the save shows what differs.
+                self.held.lock().unwrap_or_else(|e| e.into_inner()).take();
+                self.locked.store(false, Ordering::Relaxed);
+                open.clear();
+                return Ok(());
+            }
+            let next = World::open_with(&path, Some(&password)).map_err(world_err)?;
+            stamp_opened(&next, self.corpus.as_deref())?;
             *self.w() = next;
             self.locked.store(false, Ordering::Relaxed);
             self.ports.agent.switch_world(&path, Some(&password));

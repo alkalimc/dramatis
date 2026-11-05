@@ -19,6 +19,7 @@ pub mod fact;
 pub mod leakcheck;
 pub mod log;
 pub mod message;
+pub mod meta;
 pub mod params;
 pub mod picture;
 pub mod presence;
@@ -48,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005.sql"),
     include_str!("../migrations/0006.sql"),
     include_str!("../migrations/0007.sql"),
+    include_str!("../migrations/0008.sql"),
 ];
 
 /// The schema version a fully migrated database reports.
@@ -218,6 +220,11 @@ pub fn migrate(conn: &mut Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", index as i64 + 1)?;
         tx.commit()?;
     }
+    // A save made by this build says so; one that was migrated keeps what it had until
+    // the app has opened it and stamps it.
+    if found == 0 {
+        meta::write(conn, meta::APP_VERSION, None)?;
+    }
     Ok(())
 }
 
@@ -330,6 +337,8 @@ mod tests {
         "session",
         "user_avatar",
         "picture",
+        "save_meta",
+        "channel_summary",
     ];
 
     fn migrated() -> Connection {
@@ -388,6 +397,25 @@ mod tests {
         let ch = channel::get(&conn, ChannelId(1)).unwrap();
         assert_eq!(ch.person(), Some(&PersonId::from("p1")));
         assert_eq!(message::history(&conn, ch.id, None, 10).unwrap().len(), 1);
+    }
+
+    /// A save from before the version record is migrated without being stamped: the app
+    /// stamps it after it has opened, so a difference can still be told.
+    #[test]
+    fn a_migrated_old_save_is_unstamped_and_a_new_one_is_stamped() {
+        let mut old = Connection::open_in_memory().unwrap();
+        old.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..7] {
+            old.execute_batch(sql).unwrap();
+        }
+        old.pragma_update(None, "user_version", 7).unwrap();
+        migrate(&mut old).unwrap();
+        let s = meta::read(&old).unwrap();
+        assert_eq!((s.schema, s.app), (SCHEMA_VERSION, None));
+        assert_eq!(
+            meta::read(&migrated()).unwrap().app.as_deref(),
+            Some(meta::APP_VERSION)
+        );
     }
 
     /// A schema-2 meter keeps its rows; they read as token-billed (no requests).

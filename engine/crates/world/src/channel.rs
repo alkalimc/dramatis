@@ -779,7 +779,7 @@ mod tests {
         let w = world();
         let g = create_group(&w, &[p("a"), p("b")], None, Origin::User).unwrap();
         crate::message::append(&w, g, &Actor::User, "hi", None, None, 1).unwrap();
-        crate::log::open_segment(&w, g, [b"a", b"b", b"c"], "{}", None, 1).unwrap();
+        crate::log::open_segment(&w, g, [b"a", b"b", b"c"], "{}", None, "d", 1).unwrap();
         crate::session::open(
             &w,
             g,

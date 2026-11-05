@@ -10,7 +10,8 @@ use world::clock::Now;
 use crate::convert::{self, world_err};
 use crate::error::{ApiError, ApiResult};
 use crate::home::Home;
-use crate::views::SaveInfo;
+use crate::update;
+use crate::views::{SaveInfo, VersionChange, VersionStamp};
 
 /// Longest save name, in characters.
 const NAME_MAX: usize = 48;
@@ -112,6 +113,44 @@ pub fn list(home: &Home, current: &str, now: Now) -> Vec<SaveInfo> {
         .collect();
     rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
     rows.into_iter().map(|(_, info)| info).collect()
+}
+
+/// How the versions a save recorded differ from the running ones. A file with no schema
+/// yet (empty) has nothing to differ. The pack is compared only when a corpus is open.
+pub fn changes(saved: &VersionStamp, running: &VersionStamp) -> Vec<VersionChange> {
+    let mut out = Vec::new();
+    if saved.schema == 0 {
+        return out;
+    }
+    match (saved.app.as_deref(), running.app.as_deref()) {
+        (None, _) => out.push(VersionChange::Unrecorded),
+        (Some(then), Some(now)) if then != now => out.push(if update::is_newer(then, now) {
+            VersionChange::NewerApp
+        } else if update::is_newer(now, then) {
+            VersionChange::OlderApp
+        } else {
+            VersionChange::OtherApp
+        }),
+        _ => {}
+    }
+    if let (Some(pack), Some(now)) = (&saved.pack, &running.pack) {
+        if pack != now {
+            out.push(VersionChange::OtherPack);
+        } else if saved.pack_version != running.pack_version {
+            out.push(VersionChange::OtherPackVersion);
+        }
+    }
+    out
+}
+
+/// The record of a world database's stamp as the seam shows it.
+pub fn stamp_view(s: world::meta::Stamp) -> VersionStamp {
+    VersionStamp {
+        app: s.app,
+        pack: s.pack,
+        pack_version: s.pack_version,
+        schema: u32::try_from(s.schema).unwrap_or(0),
+    }
 }
 
 /// A path next to `final_path` to build a file in before it takes its name, so a save
@@ -305,6 +344,53 @@ mod tests {
             ms: 0,
             offset_min: 0,
         }
+    }
+
+    fn stamp(app: Option<&str>, pack: Option<(&str, &str)>) -> VersionStamp {
+        VersionStamp {
+            app: app.map(Into::into),
+            pack: pack.map(|p| p.0.into()),
+            pack_version: pack.map(|p| p.1.into()),
+            schema: 8,
+        }
+    }
+
+    #[test]
+    fn versions_that_differ_are_named() {
+        use VersionChange::*;
+        let run = stamp(Some("1.2.0"), Some(("pk", "1.2.0")));
+        assert!(changes(&run, &run).is_empty());
+        assert_eq!(changes(&stamp(None, None), &run), [Unrecorded]);
+        assert_eq!(
+            changes(&stamp(Some("1.3.0"), Some(("pk", "1.2.0"))), &run),
+            [NewerApp]
+        );
+        assert_eq!(
+            changes(&stamp(Some("1.1.0"), Some(("pk", "1.2.0"))), &run),
+            [OlderApp]
+        );
+        assert_eq!(
+            changes(&stamp(Some("dev"), Some(("pk", "1.2.0"))), &run),
+            [OtherApp]
+        );
+        assert_eq!(
+            changes(&stamp(Some("1.2.0"), Some(("pk", "1.1.0"))), &run),
+            [OtherPackVersion]
+        );
+        assert_eq!(
+            changes(&stamp(Some("1.2.0"), Some(("zz", "1.2.0"))), &run),
+            [OtherPack]
+        );
+        assert_eq!(
+            changes(&stamp(Some("1.1.0"), Some(("zz", "9"))), &run),
+            [OlderApp, OtherPack]
+        );
+        // No pack recorded yet, or no corpus open: nothing to compare there.
+        assert!(changes(&stamp(Some("1.2.0"), None), &run).is_empty());
+        assert!(changes(&run, &stamp(Some("1.2.0"), None)).is_empty());
+        // A file with no schema is new, not different.
+        let empty = VersionStamp::default();
+        assert!(changes(&empty, &run).is_empty());
     }
 
     #[test]

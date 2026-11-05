@@ -450,9 +450,17 @@ impl Agent {
             [a.as_bytes(), b.as_bytes(), c.as_bytes()],
             &shape.to_json(),
             summary,
+            &self.corpus.digest,
             self.now().ms,
         )?;
         Ok(id)
+    }
+
+    /// Open a segment with no log behind it to wrap up: the channel's newest stored
+    /// summary and its last messages stand in for what the log held.
+    fn open_without_log(&self, ch: ChannelId, before: Option<MessageId>) -> Result<SegmentId> {
+        let summary = log::last_summary(&self.db(), ch)?;
+        self.open_segment(ch, summary.as_ref(), Some(Tail { before }))
     }
 
     /// Why the current segment must roll over, if it must.
@@ -462,6 +470,9 @@ impl Agent {
         let Some(seg) = log::current(&conn, ch)? else {
             return Ok(Some(Roll::Fresh));
         };
+        if seg.digest != self.corpus.digest {
+            return Ok(Some(Roll::Stale));
+        }
         let names = self.names_now(&conn)?;
         let Some(stored) = request::Shape::parse(&seg.shape) else {
             return Ok(Some(Roll::Unreadable));
@@ -520,12 +531,14 @@ impl Agent {
         match self.must_roll(ch)? {
             None => {}
             Some(Roll::Fresh) => {
-                self.open_segment(ch, None, None)?;
+                self.open_without_log(ch, before)?;
             }
-            Some(Roll::Unreadable) => {
-                // Written by another build: nothing more can be appended, and no wrap-up
-                // can run on it either.
-                self.open_segment(ch, None, Some(Tail { before }))?;
+            Some(Roll::Stale | Roll::Unreadable) => {
+                // Written by another build or pack: nothing more can be appended, and no
+                // wrap-up can run on it either. The context is rebuilt from the stored
+                // summary, the memories and the last messages, and the old log goes.
+                self.open_without_log(ch, before)?;
+                log::discard_stale(&self.db(), &self.corpus.digest)?;
             }
             Some(Roll::Rename | Roll::Material | Roll::Window) => {
                 self.roll(ch, before).await?;
@@ -1379,6 +1392,8 @@ pub(crate) struct Tail {
 
 enum Roll {
     Fresh,
+    /// Written under another build or pack: the cache is dropped, not extended.
+    Stale,
     Unreadable,
     Rename,
     Material,
@@ -1387,7 +1402,7 @@ enum Roll {
 
 pub(crate) fn segment(conn: &rusqlite::Connection, seg: SegmentId) -> Result<log::Segment> {
     Ok(conn.query_row(
-        "SELECT id, channel, seq, prefix_a, prefix_b, prefix_c, shape, opened_at
+        "SELECT id, channel, seq, prefix_a, prefix_b, prefix_c, shape, opened_at, digest
          FROM log_segment WHERE id = ?1",
         [seg],
         |r| {
@@ -1400,6 +1415,7 @@ pub(crate) fn segment(conn: &rusqlite::Connection, seg: SegmentId) -> Result<log
                 prefix_c: r.get(5)?,
                 shape: r.get(6)?,
                 opened_at: r.get(7)?,
+                digest: r.get(8)?,
             })
         },
     )?)

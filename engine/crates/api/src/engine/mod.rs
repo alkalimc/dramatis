@@ -151,20 +151,51 @@ impl Engine {
     ) -> ApiResult<Self> {
         home.create().map_err(io)?;
         let params = Params::load(&home.params()).map_err(io)?;
+        let (corpus, state) = match folio {
+            None => (None, CorpusState::Missing),
+            Some(path) => match Corpus::open(&path, params.retrieve.clone(), &home.prompts()) {
+                Ok(c) => {
+                    let state = CorpusState::Loaded { name: c.name() };
+                    (Some(Arc::new(c)), state)
+                }
+                Err(e) => (None, corpus::refusal(&e)),
+            },
+        };
         let mut passwords = HashMap::new();
         let mut held = None;
         let (save, missing, world, locked) = match home.start_save() {
             Start::Open(save) => {
-                held = Some(SaveLock::shared(&home.save_path(&save))?);
-                match World::open_with(home.save_path(&save), password.as_deref()) {
-                    Ok(w) => {
-                        passwords.extend(password.map(|p| (save.clone(), p)));
-                        (save, None, w, false)
+                let path = home.save_path(&save);
+                // A save last opened with other versions waits for the user's say at the
+                // picker, before anything (a schema step included) is written to it.
+                let waits = world::meta::peek(&path, password.as_deref()).is_ok_and(|s| {
+                    !crate::saves::changes(
+                        &crate::saves::stamp_view(s),
+                        &saves::running_stamp(corpus.as_deref()),
+                    )
+                    .is_empty()
+                });
+                if waits {
+                    passwords.extend(password.map(|p| (save.clone(), p)));
+                    (
+                        String::new(),
+                        None,
+                        World::in_memory().map_err(world_err)?,
+                        false,
+                    )
+                } else {
+                    held = Some(SaveLock::shared(&path)?);
+                    match World::open_with(&path, password.as_deref()) {
+                        Ok(w) => {
+                            saves::stamp_opened(&w, corpus.as_deref())?;
+                            passwords.extend(password.map(|p| (save.clone(), p)));
+                            (save, None, w, false)
+                        }
+                        Err(world::Error::Locked) => {
+                            (save, None, World::in_memory().map_err(world_err)?, true)
+                        }
+                        Err(e) => return Err(world_err(e)),
                     }
-                    Err(world::Error::Locked) => {
-                        (save, None, World::in_memory().map_err(world_err)?, true)
-                    }
-                    Err(e) => return Err(world_err(e)),
                 }
             }
             Start::Pick { missing } => (
@@ -180,16 +211,6 @@ impl Engine {
             Err(e) => return Err(io(e)),
         };
 
-        let (corpus, state) = match folio {
-            None => (None, CorpusState::Missing),
-            Some(path) => match Corpus::open(&path, params.retrieve.clone(), &home.prompts()) {
-                Ok(c) => {
-                    let state = CorpusState::Loaded { name: c.name() };
-                    (Some(Arc::new(c)), state)
-                }
-                Err(e) => (None, corpus::refusal(&e)),
-            },
-        };
         ports.agent.set_endpoints(&endpoints);
         let media = MediaCache::new(home.media(), params.media.cache_bytes());
         Ok(Self {
@@ -817,6 +838,9 @@ impl Api for Engine {
     }
     async fn new_save(&self, name: String) -> ApiResult<()> {
         crate::saves::create(&self.home, &name)
+    }
+    async fn check_save(&self, name: String) -> ApiResult<SaveCheck> {
+        self.check_save_impl(&name)
     }
     async fn log_out(&self) -> ApiResult<()> {
         self.log_out_impl()

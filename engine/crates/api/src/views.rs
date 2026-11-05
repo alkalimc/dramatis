@@ -723,6 +723,45 @@ pub struct SaveInfo {
     pub encrypted: bool,
 }
 
+/// The versions a save was last opened with, or the ones running now. `None`: not
+/// recorded (a save from before the record, or no corpus open to name a pack).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct VersionStamp {
+    pub app: Option<String>,
+    pub pack: Option<String>,
+    pub pack_version: Option<String>,
+    /// The save's database schema; this build's own for the running side.
+    pub schema: u32,
+}
+
+/// How a save's versions differ from the running ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionChange {
+    /// The save has no record: it was last written by a build from before the record.
+    Unrecorded,
+    /// The save was last opened with a newer app than this one.
+    NewerApp,
+    /// The save was last opened with an older app.
+    OlderApp,
+    /// The app version is not comparable (not a version number).
+    OtherApp,
+    /// The save was last opened with another corpus pack.
+    OtherPack,
+    /// The same pack, another release of it.
+    OtherPackVersion,
+}
+
+/// What opening a save would change: its recorded versions next to the running ones.
+/// `changes` is empty when they agree, and the save can be opened without asking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SaveCheck {
+    pub name: String,
+    pub saved: VersionStamp,
+    pub running: VersionStamp,
+    pub changes: Vec<VersionChange>,
+}
+
 // ---- storage ----
 
 /// What takes room on disk, by kind.

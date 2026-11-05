@@ -78,6 +78,11 @@ fn rewind_in(conn: &Connection, ch: ChannelId, id: MessageId) -> Result<Rewound>
            AND segment IN (SELECT id FROM log_segment WHERE channel = ?1)",
         (ch, t),
     )?;
+    // A summary written since summed up what is being taken back.
+    conn.execute(
+        "DELETE FROM channel_summary WHERE channel = ?1 AND at >= ?2",
+        (ch, t),
+    )?;
 
     // Memories written in this channel since, other than the user's own edits.
     let audience = ch.0.to_string();
@@ -160,6 +165,7 @@ mod tests {
     use crate::fact::{About, Audience, NewFact};
     use crate::log::{self, Role};
     use crate::testing::*;
+    use crate::wrapup::Summary;
     use crate::{bond, session};
 
     fn say(w: &Connection, c: ChannelId, who: &Actor, text: &str, ms: i64) -> MessageId {
@@ -172,7 +178,7 @@ mod tests {
         let a = p("a");
         let c = channel::direct(&w, &a).unwrap();
         let person = Actor::Person(a.clone());
-        let s0 = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 10).unwrap();
+        let s0 = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, "d", 10).unwrap();
         say(&w, c, &Actor::User, "one", 100);
         log::append(&w, s0, Role::User, b"u1", 101).unwrap();
         say(&w, c, &person, "r1", 102);
@@ -189,7 +195,13 @@ mod tests {
         log::append(&w, s0, Role::User, b"u2", 201).unwrap();
         say(&w, c, &person, "r2", 202);
         log::append(&w, s0, Role::Assistant, b"a2", 202).unwrap();
-        let s1 = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 203).unwrap();
+        let summary = Summary {
+            channel: c,
+            audience: fact::channel_audience(c),
+            text: "so far".into(),
+        };
+        let s1 =
+            log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", Some(&summary), "d", 203).unwrap();
         let late = NewFact::new(
             person.clone(),
             Audience::Participants(c),
@@ -240,6 +252,8 @@ mod tests {
             .collect();
         assert_eq!(bytes, [b"u1".to_vec(), b"a1".to_vec()]);
         assert!(log::entries(&w, s1).unwrap().is_empty());
+        // The summary the dropped segment opened with sums up what was taken back.
+        assert_eq!(log::last_summary(&w, c).unwrap(), None);
         assert!(fact::get(&w, keep).is_ok());
         assert!(fact::get(&w, edited).is_ok());
         assert!(fact::get(&w, late).is_err());
@@ -272,7 +286,7 @@ mod tests {
         let w = world();
         let c = channel::direct(&w, &p("a")).unwrap();
         let m = say(&w, c, &Actor::User, "hello", 100);
-        let s = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, 100).unwrap();
+        let s = log::open_segment(&w, c, [b"A", b"B", b"C"], "{}", None, "d", 100).unwrap();
         log::append(&w, s, Role::User, b"u", 101).unwrap();
         rewind(&w, c, m).unwrap();
         assert_eq!(log::current(&w, c).unwrap(), None);

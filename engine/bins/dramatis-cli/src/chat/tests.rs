@@ -1326,6 +1326,43 @@ async fn switching_to_an_encrypted_save_asks_for_its_password() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_save_of_other_versions_shows_the_difference_and_loads_only_on_a_yes() {
+    let mut r = rig().await;
+    r.run("/save new old").await;
+    {
+        let w = world::World::open(r._home.0.join("saves/old.sqlite")).unwrap();
+        world::meta::write(&w, "0.9.0", None).unwrap();
+    }
+    let out = r.run("/save switch old").await;
+    assert!(
+        out.contains("old was last opened with other versions"),
+        "{out}"
+    );
+    assert!(
+        out.contains("app 0.9.0") && out.contains("it was last opened with an older app"),
+        "{out}"
+    );
+    assert!(
+        r.session
+            .question()
+            .is_some_and(|q| q.contains("Load it anyway?"))
+    );
+    assert!(r.run("n").await.contains("cancelled"));
+    assert!(r.run("/save").await.contains("* default"));
+
+    r.run("/save switch old").await;
+    let out = r.run("y").await;
+    assert!(out.contains("now playing old"), "{out}");
+    let again = r.run("/save switch default").await;
+    assert!(again.contains("now playing default"), "{again}");
+    let back = r.run("/save switch old").await;
+    assert!(
+        back.contains("now playing old"),
+        "recorded by the load: {back}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bio_shows_sets_clears_and_is_bounded() {
     let mut r = rig().await;
     assert!(r.run("/bio").await.contains("no bio"));

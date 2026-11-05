@@ -3302,3 +3302,164 @@ async fn an_update_is_not_newer_when_it_is_the_running_version_and_a_failure_kee
         assert_eq!(failing.engine.update_status().await.unwrap(), before);
     }
 }
+
+/// Write another version record into the save `name`, as if another build had last opened it.
+fn record(e: &Engine, name: &str, app: &str, pack: Option<(&str, &str)>) {
+    let w = world::World::open(e.home.save_path(name)).unwrap();
+    world::meta::write(&w, app, pack).unwrap();
+}
+
+#[tokio::test]
+async fn a_save_opened_by_other_versions_is_reported_and_recorded_only_when_loaded() {
+    use crate::views::VersionChange::*;
+    let r = rig();
+    let e = &r.engine;
+    // The save open now was recorded at the start: nothing to say about it.
+    let own = e.check_save("default".into()).await.unwrap();
+    assert!(own.changes.is_empty());
+    assert_eq!(own.saved.app.as_deref(), Some(crate::update::VERSION));
+    assert_eq!(own.saved, own.running);
+
+    e.new_save("old".into()).await.unwrap();
+    record(e, "old", "0.9.0", Some(("fixture", "0.1")));
+    let check = e.check_save("old".into()).await.unwrap();
+    assert_eq!(check.changes, [OlderApp, OtherPackVersion]);
+    assert_eq!(check.saved.app.as_deref(), Some("0.9.0"));
+    assert_eq!(check.running.app.as_deref(), Some(crate::update::VERSION));
+
+    e.new_save("far".into()).await.unwrap();
+    record(e, "far", "99.0.0", Some(("another", "7")));
+    assert_eq!(
+        e.check_save("far".into()).await.unwrap().changes,
+        [NewerApp, OtherPack]
+    );
+
+    // Looking changes nothing; loading records the running versions.
+    let peek = |name: &str| world::meta::peek(e.home.save_path(name), None).unwrap();
+    assert_eq!(peek("old").app.as_deref(), Some("0.9.0"));
+    e.switch_save("old".into()).await.unwrap();
+    assert_eq!(peek("old").app.as_deref(), Some(crate::update::VERSION));
+    assert_eq!(peek("old").pack.as_deref(), Some("fixture"));
+    assert!(e.check_save("old".into()).await.unwrap().changes.is_empty());
+
+    assert_eq!(e.check_save("nope".into()).await, Err(ApiError::NotFound));
+}
+
+#[tokio::test]
+async fn a_save_from_a_newer_schema_is_still_refused() {
+    let r = rig();
+    let e = &r.engine;
+    e.new_save("future".into()).await.unwrap();
+    let conn = rusqlite::Connection::open(e.home.save_path("future")).unwrap();
+    conn.pragma_update(None, "user_version", world::SCHEMA_VERSION + 1)
+        .unwrap();
+    drop(conn);
+    assert!(matches!(
+        e.check_save("future".into()).await,
+        Err(ApiError::Io { .. })
+    ));
+    assert!(matches!(
+        e.switch_save("future".into()).await,
+        Err(ApiError::Io { .. })
+    ));
+    assert_eq!(
+        e.app_status().await.unwrap().save.as_deref(),
+        Some("default")
+    );
+}
+
+#[tokio::test]
+async fn a_start_on_a_save_of_other_versions_waits_at_the_picker_and_writes_nothing() {
+    let r = rig();
+    record(&r.engine, "default", "0.9.0", None);
+    let before = std::fs::read(r.engine.home().save_path("default")).unwrap();
+
+    let started = reopen(&r, None);
+    let status = started.app_status().await.unwrap();
+    assert_eq!(status.save, None, "no save is open until the user chooses");
+    assert!(!status.locked);
+    assert_eq!(
+        std::fs::read(started.home().save_path("default")).unwrap(),
+        before
+    );
+    let check = started.check_save("default".into()).await.unwrap();
+    assert_eq!(check.changes, [crate::views::VersionChange::OlderApp]);
+
+    started.switch_save("default".into()).await.unwrap();
+    assert_eq!(
+        started.app_status().await.unwrap().save.as_deref(),
+        Some("default")
+    );
+    assert!(reopen(&r, None).app_status().await.unwrap().save.is_some());
+}
+
+/// A save written by 1.1.0: schema 7, no version record.
+fn write_1_1_0_save(path: &std::path::Path) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    for sql in [
+        include_str!("../../../world/migrations/0001.sql"),
+        include_str!("../../../world/migrations/0002.sql"),
+        include_str!("../../../world/migrations/0003.sql"),
+        include_str!("../../../world/migrations/0004.sql"),
+        include_str!("../../../world/migrations/0005.sql"),
+        include_str!("../../../world/migrations/0006.sql"),
+        include_str!("../../../world/migrations/0007.sql"),
+    ] {
+        conn.execute_batch(sql).unwrap();
+    }
+    conn.pragma_update(None, "user_version", 7).unwrap();
+}
+
+#[tokio::test]
+async fn a_1_1_0_save_reads_as_unrecorded_and_is_migrated_only_on_load() {
+    let r = rig();
+    let e = &r.engine;
+    write_1_1_0_save(&e.home.save_path("legacy"));
+    let check = e.check_save("legacy".into()).await.unwrap();
+    assert_eq!(check.changes, [crate::views::VersionChange::Unrecorded]);
+    assert_eq!(check.saved.schema, 7);
+    assert_eq!(
+        world::meta::peek(e.home.save_path("legacy"), None)
+            .unwrap()
+            .schema,
+        7,
+        "checking left the file at its old schema"
+    );
+    e.switch_save("legacy".into()).await.unwrap();
+    let after = e.check_save("legacy".into()).await.unwrap();
+    assert!(after.changes.is_empty());
+    assert_eq!(after.saved.schema, world::SCHEMA_VERSION as u32);
+}
+
+#[tokio::test]
+async fn unlocking_a_save_of_other_versions_goes_to_the_picker_instead_of_opening_it() {
+    let r = rig();
+    r.engine
+        .set_password(None, Some("pw".into()))
+        .await
+        .unwrap();
+    {
+        let w = world::World::open_with(r.engine.home().save_path("default"), Some("pw")).unwrap();
+        world::meta::write(&w, "0.9.0", None).unwrap();
+    }
+    let started = reopen(&r, None);
+    assert!(started.app_status().await.unwrap().locked);
+    assert_eq!(
+        started.unlock("default".into(), "bad".into()).await,
+        Err(ApiError::WrongPassword)
+    );
+    started.unlock("default".into(), "pw".into()).await.unwrap();
+    let status = started.app_status().await.unwrap();
+    assert_eq!((status.save, status.locked), (None, false));
+    let check = started.check_save("default".into()).await.unwrap();
+    assert_eq!(check.changes, [crate::views::VersionChange::OlderApp]);
+    started.switch_save("default".into()).await.unwrap();
+    assert!(
+        started
+            .check_save("default".into())
+            .await
+            .unwrap()
+            .changes
+            .is_empty()
+    );
+}

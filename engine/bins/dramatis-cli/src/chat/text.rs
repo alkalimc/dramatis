@@ -445,6 +445,47 @@ line is one message.",
     ),
     ("cli.save.encrypted", "encrypted"),
     (
+        "cli.save.drift",
+        "{name} was last opened with other versions:",
+    ),
+    (
+        "cli.save.drift.saved",
+        "  the save: app {app}, pack {pack}, data format {schema}",
+    ),
+    (
+        "cli.save.drift.running",
+        "  this app: app {app}, pack {pack}, data format {schema}",
+    ),
+    ("cli.save.drift.unknown", "not recorded"),
+    (
+        "cli.save.drift.unrecorded",
+        "  it has no version record, so an earlier release wrote it last",
+    ),
+    (
+        "cli.save.drift.newer_app",
+        "  it was last opened with a newer app than this one",
+    ),
+    (
+        "cli.save.drift.older_app",
+        "  it was last opened with an older app",
+    ),
+    (
+        "cli.save.drift.other_app",
+        "  it was last opened with a different app version",
+    ),
+    (
+        "cli.save.drift.other_pack",
+        "  it was last opened with another corpus pack",
+    ),
+    (
+        "cli.save.drift.other_pack_version",
+        "  it was last opened with another release of the corpus pack",
+    ),
+    (
+        "cli.save.drift.ask",
+        "Load it anyway? Loading brings it up to this version; chats and memories are kept. (y/n)",
+    ),
+    (
         "cli.save.playing",
         "now playing {name}; /talk <person> or /host to begin",
     ),

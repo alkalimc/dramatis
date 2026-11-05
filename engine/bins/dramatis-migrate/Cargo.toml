@@ -1,0 +1,24 @@
+[package]
+name = "dramatis-migrate"
+description = "Convert a save written by an earlier release to the current format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "dramatis-migrate"
+path = "src/main.rs"
+
+[dependencies]
+folio = { path = "../../crates/folio" }
+world = { path = "../../crates/world" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+# Reads a password without echoing it.
+rpassword = "=7.4.0"
