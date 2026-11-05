@@ -34,6 +34,8 @@ export function errorText(e: Failure, t: T, names: Names): { text: string; detai
     case "io":
     case "unknown":
       return { text: t(`error.${e.code}`), detail: e.detail };
+    case "needs_migration":
+      return { text: t("error.needs_migration"), detail: e.command };
     default:
       return { text: t(`error.${e.code}`) };
   }

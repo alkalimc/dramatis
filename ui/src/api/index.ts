@@ -71,6 +71,8 @@ const CODES: Record<gen.ApiError["code"], true> = {
   open_elsewhere: true,
   locked: true,
   wrong_password: true,
+  needs_migration: true,
+  newer_save: true,
 };
 
 export function asFailure(e: unknown): Failure {

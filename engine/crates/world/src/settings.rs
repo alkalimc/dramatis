@@ -23,8 +23,33 @@ pub const EVENTS_PER_DAY: &str = "events.per_day";
 /// When the last daily event was tried (unix ms), made or not.
 pub const EVENTS_TRIED: &str = "events.tried";
 
+/// Prefix of the per-person read-aloud voice keys.
+const VOICE_PREFIX: &str = "voice.";
+
 pub fn voice_key(person: &PersonId) -> String {
-    format!("voice.{person}")
+    format!("{VOICE_PREFIX}{person}")
+}
+
+/// Whether this build reads `key`. `dramatis-migrate` drops the rest from a save it
+/// brings up to date, so a key added above is also listed here (a test checks it).
+pub fn is_known(key: &str) -> bool {
+    key.starts_with(VOICE_PREFIX)
+        || [
+            USER_NAME,
+            USER_BIRTHDAY,
+            USER_BIO,
+            USER_INTRODUCED,
+            INTENSITY,
+            QUIET_HOURS,
+            NOTIFICATIONS,
+            EVENTS_PER_DAY,
+            EVENTS_TRIED,
+            crate::away::AWAY,
+            crate::away::SPENT,
+            crate::presence::ANNOUNCED,
+            crate::presence::BIRTHDAY_SAID,
+        ]
+        .contains(&key)
 }
 
 /// The stored value, `None` when the key is absent.
@@ -150,6 +175,22 @@ pub fn voice(conn: &Connection, person: &PersonId) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every key constant declared in this file is one `is_known` keeps.
+    #[test]
+    fn every_key_declared_here_is_known() {
+        let src = include_str!("settings.rs");
+        let mut seen = 0;
+        for line in src.lines().filter(|l| l.starts_with("pub const ")) {
+            if let Some((_, rest)) = line.split_once(": &str = \"") {
+                let key = rest.trim_end_matches("\";");
+                assert!(is_known(key), "{key}");
+                seen += 1;
+            }
+        }
+        assert!(seen >= 9, "{seen}");
+        assert!(is_known("voice.someone") && !is_known("voice") && !is_known("old.thing"));
+    }
     use crate::testing::*;
 
     #[test]

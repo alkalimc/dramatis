@@ -488,7 +488,14 @@ export type ApiError = { code: "not_implemented" } | { code: "not_found" } |
  */
 { code: "open_elsewhere" } | 
 /**  A password was given and does not open the save. */
-{ code: "wrong_password" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
+{ code: "wrong_password" } | 
+/**
+ *  The save was written by an earlier release, and this app opens only its own format.
+ *  `command` is the exact line that brings it up to date.
+ */
+{ code: "needs_migration"; command: string } | 
+/**  The save was written by a newer app than this one. */
+{ code: "newer_save" } | { code: "endpoint"; detail: string } | { code: "keychain"; detail: string } | { code: "io"; detail: string };
 
 export type AppForm = 
 /**  No chat endpoint, or no network: roster and search only. */
@@ -1200,6 +1207,8 @@ export type SaveCheck = {
 	saved: VersionStamp,
 	running: VersionStamp,
 	changes: VersionChange[],
+	/**  With `NeedsMigration`: the exact command that brings the save up to date. */
+	command: string | null,
 };
 
 /**
@@ -1215,6 +1224,14 @@ export type SaveInfo = {
 	current: boolean,
 	/**  Protected by a password. */
 	encrypted: boolean,
+	/**
+	 *  What the file says about itself (schema, app, pack), read without opening the save.
+	 *  `None` when it cannot be read: locked, or not a save.
+	 */
+	stamp: VersionStamp | null,
+	state: SaveState,
+	/**  For a save that needs migration: the exact command to run. */
+	command: string | null,
 };
 
 export type SaveSize = {
@@ -1222,6 +1239,19 @@ export type SaveSize = {
 	kb: number,
 	current: boolean,
 };
+
+/**  Whether a save can be opened by this app. */
+export type SaveState = 
+/**  The save is in this app's format. */
+"ready" | 
+/**  Encrypted, and no password has been entered here: what it records is unreadable. */
+"locked" | 
+/**  An earlier release's format: `dramatis-migrate` must bring it up first. */
+"needs_migration" | 
+/**  A newer app's format. */
+"newer" | 
+/**  Not a readable save. */
+"unreadable";
 
 /**  A line wrapped in these is scene description, rendered apart from speech. */
 export type SceneMarker = {
@@ -1395,6 +1425,10 @@ export type VersionChange =
 "older_app" | 
 /**  The app version is not comparable (not a version number). */
 "other_app" | 
+/**  The save is in an earlier release's format: it must be migrated, not loaded. */
+"needs_migration" | 
+/**  The save is in a newer app's format: it cannot be loaded. */
+"newer_schema" | 
 /**  The save was last opened with another corpus pack. */
 "other_pack" | 
 /**  The same pack, another release of it. */

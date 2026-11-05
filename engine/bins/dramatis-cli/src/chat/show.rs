@@ -379,6 +379,10 @@ impl Names {
             ApiError::Exists => self.word("error.exists", &e.to_string()),
             ApiError::Locked => self.word("error.locked", &e.to_string()),
             ApiError::WrongPassword => self.word("error.wrong_password", &e.to_string()),
+            ApiError::NeedsMigration { command } => {
+                self.say("cli.save.needs_migration", &[("command", command)])
+            }
+            ApiError::NewerSave => self.word("cli.save.newer_save", &e.to_string()),
         }
     }
 

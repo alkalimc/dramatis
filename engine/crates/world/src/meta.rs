@@ -29,6 +29,30 @@ pub struct Stamp {
     pub pack_version: Option<String>,
 }
 
+/// How a save's schema stands against this build's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    /// The file has no schema yet (empty): opening creates one.
+    Empty,
+    /// Exactly this build's schema.
+    Current,
+    /// An earlier release's: needs `dramatis-migrate`.
+    Old,
+    /// A newer app's.
+    Newer,
+}
+
+impl Stamp {
+    pub fn fit(&self) -> Fit {
+        match self.schema {
+            0 => Fit::Empty,
+            s if s == crate::SCHEMA_VERSION => Fit::Current,
+            s if s < crate::SCHEMA_VERSION => Fit::Old,
+            _ => Fit::Newer,
+        }
+    }
+}
+
 fn table_exists(conn: &Connection) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'save_meta'",
@@ -66,19 +90,13 @@ pub fn read(conn: &Connection) -> Result<Stamp> {
     })
 }
 
-/// The record of the file at `path`, read without migrating or writing anything. An
-/// encrypted file needs its `key`; a wrong one is [`crate::Error::Locked`]. A schema newer
-/// than this build's is [`crate::Error::TooNew`], as when opening.
+/// The record of the file at `path`, read through a read-only connection: nothing is
+/// written, whatever the schema. An encrypted file needs its `key`; a wrong one is
+/// [`crate::Error::Locked`]. The schema may be any version; comparing it with this build's
+/// is the caller's ([`Stamp::fit`]).
 pub fn peek(path: impl AsRef<Path>, key: Option<&str>) -> Result<Stamp> {
-    let conn = cipher::connect_existing(path.as_ref(), key)?;
-    let stamp = read(&conn)?;
-    if stamp.schema > crate::SCHEMA_VERSION {
-        return Err(crate::Error::TooNew {
-            found: stamp.schema,
-            supported: crate::SCHEMA_VERSION,
-        });
-    }
-    Ok(stamp)
+    let conn = cipher::connect_read_only(path.as_ref(), key)?;
+    read(&conn)
 }
 
 fn put(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -180,15 +198,16 @@ mod tests {
         let s = peek(&path, None).unwrap();
         assert_eq!(s.app.as_deref(), Some(APP_VERSION));
         assert_eq!(std::fs::read(&path).unwrap(), before);
-        // A newer schema is refused as on open.
+        assert_eq!(s.fit(), Fit::Current);
+        // Any other schema is read, not refused: the caller decides what it means.
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.pragma_update(None, "user_version", crate::SCHEMA_VERSION + 1)
             .unwrap();
+        assert_eq!(peek(&path, None).unwrap().fit(), Fit::Newer);
+        conn.pragma_update(None, "user_version", 3).unwrap();
         drop(conn);
-        assert!(matches!(
-            peek(&path, None),
-            Err(crate::Error::TooNew { .. })
-        ));
+        let old = peek(&path, None).unwrap();
+        assert_eq!((old.schema, old.fit()), (3, Fit::Old));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -22,7 +22,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::lock::{self, SaveLock};
 use crate::saves;
 use crate::update;
-use crate::views::{SaveCheck, SaveInfo, VersionStamp};
+use crate::views::{SaveCheck, SaveInfo, VersionChange, VersionStamp};
 
 /// The versions running now for a given corpus.
 pub(crate) fn running_stamp(corpus: Option<&crate::corpus::Corpus>) -> VersionStamp {
@@ -106,16 +106,22 @@ impl Engine {
             .filter(|_| world::cipher::is_encrypted(&path));
         let saved = saves::stamp_view(world::meta::peek(&path, key.as_deref()).map_err(world_err)?);
         let running = self.running_stamp();
+        let changes = saves::changes(&saved, &running);
         Ok(SaveCheck {
             name: name.to_owned(),
-            changes: saves::changes(&saved, &running),
+            command: changes
+                .contains(&VersionChange::NeedsMigration)
+                .then(|| saves::migrate_command(&path)),
+            changes,
             saved,
             running,
         })
     }
 
     pub(crate) fn saves_impl(&self) -> Vec<SaveInfo> {
-        saves::list(&self.home, &self.open_save(), self.now())
+        saves::list(&self.home, &self.open_save(), self.now(), |name| {
+            self.password_of(name)
+        })
     }
 
     pub(crate) fn switch_save_impl(&self, name: &str) -> ApiResult<()> {
@@ -138,8 +144,9 @@ impl Engine {
             }
             SaveLock::shared(&path)?
         };
-        // Opened (and migrated) before anything changes: a file that will not open, or
-        // that wants a password not yet entered (`Locked`), leaves the current world as it was.
+        // Opened before anything changes: a file that will not open (another format
+        // included), or that wants a password not yet entered (`Locked`), leaves the
+        // current world as it was.
         let key = self
             .password_of(name)
             .filter(|_| world::cipher::is_encrypted(&path));
@@ -157,7 +164,7 @@ impl Engine {
                 if reopening {
                     *self.held.lock().unwrap_or_else(|e| e.into_inner()) = Some(lock);
                 }
-                return Err(world_err(e));
+                return Err(saves::open_err(&path, e));
             }
         };
         stamp_opened(&next, self.corpus.as_deref())?;
@@ -202,7 +209,7 @@ impl Engine {
             return Ok(());
         }
         // The password is tried by reading the record, which writes nothing: opening would
-        // run schema steps on a save the user has not yet agreed to load.
+        // write to a save the user has not yet agreed to load.
         let saved = world::meta::peek(&path, Some(&password)).map_err(|e| match e {
             world::Error::Locked => ApiError::WrongPassword,
             other => world_err(other),
@@ -218,7 +225,8 @@ impl Engine {
                 open.clear();
                 return Ok(());
             }
-            let next = World::open_with(&path, Some(&password)).map_err(world_err)?;
+            let next =
+                World::open_with(&path, Some(&password)).map_err(|e| saves::open_err(&path, e))?;
             stamp_opened(&next, self.corpus.as_deref())?;
             *self.w() = next;
             self.locked.store(false, Ordering::Relaxed);

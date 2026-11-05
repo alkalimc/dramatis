@@ -60,17 +60,34 @@ fn prepare(conn: Connection, key: Option<&str>) -> Result<Connection> {
 }
 
 /// Open (creating if absent) and unlock.
-pub(crate) fn connect(path: &Path, key: Option<&str>) -> Result<Connection> {
+pub fn connect(path: &Path, key: Option<&str>) -> Result<Connection> {
     prepare(Connection::open(path)?, key)
 }
 
 /// Open a file that must exist, and unlock it. (Not a read-write-only open: an ATTACH
 /// from such a connection cannot create its file.)
-pub(crate) fn connect_existing(path: &Path, key: Option<&str>) -> Result<Connection> {
+pub fn connect_existing(path: &Path, key: Option<&str>) -> Result<Connection> {
     if !path.is_file() {
         return Err(Error::Io(std::io::ErrorKind::NotFound.into()));
     }
     connect(path, key)
+}
+
+/// Open a file that must exist for reading only, and unlock it: nothing can be written
+/// through it. A file in write-ahead mode whose side files cannot be read this way is
+/// opened as [`connect_existing`] does, which still writes nothing for a read.
+pub fn connect_read_only(path: &Path, key: Option<&str>) -> Result<Connection> {
+    if !path.is_file() {
+        return Err(Error::Io(std::io::ErrorKind::NotFound.into()));
+    }
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
+    match Connection::open_with_flags(path, flags)
+        .map_err(Error::from)
+        .and_then(|c| prepare(c, key))
+    {
+        Err(Error::Sqlite(_)) => connect_existing(path, key),
+        done => done,
+    }
 }
 
 /// Write a consistent single-file copy of `conn`'s database to `dest` (which must not
@@ -312,6 +329,9 @@ mod tests {
         std::fs::create_dir_all(&left).unwrap();
         let c = Connection::open(live.join("a.sqlite")).unwrap();
         c.pragma_update(None, "journal_mode", "WAL").unwrap();
+        c.execute_batch(crate::SCHEMA).unwrap();
+        c.pragma_update(None, "user_version", crate::SCHEMA_VERSION)
+            .unwrap();
         c.execute_batch("CREATE TABLE mine(x); INSERT INTO mine VALUES (7);")
             .unwrap();
         // What a crashed older build leaves behind: the file with its log beside it.

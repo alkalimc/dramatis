@@ -1,17 +1,23 @@
-//! Convert a save written by an earlier release (1.1.0, schema 7) to the current format.
+//! Bring a save written by any earlier release to the format the app opens.
 //!
-//! The app carries only general compatibility: a schema ladder, a version record in every
-//! save, and a log that is dropped when it was written by another build. What is specific
-//! to one old release lives here, outside the app: this tool upgrades the schema, moves the
-//! rollover summaries out of the old prompt logs, strips the prompt material, and stamps
-//! the save. Every message, memory, event, bond, setting and picture is kept.
+//! The app opens only the latest format and carries no conversion code. This tool knows
+//! every released format (1.0.0 to 1.1.1) and brings a save from any of them up to the
+//! current one, then applies this release's rules for what a save holds: the chat records
+//! and what was generated from them stay, prompt material and anything the app no longer
+//! reads goes (see `--help` for the table).
 //!
 //! It works on a copy and writes a new file; the original is not touched. With
 //! `--in-place` the original is kept beside it as `<file>.bak` once the new file is in
-//! place. Close the app and the terminal client first. An encrypted save asks for its
+//! place. `--dry-run` runs the same conversion on a copy and prints what it did, keeping
+//! nothing. Close the app and the terminal client first. An encrypted save asks for its
 //! password, which is read without echo and goes nowhere else.
 
+mod bridge;
 mod convert;
+mod ladder;
+mod rules;
+#[cfg(test)]
+mod tests;
 
 use std::path::{Path, PathBuf};
 
@@ -19,7 +25,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version, about, after_long_help = rules::POLICY)]
 struct Args {
     /// The save to convert (a `.sqlite` file in the saves folder).
     save: PathBuf,
@@ -29,8 +35,12 @@ struct Args {
     /// Replace the original with the converted save, keeping it as `<file>.bak`.
     #[arg(long)]
     in_place: bool,
-    /// The corpus pack (`.folio`) the save was played with. Lets the tool carry the
-    /// summaries of earlier conversations over and record the pack in the save.
+    /// Do everything on a copy and print what would be kept, converted and dropped;
+    /// write nothing.
+    #[arg(long, conflicts_with_all = ["out", "in_place"])]
+    dry_run: bool,
+    /// The corpus pack (`.folio`) the save was played with, to record its name and
+    /// version in the save.
     #[arg(long)]
     folio: Option<PathBuf>,
 }
@@ -75,7 +85,13 @@ fn main() -> Result<()> {
                 bail!("the save is encrypted and no password was given");
             }
         }
-        match convert::convert(&args.save, &out, key.as_deref(), pack.as_ref()) {
+        match convert::convert(
+            &args.save,
+            &out,
+            key.as_deref(),
+            pack.as_ref(),
+            args.dry_run,
+        ) {
             Ok(report) => break report,
             Err(convert::Failure::Locked) => {
                 tries += 1;
@@ -89,6 +105,11 @@ fn main() -> Result<()> {
         }
     };
 
+    if args.dry_run {
+        println!("{report}");
+        println!("nothing was written");
+        return Ok(());
+    }
     let final_path = if args.in_place {
         convert::swap_in(&args.save, &out)?
     } else {

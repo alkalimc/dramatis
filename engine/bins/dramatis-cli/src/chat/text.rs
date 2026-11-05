@@ -449,6 +449,39 @@ line is one message.",
     ),
     ("cli.save.encrypted", "encrypted"),
     (
+        "cli.save.card",
+        "app {app}, pack {pack}, data format {schema}",
+    ),
+    (
+        "cli.save.card.migrate",
+        "data format {schema}, from an earlier release: needs migration",
+    ),
+    (
+        "cli.save.card.newer",
+        "data format {schema}, from a newer app: cannot be opened",
+    ),
+    (
+        "cli.save.card.locked",
+        "locked: versions are unreadable until it is opened",
+    ),
+    ("cli.save.card.unreadable", "not a readable save"),
+    (
+        "cli.save.migrate",
+        "{name} is from an earlier release (data format {schema}); this app opens format {current} only. Close the app and the terminal, then run:",
+    ),
+    (
+        "cli.save.needs_migration",
+        "that save is from an earlier release and needs migration first: {command}",
+    ),
+    (
+        "cli.save.newer",
+        "{name} was made by a newer app (data format {schema}); update this app to open it",
+    ),
+    (
+        "cli.save.newer_save",
+        "that save was made by a newer app; update this app to open it",
+    ),
+    (
         "cli.save.drift",
         "{name} was last opened with other versions:",
     ),

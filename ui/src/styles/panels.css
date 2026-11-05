@@ -566,6 +566,11 @@ details.more > .field + .field,
   padding: 0;
 }
 
+.save .warn-badge {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 /* ---- first open, library, search results ---- */
 .first-open {
   display: grid;

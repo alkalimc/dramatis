@@ -39,22 +39,14 @@ use rusqlite::Connection;
 
 pub use types::*;
 
-/// Schema migrations, applied in order. Entry `i` upgrades `user_version` `i` to `i + 1`;
-/// released entries are never edited, only appended to.
-const MIGRATIONS: &[&str] = &[
-    include_str!("../migrations/0001.sql"),
-    include_str!("../migrations/0002.sql"),
-    include_str!("../migrations/0003.sql"),
-    include_str!("../migrations/0004.sql"),
-    include_str!("../migrations/0005.sql"),
-    include_str!("../migrations/0006.sql"),
-    include_str!("../migrations/0007.sql"),
-    include_str!("../migrations/0008.sql"),
-    include_str!("../migrations/0009.sql"),
-];
+/// The layout of a new save: every table, at [`SCHEMA_VERSION`].
+pub const SCHEMA: &str = include_str!("../schema.sql");
 
-/// The schema version a fully migrated database reports.
-pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
+/// The one schema version this build opens. A save at another version is refused, not
+/// migrated: bringing an older save up to date is the job of `dramatis-migrate`, which
+/// keeps the steps from every released layout to this one. Raising this number means
+/// editing `schema.sql` and adding the step to that tool.
+pub const SCHEMA_VERSION: i64 = 9;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -71,6 +63,13 @@ pub enum Error {
     /// tables whose meaning it does not know.
     #[error("world database schema {found} is newer than this build ({supported})")]
     TooNew { found: i64, supported: i64 },
+
+    /// Written by an earlier release. Refused rather than opened: this build reads only its
+    /// own layout, and `dramatis-migrate` brings an older save up to it.
+    #[error(
+        "world database schema {found} is older than this build ({supported}): it needs migration, run dramatis-migrate"
+    )]
+    Old { found: i64, supported: i64 },
 
     #[error("{kind} `{id}` does not exist")]
     NotFound { kind: &'static str, id: String },
@@ -119,7 +118,8 @@ pub struct World {
 }
 
 impl World {
-    /// Open (creating if absent) and migrate to the latest schema.
+    /// Open, creating a new save if the file is absent or empty. A save of another schema
+    /// version is refused ([`Error::Old`], [`Error::TooNew`]).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with(path, None)
     }
@@ -132,14 +132,14 @@ impl World {
         // a save is never a file plus a log. A file written in WAL mode is converted; if
         // another process still holds it open that waits or keeps WAL, and either is safe.
         let _ = conn.pragma_update_and_check(None, "journal_mode", "DELETE", |_| Ok(()));
-        migrate(&mut conn)?;
+        setup(&mut conn)?;
         Ok(Self { conn })
     }
 
-    /// A fresh migrated database in memory, for tests and previews.
+    /// A fresh database in memory, for tests and previews.
     pub fn in_memory() -> Result<Self> {
         let mut conn = Connection::open_in_memory()?;
-        migrate(&mut conn)?;
+        setup(&mut conn)?;
         Ok(Self { conn })
     }
 
@@ -198,39 +198,49 @@ fn undo(conn: &Connection, outer: bool) {
     });
 }
 
-/// Open (creating if absent) and migrate to the latest schema.
+/// [`World::open`], as a bare connection.
 pub fn open(path: impl AsRef<Path>) -> Result<Connection> {
     World::open(path).map(World::into_inner)
 }
 
-/// Enable foreign keys and apply every migration above the database's `user_version`,
-/// each in its own transaction together with its version bump.
-pub fn migrate(conn: &mut Connection) -> Result<()> {
+/// Enable foreign keys and make sure the database is at [`SCHEMA_VERSION`]: a file with no
+/// tables yet gets the whole schema in one transaction with its version; one at any other
+/// version is refused.
+fn setup(conn: &mut Connection) -> Result<()> {
     // Per connection, and a no-op inside a transaction, so it is set before any.
     conn.pragma_update(None, "foreign_keys", true)?;
     let found: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if found > SCHEMA_VERSION {
-        return Err(Error::TooNew {
+    match found {
+        SCHEMA_VERSION => Ok(()),
+        0 => {
+            let tables: i64 = conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+                [],
+                |row| row.get(0),
+            )?;
+            if tables > 0 {
+                return Err(Error::Invalid("not a world database".into()));
+            }
+            let tx = conn.transaction()?;
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+            // A save made by this build says so; the pack is added when a corpus opens it.
+            meta::write(conn, meta::APP_VERSION, None)
+        }
+        found if found > SCHEMA_VERSION => Err(Error::TooNew {
             found,
             supported: SCHEMA_VERSION,
-        });
+        }),
+        found => Err(Error::Old {
+            found,
+            supported: SCHEMA_VERSION,
+        }),
     }
-    for (index, sql) in MIGRATIONS.iter().enumerate().skip(found as usize) {
-        let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", index as i64 + 1)?;
-        tx.commit()?;
-    }
-    // A save made by this build says so; one that was migrated keeps what it had until
-    // the app has opened it and stamps it.
-    if found == 0 {
-        meta::write(conn, meta::APP_VERSION, None)?;
-    }
-    Ok(())
 }
 
 /// Tables every schema version has; a file lacking one is not a world database.
-const CORE_TABLES: &[&str] = &[
+pub const CORE_TABLES: &[&str] = &[
     "bond",
     "channel",
     "channel_participant",
@@ -242,8 +252,8 @@ const CORE_TABLES: &[&str] = &[
     "settings",
 ];
 
-/// Whether `path` is a world database this build can migrate: readable, intact, with the
-/// core tables and a schema version no newer than this build's. Nothing is written.
+/// Whether `path` is a world database this build can open: readable, intact, with the core
+/// tables and exactly this build's schema version. Nothing is written.
 pub fn check_file(path: impl AsRef<Path>, key: Option<&str>) -> Result<()> {
     let invalid = |why: &str| Error::Invalid(why.to_owned());
     let conn = cipher::connect_existing(path.as_ref(), key).map_err(|e| match e {
@@ -257,12 +267,6 @@ pub fn check_file(path: impl AsRef<Path>, key: Option<&str>) -> Result<()> {
         return Err(invalid("the database is damaged"));
     }
     let found: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if found > SCHEMA_VERSION {
-        return Err(Error::TooNew {
-            found,
-            supported: SCHEMA_VERSION,
-        });
-    }
     let present: i64 = conn.query_row(
         &format!(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ({})",
@@ -278,7 +282,17 @@ pub fn check_file(path: impl AsRef<Path>, key: Option<&str>) -> Result<()> {
     if found < 1 || present != CORE_TABLES.len() as i64 {
         return Err(invalid("not a world database"));
     }
-    Ok(())
+    match found {
+        SCHEMA_VERSION => Ok(()),
+        found if found > SCHEMA_VERSION => Err(Error::TooNew {
+            found,
+            supported: SCHEMA_VERSION,
+        }),
+        found => Err(Error::Old {
+            found,
+            supported: SCHEMA_VERSION,
+        }),
+    }
 }
 
 /// A consistent single-file copy of the database at `src` (`VACUUM INTO`, so a WAL that
@@ -340,11 +354,12 @@ mod tests {
         "picture",
         "save_meta",
         "channel_summary",
+        "daily_event",
     ];
 
-    fn migrated() -> Connection {
+    fn created() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
-        migrate(&mut conn).unwrap();
+        setup(&mut conn).unwrap();
         conn
     }
 
@@ -354,8 +369,8 @@ mod tests {
     }
 
     #[test]
-    fn migrates_empty_to_latest_with_every_table() {
-        let conn = migrated();
+    fn a_new_save_has_every_table_at_the_latest_schema() {
+        let conn = created();
         assert_eq!(version(&conn), SCHEMA_VERSION);
         for table in TABLES {
             let strict: i64 = conn
@@ -367,182 +382,93 @@ mod tests {
                 .unwrap_or_else(|_| panic!("table {table} is missing"));
             assert_eq!(strict, 1, "{table} is STRICT");
         }
+        let all: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name NOT LIKE 'sqlite_%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(all, TABLES.len() as i64, "TABLES lists every table");
+        let s = meta::read(&conn).unwrap();
+        assert_eq!(s.app.as_deref(), Some(meta::APP_VERSION));
+        assert_eq!((s.pack, s.pack_version), (None, None));
     }
 
-    /// A database written at schema 1 with rows in every table upgrades in place, keeps
-    /// its rows, and reads back through this crate with the new columns defaulted.
     #[test]
-    fn migrates_schema_1_with_data_to_latest() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", true).unwrap();
-        conn.execute_batch(MIGRATIONS[0]).unwrap();
-        conn.pragma_update(None, "user_version", 1).unwrap();
-        conn.execute_batch(
-            "INSERT INTO channel(id, kind, origin) VALUES (1, 'direct', 'user');
-             INSERT INTO channel_participant VALUES (1, 'p1');
-             INSERT INTO bond(a, b, trust, mode) VALUES ('user', 'p1', 120, 'enabled');
-             INSERT INTO message(channel, author, text, at) VALUES (1, 'p1', 'hi', 5);
-             INSERT INTO fact(author, audience_kind, audience_ref, kind, text, created_at)
-                 VALUES ('user', 'participants', '1', 'fact', 't', 0);
-             INSERT INTO meter(at, shape, model, uncached, cached, output, points)
-                 VALUES (1, 'direct', 'm', 1, 0, 0, 1.0);",
-        )
-        .unwrap();
-        migrate(&mut conn).unwrap();
-        assert_eq!(version(&conn), SCHEMA_VERSION);
-
-        let b = bond::user_bond(&conn, &PersonId::from("p1")).unwrap();
-        assert_eq!((b.trust, b.mode, b.last_seen), (120, Mode::Enabled, None));
-        assert_eq!(b.trust_exact, 120.0);
-        assert_eq!(fact::all(&conn, true).unwrap().len(), 1);
-        let ch = channel::get(&conn, ChannelId(1)).unwrap();
-        assert_eq!(ch.person(), Some(&PersonId::from("p1")));
-        assert_eq!(message::history(&conn, ch.id, None, 10).unwrap().len(), 1);
-    }
-
-    /// A save from before the version record is migrated without being stamped: the app
-    /// stamps it after it has opened, so a difference can still be told.
-    #[test]
-    fn a_migrated_old_save_is_unstamped_and_a_new_one_is_stamped() {
-        let mut old = Connection::open_in_memory().unwrap();
-        old.pragma_update(None, "foreign_keys", true).unwrap();
-        for sql in &MIGRATIONS[..7] {
-            old.execute_batch(sql).unwrap();
-        }
-        old.pragma_update(None, "user_version", 7).unwrap();
-        migrate(&mut old).unwrap();
-        let s = meta::read(&old).unwrap();
-        assert_eq!((s.schema, s.app), (SCHEMA_VERSION, None));
-        assert_eq!(
-            meta::read(&migrated()).unwrap().app.as_deref(),
-            Some(meta::APP_VERSION)
-        );
-    }
-
-    /// A schema-2 meter keeps its rows; they read as token-billed (no requests).
-    #[test]
-    fn migrates_schema_2_meter_rows_as_token_billed() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", true).unwrap();
-        conn.execute_batch(MIGRATIONS[0]).unwrap();
-        conn.execute_batch(MIGRATIONS[1]).unwrap();
-        conn.pragma_update(None, "user_version", 2).unwrap();
-        conn.execute_batch(
-            "INSERT INTO meter(at, shape, model, uncached, cached, output, points)
-                 VALUES (1, 'direct', 'm', 5, 0, 0, 5.0);",
-        )
-        .unwrap();
-        migrate(&mut conn).unwrap();
-        assert_eq!(version(&conn), SCHEMA_VERSION);
-        let (pts, req): (f64, i64) = conn
-            .query_row("SELECT points, requests FROM meter", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
+    fn the_core_tables_are_in_the_schema() {
+        let conn = created();
+        for table in CORE_TABLES {
+            assert!(TABLES.contains(table), "{table}");
+            conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| {
+                r.get::<_, i64>(0)
             })
             .unwrap();
-        assert_eq!((pts, req), (5.0, 0));
-        let st = quota::status(&conn, Tier::Middle, 2, &params::Quota::default()).unwrap();
-        assert_eq!(st.band, quota::Band::Open);
+        }
     }
 
-    /// A schema-3 meter keeps its rows; both kinds count in calls from the first status.
+    /// Any other version is refused with its own kind, and nothing is changed.
     #[test]
-    fn schema_3_meter_rows_count_as_calls() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", true).unwrap();
-        for m in &MIGRATIONS[..3] {
-            conn.execute_batch(m).unwrap();
+    fn a_save_of_another_schema_is_refused_untouched() {
+        for (found, older) in [
+            (1, true),
+            (7, true),
+            (SCHEMA_VERSION - 1, true),
+            (SCHEMA_VERSION + 1, false),
+        ] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch("CREATE TABLE marker(x);").unwrap();
+            conn.pragma_update(None, "user_version", found).unwrap();
+            match setup(&mut conn) {
+                Err(Error::Old {
+                    found: f,
+                    supported,
+                }) if older => {
+                    assert_eq!((f, supported), (found, SCHEMA_VERSION));
+                }
+                Err(Error::TooNew {
+                    found: f,
+                    supported,
+                }) if !older => {
+                    assert_eq!((f, supported), (found, SCHEMA_VERSION));
+                }
+                other => panic!("schema {found}: {other:?}"),
+            }
+            assert_eq!(version(&conn), found);
+            let tables: i64 = conn
+                .query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(tables, 1, "no table was added");
         }
-        conn.pragma_update(None, "user_version", 3).unwrap();
-        conn.execute_batch(
-            "INSERT INTO meter(at, shape, model, uncached, cached, output, points, requests)
-                 VALUES (1, 'direct', 'm', 6000, 0, 0, 6000.0, 0),
-                        (2, 'direct', 'r', 0, 0, 0, 0.0, 1);",
+        let text = Error::Old {
+            found: 3,
+            supported: SCHEMA_VERSION,
+        }
+        .to_string();
+        assert!(text.contains("dramatis-migrate"));
+    }
+
+    #[test]
+    fn a_file_with_tables_and_no_version_is_not_a_world() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t(x);").unwrap();
+        assert!(matches!(setup(&mut conn), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn setting_up_again_is_a_no_op() {
+        let mut conn = created();
+        conn.execute(
+            "INSERT INTO settings VALUES ('user.name', '\"someone\"')",
+            [],
         )
         .unwrap();
-        migrate(&mut conn).unwrap();
-        let st = quota::status(&conn, Tier::Middle, 3, &params::Quota::default()).unwrap();
-        assert_eq!(st.window.unwrap().calls, 3.0);
-    }
-
-    /// Every step from every older version keeps the rows and defaults the new columns.
-    #[test]
-    fn every_older_schema_with_data_migrates_to_latest() {
-        for from in 1..SCHEMA_VERSION {
-            let mut conn = Connection::open_in_memory().unwrap();
-            conn.pragma_update(None, "foreign_keys", true).unwrap();
-            for m in &MIGRATIONS[..from as usize] {
-                conn.execute_batch(m).unwrap();
-            }
-            conn.pragma_update(None, "user_version", from).unwrap();
-            conn.execute_batch(
-                "INSERT INTO channel(id, kind, origin) VALUES (1, 'direct', 'user');
-                 INSERT INTO channel_participant VALUES (1, 'p1');
-                 INSERT INTO bond(a, b, trust, mode) VALUES ('user', 'p1', 120, 'enabled');
-                 INSERT INTO message(channel, author, text, at) VALUES (1, 'p1', 'hi', 5);
-                 INSERT INTO fact(author, audience_kind, audience_ref, kind, text, created_at)
-                     VALUES ('user', 'participants', '1', 'fact', 't', 0);
-                 INSERT INTO meter(at, shape, model, uncached, cached, output, points)
-                     VALUES (1, 'direct', 'm', 1, 0, 0, 1.0);
-                 INSERT INTO settings VALUES ('user.name', '\"someone\"');",
-            )
+        setup(&mut conn).unwrap();
+        assert_eq!(version(&conn), SCHEMA_VERSION);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
             .unwrap();
-            if from >= 2 {
-                conn.execute_batch(
-                    "INSERT INTO seed(person, kind, ref, created_at, material)
-                         VALUES ('p1', 'memory', '1', 0, '[\"c\"]');
-                     INSERT INTO session(channel, person, cause, opened_at, last_at)
-                         VALUES (1, 'p1', 'addressed', 1, 1);",
-                )
-                .unwrap();
-            }
-            migrate(&mut conn).unwrap();
-            assert_eq!(version(&conn), SCHEMA_VERSION, "from {from}");
-            let count = |t: &str| -> i64 {
-                conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
-                    .unwrap()
-            };
-            for t in ["channel", "bond", "message", "fact", "meter", "settings"] {
-                assert_eq!(count(t), 1, "{t} from {from}");
-            }
-            if from >= 2 {
-                assert_eq!((count("seed"), count("session")), (1, 1), "from {from}");
-            }
-            let ch = channel::get(&conn, ChannelId(1)).unwrap();
-            assert_eq!((ch.name, ch.avatar, ch.archived), (None, None, false));
-            let requests: i64 = conn
-                .query_row("SELECT requests FROM meter", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(requests, 0);
-            assert_eq!(
-                message::history(&conn, ChannelId(1), None, 10)
-                    .unwrap()
-                    .len(),
-                1
-            );
-        }
-    }
-
-    /// A migration that fails halfway leaves the database at its old version, untouched.
-    #[test]
-    fn a_failed_step_leaves_the_old_version() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        for m in &MIGRATIONS[..3] {
-            conn.execute_batch(m).unwrap();
-        }
-        conn.pragma_update(None, "user_version", 3).unwrap();
-        // Step 4 adds `name`; a clashing column makes it fail after the statement ran.
-        conn.execute_batch("ALTER TABLE channel ADD COLUMN avatar TEXT;")
-            .unwrap();
-        assert!(migrate(&mut conn).is_err());
-        assert_eq!(version(&conn), 3);
-        let has_name: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('channel') WHERE name = 'name'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_name, 0, "the step rolled back whole");
+        assert_eq!(n, 1);
     }
 
     fn setting_count(conn: &Connection) -> i64 {
@@ -618,32 +544,8 @@ mod tests {
     }
 
     #[test]
-    fn migrating_again_is_a_no_op() {
-        let mut conn = migrated();
-        conn.execute(
-            "INSERT INTO settings VALUES ('user.name', '\"someone\"')",
-            [],
-        )
-        .unwrap();
-        migrate(&mut conn).unwrap();
-        assert_eq!(version(&conn), SCHEMA_VERSION);
-        let n: i64 = conn
-            .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(n, 1);
-    }
-
-    #[test]
-    fn refuses_a_newer_schema() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
-            .unwrap();
-        assert!(matches!(migrate(&mut conn), Err(Error::TooNew { .. })));
-    }
-
-    #[test]
     fn constraints_reject_malformed_rows() {
-        let conn = migrated();
+        let conn = created();
         conn.execute_batch(
             "INSERT INTO channel(id, kind, origin) VALUES (1, 'direct', 'user');
              INSERT INTO bond(a, b, trust) VALUES ('user', 'p1', 100);
@@ -729,13 +631,16 @@ mod tests {
             Err(Error::TooNew { .. })
         ));
 
-        // An older schema is accepted: opening it migrates.
+        // An older schema is refused too: it needs the migration tool.
         let old = dir.join("old.sqlite");
         let c = Connection::open(&old).unwrap();
-        c.execute_batch(MIGRATIONS[0]).unwrap();
-        c.pragma_update(None, "user_version", 1).unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        c.pragma_update(None, "user_version", 8).unwrap();
         drop(c);
-        check_file(&old, None).unwrap();
+        assert!(matches!(
+            check_file(&old, None),
+            Err(Error::Old { found: 8, .. })
+        ));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

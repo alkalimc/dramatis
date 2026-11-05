@@ -11,7 +11,7 @@ use crate::convert::{self, world_err};
 use crate::error::{ApiError, ApiResult};
 use crate::home::Home;
 use crate::update;
-use crate::views::{SaveInfo, VersionChange, VersionStamp};
+use crate::views::{SaveInfo, SaveState, VersionChange, VersionStamp};
 
 /// Longest save name, in characters.
 const NAME_MAX: usize = 48;
@@ -86,9 +86,66 @@ fn ms(t: SystemTime) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 
+/// A path as a shell takes it, quoted only when it has to be.
+fn shell_word(path: &Path) -> String {
+    let text = path.display().to_string();
+    let plain = !text.is_empty()
+        && text.chars().all(|c| {
+            c.is_ascii_alphanumeric() || "_-./:@%+=,~".contains(c) || (cfg!(windows) && c == '\\')
+        });
+    if plain {
+        text
+    } else if cfg!(windows) {
+        format!("\"{text}\"")
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
+}
+
+/// The exact command that brings the save at `path` up to this build's format. The tool
+/// keeps the original beside it as `<file>.bak`.
+pub fn migrate_command(path: &Path) -> String {
+    format!("dramatis-migrate {} --in-place", shell_word(path))
+}
+
+/// A world error met while opening the save at `path`: the refusals of a save in another
+/// format name the command to run.
+pub fn open_err(path: &Path, e: world::Error) -> ApiError {
+    match e {
+        world::Error::Old { .. } => ApiError::NeedsMigration {
+            command: migrate_command(path),
+        },
+        other => world_err(other),
+    }
+}
+
+/// What a file says about itself, and whether this build can open it. `key`: the password
+/// entered for it, if any.
+pub fn inspect(path: &Path, key: Option<&str>) -> (Option<VersionStamp>, SaveState) {
+    use world::meta::Fit;
+    match world::meta::peek(path, key) {
+        Ok(stamp) => {
+            let state = match stamp.fit() {
+                Fit::Empty | Fit::Current => SaveState::Ready,
+                Fit::Old => SaveState::NeedsMigration,
+                Fit::Newer => SaveState::Newer,
+            };
+            (Some(stamp_view(stamp)), state)
+        }
+        Err(world::Error::Locked) if world::cipher::is_encrypted(path) => (None, SaveState::Locked),
+        Err(_) => (None, SaveState::Unreadable),
+    }
+}
+
 /// Every save, the most recently played first. A write-ahead log newer than the file
 /// counts: a save last opened by an older build keeps its play there until a checkpoint.
-pub fn list(home: &Home, current: &str, now: Now) -> Vec<SaveInfo> {
+/// `password` gives the password entered for a save, which lets an encrypted one be read.
+pub fn list(
+    home: &Home,
+    current: &str,
+    now: Now,
+    password: impl Fn(&str) -> Option<String>,
+) -> Vec<SaveInfo> {
     let mut rows: Vec<(Option<i64>, SaveInfo)> = names(home)
         .into_iter()
         .map(|name| {
@@ -101,12 +158,18 @@ pub fn list(home: &Home, current: &str, now: Now) -> Vec<SaveInfo> {
                 .max()
                 .and_then(ms);
             let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+            let encrypted = world::cipher::is_encrypted(&path);
+            let key = password(&name).filter(|_| encrypted);
+            let (stamp, state) = inspect(&path, key.as_deref());
             let info = SaveInfo {
                 current: name == current,
-                name,
-                encrypted: world::cipher::is_encrypted(&path),
+                encrypted,
                 size_kb: u32::try_from(size.div_ceil(1024)).unwrap_or(u32::MAX),
                 played_at: at.map(|a| convert::ts(a, now.offset_min)),
+                command: (state == SaveState::NeedsMigration).then(|| migrate_command(&path)),
+                name,
+                stamp,
+                state,
             };
             (at, info)
         })
@@ -116,11 +179,19 @@ pub fn list(home: &Home, current: &str, now: Now) -> Vec<SaveInfo> {
 }
 
 /// How the versions a save recorded differ from the running ones. A file with no schema
-/// yet (empty) has nothing to differ. The pack is compared only when a corpus is open.
+/// yet (empty) has nothing to differ. A save of another schema is told by that alone. The
+/// pack is compared only when a corpus is open.
 pub fn changes(saved: &VersionStamp, running: &VersionStamp) -> Vec<VersionChange> {
     let mut out = Vec::new();
     if saved.schema == 0 {
         return out;
+    }
+    // A save of another format cannot be loaded, so its versions are not the question.
+    if saved.schema < running.schema {
+        return vec![VersionChange::NeedsMigration];
+    }
+    if saved.schema > running.schema {
+        return vec![VersionChange::NewerSchema];
     }
     match (saved.app.as_deref(), running.app.as_deref()) {
         (None, _) => out.push(VersionChange::Unrecorded),
@@ -283,7 +354,7 @@ pub fn export(home: &Home, name: &str, dest: &Path, key: Option<&str>) -> ApiRes
     copied
 }
 
-/// Bring a world database from `file` in as a new save, migrated to this build's schema.
+/// Bring a world database from `file` in as a new save; it must be at this build's schema.
 /// `name` defaults to the file's name without its extension. An encrypted file needs its
 /// `password` and keeps it. Returns the name used.
 pub fn import(
@@ -308,7 +379,9 @@ pub fn import(
         return Err(ApiError::NotFound);
     }
     world::check_file(file, password).map_err(|e| match e {
-        world::Error::Invalid(_) | world::Error::TooNew { .. } => invalid("file"),
+        world::Error::Invalid(_) => invalid("file"),
+        world::Error::TooNew { .. } => ApiError::NewerSave,
+        old @ world::Error::Old { .. } => open_err(file, old),
         // A file that is not even a database reads as locked: ask for the password, and a
         // wrong one then says so.
         other => world_err(other),
@@ -417,6 +490,32 @@ mod tests {
     }
 
     #[test]
+    fn a_save_of_another_schema_is_told_by_that_alone() {
+        let run = stamp(Some("1.2.0"), Some(("pk", "1.2.0")));
+        let at = |schema| VersionStamp {
+            schema,
+            ..stamp(Some("0.1.0"), Some(("zz", "9")))
+        };
+        assert_eq!(changes(&at(7), &run), [VersionChange::NeedsMigration]);
+        assert_eq!(changes(&at(9), &run), [VersionChange::NewerSchema]);
+    }
+
+    #[test]
+    fn the_migration_command_names_the_tool_and_the_quoted_path() {
+        let plain = migrate_command(Path::new("/h/saves/default.sqlite"));
+        assert_eq!(plain, "dramatis-migrate /h/saves/default.sqlite --in-place");
+        let spaced = migrate_command(Path::new("/h/my saves/it's.sqlite"));
+        if cfg!(windows) {
+            assert!(spaced.contains('"'));
+        } else {
+            assert_eq!(
+                spaced,
+                "dramatis-migrate '/h/my saves/it'\\''s.sqlite' --in-place"
+            );
+        }
+    }
+
+    #[test]
     fn names_are_file_safe() {
         for ok in ["default", "story 2", "café", "a.b", "x-y_z"] {
             assert!(valid_name(ok), "{ok}");
@@ -478,7 +577,7 @@ mod tests {
         assert_eq!(marked(&h, "second").as_deref(), Some("\"Other\""));
         rename(&h, "one", "One").unwrap();
 
-        let all: Vec<_> = list(&h, "One", at())
+        let all: Vec<_> = list(&h, "One", at(), |_| None)
             .into_iter()
             .map(|s| (s.name, s.current))
             .collect();
@@ -488,12 +587,12 @@ mod tests {
 
         delete(&h, "second").unwrap();
         assert_eq!(delete(&h, "second"), Err(ApiError::NotFound));
-        assert_eq!(list(&h, "One", at()).len(), 2);
+        assert_eq!(list(&h, "One", at(), |_| None).len(), 2);
         done(&h);
     }
 
     #[test]
-    fn export_replaces_and_import_validates_and_migrates() {
+    fn export_replaces_and_import_validates() {
         let h = home("io");
         create(&h, "one").unwrap();
         marker(&h, "one", "Doc");
@@ -515,6 +614,22 @@ mod tests {
             import(&h, &h.root().join("absent.db"), Some("x"), None),
             Err(ApiError::NotFound)
         );
+        // A file of another format is not imported; an earlier release's is pointed at the tool.
+        for (schema, want) in [
+            (
+                3,
+                ApiError::NeedsMigration {
+                    command: migrate_command(&out),
+                },
+            ),
+            (world::SCHEMA_VERSION + 1, ApiError::NewerSave),
+        ] {
+            let c = rusqlite::Connection::open(&out).unwrap();
+            c.pragma_update(None, "user_version", schema).unwrap();
+            drop(c);
+            assert_eq!(import(&h, &out, Some("odd"), None), Err(want));
+        }
+        assert!(!h.save_path("odd").exists());
         // Nothing half-built is left behind.
         let left: Vec<_> = std::fs::read_dir(h.saves())
             .unwrap()

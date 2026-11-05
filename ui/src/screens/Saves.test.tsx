@@ -33,14 +33,49 @@ test("a save last opened with other versions asks before loading, and going back
   const switched = vi.spyOn(api.commands, "switchSave");
   await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
   const dialog = await screen.findByRole("dialog", { name: /second try was last opened with other versions/ });
-  expect(within(dialog).getByText("App 1.0.4")).toBeDefined();
-  expect(within(dialog).getByText("Data format 7")).toBeDefined();
+  expect(within(dialog).getByText("App 1.0.9")).toBeDefined();
+  expect(within(dialog).getAllByText("Data format 9")).toHaveLength(2);
   expect(within(dialog).getByText("It was last opened with an older app.")).toBeDefined();
   expect(within(dialog).getByText("It was last opened with another release of the corpus pack.")).toBeDefined();
   await user.click(within(dialog).getByRole("button", { name: "Go back" }));
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(switched).not.toHaveBeenCalled();
   expect(onSwitched).not.toHaveBeenCalled();
+});
+
+test("each card shows the save's version, pack and format", async () => {
+  await open(vi.fn(), "drift=1");
+  expect(within(row("default")).getByText(/App .* · Pack demo 1\.0\.0 · Format 9/)).toBeDefined();
+  expect(within(row("second try")).getByText("App 1.0.9 · Pack demo 0.9.0 · Format 9")).toBeDefined();
+});
+
+test("a locked save's card says so instead of showing versions", async () => {
+  await open(vi.fn(), "locked=1");
+  expect(within(row("default")).getByText(/Locked: versions show once it is opened/)).toBeDefined();
+});
+
+test("a save from an earlier release is marked, and opening it shows the command instead of loading", async () => {
+  const { user, onSwitched, api } = await open(vi.fn(), "migrate=1");
+  expect(within(row("second try")).getByText("Needs converting")).toBeDefined();
+  expect(within(row("second try")).getByText(/Format 7/)).toBeDefined();
+  const switched = vi.spyOn(api.commands, "switchSave");
+  await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
+  const dialog = await screen.findByRole("dialog", { name: /second try needs converting/ });
+  expect(within(dialog).getByText(/dramatis-migrate .*second try\.sqlite.* --in-place/)).toBeDefined();
+  expect(within(dialog).queryByRole("button", { name: "Load anyway" })).toBeNull();
+  await user.click(within(dialog).getByRole("button", { name: "Close" }));
+  expect(switched).not.toHaveBeenCalled();
+  expect(onSwitched).not.toHaveBeenCalled();
+});
+
+test("a save from a newer app is marked and cannot be opened", async () => {
+  const { user, api } = await open(vi.fn(), "newer=1");
+  expect(within(row("second try")).getByText("Newer app")).toBeDefined();
+  const switched = vi.spyOn(api.commands, "switchSave");
+  await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText(/Update this app to open it/)).toBeDefined();
+  expect(switched).not.toHaveBeenCalled();
 });
 
 test("loading anyway opens the save, and it is not asked about again", async () => {
