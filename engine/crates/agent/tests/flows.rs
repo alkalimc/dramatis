@@ -4579,7 +4579,7 @@ async fn a_question_about_the_speakers_past_searches_their_own_units() {
 }
 
 #[tokio::test]
-async fn a_second_wrapup_in_a_segment_points_back_at_the_first() {
+async fn a_wrapup_that_leaves_the_segment_going_is_cut_off_again_so_the_next_one_is_whole() {
     let e = env(WireApi::Responses);
     let ch = direct(&e, "ann");
     e.fake.push([
@@ -4593,14 +4593,24 @@ async fn a_second_wrapup_in_a_segment_points_back_at_the_first() {
     e.agent.send(ch, "hello again", None).await.unwrap();
     e.agent.wrapup(ch).await.unwrap();
     let bodies = e.fake.bodies();
-    assert_prefix_chain(&bodies);
-    let last = body_text(bodies.last().unwrap());
-    assert_eq!(
-        last.matches("only what is new since the last one").count(),
-        1
+    assert_eq!(bodies.len(), 4);
+    // The turns form one chain: the first wrap-up's request and answer were cut off, so
+    // the next turn extends the turn before it, not the wrap-up.
+    assert_prefix_chain(&[bodies[0].clone(), bodies[2].clone()]);
+    let next = body_text(&bodies[2]);
+    assert!(
+        !next.contains("Writing nothing is the normal result"),
+        "{next}"
     );
+    // Each wrap-up is the whole instruction, said once, since the model never sees the
+    // one before it.
+    let last = body_text(bodies.last().unwrap());
     assert_eq!(
         last.matches("Writing nothing is the normal result").count(),
         1
+    );
+    assert_eq!(
+        last.matches("only what is new since the last one").count(),
+        0
     );
 }
