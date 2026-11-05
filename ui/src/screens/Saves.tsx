@@ -44,9 +44,60 @@ function StampLines({ stamp }: { stamp: VersionStamp }) {
   );
 }
 
+/** A command to run in a terminal, selectable, with a button that copies it. */
+function Command({ text }: { text: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  return (
+    <p>
+      <code className="raw">{text}</code>{" "}
+      <button
+        type="button"
+        className="link"
+        onClick={() => {
+          void Promise.resolve(navigator.clipboard?.writeText(text)).then(() => setCopied(true), () => setCopied(false));
+        }}
+      >
+        {t("saves.migrate.copy")}
+      </button>
+      <span role="status">{copied ? ` ${t("saves.migrate.copied")}` : ""}</span>
+    </p>
+  );
+}
+
+/** A save in another data format is not loaded: it says what to run, or that the app is too old. */
+function MigrationDialog({ check, onBack }: { check: SaveCheck; onBack: () => void }) {
+  const t = useT();
+  return (
+    <Dialog title={t("saves.migrate.title", { name: check.name })} onClose={onBack}>
+      <ul>
+        {check.changes.map((c: VersionChange) => (
+          <li key={c}>{t(`saves.drift.${c}`)}</li>
+        ))}
+      </ul>
+      <StampLines stamp={check.saved} />
+      {check.command ? (
+        <>
+          <p>{t("saves.migrate.body", { to: check.running.schema })}</p>
+          <Command text={check.command} />
+          <p className="muted small">{t("saves.migrate.protected")}</p>
+        </>
+      ) : (
+        <p>{t("saves.migrate.newer")}</p>
+      )}
+      <div className="row">
+        <button type="button" className="ghost" onClick={onBack}>
+          {t("saves.migrate.close")}
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
 /** The warning before a save last opened with other versions is loaded. */
 export function VersionDialog({ check, onLoad, onBack }: { check: SaveCheck; onLoad: () => void; onBack: () => void }) {
   const t = useT();
+  if (check.changes.includes("needs_migration") || check.changes.includes("newer_schema")) return <MigrationDialog check={check} onBack={onBack} />;
   return (
     <Dialog title={t("saves.drift.title", { name: check.name })} onClose={onBack}>
       <div className="row wrap">
@@ -120,6 +171,35 @@ export function useOpenSave(onSwitched: () => void, refresh: () => Promise<void>
     }
   };
   return { open, prompt, setPrompt, drift, load, back: () => setDrift(null) };
+}
+
+/** What a save's file says about it, for its card: versions and pack, or why they cannot be shown. */
+function SaveVersions({ save }: { save: SaveInfo }) {
+  const t = useT();
+  const { stamp, state } = save;
+  if (!stamp) return <div className="muted small save-versions">{t(state === "locked" ? "saves.card.locked" : "saves.card.unreadable")}</div>;
+  const parts = [
+    t("saves.card.app", { version: stamp.app ?? t("saves.drift.unknown") }),
+    stamp.pack ? t("saves.card.pack", { name: stamp.pack, version: stamp.pack_version ?? "" }) : t("saves.card.nopack"),
+    t("saves.card.schema", { n: stamp.schema }),
+  ];
+  return (
+    <div className="muted small save-versions">
+      {parts.join(" · ")}
+      {state === "needs_migration" && (
+        <>
+          {" "}
+          <span className="badge warn-badge">{t("saves.card.needs_migration")}</span>
+        </>
+      )}
+      {state === "newer" && (
+        <>
+          {" "}
+          <span className="badge warn-badge">{t("saves.card.newer")}</span>
+        </>
+      )}
+    </div>
+  );
 }
 
 type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
@@ -232,6 +312,7 @@ export function SavesPage({ onSwitched = () => window.location.reload(), picker 
                 {t("saves.size", { kb: s.size_kb })}
                 {s.played_at && <> · {t("saves.played", { when: when(s.played_at, t) })}</>}
               </div>
+              <SaveVersions save={s} />
             </div>
             <div className="row wrap" role="group" aria-label={t("saves.actions", { name: s.name })}>
               {!s.current && (

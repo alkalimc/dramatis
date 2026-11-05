@@ -10,8 +10,8 @@ use api::error::{ApiError, ApiResult};
 use api::types::{Author, ChannelId, FactId, MessageId, Mode, PersonId, Target, Tier, Timestamp};
 use api::views::{
     Audience, ChannelKind, ChannelSummary, FactFilter, FactScope, FactView, ForwardTo,
-    InterfaceLanguage, Passage, QuietHours, RosterRow, Settings, StorageKind, StorageUsage,
-    VersionChange, VersionStamp,
+    InterfaceLanguage, Passage, QuietHours, RosterRow, SaveInfo, Settings, StorageKind,
+    StorageUsage, VersionChange, VersionStamp,
 };
 use api::{Api, Engine};
 use runtime::{AgentBridge, Call};
@@ -2462,6 +2462,12 @@ impl Session {
             api::ApiError::NotFound => "cli.save.not_found",
             api::ApiError::Invalid { field } if field == "name" => "cli.save.bad_name",
             api::ApiError::Invalid { field } if field == "file" => "cli.save.bad_file",
+            api::ApiError::NewerSave => "cli.save.newer_save",
+            api::ApiError::NeedsMigration { command } => {
+                return self
+                    .names
+                    .say("cli.save.needs_migration", &[("command", command)]);
+            }
             other => return self.names.api_error(other),
         };
         self.msg(key)
@@ -2511,13 +2517,46 @@ impl Session {
                 |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
             );
             self.term.line(&format!(
-                "{} {:<24} {:>8} KB  {played}{}",
+                "{} {:<24} {:>8} KB  {played}{}  {}",
                 if s.current { "*" } else { " " },
                 s.name,
                 s.size_kb,
-                self.encrypted_mark(s.encrypted)
+                self.encrypted_mark(s.encrypted),
+                self.card_text(s)
             ));
+            if let Some(command) = &s.command {
+                self.term.line(&format!("    {command}"));
+            }
         }
+    }
+
+    /// What a save's file says about it, for a list: its versions and pack, or why it
+    /// cannot be shown (locked), or that it needs migration.
+    fn card_text(&self, s: &SaveInfo) -> String {
+        use api::views::SaveState;
+        let unknown = self.msg("cli.save.drift.unknown");
+        let Some(stamp) = &s.stamp else {
+            return self.msg(match s.state {
+                SaveState::Locked => "cli.save.card.locked",
+                _ => "cli.save.card.unreadable",
+            });
+        };
+        let pack = match &stamp.pack {
+            Some(name) => format!("{name} {}", stamp.pack_version.as_deref().unwrap_or("")),
+            None => unknown.clone(),
+        };
+        let app = stamp.app.as_deref().unwrap_or(&unknown);
+        let fields: [(&str, &dyn std::fmt::Display); 3] = [
+            ("app", &app),
+            ("pack", &pack.trim()),
+            ("schema", &stamp.schema),
+        ];
+        let key = match s.state {
+            SaveState::NeedsMigration => "cli.save.card.migrate",
+            SaveState::Newer => "cli.save.card.newer",
+            _ => "cli.save.card",
+        };
+        self.names.say(key, &fields)
     }
 
     /// The mark after an encrypted save in a list; nothing otherwise.
@@ -2541,6 +2580,31 @@ impl Session {
         }
         match checked {
             Err(e) => return self.term.line(&self.why(&e)),
+            // Another format: nothing to confirm, the way forward is the tool.
+            Ok(check) if check.changes.contains(&VersionChange::NeedsMigration) => {
+                let schema = check.saved.schema.to_string();
+                self.term.line(&self.names.say(
+                    "cli.save.migrate",
+                    &[
+                        ("name", &name),
+                        ("schema", &schema),
+                        ("current", &check.running.schema.to_string()),
+                    ],
+                ));
+                if let Some(command) = &check.command {
+                    self.term.line(&format!("  {command}"));
+                }
+                return;
+            }
+            Ok(check) if check.changes.contains(&VersionChange::NewerSchema) => {
+                let schema = check.saved.schema.to_string();
+                self.term.line(
+                    &self
+                        .names
+                        .say("cli.save.newer", &[("name", &name), ("schema", &schema)]),
+                );
+                return;
+            }
             // Versions differ: say how, and load on a yes.
             Ok(check) if !check.changes.is_empty() => {
                 self.term
@@ -2555,6 +2619,7 @@ impl Session {
                         VersionChange::NewerApp => "cli.save.drift.newer_app",
                         VersionChange::OlderApp => "cli.save.drift.older_app",
                         VersionChange::OtherApp => "cli.save.drift.other_app",
+                        VersionChange::NeedsMigration | VersionChange::NewerSchema => continue,
                         VersionChange::OtherPack => "cli.save.drift.other_pack",
                         VersionChange::OtherPackVersion => "cli.save.drift.other_pack_version",
                     };
@@ -2695,11 +2760,12 @@ impl Session {
                 |t| t.0.chars().take(16).collect::<String>().replace('T', " "),
             );
             self.term.line(&format!(
-                "  {:>2}  {:<24} {:>8} KB  {played}{}",
+                "  {:>2}  {:<24} {:>8} KB  {played}{}  {}",
                 i + 1,
                 s.name,
                 s.size_kb,
-                self.encrypted_mark(s.encrypted)
+                self.encrypted_mark(s.encrypted),
+                self.card_text(s)
             ));
         }
         self.pickable = saves.into_iter().map(|s| s.name).collect();

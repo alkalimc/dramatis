@@ -16,9 +16,9 @@ use crate::types::{Actor, Outcome};
 use crate::{Result, event, fact, settings};
 
 /// Setting: the instant away mode was turned on; absent when it is off.
-const AWAY: &str = "away";
+pub(crate) const AWAY: &str = "away";
 /// Setting: what the last stretch away spent.
-const SPENT: &str = "away.spent";
+pub(crate) const SPENT: &str = "away.spent";
 
 /// Slots spent on one local day, and until when the visit and the event slot of the part
 /// now in are spent.

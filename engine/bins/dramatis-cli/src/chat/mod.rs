@@ -233,8 +233,10 @@ fn start_password(home: &Home) -> Result<Option<String>> {
         let Some(password) = secret::read(&prompt) else {
             bail!("the save is encrypted and no password was given");
         };
-        match world::check_file(&path, Some(&password)) {
-            Ok(()) => return Ok(Some(password)),
+        // Only the password is tried here; whether the save is in this app's format is
+        // for the engine, which waits at the picker for one that is not.
+        match world::meta::peek(&path, Some(&password)) {
+            Ok(_) => return Ok(Some(password)),
             Err(world::Error::Locked) => eprintln!("wrong password"),
             Err(e) => bail!("cannot open {}: {e}", path.display()),
         }

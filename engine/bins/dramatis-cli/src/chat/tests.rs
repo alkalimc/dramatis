@@ -1394,6 +1394,38 @@ async fn a_save_of_other_versions_shows_the_difference_and_loads_only_on_a_yes()
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_save_list_shows_versions_and_an_earlier_release_gets_the_command_not_a_load() {
+    let mut r = rig().await;
+    r.run("/save new old").await;
+    let path = r._home.0.join("saves/old.sqlite");
+    let before = {
+        let w = world::World::open(&path).unwrap();
+        w.pragma_update(None, "user_version", 7).unwrap();
+        drop(w);
+        std::fs::read(&path).unwrap()
+    };
+    let list = r.run("/save list").await;
+    assert!(
+        list.contains(&format!("app {}", world::meta::APP_VERSION))
+            && list.contains("data format 9"),
+        "{list}"
+    );
+    assert!(
+        list.contains("data format 7, from an earlier release: needs migration")
+            && list.contains(&format!("dramatis-migrate {}", path.display())),
+        "{list}"
+    );
+    let out = r.run("/save switch old").await;
+    assert!(
+        out.contains("earlier release") && out.contains("--in-place"),
+        "{out}"
+    );
+    assert!(r.session.question().is_none(), "nothing to confirm");
+    assert!(r.run("/save").await.contains("* default"));
+    assert_eq!(std::fs::read(&path).unwrap(), before, "not touched");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bio_shows_sets_clears_and_is_bounded() {
     let mut r = rig().await;
     assert!(r.run("/bio").await.contains("no bio"));

@@ -165,7 +165,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let locked = params.get("locked") === "1";
   // `?changed=1` starts as if another window had replaced the open save's file.
   let changedElsewhere = params.get("changed") === "1";
-  let saves: SaveInfo[] =
+  type MockSave = Omit<SaveInfo, "stamp" | "state" | "command">;
+  let saves: MockSave[] =
     params.get("saves") === "0"
       ? []
       : [
@@ -173,9 +174,13 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
           { name: "second try", size_kb: 96, played_at: iso(60 * 24 * 3), current: false, encrypted: false },
         ];
   // `?drift=1`: the save "second try" was last opened with an older app and another pack release.
-  const running: VersionStamp = { app: version, pack: "demo", pack_version: info.corpus_version, schema: 8 };
+  const running: VersionStamp = { app: version, pack: "demo", pack_version: info.corpus_version, schema: 9 };
   const stamps = new Map<string, VersionStamp>(saves.map((s) => [s.name, running]));
-  if (params.get("drift") === "1") stamps.set("second try", { app: "1.0.4", pack: "demo", pack_version: "0.9.0", schema: 7 });
+  if (params.get("drift") === "1") stamps.set("second try", { app: "1.0.9", pack: "demo", pack_version: "0.9.0", schema: 9 });
+  // `?migrate=1`: "second try" is from an earlier release (data format 7); `?newer=1`: from a newer app.
+  if (params.get("migrate") === "1") stamps.set("second try", { app: "1.1.0", pack: "demo", pack_version: "0.9.0", schema: 7 });
+  if (params.get("newer") === "1") stamps.set("second try", { app: "9.0.0", pack: "demo", pack_version: "0.9.0", schema: 10 });
+  const migrateCommand = (name: string) => `dramatis-migrate "/Users/demo/.dramatis/saves/${name}.sqlite" --in-place`;
   /** The two caches the user may clear; the other kinds are fixed sizes. */
   const cache = { avatars: { kb: 2300, files: 24 }, audio: { kb: 5200, files: 9 } };
   const storageUsage = (): StorageUsage => {
@@ -1173,11 +1178,22 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       for (const k of categories) cache[k as "avatars" | "audio"] = { kb: 0, files: 0 };
       return ok(storageUsage());
     },
-    saves: () => ok(saves.map((s) => ({ ...s, current: s.name === openSave }))),
+    saves: () =>
+      ok(
+        saves.map((s): SaveInfo => {
+          const current = s.name === openSave;
+          // An encrypted save shows nothing of itself until its password was entered here.
+          if (s.encrypted && !known.has(s.name)) return { ...s, current, stamp: null, state: "locked", command: null };
+          const stamp = stamps.get(s.name) ?? running;
+          const state = stamp.schema < running.schema ? "needs_migration" : stamp.schema > running.schema ? "newer" : "ready";
+          return { ...s, current, stamp, state, command: state === "needs_migration" ? migrateCommand(s.name) : null };
+        }),
+      ),
     newSave: (name) => {
       const bad = saveNameError(name);
       if (bad) return fail(bad);
       saves.push({ name, size_kb: 96, played_at: iso(), current: false, encrypted: false });
+      stamps.set(name, running);
       known.add(name);
       return ok(null);
     },
@@ -1186,15 +1202,22 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (!target) return fail({ code: "not_found" });
       if (target.encrypted && !known.has(name)) return fail({ code: "locked" });
       const saved = stamps.get(name) ?? running;
+      if (saved.schema !== running.schema) {
+        const old = saved.schema < running.schema;
+        return ok({ name, saved, running, changes: [old ? "needs_migration" : "newer_schema"], command: old ? migrateCommand(name) : null });
+      }
       const changes: VersionChange[] = [];
       if (saved.app !== running.app) changes.push("older_app");
       if (saved.pack_version !== running.pack_version) changes.push("other_pack_version");
-      return ok({ name, saved, running, changes });
+      return ok({ name, saved, running, changes, command: null });
     },
     switchSave: (name) => {
       const target = saves.find((s) => s.name === name);
       if (!target) return fail({ code: "not_found" });
       if (target.encrypted && !known.has(name)) return fail({ code: "locked" });
+      const saved = stamps.get(name) ?? running;
+      if (saved.schema < running.schema) return fail({ code: "needs_migration", command: migrateCommand(name) });
+      if (saved.schema > running.schema) return fail({ code: "newer_save" });
       stamps.set(name, running);
       openSave = name;
       changedElsewhere = false;
@@ -1227,6 +1250,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const bad = saveNameError(to);
       if (bad) return fail(bad);
       saves.push({ ...src, name: to, played_at: iso(), current: false });
+      stamps.set(to, stamps.get(from) ?? running);
       if (passwords.has(from)) passwords.set(to, passwords.get(from) as string);
       if (known.has(from)) known.add(to);
       return ok(null);
@@ -1237,6 +1261,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const bad = saveNameError(to);
       if (bad) return fail(bad);
       src.name = to;
+      stamps.set(to, stamps.get(from) ?? running);
+      stamps.delete(from);
       if (passwords.has(from)) passwords.set(to, passwords.get(from) as string);
       passwords.delete(from);
       if (known.delete(from)) known.add(to);
@@ -1262,6 +1288,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       if (encrypted && password === null) return fail({ code: "locked" });
       if (encrypted && password !== "hunter2") return fail({ code: "wrong_password" });
       saves.push({ name: used, size_kb: 128, played_at: iso(), current: false, encrypted });
+      stamps.set(used, running);
       known.add(used);
       if (encrypted) passwords.set(used, "hunter2");
       return ok(used);

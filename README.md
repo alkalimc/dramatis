@@ -161,28 +161,30 @@ endpoint that caps the size of a request.
 
 ## Saves and versions
 
-A save records the app version and the corpus pack (name and version) it was last opened with.
-When you open a save whose record differs from the running app or pack (or has none), the app and
-the terminal show both versions and ask: load anyway, or go back. Loading brings the save up to
-date and records the running versions. A save written by a newer data format than the build is
-refused. A save keeps only what was generated (messages, memories, events, settings, bonds); the
-prompt text sent to the model is rebuilt from the code and the pack, and the stored model log is
-a cache that is dropped when it was written by another build or pack.
+The app opens saves of its own data format only. A save also records the app version and the
+corpus pack (name and version) it was last opened with; when those differ from the running ones
+(or the save has none), the app and the terminal show both and ask: load anyway, or go back. Each
+card in the save list shows the save's app version, pack and data format. A save keeps only what
+was generated (messages, memories, events, settings, bonds); the prompt text sent to the model is
+rebuilt from the code and the pack, and the stored model log is a cache that is dropped when
+another build or pack wrote it.
 
-Converting a save from an earlier release is done by a separate tool, not by the app:
+A save written by an earlier release (1.0.0 to 1.1.1) is marked "needs converting" and is not
+opened. Convert it with the separate tool, which knows every earlier format:
 
 ```sh
-cargo run --release -p dramatis-migrate -- ~/.dramatis/saves/default.sqlite \
-    --folio ~/.dramatis/<pack>.folio            # writes default.v2.sqlite beside it
-cargo run --release -p dramatis-migrate -- <save> --folio <pack>.folio --in-place   # keeps <save>.bak
+cd engine
+cargo run --release -p dramatis-migrate -- <save>.sqlite --dry-run      # show what would change, write nothing
+cargo run --release -p dramatis-migrate -- <save>.sqlite --in-place     # converts; the original stays as <save>.sqlite.bak
 ```
 
-Close the app and the terminal first. The original file is never changed (the tool works on a
-copy and writes a new file; `--in-place` moves the original to `<save>.bak` only after the new
-file is checked). An encrypted save asks for its password with hidden input and stays encrypted
-under it. The tool upgrades the schema, strips the stored prompt material, carries the
-conversation summaries over (this needs `--folio`, the pack the save was played with), and writes
-the version record. Every message, memory, event, bond, setting and picture is kept.
+Close the app and the terminal first. The tool works on a copy, checks the result, and only then
+puts it in place, so the original is never changed. An encrypted save asks for its password
+(hidden) and stays encrypted under it. It upgrades the data format step by step, then keeps the
+chat records and what was generated from them (memories, events, relationships, pictures,
+settings the app still reads) and removes the stored prompt log and anything the app no longer
+reads. Add `--folio <pack>.folio` to record the pack in the save; `--help` lists what is kept,
+converted and dropped. A save made by a newer app than the tool is refused.
 
 ## Terminal
 

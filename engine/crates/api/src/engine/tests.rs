@@ -3470,23 +3470,33 @@ async fn a_save_opened_by_other_versions_is_reported_and_recorded_only_when_load
     assert_eq!(e.check_save("nope".into()).await, Err(ApiError::NotFound));
 }
 
+/// Set the schema number a save's file carries, as if another release had written it.
+fn set_schema(path: &std::path::Path, schema: i64) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.pragma_update(None, "user_version", schema).unwrap();
+}
+
 #[tokio::test]
-async fn a_save_from_a_newer_schema_is_still_refused() {
+async fn a_save_from_a_newer_schema_is_reported_and_refused() {
+    use crate::views::{SaveState, VersionChange::NewerSchema};
     let r = rig();
     let e = &r.engine;
     e.new_save("future".into()).await.unwrap();
-    let conn = rusqlite::Connection::open(e.home.save_path("future")).unwrap();
-    conn.pragma_update(None, "user_version", world::SCHEMA_VERSION + 1)
-        .unwrap();
-    drop(conn);
-    assert!(matches!(
-        e.check_save("future".into()).await,
-        Err(ApiError::Io { .. })
-    ));
-    assert!(matches!(
+    set_schema(&e.home.save_path("future"), world::SCHEMA_VERSION + 1);
+    let check = e.check_save("future".into()).await.unwrap();
+    assert_eq!((check.changes, check.command), (vec![NewerSchema], None));
+    assert_eq!(
         e.switch_save("future".into()).await,
-        Err(ApiError::Io { .. })
-    ));
+        Err(ApiError::NewerSave)
+    );
+    let card = e
+        .saves()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.name == "future")
+        .unwrap();
+    assert_eq!(card.state, SaveState::Newer);
     assert_eq!(
         e.app_status().await.unwrap().save.as_deref(),
         Some("default")
@@ -3518,42 +3528,98 @@ async fn a_start_on_a_save_of_other_versions_waits_at_the_picker_and_writes_noth
     assert!(reopen(&r, None).app_status().await.unwrap().save.is_some());
 }
 
-/// A save written by 1.1.0: schema 7, no version record.
-fn write_1_1_0_save(path: &std::path::Path) {
-    let conn = rusqlite::Connection::open(path).unwrap();
-    for sql in [
-        include_str!("../../../world/migrations/0001.sql"),
-        include_str!("../../../world/migrations/0002.sql"),
-        include_str!("../../../world/migrations/0003.sql"),
-        include_str!("../../../world/migrations/0004.sql"),
-        include_str!("../../../world/migrations/0005.sql"),
-        include_str!("../../../world/migrations/0006.sql"),
-        include_str!("../../../world/migrations/0007.sql"),
-    ] {
-        conn.execute_batch(sql).unwrap();
-    }
-    conn.pragma_update(None, "user_version", 7).unwrap();
+#[tokio::test]
+async fn a_save_of_an_earlier_release_is_marked_and_is_never_opened_or_changed() {
+    use crate::views::{SaveState, VersionChange::NeedsMigration};
+    let r = rig();
+    let e = &r.engine;
+    e.new_save("legacy".into()).await.unwrap();
+    let path = e.home.save_path("legacy");
+    set_schema(&path, 7);
+    let before = std::fs::read(&path).unwrap();
+    let command = format!("dramatis-migrate {} --in-place", path.display());
+
+    let check = e.check_save("legacy".into()).await.unwrap();
+    assert_eq!(check.changes, [NeedsMigration]);
+    assert_eq!(check.saved.schema, 7);
+    assert_eq!(check.command.as_deref(), Some(command.as_str()));
+    assert_eq!(
+        e.switch_save("legacy".into()).await,
+        Err(ApiError::NeedsMigration {
+            command: command.clone()
+        })
+    );
+    // Its card says so, with what the file records, and the app is where it was.
+    let card = e
+        .saves()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.name == "legacy")
+        .unwrap();
+    assert_eq!(card.state, SaveState::NeedsMigration);
+    assert_eq!(card.command.as_deref(), Some(command.as_str()));
+    assert_eq!(card.stamp.unwrap().schema, 7);
+    assert_eq!(
+        e.app_status().await.unwrap().save.as_deref(),
+        Some("default")
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "not one byte changed"
+    );
+
+    // A start that finds it as the save to open waits at the picker as well.
+    e.home.set_current_save("legacy").unwrap();
+    let started = reopen(&r, None);
+    assert_eq!(started.app_status().await.unwrap().save, None);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
 }
 
 #[tokio::test]
-async fn a_1_1_0_save_reads_as_unrecorded_and_is_migrated_only_on_load() {
+async fn the_cards_show_each_saves_versions_and_a_locked_one_shows_nothing_until_unlocked() {
+    use crate::views::SaveState;
     let r = rig();
     let e = &r.engine;
-    write_1_1_0_save(&e.home.save_path("legacy"));
-    let check = e.check_save("legacy".into()).await.unwrap();
-    assert_eq!(check.changes, [crate::views::VersionChange::Unrecorded]);
-    assert_eq!(check.saved.schema, 7);
+    e.new_save("pack".into()).await.unwrap();
+    record(e, "pack", "0.9.0", Some(("fixture", "0.1")));
+    e.new_save("sealed".into()).await.unwrap();
+    e.switch_save("sealed".into()).await.unwrap();
+    e.set_password(None, Some("pw".into())).await.unwrap();
+    e.switch_save("default".into()).await.unwrap();
+    let card = |all: &[crate::views::SaveInfo], name: &str| {
+        all.iter().find(|s| s.name == name).unwrap().clone()
+    };
+
+    let all = e.saves().await.unwrap();
+    let own = card(&all, "default");
+    assert_eq!(own.state, SaveState::Ready);
+    let stamp = own.stamp.unwrap();
+    assert_eq!(stamp.schema, world::SCHEMA_VERSION as u32);
+    assert_eq!(stamp.app.as_deref(), Some(crate::update::VERSION));
+    let other = card(&all, "pack").stamp.unwrap();
     assert_eq!(
-        world::meta::peek(e.home.save_path("legacy"), None)
-            .unwrap()
-            .schema,
-        7,
-        "checking left the file at its old schema"
+        (
+            other.app.as_deref(),
+            other.pack.as_deref(),
+            other.pack_version.as_deref()
+        ),
+        (Some("0.9.0"), Some("fixture"), Some("0.1"))
     );
-    e.switch_save("legacy".into()).await.unwrap();
-    let after = e.check_save("legacy".into()).await.unwrap();
-    assert!(after.changes.is_empty());
-    assert_eq!(after.saved.schema, world::SCHEMA_VERSION as u32);
+
+    // The password was entered here to encrypt it, so it is known; a restart forgets it.
+    assert_eq!(card(&all, "sealed").state, SaveState::Ready);
+    let fresh = reopen(&r, None);
+    let sealed = card(&fresh.saves().await.unwrap(), "sealed");
+    assert_eq!(
+        (sealed.state, sealed.stamp, sealed.encrypted),
+        (SaveState::Locked, None, true)
+    );
+    fresh.unlock("sealed".into(), "pw".into()).await.unwrap();
+    let sealed = card(&fresh.saves().await.unwrap(), "sealed");
+    assert_eq!(sealed.state, SaveState::Ready);
+    assert!(sealed.stamp.is_some());
 }
 
 #[tokio::test]

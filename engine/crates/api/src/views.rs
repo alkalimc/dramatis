@@ -826,6 +826,28 @@ pub struct SaveInfo {
     pub current: bool,
     /// Protected by a password.
     pub encrypted: bool,
+    /// What the file says about itself (schema, app, pack), read without opening the save.
+    /// `None` when it cannot be read: locked, or not a save.
+    pub stamp: Option<VersionStamp>,
+    pub state: SaveState,
+    /// For a save that needs migration: the exact command to run.
+    pub command: Option<String>,
+}
+
+/// Whether a save can be opened by this app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SaveState {
+    /// The save is in this app's format.
+    Ready,
+    /// Encrypted, and no password has been entered here: what it records is unreadable.
+    Locked,
+    /// An earlier release's format: `dramatis-migrate` must bring it up first.
+    NeedsMigration,
+    /// A newer app's format.
+    Newer,
+    /// Not a readable save.
+    Unreadable,
 }
 
 /// The versions a save was last opened with, or the ones running now. `None`: not
@@ -851,6 +873,10 @@ pub enum VersionChange {
     OlderApp,
     /// The app version is not comparable (not a version number).
     OtherApp,
+    /// The save is in an earlier release's format: it must be migrated, not loaded.
+    NeedsMigration,
+    /// The save is in a newer app's format: it cannot be loaded.
+    NewerSchema,
     /// The save was last opened with another corpus pack.
     OtherPack,
     /// The same pack, another release of it.
@@ -865,6 +891,8 @@ pub struct SaveCheck {
     pub saved: VersionStamp,
     pub running: VersionStamp,
     pub changes: Vec<VersionChange>,
+    /// With `NeedsMigration`: the exact command that brings the save up to date.
+    pub command: Option<String>,
 }
 
 // ---- storage ----

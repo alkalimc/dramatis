@@ -111,10 +111,10 @@ impl Waiting {
     }
 }
 
-const ANNOUNCED: &str = "presence.announced";
+pub(crate) const ANNOUNCED: &str = "presence.announced";
 
 /// The local date the host last brought up a birthday on its own.
-const BIRTHDAY_SAID: &str = "presence.birthday_said";
+pub(crate) const BIRTHDAY_SAID: &str = "presence.birthday_said";
 
 /// Days between two birthdays the host brings up unprompted.
 pub const BIRTHDAY_GAP_DAYS: i64 = 7;

@@ -45,6 +45,13 @@ pub enum ApiError {
     /// A password was given and does not open the save.
     #[error("wrong password")]
     WrongPassword,
+    /// The save was written by an earlier release, and this app opens only its own format.
+    /// `command` is the exact line that brings it up to date.
+    #[error("the save needs migration: {command}")]
+    NeedsMigration { command: String },
+    /// The save was written by a newer app than this one.
+    #[error("the save was made by a newer app")]
+    NewerSave,
     #[error("endpoint error: {detail}")]
     Endpoint { detail: String },
     #[error("keychain error: {detail}")]

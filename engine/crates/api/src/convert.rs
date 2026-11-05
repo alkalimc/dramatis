@@ -204,6 +204,10 @@ pub fn world_err(e: world::Error) -> ApiError {
     match e {
         world::Error::NotFound { .. } => ApiError::NotFound,
         world::Error::Locked => ApiError::Locked,
+        world::Error::Old { .. } => ApiError::NeedsMigration {
+            command: "dramatis-migrate <save> --in-place".into(),
+        },
+        world::Error::TooNew { .. } => ApiError::NewerSave,
         world::Error::Disabled(p) => ApiError::Disabled {
             person: person_id(&p),
         },

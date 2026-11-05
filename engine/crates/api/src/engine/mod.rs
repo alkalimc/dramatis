@@ -171,8 +171,8 @@ impl Engine {
         let (save, missing, world, locked) = match home.start_save() {
             Start::Open(save) => {
                 let path = home.save_path(&save);
-                // A save last opened with other versions waits for the user's say at the
-                // picker, before anything (a schema step included) is written to it.
+                // A save last opened with other versions, or in another format, waits at the
+                // picker for the user's say, before anything is written to it.
                 let waits = world::meta::peek(&path, password.as_deref()).is_ok_and(|s| {
                     !crate::saves::changes(
                         &crate::saves::stamp_view(s),
@@ -199,7 +199,7 @@ impl Engine {
                         Err(world::Error::Locked) => {
                             (save, None, World::in_memory().map_err(world_err)?, true)
                         }
-                        Err(e) => return Err(world_err(e)),
+                        Err(e) => return Err(crate::saves::open_err(&path, e)),
                     }
                 }
             }
