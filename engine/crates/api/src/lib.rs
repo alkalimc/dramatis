@@ -100,6 +100,7 @@ pub fn emit<H: tauri::Emitter<tauri::Wry> + tauri::Manager<tauri::Wry>>(
         AwayChanged(e) => e.emit(app),
         QuotaChanged(e) => e.emit(app),
         Rewound(e) => e.emit(app),
+        MessageRemoved(e) => e.emit(app),
         Notification(e) => e.emit(app),
     };
     if let Err(e) = sent {

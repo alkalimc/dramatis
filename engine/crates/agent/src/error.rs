@@ -48,6 +48,10 @@ pub enum Error {
     #[error("the model returned a canned reply twice")]
     Refused,
 
+    /// The model call outlasted `timeout.*`; `after_secs` is the allowance that ran out.
+    #[error("the endpoint did not answer within {after_secs} s")]
+    TimedOut { after_secs: u64 },
+
     /// The endpoint refused a request that carried a picture. `detail` is its own text.
     #[error("the endpoint did not accept the picture: {detail}")]
     ImageRejected { detail: String },
@@ -152,9 +156,11 @@ impl From<Error> for ApiError {
             e @ Error::RateLimited { .. } => ApiError::Endpoint {
                 detail: e.to_string(),
             },
-            e @ (Error::ImageRejected { .. } | Error::Refused) => ApiError::Endpoint {
-                detail: e.to_string(),
-            },
+            e @ (Error::ImageRejected { .. } | Error::Refused | Error::TimedOut { .. }) => {
+                ApiError::Endpoint {
+                    detail: e.to_string(),
+                }
+            }
             Error::Endpoint { detail } => ApiError::Endpoint { detail },
             Error::ForcedToolNotAllowed => ApiError::Endpoint {
                 detail: "a forced tool choice is not allowed on this endpoint".into(),

@@ -1211,6 +1211,36 @@ async fn resend_after_a_failed_turn_takes_back_the_unanswered_message() {
     assert!(!r.run("/history 10").await.contains("how is the tea?"));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_removes_a_message_of_the_chat_and_regen_writes_the_last_reply_again() {
+    let mut r = rig().await;
+    r.run("/talk ann").await;
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("A clumsy first line."));
+    r.script
+        .0
+        .lock()
+        .unwrap()
+        .push_back(Reply::Say("A kinder one."));
+    r.run("how is the tea?").await;
+    let out = r.run("/regen").await;
+    assert!(out.contains("A kinder one."), "{out}");
+    let history = r.run("/history 10").await;
+    assert!(!history.contains("clumsy"), "{history:?}");
+    assert!(history.contains("how is the tea?"), "{history:?}");
+    // The numbered list says which message goes.
+    assert!(r.run("/delete 1").await.contains("message removed"));
+    let after = r.run("/history 10").await;
+    assert!(
+        !after.contains("how is the tea?") && after.contains("A kinder one."),
+        "{after:?}"
+    );
+    assert!(r.run("/regen extra").await.contains("usage: /regen"));
+}
+
 /// Passwords the session will be asked for, in order; each prompt is recorded.
 fn answers(r: &mut Rig, typed: &[&str]) -> Arc<std::sync::Mutex<Vec<String>>> {
     let queue: std::collections::VecDeque<String> = typed.iter().map(|s| (*s).to_owned()).collect();
@@ -1779,11 +1809,9 @@ async fn history_numbers_feed_reply_forward_and_the_favorites() {
         "gone from the favorites"
     );
     r.run("/talk ann").await;
-    assert!(
-        r.run("/delete 1")
-            .await
-            .contains("only a message in the favorites")
-    );
+    // A number from the favorites' list names no message of this chat.
+    let refused = r.run("/delete 1").await;
+    assert!(!refused.contains("message removed"), "{refused}");
 
     // Forwarding to a person posts a copy in their channel, and they answer it.
     r.run("/history").await;

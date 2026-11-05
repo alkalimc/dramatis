@@ -52,6 +52,7 @@ const COMMANDS: &[&str] = &[
     "fav",
     "delete",
     "resend",
+    "regen",
     "sources",
     "source",
     "library",

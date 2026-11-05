@@ -157,6 +157,29 @@ pub fn delete_saved(conn: &Connection, id: MessageId) -> Result<()> {
     Ok(())
 }
 
+/// Delete one message wherever it is, with the opening its words were to start. An opening
+/// that was delivered as this message stays delivered (the seed keeps no link to it), so
+/// deleting a bad first line does not bring another one at once. Replies that quoted it
+/// lose the link; memories already written from the conversation stay, since a wrap-up
+/// covers a whole conversation and names no message. Returns the message as it was.
+pub fn remove(conn: &Connection, id: MessageId) -> Result<Message> {
+    crate::atomic(conn, |conn| {
+        let m = get(conn, id)?;
+        conn.execute(
+            "DELETE FROM seed WHERE kind = 'words' AND ref = ?1",
+            [id.0.to_string()],
+        )?;
+        conn.execute("DELETE FROM message WHERE id = ?1", [id])?;
+        conn.execute(
+            "UPDATE channel SET read_up_to = (SELECT max(id) FROM message WHERE channel = ?1)
+             WHERE id = ?1 AND read_up_to >= ?2",
+            (m.channel, id),
+        )?;
+        crate::picture::drop_orphans(conn)?;
+        Ok(m)
+    })
+}
+
 /// Fill in a message written empty: a streamed reply needs its id before its text is
 /// known, so the row exists from the first delta and is completed when the reply is.
 pub fn complete(

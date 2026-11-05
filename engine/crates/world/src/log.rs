@@ -154,6 +154,48 @@ pub fn entries(conn: &Connection, segment: SegmentId) -> Result<Vec<Entry>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Cut a segment's tail: the entries from `from_seq` on go. The bytes before the cut are
+/// untouched, so the prefix a provider cached stays valid.
+pub fn truncate(conn: &Connection, segment: SegmentId, from_seq: u32) -> Result<()> {
+    conn.execute(
+        "DELETE FROM log_entry WHERE segment = ?1 AND seq >= ?2",
+        (segment, from_seq),
+    )?;
+    Ok(())
+}
+
+/// Rewrite one entry (`Some`) or drop it (`None`). Used when the user deletes a message:
+/// what the model is shown must not keep it. Everything after the entry loses its cached
+/// prefix at the next request, which is the price of the deletion.
+pub fn replace_entry(
+    conn: &Connection,
+    segment: SegmentId,
+    seq: u32,
+    bytes: Option<&[u8]>,
+) -> Result<()> {
+    match bytes {
+        Some(b) => conn.execute(
+            "UPDATE log_entry SET bytes = ?3 WHERE segment = ?1 AND seq = ?2",
+            (segment, seq, b),
+        )?,
+        None => conn.execute(
+            "DELETE FROM log_entry WHERE segment = ?1 AND seq = ?2",
+            (segment, seq),
+        )?,
+    };
+    Ok(())
+}
+
+/// Rewrite a segment's opening block C, which carries the last messages of the segment
+/// before it. Only for taking a deleted message out of it.
+pub fn replace_prefix_c(conn: &Connection, segment: SegmentId, bytes: &[u8]) -> Result<()> {
+    conn.execute(
+        "UPDATE log_segment SET prefix_c = ?2 WHERE id = ?1",
+        (segment, bytes),
+    )?;
+    Ok(())
+}
+
 /// The memories a segment's opening block may carry for `speaker`: in a channel only
 /// he and the user read, everything he may recall; in one others read, only what every
 /// person there may recall ([`fact::shared_visible`]). The host has none.

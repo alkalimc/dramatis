@@ -255,7 +255,7 @@ const BubbleMessage = memo(function BubbleMessage({
 }) {
   const t = useT();
   const api = useApi();
-  const { attempt, resend, deleteSaved } = useActions();
+  const { attempt, resend, resendNow, deleteSaved, deleteMessage, regenerate } = useActions();
   const names = useStore((s) => s.names);
   const user = useStore((s) => s.settings?.user_name ?? null);
   const marker = useStore((s) => s.wording.scene_marker);
@@ -276,6 +276,16 @@ const BubbleMessage = memo(function BubbleMessage({
   });
   // A reply being written holds the channel; the engine would refuse the take-back.
   const writing = useStore((s) => Boolean(s.typing[message.channel]) || Object.values(s.streams).some((v) => v.channel === message.channel));
+  // A reply is still expected (sent, nothing back yet, or being written), or the last turn failed.
+  const awaiting = useStore((s) => Boolean(s.awaiting[message.channel]));
+  const failed = useStore((s) => Boolean(s.failures[message.channel]));
+  const inFlight = writing || awaiting;
+  // No later message of the user's: the one a missing or failed reply belongs to.
+  const latestMine = useStore((s) => {
+    const list = s.messages[message.channel] ?? [];
+    const i = list.findIndex((m) => m.id === message.id);
+    return i >= 0 && !list.slice(i + 1).some((m) => m.author.kind === "user");
+  });
   const [playing, setPlaying] = useState(false);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const wasOpen = useRef(false);
@@ -307,6 +317,10 @@ const BubbleMessage = memo(function BubbleMessage({
     if (!window.confirm(t("message.delete.confirm"))) return;
     void deleteSaved(message.channel, message.id);
   };
+  const removeHere = () => {
+    if (!window.confirm(t("message.delete.chat.confirm"))) return;
+    void deleteMessage(message.channel, message.id);
+  };
   // The one home for what can be done to a message, in this order. Each has a key too, on the focused message.
   const menuItems = (): MenuItem[] => {
     const out: MenuItem[] = [];
@@ -316,21 +330,28 @@ const BubbleMessage = memo(function BubbleMessage({
     const text = picked && body.current?.contains(window.getSelection()?.anchorNode ?? null) ? picked : speech;
     if (text) out.push({ label: t("message.copy"), icon: "copy", onSelect: () => void navigator.clipboard?.writeText(text).catch(() => undefined) });
     out.push({ label: t("message.forward"), icon: "forward", onSelect: forward });
-    // Taking back in the favorites would take the saved messages after it too.
-    if (mine && !writing && !favorites) {
+    // Taking back in the favorites would take the saved messages after it too. While a reply
+    // is expected only the latest message can go again: the engine abandons the reply first.
+    if (mine && !favorites && (!inFlight || latestMine)) {
+      const now = latestMine && (inFlight || failed);
       out.push({
         label: t("message.resend"),
         icon: "reset",
         onSelect: () => {
           if (after > 0 && !window.confirm(t("message.resend.confirm", { count: after }))) return;
-          void resend(message.channel, message.id);
+          void (now ? resendNow(message.channel, message.id) : resend(message.channel, message.id));
         },
       });
+    }
+    // Only the latest words of a person or the host can be written again.
+    if (!mine && !favorites && !message.service && after === 0 && !inFlight) {
+      out.push({ label: t("message.regenerate"), icon: "reset", onSelect: () => void regenerate(message.channel, message.id) });
     }
     if (message.cites.length > 0) {
       out.push({ label: t("message.sources", { count: message.cites.length }), icon: "info", onSelect: () => dispatch({ type: "sources", message: message.id }) });
     }
     if (favorites) out.push({ label: t("message.delete"), icon: "trash", danger: true, separated: true, onSelect: remove });
+    else if (!inFlight) out.push({ label: t("message.delete"), icon: "trash", danger: true, separated: true, onSelect: removeHere });
     return out;
   };
   // Keys on the message itself, when it has the focus: R reply, F forward, Delete remove (favorites),
@@ -340,6 +361,7 @@ const BubbleMessage = memo(function BubbleMessage({
     if ((e.key === "r" || e.key === "R") && !e.shiftKey) reply();
     else if ((e.key === "f" || e.key === "F") && !e.shiftKey) forward();
     else if (e.key === "Delete" && favorites) remove();
+    else if (e.key === "Delete" && !inFlight) removeHere();
     else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
       const r = e.currentTarget.getBoundingClientRect();
       setMenuAt({ x: r.left + 24, y: r.top + 24 });

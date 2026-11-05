@@ -22,8 +22,8 @@ use world::clock::Now;
 use crate::endpoints::{Endpoints, Profile};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{
-    AwayChanged, MessageAdded, MessageDelta, ModeChanged, Notification, QuotaChanged, Rewound,
-    RosterChanged, ToolCalled, TurnActivity, WorldChanged,
+    AwayChanged, MessageAdded, MessageDelta, MessageRemoved, ModeChanged, Notification,
+    QuotaChanged, Rewound, RosterChanged, ToolCalled, TurnActivity, WorldChanged,
 };
 use crate::types::{ChannelId, MessageId, PersonId};
 use crate::views::{ForwardTo, ImagePart};
@@ -60,6 +60,14 @@ pub trait AgentPort: Send + Sync + 'static {
     /// Take back the user's message `message` and everything after it in `channel`;
     /// returns its text. Refused while a turn is running in the channel. Emits `Rewound`.
     async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String>;
+
+    /// Delete one message of the channel. Refused while a turn is running there. Emits
+    /// `MessageRemoved`.
+    async fn delete_message(&self, channel: ChannelId, message: MessageId) -> ApiResult<()>;
+
+    /// Write the channel's latest reply again, in the background. Refusals come back at
+    /// once; the new reply arrives as events.
+    async fn regenerate(&self, channel: ChannelId, message: MessageId) -> ApiResult<()>;
 
     /// End the channel's conversation now and write what is worth remembering from it.
     /// Runs in the background; the facts it writes arrive as `WorldChanged`.
@@ -194,6 +202,7 @@ pub enum Event {
     AwayChanged(AwayChanged),
     QuotaChanged(QuotaChanged),
     Rewound(Rewound),
+    MessageRemoved(MessageRemoved),
     Notification(Notification),
 }
 
@@ -240,6 +249,14 @@ impl Seen {
                         *ch != e.channel.0 || id.parse::<i64>().is_ok_and(|id| id < from)
                     });
                 }
+            }
+            Event::MessageRemoved(e) => {
+                // The freed id may be handed out again, if it was the newest.
+                if let Ok(gone) = e.message.0.parse::<i64>() {
+                    let mut low = self.rewound.lock().unwrap_or_else(|e| e.into_inner());
+                    *low = Some(low.map_or(gone - 1, |l| l.min(gone - 1)));
+                }
+                ids.retain(|(ch, id)| *ch != e.channel.0 || *id != e.message.0);
             }
             _ => {}
         }
@@ -352,6 +369,14 @@ impl AgentPort for Unwired {
     }
 
     async fn rewind(&self, _: ChannelId, _: MessageId) -> ApiResult<String> {
+        Err(ApiError::NotImplemented)
+    }
+
+    async fn delete_message(&self, _: ChannelId, _: MessageId) -> ApiResult<()> {
+        Err(ApiError::NotImplemented)
+    }
+
+    async fn regenerate(&self, _: ChannelId, _: MessageId) -> ApiResult<()> {
         Err(ApiError::NotImplemented)
     }
 

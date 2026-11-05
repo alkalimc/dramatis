@@ -94,6 +94,13 @@ events! {
         pub from: MessageId,
     }
 
+    /// The user deleted one message, or a regenerated reply replaced it: it is gone from the
+    /// channel and from what the model is shown. Memories already written stay.
+    MessageRemoved {
+        pub channel: ChannelId,
+        pub message: MessageId,
+    }
+
     /// Shown as a system notification when the window is closed. The text is the
     /// person's own line.
     Notification {
@@ -149,6 +156,8 @@ pub enum ActivityFailure {
     ImageUnsupported,
     /// The endpoint answered twice with canned boilerplate instead of a reply.
     Refused,
+    /// The model call outlasted its time allowance.
+    TimedOut,
     /// The future was dropped before the turn ended.
     Cancelled,
     Error,

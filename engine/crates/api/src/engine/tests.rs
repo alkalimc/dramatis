@@ -151,6 +151,20 @@ impl AgentPort for Spy {
             .push(format!("rewind {} {}", c.0, m.0));
         Ok("again".into())
     }
+    async fn delete_message(&self, c: ChannelId, m: MessageId) -> ApiResult<()> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("delete {} {}", c.0, m.0));
+        Ok(())
+    }
+    async fn regenerate(&self, c: ChannelId, m: MessageId) -> ApiResult<()> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("regenerate {} {}", c.0, m.0));
+        Ok(())
+    }
     async fn wrapup(&self, c: ChannelId) -> ApiResult<()> {
         self.calls.lock().unwrap().push(format!("wrapup {}", c.0));
         Ok(())
@@ -676,6 +690,21 @@ async fn people_without_a_persona_are_visible_but_cannot_be_reached() {
     assert_eq!(
         r.spy.calls.lock().unwrap().last().unwrap(),
         &format!("rewind {} 7", ch.0)
+    );
+    // Deleting a message and writing a reply again go to the agent too.
+    e.delete_message(ch.clone(), MessageId("7".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        &format!("delete {} 7", ch.0)
+    );
+    e.regenerate(ch.clone(), MessageId("8".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        r.spy.calls.lock().unwrap().last().unwrap(),
+        &format!("regenerate {} 8", ch.0)
     );
 }
 
@@ -2556,6 +2585,38 @@ async fn a_rewind_frees_ids_that_a_terminal_write_then_reuses() {
         from: view.id.clone(),
     }));
     // The terminal's next message gets the freed id.
+    terminal_says(e, &ch, "from the terminal");
+    assert_eq!(e.poll_external().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_deleted_newest_message_frees_its_id_for_the_terminal_to_reuse() {
+    let r = rig();
+    let e = &r.engine;
+    let ch = e.open_direct(id("amy")).await.unwrap();
+    let wc = convert::world_channel(&ch).unwrap();
+    let said = {
+        let w = e.w();
+        world::message::append(&w, wc, &world::Actor::User, "mine", None, None, 4).unwrap()
+    };
+    let view = e.history_impl(&ch, None, 10).unwrap().pop().unwrap();
+    e.ports
+        .seen
+        .record(&Event::MessageAdded(crate::events::MessageAdded {
+            message: view.clone(),
+        }));
+    assert_eq!(e.poll_external().unwrap(), 0);
+    {
+        let w = e.w();
+        world::message::remove(&w, said).unwrap();
+    }
+    e.ports
+        .seen
+        .record(&Event::MessageRemoved(crate::events::MessageRemoved {
+            channel: ch.clone(),
+            message: view.id.clone(),
+        }));
+    assert!(!e.ports.seen.has(&view.id.0));
     terminal_says(e, &ch, "from the terminal");
     assert_eq!(e.poll_external().unwrap(), 1);
 }

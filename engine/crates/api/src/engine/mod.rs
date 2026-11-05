@@ -668,6 +668,12 @@ impl Api for Engine {
     async fn rewind(&self, channel: ChannelId, message: MessageId) -> ApiResult<String> {
         self.rewind_impl(channel, message).await
     }
+    async fn delete_message(&self, channel: ChannelId, message: MessageId) -> ApiResult<()> {
+        self.delete_message_impl(channel, message).await
+    }
+    async fn regenerate(&self, channel: ChannelId, message: MessageId) -> ApiResult<()> {
+        self.regenerate_impl(channel, message).await
+    }
 
     async fn wrapup(&self, channel: ChannelId) -> ApiResult<()> {
         self.wrapup_impl(channel).await

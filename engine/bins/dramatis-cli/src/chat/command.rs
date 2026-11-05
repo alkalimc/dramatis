@@ -79,8 +79,11 @@ pub enum Command {
     Forward(usize, String),
     /// Open the favorites.
     Fav,
-    /// Remove message n of the last `/history` list from the favorites.
+    /// Remove message n of the last `/history` list: from the favorites there, from the
+    /// chat and from what the model sees anywhere else.
     Delete(usize),
+    /// Write the channel's latest reply of a person or the host again.
+    Regen,
     /// Take back the n-th last message of the user in this channel (1 = the last) and
     /// put its text in the input line.
     Resend(usize),
@@ -368,6 +371,8 @@ pub fn parse(line: &str) -> Command {
             Ok(n) if n > 0 => Command::Delete(n),
             _ => Command::Invalid("cli.usage.delete"),
         },
+        "regen" | "regenerate" if args.is_empty() => Command::Regen,
+        "regen" | "regenerate" => Command::Invalid("cli.usage.regen"),
         "resend" | "r" => match args {
             "" => Command::Resend(1),
             n => match n.parse::<usize>() {
@@ -448,6 +453,11 @@ mod tests {
         assert_eq!(parse("/forward 3"), Command::Invalid("cli.usage.forward"));
         assert_eq!(parse("/fav"), Command::Fav);
         assert_eq!(parse("/delete 4"), Command::Delete(4));
+        assert_eq!(parse("/regen"), Command::Regen);
+        assert_eq!(
+            parse("/regenerate now"),
+            Command::Invalid("cli.usage.regen")
+        );
         assert_eq!(parse("/delete"), Command::Invalid("cli.usage.delete"));
         assert_eq!(
             parse("/topic a pot of tea"),

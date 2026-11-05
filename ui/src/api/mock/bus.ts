@@ -19,6 +19,7 @@ export function createBus() {
     awayChanged: make<import("../gen").AwayChanged>(),
     messageAdded: make<import("../gen").MessageAdded>(),
     messageDelta: make<import("../gen").MessageDelta>(),
+    messageRemoved: make<import("../gen").MessageRemoved>(),
     modeChanged: make<import("../gen").ModeChanged>(),
     notification: make<import("../gen").Notification>(),
     quotaChanged: make<import("../gen").QuotaChanged>(),

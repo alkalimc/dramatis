@@ -71,6 +71,7 @@ impl agent::Sink for Forward {
             A::AwayChanged(e) => P::AwayChanged(e),
             A::QuotaChanged(e) => P::QuotaChanged(e),
             A::Rewound(e) => P::Rewound(e),
+            A::MessageRemoved(e) => P::MessageRemoved(e),
             A::Notification(e) => P::Notification(e),
         });
     }

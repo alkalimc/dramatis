@@ -97,6 +97,20 @@ export const commands = {
 	 */
 	rewind: (channel: ChannelId, message: MessageId) => typedError<string, ApiError>(__TAURI_INVOKE("rewind", { channel, message })),
 	/**
+	 *  Delete one message of the channel, the user's or a person's or the host's. It
+	 *  leaves the chat and what the model is shown next; replies to it stay, and so do
+	 *  memories already written from the conversation. Refused while a reply is being
+	 *  written in the channel. `MessageRemoved` follows.
+	 */
+	deleteMessage: (channel: ChannelId, message: MessageId) => typedError<null, ApiError>(__TAURI_INVOKE("delete_message", { channel, message })),
+	/**
+	 *  Write the channel's latest reply of a person or the host again. The old reply
+	 *  leaves at once (`MessageRemoved`) and the new one streams like any other; if it
+	 *  fails the old one comes back. Refused for any other message, and while a reply is
+	 *  being written. Returns once the new turn has started.
+	 */
+	regenerate: (channel: ChannelId, message: MessageId) => typedError<null, ApiError>(__TAURI_INVOKE("regenerate", { channel, message })),
+	/**
 	 *  Forward a message, with its picture, to a person, the host or the favorites. To a
 	 *  person or the host it lands in their direct channel as a forwarded copy and they
 	 *  answer it as they would a message; to the favorites it is kept as its original
@@ -343,6 +357,7 @@ export const events = {
 	awayChanged: makeEvent<AwayChanged>("away-changed"),
 	messageAdded: makeEvent<MessageAdded>("message-added"),
 	messageDelta: makeEvent<MessageDelta>("message-delta"),
+	messageRemoved: makeEvent<MessageRemoved>("message-removed"),
 	modeChanged: makeEvent<ModeChanged>("mode-changed"),
 	notification: makeEvent<Notification>("notification"),
 	quotaChanged: makeEvent<QuotaChanged>("quota-changed"),
@@ -365,6 +380,8 @@ export type ActivityFailure = "rate_limited" | "quota_exhausted" |
 "image_unsupported" | 
 /**  The endpoint answered twice with canned boilerplate instead of a reply. */
 "refused" | 
+/**  The model call outlasted its time allowance. */
+"timed_out" | 
 /**  The future was dropped before the turn ended. */
 "cancelled" | "error";
 
@@ -775,6 +792,15 @@ export type MessageDelta = {
 };
 
 export type MessageId = string;
+
+/**
+ *  The user deleted one message, or a regenerated reply replaced it: it is gone from the
+ *  channel and from what the model is shown. Memories already written stay.
+ */
+export type MessageRemoved = {
+	channel: ChannelId,
+	message: MessageId,
+};
 
 /**  Whether a person or a group may act without being addressed. */
 export type Mode = 

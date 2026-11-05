@@ -256,3 +256,21 @@ test("the favorites take notes: a different prompt, and nothing is awaited", asy
   await waitFor(() => expect(r.store.getState().messages.favorites.some((m) => m.text === "remember the stairs")).toBe(true));
   expect(r.store.getState().awaiting.favorites).toBeUndefined();
 });
+
+test("a turn that timed out says so, and Send again sends the same words at once", async () => {
+  const { api, store, actions } = await mounted();
+  await subscribe(api, store, actions);
+  // The mock fails a turn whose text says so; no reply comes.
+  await api.commands.sendMessage("host", "Please fail this", null, null);
+  await screen.findByRole("alert");
+  act(() => store.dispatch({ type: "turnActivity", event: { channel: "host", author: { kind: "host" }, state: { kind: "failed", reason: "timed_out" } } }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("did not answer in time");
+  const sent = vi.spyOn(api.commands, "sendMessage");
+  const rewind = vi.spyOn(api.commands, "rewind");
+  await userEvent.setup().click(within(alert).getByRole("button", { name: "Send again" }));
+  await waitFor(() => expect(sent).toHaveBeenCalledWith("host", "Please fail this", null, null));
+  expect(rewind).toHaveBeenCalledTimes(1);
+  // Sent at once: nothing waits in the box.
+  expect(box().value).toBe("");
+});

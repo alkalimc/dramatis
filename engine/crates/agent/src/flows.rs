@@ -563,7 +563,7 @@ impl Agent {
     }
 
     /// He replied: the session spends a reply and trust grows by a shared turn.
-    fn replied(&self, ch: ChannelId, person: &PersonId) -> Result<()> {
+    pub(crate) fn replied(&self, ch: ChannelId, person: &PersonId) -> Result<()> {
         let now = self.now();
         let conn = self.db();
         session::replied(&conn, ch, person, now.ms)?;
@@ -1602,59 +1602,72 @@ impl Agent {
                 line = format!("{line}\n\n{shape}");
             }
         }
+        // Where the wrap-up leaves the segment going on, its request and answer are cut
+        // off again afterwards: a later turn that saw its own last words as a JSON
+        // document wrote one (the owner's openings that came back as the wrap-up).
+        let first = world::log::entries(&self.db(), seg.id)?
+            .last()
+            .map_or(0, |e| e.seq + 1);
         self.append_user(seg.id, &line, None)?;
-        let mut turn = Turn::new(ch, Actor::Person(author.clone()), Shape::Wrapup);
-        turn.wrapup = true;
-        let choice = if forced {
-            ToolChoice::Tool("wrapup".into())
-        } else {
-            ToolChoice::Auto
-        };
-        let reply = self.call(&mut turn, choice).await?;
-        let mut results = Vec::new();
-        for (id, name, args) in reply.tool_calls() {
-            let output = self.dispatch(&mut turn, name, args).await?;
-            results.push(request::tool_result_part(id, output));
-        }
-        if !results.is_empty() {
-            self.append(seg.id, &request::tool_results(results))?;
-        }
-        let Some(mut args) = turn.wrapped else {
-            self.note_wrapup(ch, "wrapup without a call", &reply.text());
-            return Ok(None);
-        };
-        wrapup_json::keep_undated(&mut args, self.now(), self.corpus.year_offset);
-        let outcome = world::wrapup::apply(
-            &self.db(),
-            ch,
-            &Actor::Person(author.clone()),
-            &args,
-            self.now(),
-            &self.config.world.wrapup,
-            &self.config.world.trust,
-        )?;
-        let mut changes: Vec<WorldChange> = outcome
-            .facts
-            .iter()
-            .chain(&outcome.hurt)
-            .map(|f| WorldChange::Fact {
-                id: view::fact_id(*f),
-            })
-            .collect();
-        if outcome.hurt.is_some() {
-            changes.push(WorldChange::Trust {
-                person: view::person_id(&author),
-            });
-        }
-        if outcome.facts.is_empty() && outcome.hurt.is_none() {
-            self.note_wrapup(
+        let done: Result<Option<Summary>> = async {
+            let mut turn = Turn::new(ch, Actor::Person(author.clone()), Shape::Wrapup);
+            turn.wrapup = true;
+            let choice = if forced {
+                ToolChoice::Tool("wrapup".into())
+            } else {
+                ToolChoice::Auto
+            };
+            let reply = self.call(&mut turn, choice).await?;
+            let mut results = Vec::new();
+            for (id, name, args) in reply.tool_calls() {
+                let output = self.dispatch(&mut turn, name, args).await?;
+                results.push(request::tool_result_part(id, output));
+            }
+            if !results.is_empty() {
+                self.append(seg.id, &request::tool_results(results))?;
+            }
+            let Some(mut args) = turn.wrapped else {
+                self.note_wrapup(ch, "wrapup without a call", &reply.text());
+                return Ok(None);
+            };
+            wrapup_json::keep_undated(&mut args, self.now(), self.corpus.year_offset);
+            let outcome = world::wrapup::apply(
+                &self.db(),
                 ch,
-                "wrapup wrote nothing",
-                &format!("{:?}", outcome.skipped),
-            );
+                &Actor::Person(author.clone()),
+                &args,
+                self.now(),
+                &self.config.world.wrapup,
+                &self.config.world.trust,
+            )?;
+            let mut changes: Vec<WorldChange> = outcome
+                .facts
+                .iter()
+                .chain(&outcome.hurt)
+                .map(|f| WorldChange::Fact {
+                    id: view::fact_id(*f),
+                })
+                .collect();
+            if outcome.hurt.is_some() {
+                changes.push(WorldChange::Trust {
+                    person: view::person_id(&author),
+                });
+            }
+            if outcome.facts.is_empty() && outcome.hurt.is_none() {
+                self.note_wrapup(
+                    ch,
+                    "wrapup wrote nothing",
+                    &format!("{:?}", outcome.skipped),
+                );
+            }
+            self.changed(changes);
+            Ok(if summary { outcome.summary } else { None })
         }
-        self.changed(changes);
-        Ok(if summary { outcome.summary } else { None })
+        .await;
+        if !summary {
+            world::log::truncate(&self.db(), seg.id, first)?;
+        }
+        done
     }
 
     /// The memories the author already holds in this channel (the latest few), listed

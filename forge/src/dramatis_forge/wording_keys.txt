@@ -47,6 +47,9 @@ app.mock
 app.reload
 app.retry
 app.wording.failed
+boilerplate.any
+boilerplate.start
+boilerplate.whole
 changed.body
 changed.pick
 changed.reopen
@@ -147,6 +150,7 @@ cli.date
 cli.delete.ask
 cli.delete.done
 cli.delete.in_use
+cli.delete.message.done
 cli.error
 cli.events.none
 cli.events.off
@@ -262,6 +266,7 @@ cli.read.marked.one
 cli.read.no_results
 cli.read.no_such
 cli.read.no_unit
+cli.regen.none
 cli.remove.last
 cli.remove.not_member
 cli.rename.cleared
@@ -381,6 +386,7 @@ cli.usage.mode
 cli.usage.name
 cli.usage.password
 cli.usage.quiet
+cli.usage.regen
 cli.usage.remove
 cli.usage.reply
 cli.usage.resend
@@ -544,6 +550,8 @@ error.turn.image_unsupported
 error.turn.quota_exhausted
 error.turn.rate_limited
 error.turn.refused
+error.turn.resend
+error.turn.timed_out
 error.unknown
 error.wrong_password
 events.count.0
@@ -816,6 +824,7 @@ message.author
 message.awaiting
 message.copy
 message.delete
+message.delete.chat.confirm
 message.delete.confirm
 message.forward
 message.forwarded
@@ -828,6 +837,7 @@ message.play
 message.playing
 message.quote.open
 message.quote.picture
+message.regenerate
 message.reply
 message.resend
 message.resend.confirm
