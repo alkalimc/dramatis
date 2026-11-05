@@ -7,7 +7,8 @@ import { Icon } from "../ui/Icon";
 import { ChannelView } from "./Channel";
 import { ColdstartCard } from "./Coldstart";
 import { Library } from "./Library";
-import { TypingMark } from "./Roster";
+import { RosterPage, TypingMark } from "./Roster";
+import { WorldPage } from "./World";
 
 function TypingIn({ channel }: { channel: string }) {
   const on = useStore((s) => Boolean(s.typing[channel]));
@@ -96,8 +97,11 @@ export function Main() {
   const host = useStore((s) => s.hostChannel);
   const channel = useStore((s) => s.channel);
   const library = useStore((s) => s.library);
+  const page = useStore((s) => s.page);
   const hostDone = useStore((s) => (host ? (s.historyDone[host] ?? false) : false));
 
+  if (page === "roster") return <RosterPage />;
+  if (page === "world") return <WorldPage />;
   if (library) return <Library />;
 
   if (channel && channel !== host) {

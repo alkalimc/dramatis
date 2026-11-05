@@ -905,6 +905,70 @@ async fn facts_edit_delete_and_restore() {
 }
 
 #[tokio::test]
+async fn a_daily_event_can_be_deleted_by_itself_or_through_its_fact() {
+    let r = rig();
+    let e = &r.engine;
+    let now = e.now();
+    let make = |text: &str| {
+        let w = e.w();
+        let f = world::fact::write(
+            &w,
+            &world::fact::NewFact::new(
+                world::Actor::Host,
+                world::fact::Audience::World,
+                world::FactKind::Fact,
+                text,
+            ),
+            now.ms,
+        )
+        .unwrap()
+        .id();
+        world::event::record(
+            &w,
+            &world::event::New {
+                title: text.into(),
+                text: "x".into(),
+                persons: vec![],
+                material: vec![],
+                fact: Some(f),
+            },
+            now,
+        )
+        .unwrap();
+        f
+    };
+    let first = make("Tea on the deck");
+    make("A new shelf");
+    let shown = e.daily_events(false).await.unwrap();
+    assert_eq!(shown.len(), 2);
+
+    // Deleting the event takes its fact out of the list with it.
+    let id = shown.iter().find(|d| d.title == "A new shelf").unwrap().id;
+    e.delete_event(id).await.unwrap();
+    assert_eq!(e.daily_events(false).await.unwrap().len(), 1);
+    let gone = e.daily_events(true).await.unwrap();
+    assert_eq!((gone.len(), gone[0].deleted), (1, true));
+    assert_eq!(e.facts(FactFilter::default()).await.unwrap().total, 1);
+    e.restore_event(id).await.unwrap();
+    assert_eq!(e.daily_events(false).await.unwrap().len(), 2);
+    assert_eq!(e.facts(FactFilter::default()).await.unwrap().total, 2);
+
+    // Deleting the fact in the list takes its event out of the other one, and back again.
+    e.delete_fact(convert::fact_id(first)).await.unwrap();
+    let left = e.daily_events(false).await.unwrap();
+    assert_eq!(
+        left.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(),
+        ["A new shelf"]
+    );
+    e.restore_fact(convert::fact_id(first)).await.unwrap();
+    assert_eq!(e.daily_events(false).await.unwrap().len(), 2);
+    assert!(matches!(
+        e.delete_event(9999).await,
+        Err(ApiError::NotFound)
+    ));
+}
+
+#[tokio::test]
 async fn digest_and_presence_are_data_plus_one_background_call() {
     let r = rig();
     let e = &r.engine;

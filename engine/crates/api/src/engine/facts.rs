@@ -103,8 +103,14 @@ impl Engine {
             fact::restore(&w, f)
         }
         .map_err(world_err)?;
+        // A happening's fact is the same memory as its entry under recently on board.
+        let event = world::event::follow_fact(&w, f, delete).map_err(world_err)?;
         drop(w);
-        self.changed(vec![WorldChange::Fact { id: id.clone() }]);
+        let mut changes = vec![WorldChange::Fact { id: id.clone() }];
+        if event {
+            changes.push(WorldChange::Event);
+        }
+        self.changed(changes);
         Ok(())
     }
 }

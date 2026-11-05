@@ -43,9 +43,9 @@ export async function applyDevView(view: string, store: Store, actions: Actions)
       document.querySelector<HTMLElement>('button[aria-label="Attach"]')?.focus();
       return;
     case "roster":
-      return d({ type: "drawer", drawer: { kind: "roster" } });
+      return d({ type: "page", page: "roster" });
     case "world":
-      return d({ type: "drawer", drawer: { kind: "world" } });
+      return d({ type: "page", page: "world" });
     case "archived":
       if (group) await actions.archive(group.id, true);
       return d({ type: "listView", view: "archived" });

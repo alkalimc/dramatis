@@ -266,11 +266,6 @@ button.member:hover {
   flex-direction: column;
   gap: var(--s-1);
 }
-.picker-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-1);
-}
 
 /* ---- world ---- */
 .facts li {
@@ -1070,4 +1065,15 @@ button.wide {
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
+}
+
+/* ---- a roster-like list to browse inside a dialog or panel (group members to pick) ---- */
+.people-list {
+  max-height: min(18rem, 40vh);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.people-list li + li {
+  border-top: 1px solid var(--line);
 }

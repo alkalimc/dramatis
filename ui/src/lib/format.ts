@@ -25,6 +25,13 @@ export function when(iso: string, t: T, now: Date = new Date()): string {
     : d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
+/** The time of day only, in the wording's locale: what a message shows, whatever day it is from (the day pill above says which). */
+export function clockTime(iso: string, t: T): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString(t("locale"), { hour: "2-digit", minute: "2-digit" });
+}
+
 /** The calendar day of a timestamp in the reader's local time, or `null` when it is not a date. */
 export function dayKey(iso: string): string | null {
   const d = new Date(iso);

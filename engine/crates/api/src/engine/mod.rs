@@ -830,8 +830,14 @@ impl Api for Engine {
     async fn set_away(&self, away: bool) -> ApiResult<()> {
         self.set_away_impl(away).await
     }
-    async fn daily_events(&self) -> ApiResult<Vec<DailyEvent>> {
-        self.daily_events_impl()
+    async fn daily_events(&self, deleted: bool) -> ApiResult<Vec<DailyEvent>> {
+        self.daily_events_impl(deleted)
+    }
+    async fn delete_event(&self, event: u32) -> ApiResult<()> {
+        self.hide_event_impl(event, true)
+    }
+    async fn restore_event(&self, event: u32) -> ApiResult<()> {
+        self.hide_event_impl(event, false)
     }
     async fn settings(&self) -> ApiResult<Settings> {
         self.settings_impl()

@@ -288,6 +288,8 @@ test("a kept message shows its first author and the time it was first said, and 
   const message = store.getState().messages[fav.id].find((m) => m.text.includes("market closes"))!;
   expect(article.querySelector("time")!.getAttribute("datetime")).toBe(message.original_at);
   expect(message.original_at).not.toBe(message.at);
+  // Three days on, it still shows a time of day, never a date.
+  expect(article.querySelector("time")!.textContent).toMatch(/^\d{2}:\d{2}/);
 
   // The menu ends with Delete here, and it asks first.
   const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);

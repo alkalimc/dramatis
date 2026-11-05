@@ -243,8 +243,19 @@ export const commands = {
 	 */
 	setAway: (away: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("set_away", { away })),
 	settings: () => typedError<Settings, ApiError>(__TAURI_INVOKE("settings")),
-	/**  The daily events the host told of, today's and the last few, newest first. */
-	dailyEvents: () => typedError<DailyEvent[], ApiError>(__TAURI_INVOKE("daily_events")),
+	/**
+	 *  The daily events the host told of, today's and the last few, newest first; with
+	 *  `deleted`, the ones the user deleted instead.
+	 */
+	dailyEvents: (deleted: boolean) => typedError<DailyEvent[], ApiError>(__TAURI_INVOKE("daily_events", { deleted })),
+	/**
+	 *  Delete a daily event from the drawer. It is kept out of sight, not erased (it still
+	 *  counts toward the day and keeps its material from being drawn again), and the fact
+	 *  that told people about it is deleted with it. `NotFound` for an event that is not there.
+	 */
+	deleteEvent: (event: number) => typedError<null, ApiError>(__TAURI_INVOKE("delete_event", { event })),
+	/**  Bring back an event deleted with `delete_event`, and its fact. */
+	restoreEvent: (event: number) => typedError<null, ApiError>(__TAURI_INVOKE("restore_event", { event })),
 	updateSettings: (settings: Settings) => typedError<null, ApiError>(__TAURI_INVOKE("update_settings", { settings })),
 	/**
 	 *  Show the system's file dialog for a corpus. The path chosen, or `None` when the
@@ -629,6 +640,7 @@ export type CorpusState = { state: "missing" } | { state: "loaded"; name: string
  *  itself; this is the log of them.
  */
 export type DailyEvent = {
+	id: number,
 	/**  The local date it belongs to, `YYYY-MM-DD`. */
 	day: string,
 	at: Timestamp,
@@ -637,6 +649,10 @@ export type DailyEvent = {
 	persons: PersonRef[],
 	/**  The host's post, where its offers are. */
 	message: MessageId | null,
+	/**  The fact that tells people about it while its day lasts; deleting either deletes both. */
+	fact: FactId | null,
+	/**  Deleted by the user; listed only under the drawer's deleted chip, where it can come back. */
+	deleted: boolean,
 };
 
 /**  The waiting panel: pure data, no model call. */
@@ -1294,7 +1310,9 @@ export type Wording = {
 	scene_marker: SceneMarker,
 };
 
-export type WorldChange = { kind: "fact"; id: FactId } | { kind: "channel"; id: ChannelId } | { kind: "trust"; person: PersonId } | { kind: "digest" } | 
+export type WorldChange = { kind: "fact"; id: FactId } | 
+/**  A daily event was deleted or restored. */
+{ kind: "event" } | { kind: "channel"; id: ChannelId } | { kind: "trust"; person: PersonId } | { kind: "digest" } | 
 /**
  *  The open save's file was changed by another process and this one stopped using it
  *  (see `AppStatus::changed_elsewhere`).

@@ -627,6 +627,8 @@ group.topic
 group.topic.hint
 group.who
 group.who.add
+group.who.list
+group.who.none
 group.who.remove
 group.who.search
 harness.about
@@ -898,6 +900,7 @@ person.voice
 person.voice.custom
 person.voice.default
 person.voice.save
+person_picker.none
 person_picker.search
 picker.first
 picker.first.hint
@@ -1199,6 +1202,7 @@ world.counts
 world.delete
 world.deleted
 world.due
+world.earlier
 world.edit
 world.edit.cancel
 world.edit.label
@@ -1213,6 +1217,7 @@ world.kind.fact
 world.kind.hurt
 world.outcome.kept
 world.outcome.lapsed
+world.recent.events
 world.restore
 world.scope.all
 world.scope.commitment

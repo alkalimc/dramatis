@@ -7,7 +7,7 @@ use world::{bond, channel};
 use super::{Engine, io};
 use crate::convert::{self, world_err, world_mode, world_person};
 use crate::error::{ApiError, ApiResult};
-use crate::events::{ModeChanged, RosterChanged};
+use crate::events::{ModeChanged, RosterChanged, WorldChange};
 use crate::media;
 use crate::port::Event;
 use crate::types::*;
@@ -30,13 +30,16 @@ fn activity(a: world::presence::Activity, offset: i32) -> Activity {
 
 impl Engine {
     /// The daily events, newest first. A person the corpus no longer has is left out.
-    pub(crate) fn daily_events_impl(&self) -> ApiResult<Vec<DailyEvent>> {
+    pub(crate) fn daily_events_impl(&self, deleted: bool) -> ApiResult<Vec<DailyEvent>> {
         let offset = self.now().offset_min;
-        let events =
-            world::event::recent(&self.w(), self.params.world.events.list).map_err(world_err)?;
+        let events = world::event::listed(&self.w(), self.params.world.events.list, deleted)
+            .map_err(world_err)?;
         Ok(events
             .into_iter()
             .map(|e| DailyEvent {
+                id: u32::try_from(e.id).unwrap_or(u32::MAX),
+                deleted: e.hidden,
+                fact: e.fact.map(convert::fact_id),
                 day: e.day,
                 at: convert::ts(e.at, offset),
                 title: e.title,
@@ -49,6 +52,17 @@ impl Engine {
                 message: e.message.map(convert::message_id),
             })
             .collect())
+    }
+
+    /// Delete a daily event from the world drawer, or bring it back.
+    pub(crate) fn hide_event_impl(&self, id: u32, hidden: bool) -> ApiResult<()> {
+        let w = self.w();
+        let id = i64::from(id);
+        world::event::get(&w, id).map_err(|_| ApiError::NotFound)?;
+        world::event::set_hidden(&w, id, hidden).map_err(world_err)?;
+        drop(w);
+        self.changed(vec![WorldChange::Event]);
+        Ok(())
     }
 
     /// The waiting panel: disabled people and people without a persona are left out.

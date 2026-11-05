@@ -31,7 +31,7 @@ export function ColdstartCard() {
       <p className="muted">{t("coldstart.frozen")}</p>
       <p className="row">
         <span className="muted">{t("coldstart.roster")}</span>
-        <button type="button" onClick={() => dispatch({ type: "drawer", drawer: { kind: "roster" } })}>
+        <button type="button" onClick={() => dispatch({ type: "page", page: "roster" })}>
           {t("coldstart.go_roster")}
         </button>
       </p>

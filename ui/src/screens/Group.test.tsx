@@ -8,8 +8,7 @@ async function openGroup(user: ReturnType<typeof userEvent.setup>) {
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "Roster" }));
-  const drawer = await screen.findByRole("complementary", { name: "Roster" });
-  await user.click(await within(drawer).findByRole("button", { name: TITLE }));
+  await user.click(await screen.findByRole("button", { name: TITLE }));
   return screen.findByRole("heading", { name: TITLE });
 }
 
@@ -282,4 +281,38 @@ test("a name or avatar in a chat opens the person's page as a card; Talk opens t
   await user.click(await within(again).findByRole("button", { name: "Talk" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(await screen.findByRole("textbox", { name: "Message" })).toBeDefined();
+});
+
+test("the group dialog lists the roster to browse before anything is typed, and a name narrows it", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  await screen.findByRole("heading", { name: "Who's waiting" });
+  await user.click(screen.getByRole("button", { name: "Menu" }));
+  await user.click(await screen.findByRole("button", { name: "New group" }));
+  await user.click(await screen.findByRole("button", { name: "Next" }));
+  const dialog = await screen.findByRole("dialog", { name: "Bring people in" });
+  const list = await within(dialog).findByRole("list", { name: "People to add" });
+  const names = () => within(list).queryAllByRole("button").map((b) => b.getAttribute("aria-label"));
+  expect(names()).toContain("Add Mira Vale");
+  expect(names()).toContain("Add Oren Lark");
+  // Someone disabled is not offered.
+  expect(names()).not.toContain("Add Silas Crane");
+  await user.type(within(dialog).getByRole("searchbox"), "oren");
+  expect(names()).toEqual(["Add Oren Lark"]);
+  // Taking one moves them to the chips and out of the list.
+  await user.click(within(list).getByRole("button", { name: "Add Oren Lark" }));
+  expect(within(dialog).getByRole("button", { name: "Remove Oren Lark" })).toBeDefined();
+  expect(await within(dialog).findByText("Nobody left to add.")).toBeDefined();
+});
+
+test("the add-people picker is a list of the roster too, without the members", async () => {
+  const user = userEvent.setup();
+  await openGroup(user);
+  const panel = await openInfo(user);
+  await user.click(within(panel).getByRole("button", { name: "Add people" }));
+  const dialog = await screen.findByRole("dialog", { name: "Add people to this group" });
+  const list = within(dialog).getByRole("list", { name: "Who to add" });
+  expect(within(list).getByRole("button", { name: "Juno Reyes" })).toBeDefined();
+  expect(within(list).queryByRole("button", { name: "Tess Arden" })).toBeNull();
+  expect(within(list).getAllByRole("button").length).toBeGreaterThan(1);
 });

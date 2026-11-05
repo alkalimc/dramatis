@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import type { Author, Message, Quote, ToolAction } from "../api";
 import { useT } from "../i18n";
-import { actionText, authorName, choicesOf, nameList, when } from "../lib/format";
+import { actionText, authorName, choicesOf, clockTime, nameList } from "../lib/format";
 import { jumpTo } from "../lib/jump";
 import { renderMarkdown } from "../lib/markdown";
 import { highlightMentions } from "../lib/mention";
@@ -443,7 +443,7 @@ const BubbleMessage = memo(function BubbleMessage({
         )}
       </span>
       {/* A kept message shows when it was first said; the list is in the order it was kept. */}
-      <time dateTime={message.original_at ?? message.at}>{when(message.original_at ?? message.at, t)}</time>
+      <time dateTime={message.original_at ?? message.at}>{clockTime(message.original_at ?? message.at, t)}</time>
       {mine && <Ticks delivery={delivery} />}
     </div>
   );

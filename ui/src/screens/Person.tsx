@@ -109,6 +109,8 @@ export function PersonDrawer({ id, card = false }: { id: PersonId; card?: boolea
   const dispatch = useDispatch();
   const version = useStore((s) => s.peopleVersion);
   const talkable = useStore(canTalk);
+  // Beside the roster page the way back is closing the panel; from anywhere else it is the page.
+  const onRoster = useStore((s) => s.page === "roster");
   const tts = useStore((s) => Boolean(s.endpoints?.roles?.tts));
   const { data: page, error, reload } = useQuery(() => api.commands.personPage(id), [api, id, version]);
 
@@ -129,7 +131,7 @@ export function PersonDrawer({ id, card = false }: { id: PersonId; card?: boolea
   return (
     <div className={`drawer-body info-panel person-page${card ? " in-card" : ""}`}>
       {!card && (
-        <button type="button" className="link back" onClick={() => dispatch({ type: "drawer", drawer: { kind: "roster" } })}>
+        <button type="button" className="link back" onClick={() => dispatch(onRoster ? { type: "drawer", drawer: null } : { type: "page", page: "roster" })}>
           ← {t("person.back")}
         </button>
       )}

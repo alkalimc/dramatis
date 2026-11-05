@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "./test/render";
 
@@ -71,24 +71,32 @@ test("roster: bands, no numbers on rows, disabled collapsed", async () => {
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "Roster" }));
-  const drawer = await screen.findByRole("complementary");
-  expect(await within(drawer).findByRole("heading", { name: "Close" })).toBeDefined();
-  const disabled = within(drawer).getByText("Disabled (1)").closest("details")!;
+  // The roster is a page of its own, not a panel beside the conversation.
+  expect(screen.queryByRole("complementary")).toBeNull();
+  const page = (await screen.findByRole("heading", { name: "Roster" })).closest(".page")! as HTMLElement;
+  expect(await within(page).findByRole("heading", { name: "Close" })).toBeDefined();
+  const disabled = within(page).getByText("Disabled (1)").closest("details")!;
   expect(disabled.open).toBe(false);
-  for (const row of drawer.querySelectorAll(".roster-row")) {
+  for (const row of page.querySelectorAll(".roster-row")) {
     expect(row.textContent).not.toMatch(/\b\d{2,3}\b/);
   }
-  await user.click(within(drawer).getByRole("button", { name: "Mira Vale" }));
+  // A person opens in the right panel beside the page.
+  await user.click(within(page).getByRole("button", { name: "Mira Vale" }));
+  const drawer = await screen.findByRole("complementary");
   expect(await within(drawer).findByText("Trust 137")).toBeDefined();
   expect(within(drawer).getByRole("group", { name: "Read-aloud voice" })).toBeDefined();
+  await user.click(within(drawer).getByRole("button", { name: /Back to roster/ }));
+  expect(screen.queryByRole("complementary")).toBeNull();
+  expect(screen.getByRole("heading", { name: "Roster" })).toBeDefined();
 });
 
-test("world drawer: visibility on every row, hurt shows the quote and its effect", async () => {
+test("world page: visibility on every row, hurt shows the quote and its effect", async () => {
   const user = userEvent.setup();
   renderApp();
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "World" }));
-  const drawer = await screen.findByRole("complementary");
+  expect(screen.queryByRole("complementary")).toBeNull();
+  const drawer = (await screen.findByRole("heading", { name: "What happened" })).closest(".page")! as HTMLElement;
   const rows = await within(drawer).findAllByRole("listitem");
   for (const row of rows.filter((r) => r.classList.contains("fact"))) {
     expect(row.querySelector(".fact-meta")!.textContent).not.toBe("");
@@ -211,4 +219,71 @@ test("the host's name and avatar in its channel open its page, which has no trus
   await user.click(within(card).getByRole("button", { name: "Happenings on board" }));
   expect(await screen.findByRole("region", { name: "Quota and intensity" })).toBeDefined();
   expect(screen.queryByRole("dialog", { name: "Host" })).toBeNull();
+});
+
+const rail = () => within(screen.getByRole("navigation", { name: "Sections" }));
+const pressed = (name: string) => rail().getByRole("button", { name }).getAttribute("aria-pressed");
+
+test("in the library, Roster and World are highlighted and fill the page like Chats and Library", async () => {
+  const user = userEvent.setup();
+  renderApp("form=library");
+  expect(await screen.findByText(/Not connected\./)).toBeDefined();
+  expect(pressed("Library")).toBe("true");
+  await user.click(rail().getByRole("button", { name: "Roster" }));
+  expect(pressed("Roster")).toBe("true");
+  expect(pressed("Library")).toBe("false");
+  expect(await screen.findByRole("heading", { name: "Roster" })).toBeDefined();
+  expect(screen.queryByRole("searchbox", { name: "Search the archive" })).toBeNull();
+  expect(screen.queryByRole("complementary")).toBeNull();
+  await user.click(rail().getByRole("button", { name: "World" }));
+  expect(pressed("World")).toBe("true");
+  expect(pressed("Roster")).toBe("false");
+  expect(await screen.findByRole("heading", { name: "What happened" })).toBeDefined();
+  // Pressing the lit one again goes back to where the library is.
+  await user.click(rail().getByRole("button", { name: "World" }));
+  expect(pressed("Library")).toBe("true");
+  expect(await screen.findByRole("searchbox", { name: "Search the archive" })).toBeDefined();
+});
+
+test("the four sections are peers: exactly one is lit, and a chat opened from a page ends it", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  await screen.findByRole("heading", { name: "Who's waiting" });
+  const lit = () => ["Chats", "Library", "Roster", "World"].filter((n) => pressed(n) === "true");
+  expect(lit()).toEqual(["Chats"]);
+  for (const name of ["Library", "Roster", "World", "Library", "Chats"]) {
+    await user.click(rail().getByRole("button", { name }));
+    expect(lit()).toEqual([name]);
+  }
+  await user.click(rail().getByRole("button", { name: "Roster" }));
+  await user.click(await screen.findByRole("button", { name: "Rowan, Oren Lark (4 in all)" }));
+  expect(lit()).toEqual(["Chats"]);
+});
+
+test("shrinking the window closes the right panel, and opening it again floats it over the chat", async () => {
+  const user = userEvent.setup();
+  const listeners = new Set<() => void>();
+  const narrow = { matches: false };
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    get matches() {
+      return query.includes("max-width") && narrow.matches;
+    },
+    media: query,
+    addEventListener: (_: string, f: () => void) => listeners.add(f),
+    removeEventListener: (_: string, f: () => void) => listeners.delete(f),
+  })) as unknown as typeof window.matchMedia;
+  try {
+    renderApp();
+    await screen.findByRole("heading", { name: "Who's waiting" });
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+    expect(await screen.findByRole("complementary")).toBeDefined();
+    narrow.matches = true;
+    act(() => listeners.forEach((f) => f()));
+    await waitFor(() => expect(screen.queryByRole("complementary")).toBeNull());
+    // The chat list is untouched by this step; folding it is the stylesheet's, further down.
+    expect(screen.getByRole("navigation", { name: "Chats" })).toBeDefined();
+  } finally {
+    window.matchMedia = original;
+  }
 });

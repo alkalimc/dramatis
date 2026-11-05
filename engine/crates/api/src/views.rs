@@ -697,6 +697,7 @@ impl Default for Settings {
 /// itself; this is the log of them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct DailyEvent {
+    pub id: u32,
     /// The local date it belongs to, `YYYY-MM-DD`.
     pub day: String,
     pub at: Timestamp,
@@ -705,6 +706,10 @@ pub struct DailyEvent {
     pub persons: Vec<PersonRef>,
     /// The host's post, where its offers are.
     pub message: Option<MessageId>,
+    /// The fact that tells people about it while its day lasts; deleting either deletes both.
+    pub fact: Option<FactId>,
+    /// Deleted by the user; listed only under the drawer's deleted chip, where it can come back.
+    pub deleted: bool,
 }
 
 // ---- saves ----

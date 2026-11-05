@@ -847,6 +847,8 @@ button.pinned-first {
 .mention-pop button {
   display: flex;
   align-items: center;
+  /* a plain button centres its content; the picker's rows start at the left edge */
+  justify-content: flex-start;
   gap: var(--s-3);
   width: 100%;
   height: var(--ctl-lg);

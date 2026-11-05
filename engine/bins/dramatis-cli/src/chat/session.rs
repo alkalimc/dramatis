@@ -2434,7 +2434,7 @@ impl Session {
         if arg.is_some() {
             return;
         }
-        match self.engine.daily_events().await {
+        match self.engine.daily_events(false).await {
             Ok(events) if events.is_empty() => self.term.note(&self.msg("cli.events.none")),
             Ok(events) => {
                 for e in events {

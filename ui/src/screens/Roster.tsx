@@ -1,13 +1,14 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { Candidate, RosterGroup } from "../api";
 import { useT, useUserName } from "../i18n";
 import { activityText } from "../lib/format";
 import { groupTitle } from "../lib/chats";
 import { canTalk } from "../lib/library";
 import { hasPersona } from "../lib/persona";
-import { filtering, passes, type RosterFilter } from "../lib/roster";
+import { filtering, named, passes, type RosterFilter } from "../lib/roster";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Avatar, ChannelAvatar } from "../ui/Avatar";
+import { BackToTop } from "../ui/BackToTop";
 import { ModeSwitch, modeHintKey } from "../ui/ModeSwitch";
 
 /** A small "typing" marker for a channel that is generating. */
@@ -20,17 +21,23 @@ export function TypingMark() {
   );
 }
 
-export function RosterDrawer() {
+export function RosterPage() {
   const t = useT();
   const roster = useStore((s) => s.roster);
+  const scroll = useRef<HTMLDivElement>(null);
   return (
-    <div className="drawer-body">
-      <header className="drawer-head">
-        <h2>{t("roster.title")}</h2>
-        {roster && <p className="muted">{t("roster.counts", { total: roster.total, enabled: roster.enabled })}</p>}
-      </header>
-      <GroupList />
-      <RosterList />
+    <div className="main page">
+      <div ref={scroll} className="page-scroll">
+        <div className="drawer-body page-body">
+          <header className="drawer-head">
+            <h2>{t("roster.title")}</h2>
+            {roster && <p className="muted">{t("roster.counts", { total: roster.total, enabled: roster.enabled })}</p>}
+          </header>
+          <GroupList />
+          <RosterList />
+        </div>
+      </div>
+      <BackToTop scroller={scroll} />
     </div>
   );
 }
@@ -74,13 +81,15 @@ export function RosterList() {
   const t = useT();
   const roster = useStore((s) => s.roster);
   const filter = useStore((s) => s.rosterFilter);
-  const on = filtering(filter);
+  // What is typed in the search box narrows the list by name, together with the chips.
+  const [query, setQuery] = useState("");
+  const on = filtering(filter) || query.trim() !== "";
   const groups = (roster?.groups ?? [])
-    .map((g) => ({ ...g, rows: g.rows.filter((r) => passes(r, filter)) }))
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => passes(r, filter) && named(r.person.name, query)) }))
     .filter((g) => g.rows.length > 0);
   return (
     <section className="roster" aria-label={t("roster.title")}>
-      <FindByTopic />
+      <FindByTopic query={query} onQuery={setQuery} />
       <FilterBar />
       <details className="mode-legend">
         <summary>{t("roster.modes")}</summary>
@@ -216,8 +225,11 @@ function FilterBar() {
   );
 }
 
-/** Search by what you need, not by name: a roster retrieval, no model call. */
-function FindByTopic() {
+/**
+ * The roster's search box. Typing narrows the list below by name as it goes; Find also looks
+ * for people by what you need (a roster retrieval, no model call) and lists who it found.
+ */
+function FindByTopic({ query: topic, onQuery: setTopic }: { query: string; onQuery: (q: string) => void }) {
   const t = useT();
   const api = useApi();
   const actions = useActions();
@@ -226,7 +238,6 @@ function FindByTopic() {
   const library = !useStore(canTalk);
   const filter = useStore((s) => s.rosterFilter);
   const roster = useStore((s) => s.roster);
-  const [topic, setTopic] = useState("");
   const [found, setFound] = useState<Candidate[] | null>(null);
   const run = async () => {
     if (!topic.trim()) return;
@@ -251,7 +262,11 @@ function FindByTopic() {
         <label htmlFor={id} className="sr-only">
           {t("roster.find")}
         </label>
-        <input id={id} type="search" value={topic} placeholder={t("roster.find.placeholder")} onChange={(e) => setTopic(e.target.value)} />
+        <input id={id} type="search" value={topic} placeholder={t("roster.find.placeholder")} onChange={(e) => {
+            setTopic(e.target.value);
+            setFound(null);
+          }}
+        />
         <button type="submit">{t("roster.find.submit")}</button>
       </form>
       {shown &&
