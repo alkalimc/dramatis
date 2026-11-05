@@ -68,6 +68,13 @@ describe("errors", () => {
     expect(errorText({ code: "unknown", detail: "boom" }, t, {}).detail).toBe("boom");
   });
 
+  test("a refused rewrite says what is wrong, and a busy channel is not a bad request", () => {
+    const t = makeT({ entries: { "error.busy": "Busy.", "error.invalid.regenerate_latest": "Only the latest.", "error.invalid.regenerate_question": "No question." } });
+    expect(errorText({ code: "invalid", field: "regenerate_latest" }, t, {}).text).toBe("Only the latest.");
+    expect(errorText({ code: "invalid", field: "regenerate_question" }, t, {}).text).toBe("No question.");
+    expect(errorText({ code: "invalid", field: "busy" }, t, {}).text).toBe("Busy.");
+  });
+
   test("inline error with retry", async () => {
     const retry = vi.fn();
     renderWith(<InlineError error={{ code: "endpoint", detail: "502" }} onRetry={retry} />);

@@ -862,7 +862,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const i = ch ? ch.log.findIndex((m) => m.id === message) : -1;
       if (!ch || i < 0) return fail({ code: "not_found" });
       const old = ch.log[i];
-      if (old.author.kind === "user" || i !== ch.log.length - 1) return fail({ code: "invalid", field: "request" });
+      if (old.author.kind === "user" || i !== ch.log.length - 1) return fail({ code: "invalid", field: "regenerate_latest" });
       const asked = [...ch.log.slice(0, i)].reverse().find((m) => m.author.kind === "user");
       ch.log.splice(i, 1);
       setTimeout(() => {

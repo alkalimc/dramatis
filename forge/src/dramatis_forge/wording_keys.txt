@@ -573,6 +573,8 @@ error.invalid.model
 error.invalid.no_proxy
 error.invalid.path
 error.invalid.proxy
+error.invalid.regenerate_latest
+error.invalid.regenerate_question
 error.invalid.username
 error.io
 error.keychain

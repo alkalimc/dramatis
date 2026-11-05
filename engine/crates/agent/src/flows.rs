@@ -402,7 +402,12 @@ impl Agent {
     }
 
     /// The user's entry: their words verbatim, then the harness's lines and material.
-    fn user_entry(&self, seg: world::SegmentId, posted: &Posted, lines: &[String]) -> Result<()> {
+    pub(crate) fn user_entry(
+        &self,
+        seg: world::SegmentId,
+        posted: &Posted,
+        lines: &[String],
+    ) -> Result<()> {
         let before = message::history(&self.db(), posted.channel, Some(posted.message), 50)?;
         let since = before
             .iter()
@@ -1741,17 +1746,45 @@ impl Agent {
 
     /// Whether the segment already carries a full wrap-up instruction.
     fn wrapup_asked(&self, seg: world::SegmentId, names: &Names) -> Result<bool> {
-        let w = &self.corpus.wording;
-        let heads: Vec<String> = ["harness.wrapup", "harness.wrapup.summary"]
-            .iter()
-            .map(|k| w.fill(k, names, &[]).chars().take(WRAPUP_HEAD).collect())
-            .collect();
+        let heads = self.wrapup_heads(&["harness.wrapup", "harness.wrapup.summary"], names);
         let log = self.log(seg)?;
-        Ok(log.items.iter().flat_map(request::harness_texts).any(|t| {
-            heads
-                .iter()
-                .any(|h| !h.is_empty() && t.starts_with(h.as_str()))
+        Ok(log
+            .items
+            .iter()
+            .flat_map(request::harness_texts)
+            .any(|t| heads.iter().any(|h| t.starts_with(h.as_str()))))
+    }
+
+    /// Whether a log entry is a request for a wrap-up, in any of its wordings: what an
+    /// older build left at the end of a segment is not a question anyone asked.
+    pub(crate) fn is_wrapup_request(&self, seg: world::SegmentId, bytes: &[u8]) -> Result<bool> {
+        let names = self.segment_names(seg)?;
+        let heads = self.wrapup_heads(
+            &[
+                "harness.wrapup",
+                "harness.wrapup.summary",
+                "harness.wrapup.again",
+                "harness.wrapup.again.summary",
+            ],
+            &names,
+        );
+        Ok(request::parse(bytes).is_some_and(|m| {
+            request::harness_texts(&m).any(|t| heads.iter().any(|h| t.starts_with(h.as_str())))
         }))
+    }
+
+    /// The opening words of the named wrap-up instructions, as the log carries them.
+    fn wrapup_heads(&self, keys: &[&str], names: &Names) -> Vec<String> {
+        let w = &self.corpus.wording;
+        keys.iter()
+            .map(|k| {
+                w.fill(k, names, &[])
+                    .chars()
+                    .take(WRAPUP_HEAD)
+                    .collect::<String>()
+            })
+            .filter(|h| !h.is_empty())
+            .collect()
     }
 
     /// One line in the diagnostics log about a wrap-up that wrote no memory.
