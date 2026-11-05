@@ -88,3 +88,29 @@ test("the filters also narrow what a topic search found", async () => {
   await user.click(chip("Talked to"));
   expect(container.querySelector(".candidates")).not.toBeNull();
 });
+
+test("typing in the search box narrows the list by name as it goes, together with the chips", async () => {
+  const { user } = await open();
+  const box = screen.getByRole("searchbox");
+  await user.type(box, "mir");
+  expect(seen("Mira Vale")).toBe(true);
+  expect(seen("Oren Lark")).toBe(false);
+  expect(seen("Silas Crane")).toBe(false);
+  // Folded bands open for what was found; a name nobody has says so.
+  await user.clear(box);
+  await user.type(box, "silas");
+  expect(seen("Silas Crane")).toBe(true);
+  expect(seen("Mira Vale")).toBe(false);
+  await user.clear(box);
+  await user.type(box, "nobody by this name");
+  expect(await screen.findByText("Nobody matches these filters.")).toBeDefined();
+  await user.clear(box);
+  expect(seen("Mira Vale") && seen("Oren Lark") && seen("Silas Crane")).toBe(true);
+  // With a chip on, the typed name narrows what the chip left.
+  await user.click(chip("Enabled"));
+  await user.type(box, "oren");
+  expect(seen("Oren Lark")).toBe(false);
+  await user.clear(box);
+  await user.type(box, "vale");
+  expect(seen("Mira Vale")).toBe(true);
+});

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api as defaultApi, type Api } from "./api";
 import { useT } from "./i18n";
-import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Store } from "./store";
+import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Page, type Store } from "./store";
 import { ErrorBar, InlineError } from "./ui/ErrorBar";
 import { unreadOf } from "./lib/chats";
+import { PANEL_CLOSES } from "./lib/breakpoints";
 import { inLibrary } from "./lib/library";
 import { readFresh } from "./lib/fresh";
 import { isDark } from "./lib/prefs";
@@ -20,14 +21,12 @@ import { Main } from "./screens/Home";
 import { HostCard, HostDrawer, PersonCard, PersonDrawer } from "./screens/Person";
 import { LeftDrawer, ProfileCard } from "./screens/Profile";
 import { ContactsCard } from "./screens/Contacts";
-import { RosterDrawer } from "./screens/Roster";
 import { SettingsCard } from "./screens/Settings";
 import { ChangedScreen } from "./screens/Changed";
 import { UnlockScreen } from "./screens/Unlock";
 import { AvatarStep, CorpusSetup, SavePicker, UpdateStep } from "./screens/Welcome";
 import { ConnectStep } from "./screens/Connect";
 import { needsSetup } from "./screens/EndpointEditor";
-import { WorldDrawer } from "./screens/World";
 
 /** Wire a store and actions to an api, subscribe to its events, and render the app. */
 export function App({ api = defaultApi, store: given }: { api?: Api; store?: Store }) {
@@ -93,6 +92,7 @@ function Shell() {
   const modelMissing = endpoints !== null && needsSetup(endpoints);
   usePresence();
   useTheme();
+  useNarrowPanel();
   // Native controls and screen readers follow the document's language.
   const locale = t("locale");
   useEffect(() => {
@@ -214,23 +214,37 @@ function useTheme() {
   }, [theme]);
 }
 
-// Settings live in the hamburger's drawer, not on the rail.
-const NAV: { key: "roster" | "world"; icon: IconName; drawer: Drawer }[] = [
-  { key: "roster", icon: "people", drawer: { kind: "roster" } },
-  { key: "world", icon: "world", drawer: { kind: "world" } },
-];
+/**
+ * Below this width the right panel is closed and opens over the conversation instead of
+ * beside it; the chat list folds to pictures further down (see `layout.css`, same numbers).
+ */
+const NARROW = `(max-width: ${PANEL_CLOSES}px)`;
 
-function drawerKey(d: Drawer | null): "roster" | "world" | "system" | null {
-  if (!d || d.kind === "channel" || d.kind === "contacts" || d.kind === "host") return null;
-  if (d.kind === "person") return "roster";
-  return d.kind;
+/** Shrinking the window closes the right panel first; the chat list folds after that. */
+function useNarrowPanel() {
+  const dispatch = useDispatch();
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const query = matchMedia(NARROW);
+    const onChange = () => {
+      if (query.matches) dispatch({ type: "narrow" });
+    };
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [dispatch]);
 }
+
+// Settings live in the hamburger's drawer, not on the rail. The four sections are peers:
+// each fills the main area beside the chat list.
+const NAV: { key: Page; icon: IconName }[] = [
+  { key: "roster", icon: "people" },
+  { key: "world", icon: "world" },
+];
 
 /** The narrow left rail: the main sections as icon and short label. */
 function Rail() {
   const t = useT();
   const dispatch = useDispatch();
-  const drawer = useStore((s) => s.drawer);
   const unreadChats = useStore((s) => {
     let n = 0;
     for (const c of s.channels) if (unreadOf(c, s.unread) > 0) n += 1;
@@ -239,9 +253,9 @@ function Rail() {
   const away = useStore((s) => s.away);
   const library = useStore((s) => s.library);
   const libOn = useStore(inLibrary);
-  const key = drawerKey(drawer);
-  // Settings is a card over the app, not a section: the rail keeps showing the chats.
-  const current = libOn ? null : key === "system" ? null : key;
+  const page = useStore((s) => s.page);
+  // Settings is a card over the app, not a section: the rail keeps showing where the user is.
+  const current: "chats" | "library" | Page = page ?? (libOn ? "library" : "chats");
 
   return (
     <header className="rail">
@@ -255,11 +269,11 @@ function Rail() {
           <li>
             <button
               type="button"
-              className={`rail-item${current === null && !libOn ? " on" : ""}`}
-              aria-pressed={current === null && !libOn}
+              className={`rail-item${current === "chats" ? " on" : ""}`}
+              aria-pressed={current === "chats"}
               onClick={() => {
                 dispatch({ type: "library", on: false });
-                dispatch({ type: "drawer", drawer: null });
+                dispatch({ type: "page", page: null });
               }}
             >
               <span className="rail-icon">
@@ -270,7 +284,7 @@ function Rail() {
             </button>
           </li>
           <li>
-            <button type="button" className={`rail-item${libOn ? " on" : ""}`} aria-pressed={libOn} onClick={() => dispatch({ type: "library", on: !library })}>
+            <button type="button" className={`rail-item${current === "library" ? " on" : ""}`} aria-pressed={current === "library"} onClick={() => dispatch({ type: "library", on: !library })}>
               <span className="rail-icon">
                 <Icon name="library" size={30} />
               </span>
@@ -283,7 +297,7 @@ function Rail() {
                 type="button"
                 className={`rail-item${current === n.key ? " on" : ""}`}
                 aria-pressed={current === n.key}
-                onClick={() => dispatch({ type: "drawer", drawer: current === n.key ? null : n.drawer })}
+                onClick={() => dispatch({ type: "page", page: current === n.key ? null : n.key })}
               >
                 <span className="rail-icon">
                   <Icon name={n.icon} size={30} />
@@ -313,18 +327,16 @@ function DrawerPane({ drawer }: { drawer: Drawer }) {
       ref={ref}
       className="drawer"
       tabIndex={-1}
-      aria-label={drawer.kind === "channel" ? t("channel.group_info") : drawer.kind === "host" ? t("host.name") : t(`nav.${drawerKey(drawer) as "roster"}`)}
+      aria-label={drawer.kind === "channel" ? t("channel.group_info") : drawer.kind === "host" ? t("host.name") : t("nav.roster")}
       onKeyDown={(e) => e.key === "Escape" && dispatch({ type: "drawer", drawer: null })}
     >
       <button type="button" className="icon close" aria-label={t("drawer.close")} title={t("drawer.close")} onClick={() => dispatch({ type: "drawer", drawer: null })}>
         <Icon name="close" size={20} />
       </button>
       <div ref={scroll} className="drawer-scroll">
-        {drawer.kind === "roster" && <RosterDrawer />}
         {drawer.kind === "person" && <PersonDrawer id={drawer.id} />}
         {drawer.kind === "host" && <HostDrawer />}
         {drawer.kind === "channel" && <GroupInfo id={drawer.id} />}
-        {drawer.kind === "world" && <WorldDrawer />}
       </div>
       <BackToTop scroller={scroll} />
     </aside>

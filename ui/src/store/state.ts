@@ -33,14 +33,15 @@ import type {
 import { makeT, type T } from "../i18n";
 import { NO_FILTER, type RosterFilter } from "../lib/roster";
 
+/** The pages beside chats and the library: each fills the main area. */
+export type Page = "roster" | "world";
+
 export type Drawer =
-  | { kind: "roster" }
   /** The contacts list, a card over the app. */
   | { kind: "contacts" }
   | { kind: "person"; id: PersonId }
   /** The host's page, in the side panel of the host's channel. */
   | { kind: "host" }
-  | { kind: "world" }
   | { kind: "system"; tab: SystemPage }
   /** A group's info panel (a person's is `person`). */
   | { kind: "channel"; id: ChannelId };
@@ -173,7 +174,10 @@ export interface State {
   loadErrors: Partial<Record<LoadKey, Failure>>;
   /** The channel in the main pane; `null` = home (host channel, or the library). */
   channel: ChannelId | null;
+  /** The right panel (a person, the host, a group's info, or a card over the app). */
   drawer: Drawer | null;
+  /** A page chosen from the rail (roster, world) in place of the chats or the library; `null` = neither. */
+  page: Page | null;
   groupDialog: boolean;
   /** A person's page shown as a card over the conversation (from a name or avatar in a chat). */
   personCard: PersonId | null;
@@ -236,6 +240,7 @@ export function initialState(): State {
     loadErrors: {},
     channel: null,
     drawer: null,
+    page: null,
     groupDialog: false,
     personCard: null,
     hostCard: false,
@@ -301,6 +306,9 @@ export type Action =
   | { type: "loaded"; key: LoadKey; error: Failure | null }
   | { type: "open"; channel: ChannelId | null }
   | { type: "drawer"; drawer: Drawer | null }
+  | { type: "page"; page: Page | null }
+  /** The window got narrow: the right panel closes. */
+  | { type: "narrow" }
   | { type: "personCard"; person: PersonId | null }
   | { type: "hostCard"; open: boolean }
   | { type: "groupDialog"; open: boolean }

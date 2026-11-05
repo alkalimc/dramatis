@@ -287,6 +287,7 @@ export function reduce(s: State, a: Action): State {
         listAuto: toArchived ? s.listAuto || s.listView !== "archived" : false,
         channel: a.channel,
         library: false,
+        page: null,
         drawer: null,
         menuOpen: false,
         find: null,
@@ -319,6 +320,12 @@ export function reduce(s: State, a: Action): State {
         : { ...s, unread: omit(s.unread, a.channel), channels: s.channels.map((c) => (c.id === a.channel && c.unread > 0 ? { ...c, unread: 0 } : c)) };
     case "drawer":
       return { ...s, drawer: a.drawer };
+    case "narrow":
+      // Cards over the app (settings, contacts) are not the right panel and stay.
+      return s.drawer && (s.drawer.kind === "person" || s.drawer.kind === "host" || s.drawer.kind === "channel") ? { ...s, drawer: null } : s;
+    case "page":
+      // A page is one of four peers: choosing it leaves the library and closes the right panel.
+      return a.page ? { ...s, page: a.page, library: false, drawer: null, menuOpen: false } : { ...s, page: null, drawer: null };
     case "personCard":
       return { ...s, personCard: a.person };
     case "hostCard":
@@ -326,7 +333,7 @@ export function reduce(s: State, a: Action): State {
     case "groupDialog":
       return { ...s, groupDialog: a.open };
     case "library":
-      return { ...s, library: a.on, ...(a.on ? { menuOpen: false } : {}) };
+      return { ...s, library: a.on, ...(a.on ? { menuOpen: false, page: null } : {}) };
     case "dismissLibraryNotice":
       return { ...s, libraryNoticeDismissed: true };
     case "error":

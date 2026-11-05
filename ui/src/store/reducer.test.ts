@@ -119,11 +119,34 @@ test("world changes bump the version screens refetch on", () => {
   expect(s.worldVersion).toBe(1);
 });
 
-test("opening a channel closes the drawer", () => {
-  let s = reduce(initialState(), { type: "drawer", drawer: { kind: "world" } });
+test("opening a channel closes the drawer and leaves a page", () => {
+  let s = reduce(initialState(), { type: "drawer", drawer: { kind: "person", id: "p1" } });
+  s = reduce(s, { type: "page", page: "world" });
+  s = reduce(s, { type: "drawer", drawer: { kind: "person", id: "p1" } });
   s = reduce(s, { type: "open", channel: "c1" });
   expect(s.drawer).toBeNull();
+  expect(s.page).toBeNull();
   expect(s.channel).toBe("c1");
+});
+
+test("chats, library, roster and world are peers: choosing one leaves the others", () => {
+  let s = reduce(initialState(), { type: "library", on: true });
+  s = reduce(s, { type: "drawer", drawer: { kind: "person", id: "p1" } });
+  s = reduce(s, { type: "page", page: "roster" });
+  expect(s).toMatchObject({ page: "roster", library: false, drawer: null });
+  s = reduce(s, { type: "page", page: "world" });
+  expect(s.page).toBe("world");
+  s = reduce(s, { type: "library", on: true });
+  expect(s).toMatchObject({ page: null, library: true });
+  s = reduce(reduce(s, { type: "page", page: "roster" }), { type: "page", page: null });
+  expect(s.page).toBeNull();
+});
+
+test("a narrow window closes the right panel but not a card over the app", () => {
+  const panel = reduce(initialState(), { type: "drawer", drawer: { kind: "channel", id: "g1" } });
+  expect(reduce(panel, { type: "narrow" }).drawer).toBeNull();
+  const card = reduce(initialState(), { type: "drawer", drawer: { kind: "contacts" } });
+  expect(reduce(card, { type: "narrow" }).drawer).toEqual({ kind: "contacts" });
 });
 
 test("activity tracks who is generating per channel and clears on done or failed", () => {

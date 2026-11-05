@@ -28,8 +28,23 @@
   min-height: 0;
   background: var(--bg);
 }
-.main.library {
+.main.library,
+.main.page {
   position: relative;
+}
+/* roster and world: pages of their own, scrolling inside, with a readable column */
+.page-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page-body {
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+.page-body .drawer-head {
+  padding-right: 0;
 }
 .library-scroll {
   flex: 1;
@@ -644,6 +659,22 @@ button.drawer-item:hover,
   grid-row: span 2;
 }
 
+/* Shrinking from full screen: the right panel closes first (and opens over the conversation
+   when asked for), then the chat list folds to pictures. Widths: lib/breakpoints.ts. */
+@media (max-width: 1100px) {
+  .body {
+    position: relative;
+  }
+  .drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(var(--info-w), 100%);
+    box-shadow: var(--shadow-menu);
+  }
+}
 @media (max-width: 900px) {
   .chat-list {
     width: 4.5rem;
@@ -660,14 +691,9 @@ button.drawer-item:hover,
   }
 }
 @media (max-width: 720px) {
-  .body {
-    flex-direction: column;
-  }
   .drawer {
     width: 100%;
     border-left: none;
-    border-top: 1px solid var(--line);
-    max-height: 60vh;
   }
 }
 

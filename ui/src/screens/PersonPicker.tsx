@@ -3,6 +3,7 @@ import type { PersonRef } from "../api";
 import { useT } from "../i18n";
 import { HOST_ID } from "../ui/Avatar";
 import { useStore } from "../store";
+import { PeopleList } from "./PeopleList";
 
 /**
  * Pick someone from the roster by name. Disabled people are not offered: for any purpose
@@ -35,20 +36,12 @@ export function PersonPicker({
   );
   const host = t("host.name");
   const all = withHost && !exclude.includes(HOST_ID) ? [{ id: HOST_ID, name: host }, ...people] : people;
-  const shown = all.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
+  const shown = all.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <div className="picker">
       <label htmlFor={id}>{label}</label>
       <input id={id} type="search" value={q} placeholder={t("person_picker.search")} onChange={(e) => setQ(e.target.value)} />
-      <ul className="picker-list">
-        {shown.map((p) => (
-          <li key={p.id}>
-            <button type="button" className="chip" onClick={() => onPick(p)}>
-              {p.name}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <PeopleList people={shown} label={label} empty={t("person_picker.none")} onPick={onPick} />
     </div>
   );
 }

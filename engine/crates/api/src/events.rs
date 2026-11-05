@@ -110,6 +110,8 @@ pub enum WorldChange {
     Fact {
         id: FactId,
     },
+    /// A daily event was deleted or restored.
+    Event,
     Channel {
         id: ChannelId,
     },

@@ -32,6 +32,8 @@ pub struct Event {
     pub material: Vec<String>,
     pub fact: Option<FactId>,
     pub message: Option<MessageId>,
+    /// The user deleted it from the drawer; see [`set_hidden`].
+    pub hidden: bool,
 }
 
 /// An event to record.
@@ -55,7 +57,7 @@ pub fn day_end(now: Now) -> i64 {
     now.local_day_start() + DAY_MS
 }
 
-const COLUMNS: &str = "id, day, at, title, text, persons, material, fact, message";
+const COLUMNS: &str = "id, day, at, title, text, persons, material, fact, message, hidden";
 
 fn read(r: &Row<'_>) -> rusqlite::Result<Event> {
     let json = |col: &str| -> rusqlite::Result<Vec<String>> {
@@ -74,6 +76,7 @@ fn read(r: &Row<'_>) -> rusqlite::Result<Event> {
         material: json("material")?,
         fact: r.get("fact")?,
         message: r.get("message")?,
+        hidden: r.get("hidden")?,
     })
 }
 
@@ -112,7 +115,43 @@ pub fn get(conn: &Connection, id: i64) -> Result<Event> {
     )?)
 }
 
-/// The newest events, newest first.
+/// The newest events the user has not deleted (or, with `hidden`, only those they have),
+/// newest first: what the drawer lists.
+pub fn listed(conn: &Connection, limit: u32, hidden: bool) -> Result<Vec<Event>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM daily_event WHERE hidden = ?1 ORDER BY id DESC LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map((hidden, limit), read)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Delete an event from the drawer, or bring it back. The row stays, so the day's count and
+/// the material it drew on still hold; its fact (while the day lasts) goes with it, so no
+/// one mentions it, and returns with it.
+pub fn set_hidden(conn: &Connection, id: i64, hidden: bool) -> Result<()> {
+    crate::atomic(conn, |conn| {
+        let e = get(conn, id)?;
+        conn.execute(
+            "UPDATE daily_event SET hidden = ?2 WHERE id = ?1",
+            (id, hidden),
+        )?;
+        match (e.fact, hidden) {
+            (Some(f), true) => fact::retract(conn, f),
+            (Some(f), false) => fact::restore(conn, f),
+            (None, _) => Ok(()),
+        }
+    })
+}
+
+/// The user deleted or restored a fact: the event it told of follows. Whether any did.
+pub fn follow_fact(conn: &Connection, fact: FactId, hidden: bool) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE daily_event SET hidden = ?2 WHERE fact = ?1 AND hidden <> ?2",
+        (fact, hidden),
+    )? > 0)
+}
+
+/// The newest events, hidden or not, newest first: what the next event is made to differ from.
 pub fn recent(conn: &Connection, limit: u32) -> Result<Vec<Event>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM daily_event ORDER BY id DESC LIMIT ?1"
@@ -405,5 +444,48 @@ mod tests {
         let e = recent(&w, 5).unwrap();
         assert_eq!((e.len(), e[0].fact), (1, None));
         assert_eq!(used_material(&w, 5).unwrap(), vec!["u1".to_owned()]);
+    }
+
+    #[test]
+    fn a_deleted_event_leaves_the_drawer_but_still_counts_and_its_fact_goes_with_it() {
+        let w = world();
+        let now = at(T0);
+        let id = make(&w, now, &["a"]);
+        assert_eq!(listed(&w, 5, false).unwrap().len(), 1);
+        set_hidden(&w, id, true).unwrap();
+        assert!(listed(&w, 5, false).unwrap().is_empty());
+        assert_eq!(listed(&w, 5, true).unwrap().len(), 1);
+        // It still counts toward the day and still keeps its material from being drawn again.
+        assert_eq!(count_on(&w, &day_key(now)).unwrap(), 1);
+        assert_eq!(used_material(&w, 5).unwrap(), vec!["u1".to_owned()]);
+        // Nobody mentions it: its fact is retracted.
+        assert!(facts_for(&w, &p("a"), now).unwrap().is_empty());
+        set_hidden(&w, id, false).unwrap();
+        assert_eq!(listed(&w, 5, false).unwrap().len(), 1);
+        assert_eq!(facts_for(&w, &p("a"), now).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deleting_the_fact_hides_the_event_and_restoring_it_brings_the_event_back() {
+        let w = world();
+        let id = make(&w, at(T0), &["a"]);
+        let f = get(&w, id).unwrap().fact.unwrap();
+        assert!(follow_fact(&w, f, true).unwrap());
+        assert!(listed(&w, 5, false).unwrap().is_empty());
+        assert!(!follow_fact(&w, f, true).unwrap());
+        assert!(follow_fact(&w, f, false).unwrap());
+        assert_eq!(listed(&w, 5, false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_event_whose_day_has_passed_can_still_be_deleted() {
+        let w = world();
+        let now = at(T0);
+        let id = make(&w, now, &["a"]);
+        fact::sweep_expired(&w, day_end(now)).unwrap();
+        set_hidden(&w, id, true).unwrap();
+        assert!(listed(&w, 5, false).unwrap().is_empty());
+        set_hidden(&w, id, false).unwrap();
+        assert_eq!(listed(&w, 5, false).unwrap().len(), 1);
     }
 }

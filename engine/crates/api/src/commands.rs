@@ -268,8 +268,15 @@ commands! {
     /// what fell due meanwhile; the user's own message turns it off too (`AwayChanged`).
     fn set_away(away: bool) -> ();
     fn settings() -> Settings = Ok(Settings::default());
-    /// The daily events the host told of, today's and the last few, newest first.
-    fn daily_events() -> Vec<DailyEvent> = Ok(Vec::new());
+    /// The daily events the host told of, today's and the last few, newest first; with
+    /// `deleted`, the ones the user deleted instead.
+    fn daily_events(deleted: bool) -> Vec<DailyEvent> = Ok(Vec::new());
+    /// Delete a daily event from the drawer. It is kept out of sight, not erased (it still
+    /// counts toward the day and keeps its material from being drawn again), and the fact
+    /// that told people about it is deleted with it. `NotFound` for an event that is not there.
+    fn delete_event(event: u32) -> ();
+    /// Bring back an event deleted with `delete_event`, and its fact.
+    fn restore_event(event: u32) -> ();
     fn update_settings(settings: Settings) -> ();
 
     // ---- first run ----

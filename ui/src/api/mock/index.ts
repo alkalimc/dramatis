@@ -24,6 +24,7 @@ import type {
   ChannelId,
   ChannelSummary,
   Citation,
+  DailyEvent,
   Confidence,
   EndpointSetup,
   EndpointsView,
@@ -264,6 +265,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
 
   // ---- facts ----
   const facts = new Map<FactId, FactView>();
+  // The daily events; each names the fact that tells of it.
+  const events: DailyEvent[] = [];
   const addFact = (f: Omit<FactView, "id" | "created_at" | "delivered" | "outcome" | "retracted"> & Partial<FactView>, minutesAgo = 0) => {
     const fact: FactView = { id: nextId("f"), delivered: false, outcome: null, retracted: false, created_at: iso(minutesAgo), ...f };
     facts.set(fact.id, fact);
@@ -340,6 +343,19 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     addFact({ author: USER, audience: { kind: "participants", channel: direct("mira"), persons: [ref("mira")] }, kind: "hurt", about: { kind: "person", id: "mira" }, due: null, text: "Your ledgers are useless, nobody reads them." }, 60 * 47);
     addFact({ author: USER, audience: { kind: "participants", channel: direct("mira"), persons: [ref("mira")] }, kind: "fact", about: { kind: "user" }, due: null, text: "You said you don't like sweets.", retracted: true }, 60 * 46);
     addFact({ author: person("mira"), audience: { kind: "own", person: ref("mira") }, kind: "fact", about: { kind: "user" }, due: null, text: "Mira noticed you prefer short answers." }, 60 * 45);
+    // A happening and the world fact that tells everyone of it: the same memory under two views.
+    const tea = addFact({ author: HOST, audience: { kind: "world" }, kind: "fact", about: null, due: null, text: "Tea on the deck: Mira brewed a pot for whoever passed by." }, 20);
+    events.push({
+      id: 1,
+      day: iso().slice(0, 10),
+      at: iso(20),
+      title: "Tea on the deck",
+      text: "Mira brewed a pot for whoever passed by, and Oren stayed to argue about the water.",
+      persons: [ref("mira"), ref("oren")],
+      message: null,
+      deleted: false,
+      fact: tea.id,
+    });
   }
 
   const digestItems: Waiting[] = introPending
@@ -980,7 +996,7 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       const match = (f: FactView) => {
         switch (filter.scope) {
           case "all":
-            return true;
+            return !f.retracted;
           case "world":
             return !f.retracted && f.audience.kind === "world";
           case "own":
@@ -1074,21 +1090,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
       return ok(null);
     },
     settings: () => ok({ ...settings }),
-    dailyEvents: () =>
-      ok(
-        settings.events_per_day === 0
-          ? []
-          : [
-              {
-                day: iso().slice(0, 10),
-                at: iso(),
-                title: "Tea on the deck",
-                text: "Mira brewed a pot for whoever passed by, and Oren stayed to argue about the water.",
-                persons: [ref("mira"), ref("oren")],
-                message: null,
-              },
-            ],
-      ),
+    dailyEvents: (deleted) =>
+      ok(settings.events_per_day === 0 ? [] : events.filter((e) => e.deleted === deleted)),
+    deleteEvent: (id) => hideEvent(id, true),
+    restoreEvent: (id) => hideEvent(id, false),
     updateSettings: (next) => {
       if (next.user_name !== null && !next.user_name.trim()) return fail({ code: "invalid", field: "user_name" });
       if (next.bio !== null && Array.from(next.bio.trim()).length > 200) return fail({ code: "invalid", field: "bio" });
@@ -1239,10 +1244,22 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     },
   };
 
+  /** Deleting an event deletes the fact that tells of it, and the other way round. */
+  function hideEvent(id: number, deleted: boolean): Result<null> {
+    const e = events.find((x) => x.id === id);
+    if (!e) return fail({ code: "not_found" });
+    e.deleted = deleted;
+    const f = e.fact ? facts.get(e.fact) : undefined;
+    if (f) facts.set(f.id, { ...f, retracted: deleted });
+    setTimeout(() => announceWorld({ kind: "event" }));
+    return ok(null);
+  }
+
   function toggleFact(id: FactId, retracted: boolean): Result<null> {
     const f = facts.get(id);
     if (!f) return fail({ code: "not_found" });
     facts.set(id, { ...f, retracted });
+    for (const e of events) if (e.fact === id) e.deleted = retracted;
     const changes: { kind: "fact"; id: FactId }[] = [{ kind: "fact", id }];
     if (f.kind === "hurt" && f.about?.kind === "person") {
       const p = persons.get(f.about.id);

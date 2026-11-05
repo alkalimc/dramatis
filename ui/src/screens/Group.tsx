@@ -6,6 +6,7 @@ import { Icon } from "../ui/Icon";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
 import { modeHintKey } from "../ui/ModeSwitch";
+import { PeopleList } from "./PeopleList";
 
 /** Start a group: first its name and picture, then who (by name or by topic) and what about. */
 export function GroupDialog() {
@@ -33,7 +34,8 @@ export function GroupDialog() {
 
   const everyone = (roster?.groups ?? []).flatMap((g) => g.rows).filter((r) => r.mode !== "disabled").map((r) => r.person);
   const term = q.trim().toLowerCase();
-  const byName = term ? everyone.filter((p) => p.name.toLowerCase().includes(term)) : [];
+  // The whole roster to browse; what is typed narrows it by name, and a topic search adds the people it found.
+  const byName = term ? everyone.filter((p) => p.name.toLowerCase().includes(term)) : everyone;
   const offered = [...byName, ...(byTopic ?? []).map((c) => c.person).filter((p) => !byName.some((x) => x.id === p.id))].filter(
     (p) => !members.some((m) => m.id === p.id),
   );
@@ -142,17 +144,7 @@ export function GroupDialog() {
             {t("roster.find.submit")}
           </button>
         </div>
-        {offered.length > 0 && (
-          <ul className="chips">
-            {offered.slice(0, 10).map((p) => (
-              <li key={p.id}>
-                <button type="button" className="chip" aria-label={t("group.who.add", { name: p.name })} onClick={() => add(p)}>
-                  + {p.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <PeopleList people={offered} label={t("group.who.list")} take={(p) => t("group.who.add", { name: p.name })} empty={t("group.who.none")} onPick={add} />
 
         <label htmlFor={topicId}>{t("group.topic")}</label>
         <textarea id={topicId} rows={2} value={topic} onChange={(e) => setTopic(e.target.value)} aria-describedby={`${topicId}-h`} />
