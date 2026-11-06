@@ -2,10 +2,10 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { settle, type Failure, type SaveCheck, type SaveInfo, type VersionChange, type VersionStamp } from "../api";
 import { useT } from "../i18n";
 import { markFresh } from "../lib/fresh";
-import { when } from "../lib/format";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
-import { Icon } from "../ui/Icon";
+import { Body, Note, Row, Section } from "../ui/SettingsKit";
+import { SaveList, type SaveAsk } from "./SaveCard";
 import { PasswordDialog } from "./Unlock";
 
 /** A folder's full path, selectable, with a button that copies it (there is no file manager to open from here). */
@@ -173,36 +173,7 @@ export function useOpenSave(onSwitched: () => void, refresh: () => Promise<void>
   return { open, prompt, setPrompt, drift, load, back: () => setDrift(null) };
 }
 
-/** What a save's file says about it, for its card: versions and pack, or why they cannot be shown. */
-function SaveVersions({ save }: { save: SaveInfo }) {
-  const t = useT();
-  const { stamp, state } = save;
-  if (!stamp) return <div className="muted small save-versions">{t(state === "locked" ? "saves.card.locked" : "saves.card.unreadable")}</div>;
-  const parts = [
-    t("saves.card.app", { version: stamp.app ?? t("saves.drift.unknown") }),
-    stamp.pack ? t("saves.card.pack", { name: stamp.pack, version: stamp.pack_version ?? "" }) : t("saves.card.nopack"),
-    t("saves.card.schema", { n: stamp.schema }),
-  ];
-  return (
-    <div className="muted small save-versions">
-      {parts.join(" · ")}
-      {state === "needs_migration" && (
-        <>
-          {" "}
-          <span className="badge warn-badge">{t("saves.card.needs_migration")}</span>
-        </>
-      )}
-      {state === "newer" && (
-        <>
-          {" "}
-          <span className="badge warn-badge">{t("saves.card.newer")}</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-type Ask = { kind: "copy" | "rename" | "export"; save: SaveInfo };
+type Ask = { kind: SaveAsk; save: SaveInfo };
 
 /**
  * System drawer, third tab: the saves of this home. Opening another one reloads the
@@ -280,114 +251,83 @@ export function SavesPage({ onSwitched = () => window.location.reload(), picker 
   };
 
   return (
-    <section className="saves" aria-labelledby={picker ? undefined : `${id}-h`}>
-      {!picker && (
-        <>
-          <h3 id={`${id}-h`}>{t("saves.title")}</h3>
-          <p className="muted small">{t("saves.hint")}</p>
-        </>
+    <>
+      {status && (
+        <Section>
+          <Body>
+            <FolderNote text={t(picker ? "picker.folder" : "saves.folder")} path={status.saves_dir} />
+          </Body>
+        </Section>
       )}
-      {status && <FolderNote text={t(picker ? "picker.folder" : "saves.folder")} path={status.saves_dir} />}
-      {!picker && status?.save && (
-        <p className="row wrap">
-          <button type="button" className="ghost" onClick={() => void actions.logOut()}>
-            <Icon name="leave" size={16} /> {t("logout")}
-          </button>
-          <span className="muted small">{t("logout.hint")}</span>
-        </p>
-      )}
-      {saves?.length === 0 && !picker && <p className="muted">{t("saves.empty")}</p>}
-      <ul className="save-list">
-        {saves?.map((s) => (
-          <li key={s.name} className={s.current ? "save current" : "save"}>
-            <div className="save-main">
-              <strong>{s.name}</strong>{" "}
-              {s.current && <span className="badge">{t("saves.current")}</span>}{" "}
-              {s.encrypted && (
-                <span className="badge lock-badge">
-                  <Icon name="lock" size={12} /> {t("saves.encrypted")}
-                </span>
-              )}
-              <div className="muted small">
-                {t("saves.size", { kb: s.size_kb })}
-                {s.played_at && <> · {t("saves.played", { when: when(s.played_at, t) })}</>}
-              </div>
-              <SaveVersions save={s} />
-            </div>
-            <div className="row wrap" role="group" aria-label={t("saves.actions", { name: s.name })}>
-              {!s.current && (
-                <button type="button" aria-label={picker ? `${t("saves.switch")} ${s.name}` : undefined} onClick={() => void open(s.name)}>
-                  {t("saves.switch")}
-                </button>
-              )}
-              {(["copy", "rename", "export"] as const).map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    setAsk({ kind, save: s });
-                    setName(kind === "copy" ? `${s.name} 2` : kind === "rename" ? s.name : "");
-                    setFile("");
-                  }}
-                >
-                  {t(`saves.${kind}`)}
-                </button>
-              ))}
-              {!s.current && (
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    if (window.confirm(t("saves.delete.confirm", { name: s.name }))) void run(api.commands.deleteSave(s.name));
-                  }}
-                >
-                  {t("saves.delete")}
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <Section className="saves" title={picker ? undefined : t("saves.title")}>
+        {!picker && <Note>{t("saves.hint")}</Note>}
+        {saves?.length === 0 && !picker && <Note>{t("saves.empty")}</Note>}
+        {saves && (
+          <SaveList
+            saves={saves}
+            picker={picker}
+            onOpen={(s) => void open(s.name)}
+            onAsk={(kind, s) => {
+              setAsk({ kind, save: s });
+              setName(kind === "copy" ? `${s.name} 2` : kind === "rename" ? s.name : "");
+              setFile("");
+            }}
+            onDelete={(s) => {
+              if (window.confirm(t("saves.delete.confirm", { name: s.name }))) void run(api.commands.deleteSave(s.name));
+            }}
+          />
+        )}
+        {!picker && status?.save && (
+          <>
+            <Row kind="button" icon="leave" label={t("logout")} onClick={() => void actions.logOut()} />
+            <Note>{t("logout.hint")}</Note>
+          </>
+        )}
+      </Section>
 
-      <form
-        className="row wrap"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const given = (fresh.trim() || (picker ? t("picker.new.default") : "")).trim();
-          if (!given) return;
-          if (await run(api.commands.newSave(given))) {
-            setFresh("");
-            made.current.add(given);
-            if (picker) await open(given);
-          }
-        }}
-      >
-        <label htmlFor={`${id}-new`}>{t(picker ? "picker.new.name" : "saves.new")}</label>
-        <input id={`${id}-new`} value={fresh} placeholder={t(picker ? "picker.new.default" : "saves.name")} autoComplete="off" onChange={(e) => setFresh(e.target.value)} />
-        <button type="submit" disabled={!picker && !fresh.trim()}>
-          {t(picker ? "picker.new.go" : "saves.create")}
-        </button>
-      </form>
+      <Section title={picker ? undefined : t("saves.new")}>
+        <Body>
+          <form
+            className="row wrap"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const given = (fresh.trim() || (picker ? t("picker.new.default") : "")).trim();
+              if (!given) return;
+              if (await run(api.commands.newSave(given))) {
+                setFresh("");
+                made.current.add(given);
+                if (picker) await open(given);
+              }
+            }}
+          >
+            <label htmlFor={`${id}-new`}>{t(picker ? "picker.new.name" : "saves.new")}</label>
+            <input id={`${id}-new`} value={fresh} placeholder={t(picker ? "picker.new.default" : "saves.name")} autoComplete="off" onChange={(e) => setFresh(e.target.value)} />
+            <button type="submit" disabled={!picker && !fresh.trim()}>
+              {t(picker ? "picker.new.go" : "saves.create")}
+            </button>
+          </form>
+        </Body>
+      </Section>
 
-      <h4>{t("saves.import")}</h4>
-      <form
-        className="row wrap"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!source.trim()) return;
-          await importFile(null);
-        }}
-      >
-        <input aria-label={t("saves.import.path")} placeholder={t("saves.import.path")} value={source} onChange={(e) => setSource(e.target.value)} />
-        <input aria-label={t("saves.import.name")} placeholder={t("saves.import.name")} value={importName} onChange={(e) => setImportName(e.target.value)} />
-        <button type="submit" disabled={!source.trim()}>
-          {t("saves.import.go")}
-        </button>
-      </form>
-      <p role="status" className="muted">
-        {note}
-      </p>
+      <Section title={t("saves.import")}>
+        <Body>
+          <form
+            className="row wrap"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!source.trim()) return;
+              await importFile(null);
+            }}
+          >
+            <input aria-label={t("saves.import.path")} placeholder={t("saves.import.path")} value={source} onChange={(e) => setSource(e.target.value)} />
+            <input aria-label={t("saves.import.name")} placeholder={t("saves.import.name")} value={importName} onChange={(e) => setImportName(e.target.value)} />
+            <button type="submit" disabled={!source.trim()}>
+              {t("saves.import.go")}
+            </button>
+          </form>
+        </Body>
+        <Note role="status">{note}</Note>
+      </Section>
 
       {prompt && <PasswordDialog title={prompt.title} submit={prompt.submit} onClose={() => setPrompt(null)} />}
       {drift && <VersionDialog check={drift} onLoad={() => void load(drift.name)} onBack={back} />}
@@ -429,6 +369,6 @@ export function SavesPage({ onSwitched = () => window.location.reload(), picker 
           </form>
         </Dialog>
       )}
-    </section>
+    </>
   );
 }

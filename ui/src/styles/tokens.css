@@ -121,6 +121,8 @@
   --chat-line: 1.4rem;
   /* the widths shared by the centred cards, and the picture of a profile row */
   --card-w: 32.5rem;
+  /* the settings card's height: the main page and every sub-page share it */
+  --settings-h: 44rem;
   --avatar-row: 4.4rem;
   --switch-w: 2.4rem;
   --switch-h: 1.4rem;

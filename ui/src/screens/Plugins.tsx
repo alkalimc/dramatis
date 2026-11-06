@@ -3,6 +3,7 @@ import { settle, type Failure, type PluginInfo } from "../api";
 import { useT } from "../i18n";
 import { useApi, useStore } from "../store";
 import { InlineError } from "../ui/ErrorBar";
+import { Note, Row, Section } from "../ui/SettingsKit";
 
 /** The plugins in the home's plugins folder, each with an on/off switch. Off until turned on. */
 export function PluginsPage() {
@@ -32,30 +33,38 @@ export function PluginsPage() {
   if (list === null) return error ? <InlineError error={error} /> : <p className="muted" role="status">{t("app.loading")}</p>;
 
   return (
-    <section>
-      <p className="muted small">{t("plugins.intro")}</p>
-      <p className="muted small">{t("plugins.warn")}</p>
-      {home && <p className="muted small">{t("plugins.folder", { path: `${home}/plugins` })}</p>}
-      {list.length === 0 && <p role="status">{t("plugins.none")}</p>}
-      <ul className="plain">
+    <>
+      <Section>
+        <Note>{t("plugins.intro")}</Note>
+        <Note>{t("plugins.warn")}</Note>
+        {home && <Note>{t("plugins.folder", { path: `${home}/plugins` })}</Note>}
+      </Section>
+      <Section>
+        {list.length === 0 && <Note role="status">{t("plugins.none")}</Note>}
         {list.map((p) => (
-          <li key={p.name}>
-            <label className="switch">
-              <span>
-                {p.name} {p.version && <span className="muted small">{p.version}</span>}
-                {p.description && <span className="muted small"> {p.description}</span>}
-              </span>
-              <input type="checkbox" role="switch" aria-label={p.name} checked={p.enabled} disabled={p.problem !== null && !p.enabled} onChange={(e) => void toggle(p.name, e.target.checked)} />
-            </label>
-            {p.hooks.length > 0 && <p className="muted small">{t("plugins.hooks", { list: p.hooks.join(", ") })}</p>}
-            {p.tools.length > 0 && <p className="muted small">{t("plugins.tools", { list: p.tools.join(", ") })}</p>}
-            {p.problem && <p className="inline-error">{t("plugins.problem", { detail: p.problem })}</p>}
-            {p.status && <p className="inline-error">{t("plugins.status", { detail: p.status })}</p>}
-          </li>
+          <div key={p.name} className="plugin">
+            <Row
+              kind="toggle"
+              icon="plugin"
+              label={p.name}
+              hint={[p.version, p.description].filter(Boolean).join(" ") || undefined}
+              checked={p.enabled}
+              disabled={p.problem !== null && !p.enabled}
+              onChange={(on) => void toggle(p.name, on)}
+            />
+            {p.hooks.length > 0 && <Note>{t("plugins.hooks", { list: p.hooks.join(", ") })}</Note>}
+            {p.tools.length > 0 && <Note>{t("plugins.tools", { list: p.tools.join(", ") })}</Note>}
+            {p.problem && <p className="inline-error sx-note">{t("plugins.problem", { detail: p.problem })}</p>}
+            {p.status && <p className="inline-error sx-note">{t("plugins.status", { detail: p.status })}</p>}
+          </div>
         ))}
-      </ul>
-      {error && <InlineError error={error} />}
-      <p className="muted small">{t("plugins.hint")}</p>
-    </section>
+        {error && (
+          <div className="sx-body">
+            <InlineError error={error} />
+          </div>
+        )}
+        <Note>{t("plugins.hint")}</Note>
+      </Section>
+    </>
   );
 }

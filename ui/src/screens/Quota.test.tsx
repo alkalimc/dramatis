@@ -51,7 +51,7 @@ test("ultra: no bars at all, one sentence", () => {
 test("the intensity is a labelled choice that shows the tier and picks another", () => {
   const picked: Tier[] = [];
   renderWith(<QuotaPanel quota={status("open")} onTier={(t) => picked.push(t)} />);
-  const group = screen.getByRole("group", { name: "Intensity" });
+  const group = screen.getByRole("radiogroup", { name: "Intensity" });
   expect((within(group).getByRole("radio", { name: "Middle" }) as HTMLInputElement).checked).toBe(true);
   fireEvent.click(within(group).getByRole("radio", { name: "Ultra" }));
   expect(picked).toEqual(["ultra"]);

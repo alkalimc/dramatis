@@ -9,12 +9,12 @@ import { filterMembers, insertMention, mentionAt } from "../lib/mention";
 import { isBlank, speechOnly } from "../lib/scene";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { quotaExhaustedLine } from "../lib/quota";
-import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
 import { InlineError } from "../ui/ErrorBar";
 import { Icon } from "../ui/Icon";
 import { ActionLines, MessageView, StreamView, hueOf } from "./Message";
 import { useChatMenu } from "./chatMenu";
+import { PersonRow, personEntry } from "./PeopleList";
 
 const NO_MESSAGES: Message[] = [];
 
@@ -407,10 +407,7 @@ export function Composer({ channel }: { channel: ChannelId }) {
             <ul className="mention-pop" role="listbox" aria-label={t("composer.mention")}>
               {options.map((m, i) => (
                 <li key={m.id} id={`${id}-m${i}`} role="option" aria-selected={i === chosen} className={i === chosen ? "on" : undefined}>
-                  <button type="button" tabIndex={-1} onMouseDown={(e) => e.preventDefault()} onClick={() => take(m)}>
-                    <Avatar person={m} size="s" />
-                    <span>{m.name}</span>
-                  </button>
+                  <PersonRow entry={personEntry(m)} size="s" tabIndex={-1} keepFocus onPick={() => take(m)} />
                 </li>
               ))}
             </ul>

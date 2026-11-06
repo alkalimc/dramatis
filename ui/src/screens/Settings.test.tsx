@@ -16,6 +16,7 @@ test("settings is a card with a list of sections; each opens its page and back r
   const card = await openSettings(user);
   // The drawer is gone and the right panel stays closed: this is a card over the app.
   expect(screen.queryByRole("complementary")).toBeNull();
+  await user.click(within(card).getByRole("button", { name: "Chat settings" }));
   await user.click(within(card).getByRole("button", { name: "Quiet hours and notifications" }));
   const page = within(card).getByRole("region", { name: "Quiet hours and notifications" });
   // Every control carries a visible label.
@@ -24,6 +25,9 @@ test("settings is a card with a list of sections; each opens its page and back r
   expect(within(page).getByLabelText("To")).toBeDefined();
   // The happenings moved to the quota page, where the intensity sets how many there can be.
   expect(within(page).queryByLabelText("Happenings on board")).toBeNull();
+  // Back goes up one level at a time: quiet hours, then chat settings, then the main list.
+  await user.click(within(card).getByRole("button", { name: "Back" }));
+  expect(within(card).getByRole("region", { name: "Chat settings" })).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Back" }));
   await user.click(within(card).getByRole("button", { name: /^Quota and intensity/ }));
   const quota = within(card).getByRole("region", { name: "Quota and intensity" });
@@ -62,6 +66,7 @@ test("typing and sending: the choice is a pair of radios, the card row shows it,
   const user = userEvent.setup();
   const { store } = renderApp();
   const card = await openSettings(user);
+  await user.click(within(card).getByRole("button", { name: "Chat settings" }));
   await user.click(within(card).getByRole("button", { name: /^Typing and sending/ }));
   const page = within(card).getByRole("region", { name: "Typing and sending" });
   const mod = within(page).getByRole("radio", { name: /sends, Enter adds a line/ }) as HTMLInputElement;
@@ -77,6 +82,7 @@ test("network: system by default; a manual proxy needs a good address, keeps its
   const { api } = renderApp();
   const set = vi.spyOn(api.commands, "setNetwork");
   const card = await openSettings(user);
+  await user.click(within(card).getByRole("button", { name: "Advanced" }));
   await user.click(within(card).getByRole("button", { name: "Network" }));
   const page = within(card).getByRole("region", { name: "Network" });
   expect((await within(page).findByRole("radio", { name: /^System proxy/ }) as HTMLInputElement).checked).toBe(true);
@@ -119,4 +125,72 @@ test("the plugins page lists plugins off by default and turns one on; an unusabl
   const broken = within(page).getByRole("switch", { name: "broken" }) as HTMLInputElement;
   expect(broken.disabled).toBe(true);
   expect(within(page).getByText(/Cannot be used/)).toBeDefined();
+});
+
+test("every page is reachable from the main list, sub-pages through their parent, and each is one level down", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const card = await openSettings(user);
+  const top = ["Chat settings", "Models and endpoints", "Quota and intensity", "Saves", "Privacy and security", "Plugins", "Advanced", "Language", "About"];
+  for (const name of top) expect(within(card).getByRole("button", { name: new RegExp(`^${name}`) })).toBeDefined();
+  expect(within(card).getByRole("button", { name: "Account and profile" })).toBeDefined();
+  const tree: [string, string[]][] = [
+    ["Chat settings", ["Night mode", "Typing and sending", "Quiet hours and notifications"]],
+    ["Advanced", ["Data and storage", "Network"]],
+  ];
+  for (const [parent, kids] of tree) {
+    for (const kid of kids) {
+      await user.click(within(card).getByRole("button", { name: new RegExp(`^${parent}`) }));
+      await user.click(within(card).getByRole("button", { name: new RegExp(`^${kid}`) }));
+      expect(within(card).getByRole("region", { name: kid })).toBeDefined();
+      await user.click(within(card).getByRole("button", { name: "Back" }));
+      expect(within(card).getByRole("region", { name: parent })).toBeDefined();
+      await user.click(within(card).getByRole("button", { name: "Back" }));
+      expect(within(card).queryByRole("region")).toBeNull();
+    }
+  }
+  for (const name of ["Models and endpoints", "Quota and intensity", "Saves", "Privacy and security", "Plugins", "Language", "About"]) {
+    await user.click(within(card).getByRole("button", { name: new RegExp(`^${name}`) }));
+    expect(within(card).getByRole("region", { name })).toBeDefined();
+    await user.click(within(card).getByRole("button", { name: "Back" }));
+  }
+  // The main list has no back arrow.
+  expect(within(card).queryByRole("button", { name: "Back" })).toBeNull();
+});
+
+test("Backspace goes up a level except while typing; Escape closes the card from any level", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const card = await openSettings(user);
+  await user.click(within(card).getByRole("button", { name: "Advanced" }));
+  await user.click(within(card).getByRole("button", { name: "Network" }));
+  await user.click(await within(card).findByRole("radio", { name: /^Manual proxy/ }));
+  const address = within(card).getByLabelText("Proxy address");
+  await user.type(address, "ab{Backspace}");
+  expect((address as HTMLInputElement).value).toBe("a");
+  expect(within(card).getByRole("region", { name: "Network" })).toBeDefined();
+  // Focus on a button: Backspace leaves the page.
+  within(card).getByRole("button", { name: "Back" }).focus();
+  await user.keyboard("{Backspace}");
+  expect(within(card).getByRole("region", { name: "Advanced" })).toBeDefined();
+  await user.keyboard("{Backspace}");
+  expect(within(card).queryByRole("region")).toBeNull();
+  await user.click(within(card).getByRole("button", { name: /^Language/ }));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("night mode is a page of Chat settings: follow the system, light or dark", async () => {
+  const user = userEvent.setup();
+  const { store } = renderApp();
+  const card = await openSettings(user);
+  await user.click(within(card).getByRole("button", { name: "Chat settings" }));
+  expect(within(within(card).getByRole("button", { name: /^Night mode/ })).getByText("Follow the system")).toBeDefined();
+  await user.click(within(card).getByRole("button", { name: /^Night mode/ }));
+  const page = within(card).getByRole("region", { name: "Night mode" });
+  expect((within(page).getByRole("radio", { name: /^Follow the system/ }) as HTMLInputElement).checked).toBe(true);
+  await user.click(within(page).getByRole("radio", { name: "Dark" }));
+  expect(store.getState().theme).toBe("dark");
+  await user.click(within(page).getByRole("radio", { name: "Light" }));
+  expect(store.getState().theme).toBe("light");
 });

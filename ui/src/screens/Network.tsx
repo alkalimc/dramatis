@@ -3,6 +3,7 @@ import { settle, type Failure, type NetworkMode, type NetworkSetting } from "../
 import { useT } from "../i18n";
 import { useApi } from "../store";
 import { InlineError } from "../ui/ErrorBar";
+import { Body, Choices, Note, Row, Section } from "../ui/SettingsKit";
 
 const MODES: NetworkMode[] = ["system", "direct", "manual"];
 
@@ -77,18 +78,11 @@ export function NetworkForm({ onSaved }: { onSaved?: () => void }) {
         if (!busy) void save();
       }}
     >
-      <fieldset className="language">
-        <legend>{t("network.mode")}</legend>
+      <Choices label={t("network.mode")}>
         {MODES.map((m) => (
-          <label key={m} className="switch">
-            <input type="radio" name={`${id}-mode`} checked={mode === m} onChange={() => setMode(m)} />
-            <span>
-              {t(`network.mode.${m}`)}
-              <span className="muted small"> {t(`network.mode.${m}.hint`)}</span>
-            </span>
-          </label>
+          <Row key={m} kind="choice" group={`${id}-mode`} checked={mode === m} onChange={() => setMode(m)} label={t(`network.mode.${m}`)} hint={t(`network.mode.${m}.hint`)} />
         ))}
-      </fieldset>
+      </Choices>
       {manual && (
         <>
           <div className="field">
@@ -155,9 +149,11 @@ export function NetworkForm({ onSaved }: { onSaved?: () => void }) {
 export function NetworkPage() {
   const t = useT();
   return (
-    <section>
-      <p className="muted small">{t("network.intro")}</p>
-      <NetworkForm />
-    </section>
+    <Section title={t("network.mode")}>
+      <Note>{t("network.intro")}</Note>
+      <Body>
+        <NetworkForm />
+      </Body>
+    </Section>
   );
 }

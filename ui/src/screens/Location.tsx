@@ -3,6 +3,7 @@ import { settle, type Failure, type HomeData, type HomeLocation } from "../api";
 import { useT } from "../i18n";
 import { useApi } from "../store";
 import { InlineError } from "../ui/ErrorBar";
+import { Body, Choices, Row } from "../ui/SettingsKit";
 
 /**
  * Where the app keeps its files: the folder in use, and a way to move to another (or back
@@ -52,19 +53,20 @@ export function LocationForm({ compact = false }: { compact?: boolean }) {
   };
 
   return (
-    <section className="location" aria-labelledby={`${id}-h`}>
+    <section className="sx location" aria-labelledby={`${id}-h`}>
       {compact ? (
         <h3 id={`${id}-h`} className="sr-only">
           {t("location.title")}
         </h3>
       ) : (
         <>
-          <h3 id={`${id}-h`} className="section-title">
+          <h3 id={`${id}-h`} className="sx-title">
             {t("location.title")}
           </h3>
-          <p className="muted small">{t("location.intro")}</p>
+          <p className="sx-note">{t("location.intro")}</p>
         </>
       )}
+      <Body>
       <p className="small">
         {t("location.now")}: <code className="raw">{where.path}</code>
       </p>
@@ -99,18 +101,11 @@ export function LocationForm({ compact = false }: { compact?: boolean }) {
                 {note}
               </p>
             )}
-            <fieldset className="language">
-              <legend>{t("location.data")}</legend>
+            <Choices label={t("location.data")}>
               {(["copy", "empty"] as const).map((d) => (
-                <label key={d} className="switch">
-                  <input type="radio" name={`${id}-data`} checked={data === d} onChange={() => setData(d)} />
-                  <span>
-                    {t(`location.data.${d}`)}
-                    <span className="muted small"> {t(`location.data.${d}.hint`)}</span>
-                  </span>
-                </label>
+                <Row key={d} kind="choice" group={`${id}-data`} checked={data === d} onChange={() => setData(d)} label={t(`location.data.${d}`)} hint={t(`location.data.${d}.hint`)} />
               ))}
-            </fieldset>
+            </Choices>
             <p className="muted small">{t("location.keep")}</p>
             {error && (error.code === "exists" ? <p className="inline-error" role="status">{t("location.exists")}</p> : <InlineError error={error} />)}
             <p className="row end">
@@ -126,6 +121,7 @@ export function LocationForm({ compact = false }: { compact?: boolean }) {
           </form>
         )
       )}
+      </Body>
     </section>
   );
 }

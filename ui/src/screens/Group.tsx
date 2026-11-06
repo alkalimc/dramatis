@@ -6,7 +6,7 @@ import { Icon } from "../ui/Icon";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { Dialog } from "../ui/Dialog";
 import { modeHintKey } from "../ui/ModeSwitch";
-import { PeopleList } from "./PeopleList";
+import { PeopleSearch, PickedChips, personEntry } from "./PeopleList";
 
 /** Start a group: first its name and picture, then who (by name or by topic) and what about. */
 export function GroupDialog() {
@@ -15,7 +15,6 @@ export function GroupDialog() {
   const actions = useActions();
   const dispatch = useDispatch();
   const roster = useStore((s) => s.roster);
-  const whoId = useId();
   const topicId = useId();
   const [members, setMembers] = useState<PersonRef[]>([]);
   const [q, setQ] = useState("");
@@ -113,38 +112,28 @@ export function GroupDialog() {
           void start();
         }}
       >
-        <label htmlFor={whoId}>{t("group.who")}</label>
-        <ul className="chips" aria-live="polite">
-          {members.map((m) => (
-            <li key={m.id}>
-              <button type="button" className="chip on" aria-label={t("group.who.remove", { name: m.name })} onClick={() => remove(m.id)}>
-                {m.name} ×
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div className="row field-row">
-          <input
-            id={whoId}
-            type="search"
-            value={q}
-            placeholder={t("group.who.search")}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setByTopic(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void searchTopic();
-              }
-            }}
-          />
-          <button type="button" className="ghost" onClick={searchTopic}>
-            {t("roster.find.submit")}
-          </button>
-        </div>
-        <PeopleList people={offered} label={t("group.who.list")} take={(p) => t("group.who.add", { name: p.name })} empty={t("group.who.none")} onPick={add} />
+        <p className="muted small">{t("group.who")}</p>
+        <PickedChips people={members} remove={(m) => t("group.who.remove", { name: m.name })} onRemove={(m) => remove(m.id)} />
+        <PeopleSearch
+          value={q}
+          onChange={(v) => {
+            setQ(v);
+            setByTopic(null);
+          }}
+          placeholder={t("group.who.search")}
+          label={t("group.who")}
+          listLabel={t("group.who.list")}
+          entries={offered.map((p) => personEntry(p, { take: t("group.who.add", { name: p.name }) }))}
+          empty={t("group.who.none")}
+          enter={() => void searchTopic()}
+          action={
+            <button type="button" className="ghost" onClick={searchTopic}>
+              {t("roster.find.submit")}
+            </button>
+          }
+          size="s"
+          onPick={(e) => add(e.value as PersonRef)}
+        />
 
         <label htmlFor={topicId}>{t("group.topic")}</label>
         <textarea id={topicId} rows={2} value={topic} onChange={(e) => setTopic(e.target.value)} aria-describedby={`${topicId}-h`} />

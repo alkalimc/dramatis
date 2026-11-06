@@ -4,7 +4,9 @@ import { expect, test } from "vitest";
 import base from "./base.css?raw";
 import chat from "./chat.css?raw";
 import layout from "./layout.css?raw";
-import { LIST_FOLDS, PANEL_CLOSES } from "../lib/breakpoints";
+import panels from "./panels.css?raw";
+import { CHAT_MIN_REM, DOCK_MIN_REM, LIST_FOLDS, PANEL_REM } from "../lib/breakpoints";
+import tokens from "./tokens.css?raw";
 
 /** The declarations of the first rule whose selector list is exactly `selector`. */
 function rule(css: string, selector: string): string {
@@ -51,28 +53,33 @@ test("a search field and its filters and button share one control height", () =>
   expect(rule(base, ".row.field-row")).toMatch(/align-items:\s*stretch/);
 });
 
-test("the forward picker's rows start at the left edge, not centred like a plain button", () => {
-  expect(rule(chat, ".forward-row")).toMatch(/justify-content:\s*flex-start/);
+test("every people row (contacts, forward, group pickers, members, @ mentions) starts at the left edge, not centred like a plain button", () => {
+  expect(rule(layout, "button.person-row")).toMatch(/justify-content:\s*flex-start/);
+  // The mention popup draws the same row; it only sets its height.
+  expect(rule(chat, ".mention-pop .person-row")).toMatch(/height:/);
 });
 
-test("the @ mention picker's rows start at the left edge", () => {
-  expect(rule(chat, ".mention-pop button")).toMatch(/justify-content:\s*flex-start/);
-});
-
-/** The declarations of the first rule for `selector` inside the media query for `max-width: <px>px`. */
-function inMedia(css: string, px: number, selector: string): string {
+/** The declarations of the first rule for `selector` inside `@<kind> <head> { ... }`. */
+function inQuery(css: string, head: string, selector: string): string {
   const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  const start = flat.indexOf(`@media (max-width: ${px}px) {`);
-  if (start < 0) throw new Error(`no media query for ${px}px`);
+  const start = flat.indexOf(`${head} {`);
+  if (start < 0) throw new Error(`no query ${head}`);
   const block = flat.slice(start).split(/\n}\n/)[0];
   return rule(block.slice(block.indexOf("{") + 1), selector);
 }
 
-test("shrinking the window closes the right panel first, then folds the chat list", () => {
-  expect(PANEL_CLOSES).toBeGreaterThan(LIST_FOLDS);
-  // Between the two widths the panel floats over the conversation instead of taking its width.
-  expect(inMedia(layout, PANEL_CLOSES, ".drawer")).toMatch(/position:\s*absolute/);
-  expect(inMedia(layout, LIST_FOLDS, ".chat-list")).toMatch(/width:\s*4\.5rem/);
+test("shrinking the window closes the right panel first, keeps the conversation, then folds the chat list", () => {
+  // The panel docks only while the conversation keeps its least width beside it.
+  expect(DOCK_MIN_REM).toBe(CHAT_MIN_REM + PANEL_REM);
+  expect(tokens).toMatch(new RegExp(`--info-w:\\s*${PANEL_REM}rem`));
+  expect(rule(layout, ".body")).toMatch(/container:\s*body\s*\/\s*inline-size/);
+  expect(inQuery(layout, `@container body (max-width: ${DOCK_MIN_REM}rem)`, ".drawer")).toMatch(/position:\s*absolute/);
+  expect(inQuery(layout, `@media (max-width: ${LIST_FOLDS}px)`, ".chat-list")).toMatch(/width:\s*4\.5rem/);
+  // Order: the narrowest window that still docks the panel (rail, widest-folded list is not
+  // yet in play, list at its least) is wider than the one where the list folds.
+  const rail = 5.3 * 15;
+  const listLeast = 16 * 15;
+  expect(rail + listLeast + DOCK_MIN_REM * 15).toBeGreaterThan(LIST_FOLDS);
 });
 
 test("roster and world are pages that scroll inside themselves", () => {
@@ -84,4 +91,19 @@ test("the list a select opens has the theme's surface and ink, not the browser's
   const css = rule(base, "select option");
   expect(css).toMatch(/background:\s*var\(--raised\)/);
   expect(css).toMatch(/color:\s*var\(--ink\)/);
+});
+
+test("the settings card is one size for every page: a fixed height, with only the body scrolling", () => {
+  const card = rule(layout, ".dialog.settings-card");
+  expect(card).toMatch(/height:\s*min\(var\(--settings-h\),\s*90vh\)/);
+  expect(card).toMatch(/overflow:\s*hidden/);
+  expect(rule(layout, ".settings-scroll")).toMatch(/overflow-y:\s*auto/);
+  // No page or part sets a size of its own inside the card.
+  for (const css of [layout, panels]) {
+    const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of flat.matchAll(/([^{}]*settings-(?:page|card|scroll)[^{}]*)\{([^{}]*)\}/g)) {
+      if (m[1].includes(".dialog.settings-card") && !m[1].includes(",")) continue;
+      expect(m[2], m[1]).not.toMatch(/(^|[\s;])(?:max-)?height\s*:|min-height\s*:\s*[1-9]/);
+    }
+  }
 });
