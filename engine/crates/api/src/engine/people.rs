@@ -289,9 +289,8 @@ impl Engine {
                 bond::user_bonds(&w).map_err(world_err)?,
             )
         };
-        let found = c.with_index(|ix| {
-            ix.find_people(topic, Some(&scope), self.params.find_people.k, &off)
-        })?;
+        let found =
+            c.with_index(|ix| ix.recommend(topic, Some(&scope), &off, &self.params.find_people))?;
         Ok(found
             .persons
             .iter()

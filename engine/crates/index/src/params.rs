@@ -115,18 +115,31 @@ impl Default for ScopeWeights {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct FindPeople {
-    /// People returned at most.
-    pub k: usize,
-    /// When people are offered to the user, those scoring under this share of the best one
-    /// are left out: a crowd of weak matches is noise next to the one or two who fit.
-    pub keep_ratio: f64,
+    /// Safety bound on the people ranked at all: it guards against degenerate lists and is
+    /// not how many are offered; the cut below decides that.
+    pub max: usize,
+    /// A unit's score is divided by `1 + crowd * (persons - 1)`, `persons` being how many
+    /// people it is attributed to, so a scene counts for less than a line of one's own.
+    pub crowd: f64,
+    /// Attribution up to this many persons still counts as about the person.
+    pub solo: usize,
+    /// People at the head of the list in which a break is looked for.
+    pub window: usize,
+    /// A drop of at least this share of the score above ends the cluster.
+    pub gap: f64,
+    /// People kept when no break reaches `gap`: the head of a plateau.
+    pub plateau: usize,
 }
 
 impl Default for FindPeople {
     fn default() -> Self {
         Self {
-            k: 3,
-            keep_ratio: 0.7,
+            max: 8,
+            crowd: 0.5,
+            solo: 2,
+            window: 6,
+            gap: 0.12,
+            plateau: 3,
         }
     }
 }

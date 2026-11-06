@@ -33,6 +33,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use folio::{Folio, Unit};
+use params::FindPeople;
 use serde::{Deserialize, Serialize};
 
 pub use confidence::{Confidence, Level};
@@ -234,6 +235,16 @@ pub struct PersonMatch {
     pub person: PersonId,
     /// Best unweighted score among their own units.
     pub score: f64,
+    /// The score the list is ordered and cut by: the best own unit with its score divided
+    /// by how crowded its attribution is (`find_people.crowd`). Equals `score` when the
+    /// list was ranked without the crowd discount.
+    pub fit: f64,
+    /// Persons the reason unit is attributed to, the person included: one means the unit
+    /// is theirs alone, many means a scene they appear in.
+    pub attributed: usize,
+    /// Own matching units attributed to at most `find_people.solo` persons: evidence that
+    /// is about them rather than about a scene they stood in.
+    pub specific: usize,
     /// `score` read against `retrieve.confidence` on its own. `High` is the interjection
     /// bar (`interject.min_confidence` is the high boundary).
     pub level: Level,
@@ -252,16 +263,74 @@ pub struct People {
 }
 
 impl People {
-    /// Keep the people scoring at least `ratio` of the best one; the best always stays.
+    /// Keep the natural cluster at the head of the list.
+    ///
+    /// People are dropped first when nothing about them alone matched, or when one weak
+    /// unit is all there is ([`supported`]). The rest is cut at the largest relative drop
+    /// in `fit` within the top `p.window` ([`cluster_len`]). When no drop is large enough
+    /// nobody stands out: the head of that plateau is kept, `p.plateau` of them, and only
+    /// those with a score in the high band, or the best one when none has. The result is
+    /// one person when one clearly dominates, and never more than `p.max`.
     #[must_use]
-    pub fn most_relevant(mut self, ratio: f64) -> Self {
-        let best = self.persons.first().map_or(0.0, |p| p.score);
-        self.persons.retain(|p| p.score >= best * ratio);
+    pub fn most_relevant(mut self, p: &FindPeople) -> Self {
+        self.persons.retain(supported);
+        let fits: Vec<f64> = self.persons.iter().map(|m| m.fit).collect();
+        match cluster_len(&fits, p) {
+            Cluster::Break(n) => self.persons.truncate(n),
+            Cluster::Plateau => {
+                self.persons.truncate(p.plateau);
+                if self.persons.iter().any(|m| m.level == Level::High) {
+                    self.persons.retain(|m| m.level == Level::High);
+                } else {
+                    self.persons.truncate(1);
+                }
+            }
+        }
         self
     }
 
     pub fn get(&self, person: &str) -> Option<&PersonMatch> {
         self.persons.iter().find(|p| p.person == person)
+    }
+}
+
+/// A candidate is supported when at least one unit about them alone matched (one
+/// attributed to at most `find_people.solo` persons), and they are not carried by a single
+/// unit scoring in the low band.
+fn supported(m: &PersonMatch) -> bool {
+    m.specific > 0 && (m.matched > 1 || m.level != Level::Low)
+}
+
+/// Where the head of a list ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cluster {
+    /// The first `n` form a group set apart from the rest.
+    Break(usize),
+    /// No drop is large enough: the scores run on without a break.
+    Plateau,
+}
+
+/// The break in `fits` (best first, all positive): the largest drop between neighbours in
+/// the top `p.window`, read against the score above it, earliest on a tie, provided it is
+/// at least `p.gap`.
+pub fn cluster_len(fits: &[f64], p: &FindPeople) -> Cluster {
+    let top = &fits[..fits.len().min(p.window)];
+    let mut best: Option<(usize, f64)> = None;
+    for (i, w) in top.windows(2).enumerate() {
+        let drop = if w[0] > 0.0 {
+            (w[0] - w[1]) / w[0]
+        } else {
+            0.0
+        };
+        if drop > best.map_or(0.0, |b| b.1) {
+            best = Some((i + 1, drop));
+        }
+    }
+    match best {
+        Some((n, drop)) if drop >= p.gap => Cluster::Break(n),
+        // One candidate, or none: nothing to compare with.
+        _ if top.len() < 2 => Cluster::Break(top.len()),
+        _ => Cluster::Plateau,
     }
 }
 
@@ -558,7 +627,7 @@ impl Index {
         Ok(Some((unit, around)))
     }
 
-    /// People whose own units match `topic`, best first, at most `k` (`find_people.k`).
+    /// People whose own units match `topic`, best first, at most `k`.
     ///
     /// `scope` is the candidate set: `None` for the whole roster, or the participants of a
     /// group. `exclude` removes people the caller must never offer (disabled ones); it is
@@ -571,6 +640,45 @@ impl Index {
         scope: Option<&[PersonId]>,
         k: usize,
         exclude: &[PersonId],
+    ) -> Result<People> {
+        self.rank_people(topic, scope, k, exclude, 0.0, 1)
+    }
+
+    /// People worth offering a user for `topic`: ranked with the crowd discount, then cut
+    /// to the natural cluster at the head ([`People::most_relevant`]). `p.max` only guards
+    /// against degenerate lists.
+    pub fn recommend(
+        &self,
+        topic: &str,
+        scope: Option<&[PersonId]>,
+        exclude: &[PersonId],
+        p: &FindPeople,
+    ) -> Result<People> {
+        Ok(self.ranked(topic, scope, exclude, p)?.most_relevant(p))
+    }
+
+    /// The list [`Index::recommend`] cuts: discounted, ordered by `fit`, at most `p.max`.
+    pub fn ranked(
+        &self,
+        topic: &str,
+        scope: Option<&[PersonId]>,
+        exclude: &[PersonId],
+        p: &FindPeople,
+    ) -> Result<People> {
+        self.rank_people(topic, scope, p.max, exclude, p.crowd, p.solo)
+    }
+
+    /// `find_people` with each unit's score divided by `1 + crowd * (attributed - 1)`, so
+    /// that a scene several people stand in counts for less than a line that is one
+    /// person's. `solo` is the largest attribution that still counts as about the person.
+    fn rank_people(
+        &self,
+        topic: &str,
+        scope: Option<&[PersonId]>,
+        k: usize,
+        exclude: &[PersonId],
+        crowd: f64,
+        solo: usize,
     ) -> Result<People> {
         let (_, _, query, _) =
             self.normalise_with(topic, &Filters::default(), Normalise::Expand)?;
@@ -591,26 +699,43 @@ impl Index {
             "WITH h AS MATERIALIZED (\
                  SELECT rowid AS ord, -bm25(chunks_fts) AS score \
                  FROM chunks_fts WHERE chunks_fts MATCH ?1), \
-             p AS (\
+             a AS (\
                  SELECT u.person_id AS person, h.ord AS ord, h.score AS score, \
-                        COUNT(*) OVER (PARTITION BY u.person_id) AS matched, \
-                        ROW_NUMBER() OVER (PARTITION BY u.person_id \
-                                           ORDER BY h.score DESC, h.ord) AS r \
+                        (SELECT COUNT(*) FROM unit_persons x WHERE x.chunk_id = c.id) AS n \
                  FROM h JOIN chunks c ON c.ord = h.ord \
                         JOIN unit_persons u ON u.chunk_id = c.id \
                  WHERE (?2 IS NULL OR u.person_id IN (SELECT value FROM json_each(?2))) \
-                   AND (?3 IS NULL OR u.person_id NOT IN (SELECT value FROM json_each(?3)))) \
-             SELECT person, ord, score, matched FROM p WHERE r = 1 \
-             ORDER BY score DESC, person LIMIT ?4",
+                   AND (?3 IS NULL OR u.person_id NOT IN (SELECT value FROM json_each(?3)))), \
+             f AS (\
+                 SELECT person, ord, score, n, score / (1.0 + ?5 * (n - 1)) AS fit FROM a), \
+             p AS (\
+                 SELECT person, ord, score, n, fit, \
+                        COUNT(*) OVER (PARTITION BY person) AS matched, \
+                        SUM(n <= ?6) OVER (PARTITION BY person) AS solo, \
+                        ROW_NUMBER() OVER (PARTITION BY person \
+                                           ORDER BY fit DESC, ord) AS r \
+                 FROM f) \
+             SELECT person, ord, score, matched, fit, n, solo FROM p WHERE r = 1 \
+             ORDER BY fit DESC, person LIMIT ?4",
         )?;
         let rows = stmt.query_map(
-            rusqlite::params![expression, scope_json, exclude_json, k as i64],
+            rusqlite::params![
+                expression,
+                scope_json,
+                exclude_json,
+                k as i64,
+                crowd,
+                solo as i64
+            ],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, f64>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, f64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             },
         )?;
@@ -625,12 +750,15 @@ impl Index {
         let bands = &self.params.confidence;
         let persons = rows
             .into_iter()
-            .filter_map(|(person, ord, score, matched)| {
+            .filter_map(|(person, ord, score, matched, fit, attributed, specific)| {
                 // Several people can share one best unit, so clone rather than take.
                 let reason = units.get(&ord)?.clone();
                 Some(PersonMatch {
                     person,
                     score,
+                    fit,
+                    attributed: attributed as usize,
+                    specific: specific as usize,
                     level: confidence::level_of_score(score, bands),
                     matched: matched as usize,
                     reason,

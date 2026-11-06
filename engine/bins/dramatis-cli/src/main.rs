@@ -102,9 +102,24 @@ enum Command {
         /// Never offer these people.
         #[arg(long)]
         exclude: Vec<String>,
-        /// 0 means `find_people.k`.
+        /// Rank by raw best-unit score and show that many people, with no cut. 0 means
+        /// the recommendation: the crowd discount and the cut to the natural cluster.
         #[arg(long, default_value_t = 0)]
         k: usize,
+        /// Show the discounted list before the cut, marking who is kept.
+        #[arg(long)]
+        all: bool,
+        /// Override `find_people.crowd` · `solo` · `window` · `gap` · `plateau`, for tuning.
+        #[arg(long)]
+        crowd: Option<f64>,
+        #[arg(long)]
+        solo: Option<usize>,
+        #[arg(long)]
+        window: Option<usize>,
+        #[arg(long)]
+        gap: Option<f64>,
+        #[arg(long)]
+        plateau: Option<usize>,
     },
     /// Score retrieval against the structural benchmark.
     ///
@@ -253,7 +268,21 @@ fn main() -> Result<()> {
             among,
             exclude,
             k,
-        } => people(&folio, &topic, among, exclude, k),
+            all,
+            crowd,
+            solo,
+            window,
+            gap,
+            plateau,
+        } => {
+            let mut p = FindPeople::default();
+            p.crowd = crowd.unwrap_or(p.crowd);
+            p.solo = solo.unwrap_or(p.solo);
+            p.window = window.unwrap_or(p.window);
+            p.gap = gap.unwrap_or(p.gap);
+            p.plateau = plateau.unwrap_or(p.plateau);
+            people(&folio, &topic, among, exclude, k, all, &p)
+        }
         Command::Evaluate {
             suite,
             k,
@@ -507,19 +536,46 @@ fn people(
     among: Vec<String>,
     exclude: Vec<String>,
     k: usize,
+    all: bool,
+    p: &FindPeople,
 ) -> Result<()> {
     let index = open_index(path)?;
-    let k = if k == 0 { FindPeople::default().k } else { k };
     let scope = (!among.is_empty()).then_some(among.as_slice());
-    let found = index.find_people(topic, scope, k, &exclude)?;
+    let found = if k > 0 {
+        index.find_people(topic, scope, k, &exclude)?
+    } else if all {
+        index.ranked(topic, scope, &exclude, p)?
+    } else {
+        index.recommend(topic, scope, &exclude, p)?
+    };
+    let kept: Vec<String> = if all && k == 0 {
+        found
+            .clone()
+            .most_relevant(p)
+            .persons
+            .into_iter()
+            .map(|m| m.person)
+            .collect()
+    } else {
+        Vec::new()
+    };
     for (rank, person) in found.persons.iter().enumerate() {
+        let mark = if kept.contains(&person.person) {
+            "*"
+        } else {
+            " "
+        };
         println!(
-            "{}. {}  bm25={:.3}  {:?}  own units matched {}",
+            "{}.{} {}  bm25={:.3}  fit={:.3}  {:?}  matched {}  specific {}  attributed {}",
             rank + 1,
+            mark,
             person.person,
             person.score,
+            person.fit,
             person.level,
-            person.matched
+            person.matched,
+            person.specific,
+            person.attributed
         );
         println!(
             "   [{}] {}",

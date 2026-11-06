@@ -288,7 +288,7 @@ impl Agent {
                     .cloned()
                     .collect();
                 self.ix()
-                    .find_people(topic, Some(&scope), self.config.find_people.k, &[])?
+                    .ranked(topic, Some(&scope), &[], &self.config.find_people)?
                     .persons
                     .into_iter()
                     // Weak evidence is no reason to pull someone in.
@@ -701,10 +701,9 @@ impl Agent {
                 if let Some(p) = self.person_named(f.topic.trim(), &offer)? {
                     return self.talk_offer(turn, p.as_str(), names);
                 }
-                let people = self
-                    .ix()
-                    .find_people(&f.topic, Some(&offer), self.config.find_people.k, &[])?
-                    .most_relevant(self.config.find_people.keep_ratio);
+                let people =
+                    self.ix()
+                        .recommend(&f.topic, Some(&offer), &[], &self.config.find_people)?;
                 let here = {
                     let ch = channel::get(&self.db(), turn.channel)?;
                     (ch.kind == world::ChannelKind::Group).then(|| ch.persons())
