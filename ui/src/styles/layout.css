@@ -16,9 +16,12 @@
 .body {
   flex: 1;
   display: flex;
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* The right panel judges the room it has by this box, not by the window: see lib/breakpoints.ts. */
+  container: body / inline-size;
 }
 .main {
   flex: 1;
@@ -659,12 +662,12 @@ button.drawer-item:hover,
   grid-row: span 2;
 }
 
-/* Shrinking from full screen: the right panel closes first (and opens over the conversation
-   when asked for), then the chat list folds to pictures. Widths: lib/breakpoints.ts. */
-@media (max-width: 1100px) {
-  .body {
-    position: relative;
-  }
+/* Shrinking from full screen: the right panel gives way first, then the chat list folds to
+   pictures, and the conversation keeps its width throughout. The panel docks beside the
+   conversation only while the area beside the chat list (.body) is at least DOCK_MIN_REM
+   wide, so it never squeezes the conversation below CHAT_MIN_REM; narrower, it is closed
+   and opens over the conversation when asked for. Numbers: lib/breakpoints.ts. */
+@container body (max-width: 56rem) {
   .drawer {
     position: absolute;
     top: 0;
@@ -673,6 +676,12 @@ button.drawer-item:hover,
     z-index: 20;
     width: min(var(--info-w), 100%);
     box-shadow: var(--shadow-menu);
+  }
+}
+@container body (max-width: 34rem) {
+  .drawer {
+    width: 100%;
+    border-left: none;
   }
 }
 @media (max-width: 900px) {
@@ -688,12 +697,6 @@ button.drawer-item:hover,
   button.chat-row {
     justify-content: center;
     padding: var(--s-2) 0;
-  }
-}
-@media (max-width: 720px) {
-  .drawer {
-    width: 100%;
-    border-left: none;
   }
 }
 
@@ -791,26 +794,32 @@ button.square.danger {
 .dialog.group-card {
   padding: 0;
 }
+/* The settings card is one size for the main page and every sub-page: only the body scrolls. */
 .dialog.settings-card {
   width: min(var(--card-w), 100%);
+  height: min(var(--settings-h), 90vh);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .settings-bar {
   flex: none;
   padding: var(--s-3) var(--s-3) var(--s-2) var(--s-4);
+  border-bottom: 1px solid var(--line);
 }
-.settings-root,
-.settings-page {
-  flex: 0 1 auto;
-  overflow-y: auto;
+.settings-shell {
+  flex: 1 1 0;
   min-height: 0;
-}
-.settings-page {
-  padding: var(--s-3) 0 var(--s-5);
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+}
+.settings-scroll:focus {
+  outline: none;
+}
+.settings-scroll {
+  flex: 1 1 0;
+  overflow-y: auto;
+  min-height: 0;
 }
 button.settings-head {
   display: flex;
@@ -828,19 +837,39 @@ button.settings-head {
 button.settings-head .avatar {
   --size: var(--avatar-row);
 }
-.settings-list {
-  padding: var(--s-1) 0;
+button.settings-head:hover {
+  background: var(--hover);
 }
-.settings-gap {
-  border-top: var(--s-3) solid var(--line);
+.settings-head .left-who {
+  flex: 1;
+  min-width: 0;
 }
-.settings-row {
+
+/* ---- the parts of a settings page (ui/SettingsKit.tsx) ---- */
+/* Sections are told apart by a band, as in a desktop messenger's settings: no boxes. */
+.sx {
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-1) 0 var(--s-2);
+}
+.sx + .sx,
+.settings-head + .sx {
+  border-top: var(--s-3) solid var(--bg);
+}
+.sx-title {
+  margin: 0;
+  padding: var(--s-3) var(--s-4) var(--s-1);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-strong);
+}
+.sx-row {
   display: flex;
   align-items: center;
-  gap: var(--s-4);
+  gap: var(--s-3);
   width: 100%;
   min-height: var(--row-s);
-  padding: 0 var(--s-4);
+  padding: var(--s-1) var(--s-4);
   background: none;
   border: none;
   border-radius: 0;
@@ -848,19 +877,41 @@ button.settings-head .avatar {
   font-weight: var(--fw);
   text-align: left;
   justify-content: flex-start;
+  cursor: pointer;
 }
-button.settings-row:hover,
-label.settings-row:hover {
+.sx-plain {
+  cursor: default;
+}
+button.sx-row:hover:not(:disabled),
+label.sx-row:hover {
   background: var(--hover);
 }
-.settings-row svg {
+button.sx-row:focus-visible,
+label.sx-row:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.sx-lead {
+  flex: none;
+  display: inline-flex;
+  width: 1.6rem;
+  justify-content: center;
   color: var(--muted);
 }
-.settings-label {
+.sx-lead:empty {
+  display: none;
+}
+.sx-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
-.settings-value {
+.sx-hint {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.sx-value {
   flex: none;
   max-width: 45%;
   overflow: hidden;
@@ -868,50 +919,66 @@ label.settings-row:hover {
   white-space: nowrap;
   color: var(--accent);
 }
-.settings-row svg {
+.sx-go {
   flex: none;
+  display: inline-flex;
+  color: var(--muted);
+  transform: rotate(-90deg);
+}
+.sx-act .sx-label {
+  color: var(--accent);
+}
+.sx-danger .sx-label,
+.sx-danger .sx-lead {
+  color: var(--danger);
+}
+.sx-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.sx-note {
+  margin: 0;
+  padding: var(--s-2) var(--s-4) 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.sx-note.sx-flush {
+  padding-inline: 0;
+}
+.sx-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
+}
+.sx-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-4);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.sx-field input,
+.sx-field select {
+  color: var(--ink);
+  font-size: var(--fs-md);
+  min-width: 0;
+}
+.sx-pair {
+  display: flex;
+  gap: var(--s-4);
+  padding: var(--s-1) var(--s-4);
+}
+.sx-pair .sx-field {
+  flex: 1;
+  padding: 0;
 }
 .dialog.contacts-card {
   width: min(var(--card-w), 100%);
   height: min(44rem, 90vh);
   display: flex;
   flex-direction: column;
-}
-.contacts-search {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  padding: var(--s-3) var(--s-4);
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
-}
-.contacts-search input {
-  flex: 1;
-  border: none;
-  background: none;
-  box-shadow: none;
-  padding: var(--s-2) 0;
-}
-.contacts-list {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-}
-button.contact-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--s-3);
-  width: 100%;
-  background: none;
-  border: none;
-  border-radius: 0;
-  color: var(--ink);
-  text-align: left;
-  padding: var(--s-2) var(--s-4);
-}
-button.contact-row:hover:not(:disabled) {
-  background: var(--hover);
 }
 .text-actions {
   display: flex;
@@ -1004,4 +1071,108 @@ button.camera-big img {
 }
 .person-page.in-card {
   padding: var(--s-4) var(--s-5) var(--s-5);
+}
+/* A form placed in a section's body keeps its own gutter; choice rows inside it reach the card's edges. */
+.sx-body .sx-choices {
+  margin-inline: calc(var(--s-4) * -1);
+}
+.sx > .field-group {
+  padding: var(--s-1) var(--s-4);
+}
+/* On the first-run and picker cards the same sections reach the card's edges, as in the settings card. */
+.card .sx,
+.card > .sx-choices {
+  margin-inline: calc(var(--s-4) * -1);
+}
+
+/* ---- people: rows, and a search field over them (screens/PeopleList.tsx) ---- */
+.people-search {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.people-search-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.people-search-bar input {
+  flex: 1;
+  border: none;
+  background: none;
+  box-shadow: none;
+  padding: var(--s-2) 0;
+}
+.people-search-bar button {
+  flex: none;
+}
+.people-list {
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.people-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-width: 0;
+}
+.people-list li > .round {
+  flex: none;
+}
+.people-search .people-list {
+  flex: 1;
+}
+/* in a dialog the list is a window of its own height; the contacts card gives it the card */
+.dialog:not(.contacts-card) .people-list {
+  max-height: min(22rem, 45vh);
+}
+button.person-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--s-3);
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  font-weight: var(--fw);
+  text-align: left;
+  white-space: normal;
+  padding: var(--s-2) var(--s-3);
+}
+button.person-row-l {
+  padding-inline: var(--s-4);
+}
+button.person-row:hover:not(:disabled),
+button.person-row:focus-visible {
+  background: var(--hover);
+}
+.person-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: var(--lh-tight);
+}
+.person-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.person-sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

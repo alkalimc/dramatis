@@ -4,7 +4,7 @@ import { useT } from "./i18n";
 import { createActions, createStore, Provider, subscribe, useActions, useDispatch, useStore, type Drawer, type Page, type Store } from "./store";
 import { ErrorBar, InlineError } from "./ui/ErrorBar";
 import { unreadOf } from "./lib/chats";
-import { PANEL_CLOSES } from "./lib/breakpoints";
+import { DOCK_MIN_REM } from "./lib/breakpoints";
 import { inLibrary } from "./lib/library";
 import { readFresh } from "./lib/fresh";
 import { isDark } from "./lib/prefs";
@@ -92,7 +92,8 @@ function Shell() {
   const modelMissing = endpoints !== null && needsSetup(endpoints);
   usePresence();
   useTheme();
-  useNarrowPanel();
+  const [body, setBody] = useState<HTMLElement | null>(null);
+  useNarrowPanel(body);
   // Native controls and screen readers follow the document's language.
   const locale = t("locale");
   useEffect(() => {
@@ -164,7 +165,7 @@ function Shell() {
       {full && <ChatList />}
       <div className="stage">
         {wordingError && <p className="banner">{t("app.wording.failed")}</p>}
-        <div className="body">
+        <div className="body" ref={setBody}>
           <Main />
           {drawer && drawer.kind !== "system" && drawer.kind !== "contacts" && <DrawerPane drawer={drawer} />}
         </div>
@@ -215,23 +216,27 @@ function useTheme() {
 }
 
 /**
- * Below this width the right panel is closed and opens over the conversation instead of
- * beside it; the chat list folds to pictures further down (see `layout.css`, same numbers).
+ * Shrinking the window closes the right panel first (the chat list folds after that, see
+ * `layout.css`). The panel docks only while the box it sits in, beside the chat list, is
+ * `DOCK_MIN_REM` wide; when that box gets narrower than this, an open panel is closed once
+ * and can then be opened again as an overlay. The same number is the container query in
+ * the stylesheet, so what is seen and what is closed agree.
  */
-const NARROW = `(max-width: ${PANEL_CLOSES}px)`;
-
-/** Shrinking the window closes the right panel first; the chat list folds after that. */
-function useNarrowPanel() {
+function useNarrowPanel(body: HTMLElement | null) {
   const dispatch = useDispatch();
   useEffect(() => {
-    if (typeof matchMedia !== "function") return;
-    const query = matchMedia(NARROW);
-    const onChange = () => {
-      if (query.matches) dispatch({ type: "narrow" });
-    };
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, [dispatch]);
+    if (!body || typeof ResizeObserver !== "function") return;
+    let docked: boolean | null = null;
+    const watch = new ResizeObserver((entries) => {
+      const width = entries[entries.length - 1]?.contentRect.width ?? 0;
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 15;
+      const now = width >= DOCK_MIN_REM * rem;
+      if (docked === true && !now) dispatch({ type: "narrow" });
+      docked = now;
+    });
+    watch.observe(body);
+    return () => watch.disconnect();
+  }, [body, dispatch]);
 }
 
 // Settings live in the hamburger's drawer, not on the rail. The four sections are peers:

@@ -1,5 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 import { renderApp } from "./test/render";
 
 test("full form: header clock, waiting panel, host channel with action lines", async () => {
@@ -124,7 +125,7 @@ test("library form: not-connected notice, search, roster", async () => {
   await user.click(screen.getByRole("button", { name: "Search" }));
   expect(await screen.findByText("Dock Routes · Upper Town")).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Set up now" }));
-  expect(await screen.findByRole("heading", { name: "Endpoints" })).toBeDefined();
+  expect(await screen.findByRole("region", { name: "Models and endpoints" })).toBeDefined();
 });
 
 test("library: always reachable from the rail, filtered search, a unit read with its neighbours", async () => {
@@ -186,7 +187,7 @@ test("endpoints: a failed check shows the endpoint's own text, a manual field, a
   await screen.findByRole("heading", { name: "Who's waiting" });
   await user.click(screen.getByRole("button", { name: "Menu" }));
   await user.click(within(await screen.findByRole("complementary", { name: "Menu" })).getByRole("button", { name: "Settings" }));
-  await user.click(await screen.findByRole("button", { name: "Endpoints" }));
+  await user.click(await screen.findByRole("button", { name: "Models and endpoints" }));
   const card = (await screen.findByRole("heading", { name: "deepseek" })).closest("li")!;
   expect(within(card).getByText("No key stored")).toBeDefined();
   await user.click(within(card).getByRole("button", { name: "Edit deepseek" }));
@@ -260,30 +261,40 @@ test("the four sections are peers: exactly one is lit, and a chat opened from a 
   expect(lit()).toEqual(["Chats"]);
 });
 
-test("shrinking the window closes the right panel, and opening it again floats it over the chat", async () => {
+test("when the area beside the chat list gets too narrow for the panel, the panel closes and the chat stays", async () => {
   const user = userEvent.setup();
-  const listeners = new Set<() => void>();
-  const narrow = { matches: false };
-  const original = window.matchMedia;
-  window.matchMedia = ((query: string) => ({
-    get matches() {
-      return query.includes("max-width") && narrow.matches;
-    },
-    media: query,
-    addEventListener: (_: string, f: () => void) => listeners.add(f),
-    removeEventListener: (_: string, f: () => void) => listeners.delete(f),
-  })) as unknown as typeof window.matchMedia;
+  const watchers = new Set<(entries: { contentRect: { width: number } }[]) => void>();
+  class FakeObserver {
+    constructor(private readonly f: (entries: { contentRect: { width: number } }[]) => void) {
+      watchers.add(f);
+    }
+    observe() {}
+    disconnect() {
+      watchers.delete(this.f);
+    }
+  }
+  const report = (width: number) => act(() => watchers.forEach((f) => f([{ contentRect: { width } }])));
+  vi.stubGlobal("ResizeObserver", FakeObserver);
   try {
     renderApp();
     await screen.findByRole("heading", { name: "Who's waiting" });
+    // Roomy: 56 rems of 15px is where the panel stops docking.
+    report(1000);
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(await screen.findByRole("complementary")).toBeDefined();
-    narrow.matches = true;
-    act(() => listeners.forEach((f) => f()));
+    report(900);
+    expect(screen.getByRole("complementary")).toBeDefined();
+    report(700);
     await waitFor(() => expect(screen.queryByRole("complementary")).toBeNull());
-    // The chat list is untouched by this step; folding it is the stylesheet's, further down.
+    // The chat and its list are untouched by this step; folding the list is the stylesheet's, further down.
     expect(screen.getByRole("navigation", { name: "Chats" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Who's waiting" })).toBeDefined();
+    // Opened again while narrow, the panel stays until asked to go (it floats over the chat).
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+    expect(await screen.findByRole("complementary")).toBeDefined();
+    report(650);
+    expect(screen.getByRole("complementary")).toBeDefined();
   } finally {
-    window.matchMedia = original;
+    vi.unstubAllGlobals();
   }
 });

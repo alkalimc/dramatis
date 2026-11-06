@@ -1,9 +1,9 @@
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { PersonRef } from "../api";
 import { useT } from "../i18n";
 import { HOST_ID } from "../ui/Avatar";
 import { useStore } from "../store";
-import { PeopleList } from "./PeopleList";
+import { PeopleSearch, personEntry } from "./PeopleList";
 
 /**
  * Pick someone from the roster by name. Disabled people are not offered: for any purpose
@@ -22,7 +22,6 @@ export function PersonPicker({
   withHost?: boolean;
 }) {
   const t = useT();
-  const id = useId();
   const roster = useStore((s) => s.roster);
   const [q, setQ] = useState("");
   const people = useMemo(
@@ -38,10 +37,15 @@ export function PersonPicker({
   const all = withHost && !exclude.includes(HOST_ID) ? [{ id: HOST_ID, name: host }, ...people] : people;
   const shown = all.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
   return (
-    <div className="picker">
-      <label htmlFor={id}>{label}</label>
-      <input id={id} type="search" value={q} placeholder={t("person_picker.search")} onChange={(e) => setQ(e.target.value)} />
-      <PeopleList people={shown} label={label} empty={t("person_picker.none")} onPick={onPick} />
-    </div>
+    <PeopleSearch
+      value={q}
+      onChange={setQ}
+      placeholder={t("person_picker.search")}
+      label={label}
+      listLabel={label}
+      entries={shown.map((p) => personEntry(p))}
+      empty={t("person_picker.none")}
+      onPick={(e) => onPick(e.value as PersonRef)}
+    />
   );
 }

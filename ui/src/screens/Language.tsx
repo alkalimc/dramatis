@@ -2,6 +2,7 @@ import { useId } from "react";
 import type { InterfaceLanguage } from "../api";
 import { useT } from "../i18n";
 import { useActions, useStore } from "../store";
+import { Choices, Note, Row, Section } from "../ui/SettingsKit";
 
 const CHOICES: { value: InterfaceLanguage; label: "lang.corpus" | "lang.english" }[] = [
   { value: "corpus", label: "lang.corpus" },
@@ -15,15 +16,11 @@ export function LanguageChoice({ legend }: { legend: string }) {
   const language = useStore((s) => s.language);
   const name = useId();
   return (
-    <fieldset className="language">
-      <legend>{legend}</legend>
+    <Choices label={legend}>
       {CHOICES.map((c) => (
-        <label key={c.value} className="switch">
-          <input type="radio" name={name} checked={language === c.value} onChange={() => void actions.setInterfaceLanguage(c.value)} />
-          <span>{t(c.label)}</span>
-        </label>
+        <Row key={c.value} kind="choice" group={name} checked={language === c.value} onChange={() => void actions.setInterfaceLanguage(c.value)} label={t(c.label)} />
       ))}
-    </fieldset>
+    </Choices>
   );
 }
 
@@ -31,9 +28,9 @@ export function LanguageChoice({ legend }: { legend: string }) {
 export function LanguagePage() {
   const t = useT();
   return (
-    <section>
+    <Section title={t("settings.page.language")}>
       <LanguageChoice legend={t("settings.page.language")} />
-      <p className="muted small">{t("lang.hint")}</p>
-    </section>
+      <Note>{t("lang.hint")}</Note>
+    </Section>
   );
 }

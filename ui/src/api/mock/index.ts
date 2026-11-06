@@ -184,6 +184,8 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   if (params.get("drift") === "1") stamps.set("second try", { app: "1.0.9", pack: "demo", pack_version: "0.9.0", schema: 9 });
   // `?migrate=1`: "second try" is from an earlier release (data format 7); `?newer=1`: from a newer app.
   if (params.get("migrate") === "1") stamps.set("second try", { app: "1.1.0", pack: "demo", pack_version: "0.9.0", schema: 7 });
+  // `?unrecorded=1`: "second try" is a format-7 save with no version record at all.
+  if (params.get("unrecorded") === "1") stamps.set("second try", { app: null, pack: null, pack_version: null, schema: 7 });
   if (params.get("newer") === "1") stamps.set("second try", { app: "9.0.0", pack: "demo", pack_version: "0.9.0", schema: 10 });
   const migrateCommand = (name: string) => `dramatis-migrate "/Users/demo/.dramatis/saves/${name}.sqlite" --in-place`;
   /** The two caches the user may clear; the other kinds are fixed sizes. */

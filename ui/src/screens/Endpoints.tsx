@@ -3,6 +3,7 @@ import { type EndpointsView, type ProfileView, type Role, type RoleKind } from "
 import { useT } from "../i18n";
 import { useActions, useApi, useDispatch, useStore } from "../store";
 import { InlineError } from "../ui/ErrorBar";
+import { Body, Field, Note, Row, Section } from "../ui/SettingsKit";
 import { EndpointEditor, isLocal } from "./EndpointEditor";
 import { EndpointTester } from "./EndpointTest";
 
@@ -37,33 +38,33 @@ export function EndpointsPage() {
   };
 
   return (
-    <section className="endpoints" aria-labelledby="endpoints-h">
-      <h3 id="endpoints-h">{t("endpoints.title")}</h3>
-      {loadError && <InlineError error={loadError} onRetry={() => void actions.refreshEndpoints()} />}
+    <>
+      {loadError && (
+        <Body>
+          <InlineError error={loadError} onRetry={() => void actions.refreshEndpoints()} />
+        </Body>
+      )}
       {listed.length > 0 && <Roles view={view} onNetwork={toNetwork} />}
-      <section className="profiles-section" aria-labelledby="endpoints-list-h">
-        <header className="row">
-          <h4 id="endpoints-list-h">{t("endpoints.list")}</h4>
-          <span className="spacer" />
-          {!open && (
-            <button type="button" className="ghost" onClick={() => setAdding(true)}>
-              + {t("endpoints.add")}
-            </button>
-          )}
-        </header>
-        {open && (
-          <div className="card add">
-            {view.profiles.length === 0 && <p className="muted">{t("endpoints.empty")}</p>}
-            <EndpointEditor view={view} focus={adding} onSaved={setDraft} onNetwork={toNetwork} onDone={close} onCancel={view.profiles.length > 0 ? close : undefined} />
-          </div>
+      <Section title={t("endpoints.list")}>
+        {open ? (
+          <Body>
+            <div className="card add">
+              {view.profiles.length === 0 && <p className="muted">{t("endpoints.empty")}</p>}
+              <EndpointEditor view={view} focus={adding} onSaved={setDraft} onNetwork={toNetwork} onDone={close} onCancel={view.profiles.length > 0 ? close : undefined} />
+            </div>
+          </Body>
+        ) : (
+          <Row kind="button" icon="plus" label={t("endpoints.add")} onClick={() => setAdding(true)} />
         )}
-        <ul className="profiles">
-          {listed.map((p) => (
-            <ProfileCard key={p.profile.name} view={p} all={view} onNetwork={toNetwork} />
-          ))}
-        </ul>
-      </section>
-    </section>
+        <Body>
+          <ul className="profiles">
+            {listed.map((p) => (
+              <ProfileCard key={p.profile.name} view={p} all={view} onNetwork={toNetwork} />
+            ))}
+          </ul>
+        </Body>
+      </Section>
+    </>
   );
 }
 
@@ -172,86 +173,55 @@ function Roles({ view, onNetwork }: { view: EndpointsView; onNetwork: () => void
   ];
 
   return (
-    <section className="roles" aria-labelledby={`${id}-h`}>
-      <h4 id={`${id}-h`}>{t("endpoints.roles")}</h4>
-      <table className="roles-table" aria-describedby={`${id}-hint`}>
-        <thead>
-          <tr>
-            <th scope="col">{t("endpoints.role")}</th>
-            <th scope="col">{t("endpoints.model")}</th>
-            <th scope="col">{t("endpoints.reasoning")}</th>
-            <th scope="col">{t("endpoints.test.col")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ kind, role, none, reasoning }) => {
-            const label = t(`endpoints.role.${kind}`);
-            const current = roles?.[kind] ?? null;
-            // Without a chat role nothing else can be set.
-            const off = !roles && kind !== "chat";
-            return (
-              <tr key={kind}>
-                <th scope="row">
-                  <label htmlFor={`${id}-${kind}`}>{label}</label>
-                </th>
-                <td>
-                  <select
-                    id={`${id}-${kind}`}
-                    disabled={off}
-                    value={keyOf(role)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (!v && kind === "chat") return;
-                      void setRole(kind, v ? { ...parse(v), reasoning: reasoning ? (current?.reasoning ?? null) : undefined } : null);
-                    }}
-                  >
-                    {none !== null && <option value="">{none}</option>}
-                    {withCurrent(role).map((o) => (
-                      <option key={keyOf(o)} value={keyOf(o)}>
-                        {o.profile} · {o.model}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  {reasoning ? (
-                    <select
-                      aria-label={t("endpoints.reasoning.of", { role: label })}
-                      disabled={!current}
-                      value={current?.reasoning ?? ""}
-                      onChange={(e) => current && void setRole(kind, { ...current, reasoning: e.target.value || null })}
-                    >
-                      <option value="">{t("endpoints.reasoning.default")}</option>
-                      {REASONING.map((r) => (
-                        <option key={r} value={r}>
-                          {t(`endpoints.reasoning.${r}`)}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span className="muted" aria-hidden="true">
-                      –
-                    </span>
-                  )}
-                </td>
-                <td>
-                  {current && kind !== "tts" ? (
-                    <EndpointTester profile={current.profile} model={current.model} label={t("endpoints.test.of", { role: label })} onNetwork={onNetwork} />
-                  ) : (
-                    <span className="muted" aria-hidden="true">
-                      –
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {options.length === 0 && <p className="muted small">{t("endpoints.roles.empty")}</p>}
-      <p id={`${id}-hint`} className="muted small">
-        {t("endpoints.reasoning.hint")}
-      </p>
-    </section>
+    <Section className="roles" title={t("endpoints.roles")}>
+      {rows.map(({ kind, role, none, reasoning }) => {
+        const label = t(`endpoints.role.${kind}`);
+        const current = roles?.[kind] ?? null;
+        // Without a chat role nothing else can be set.
+        const off = !roles && kind !== "chat";
+        return (
+          <div key={kind} className="role">
+            <Field label={label} htmlFor={`${id}-${kind}`}>
+              <select
+                id={`${id}-${kind}`}
+                disabled={off}
+                value={keyOf(role)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v && kind === "chat") return;
+                  void setRole(kind, v ? { ...parse(v), reasoning: reasoning ? (current?.reasoning ?? null) : undefined } : null);
+                }}
+              >
+                {none !== null && <option value="">{none}</option>}
+                {withCurrent(role).map((o) => (
+                  <option key={keyOf(o)} value={keyOf(o)}>
+                    {o.profile} · {o.model}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {reasoning && (
+              <Field label={t("endpoints.reasoning")} htmlFor={`${id}-${kind}-r`}>
+                <select id={`${id}-${kind}-r`} aria-label={t("endpoints.reasoning.of", { role: label })} disabled={!current} value={current?.reasoning ?? ""} onChange={(e) => current && void setRole(kind, { ...current, reasoning: e.target.value || null })}>
+                  <option value="">{t("endpoints.reasoning.default")}</option>
+                  {REASONING.map((r) => (
+                    <option key={r} value={r}>
+                      {t(`endpoints.reasoning.${r}`)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {current && kind !== "tts" && (
+              <Body>
+                <EndpointTester profile={current.profile} model={current.model} label={t("endpoints.test.of", { role: label })} onNetwork={onNetwork} />
+              </Body>
+            )}
+          </div>
+        );
+      })}
+      {options.length === 0 && <Note>{t("endpoints.roles.empty")}</Note>}
+      <Note>{t("endpoints.reasoning.hint")}</Note>
+    </Section>
   );
 }

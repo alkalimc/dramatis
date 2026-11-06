@@ -2,22 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { settle, type Failure, type SaveInfo } from "../api";
 import { useT } from "../i18n";
 import { useActions, useApi } from "../store";
-import { Icon, type IconName } from "../ui/Icon";
+import { Body, Note, Row, Section } from "../ui/SettingsKit";
 import { PasswordError, UnderlineField } from "./Unlock";
 
 type View = "root" | "manage" | "on" | "change" | "off";
-
-function Row({ icon, label, value, onClick }: { icon: IconName; label: string; value?: string; onClick: () => void }) {
-  return (
-    <li>
-      <button type="button" className="settings-row" onClick={onClick}>
-        <Icon name={icon} size={24} />
-        <span className="settings-label">{label}</span>
-        {value && <span className="settings-value">{value}</span>}
-      </button>
-    </li>
-  );
-}
 
 /** Privacy and security: the open save's password, on or off, changed, removed. */
 export function PrivacyPage() {
@@ -45,23 +33,18 @@ export function PrivacyPage() {
 
   if (view === "root" || view === "manage") {
     return (
-      <section className="privacy">
-        <h3 className="section-title">{t("privacy.section")}</h3>
-        <ul className="settings-list">
-          {view === "root" || !encrypted ? (
-            <Row icon="lock" label={t("privacy.password")} value={saves ? (encrypted ? t("privacy.on") : t("privacy.off")) : undefined} onClick={() => setView(encrypted ? "manage" : "on")} />
-          ) : (
-            <>
-              <Row icon="lock" label={t("privacy.change")} onClick={() => setView("change")} />
-              <Row icon="trash" label={t("privacy.remove")} onClick={() => setView("off")} />
-            </>
-          )}
-        </ul>
-        <p className="muted small privacy-hint">{t("privacy.scope")}</p>
-        <p role="status" className="muted privacy-note">
-          {note}
-        </p>
-      </section>
+      <Section title={t("privacy.section")}>
+        {view === "root" || !encrypted ? (
+          <Row icon="lock" label={t("privacy.password")} value={saves ? (encrypted ? t("privacy.on") : t("privacy.off")) : undefined} onClick={() => setView(encrypted ? "manage" : "on")} />
+        ) : (
+          <>
+            <Row icon="lock" label={t("privacy.change")} onClick={() => setView("change")} />
+            <Row kind="button" icon="trash" tone="danger" label={t("privacy.remove")} onClick={() => setView("off")} />
+          </>
+        )}
+        <Note>{t("privacy.scope")}</Note>
+        <Note role="status">{note}</Note>
+      </Section>
     );
   }
   return (
@@ -90,6 +73,8 @@ function PasswordForm({ mode, back, onDone }: { mode: "on" | "change" | "off"; b
   const ready = (!needsOld || old !== "") && (!needsNew || (next !== "" && next === again)) && (mode !== "on" || understood);
 
   return (
+    <Section title={t(`privacy.${mode}.title`)}>
+    <Body>
     <form
       className="privacy-form"
       onSubmit={async (e) => {
@@ -108,7 +93,6 @@ function PasswordForm({ mode, back, onDone }: { mode: "on" | "change" | "off"; b
       <button type="button" className="link" onClick={back}>
         {t("chatlist.back")}
       </button>
-      <h3>{t(`privacy.${mode}.title`)}</h3>
       <p className="muted">{t(`privacy.${mode}.hint`)}</p>
       {mode === "on" && (
         <label className="check-row">
@@ -129,5 +113,7 @@ function PasswordForm({ mode, back, onDone }: { mode: "on" | "change" | "off"; b
         {t("privacy.submit")}
       </button>
     </form>
+    </Body>
+    </Section>
   );
 }

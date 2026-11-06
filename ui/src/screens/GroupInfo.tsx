@@ -4,10 +4,11 @@ import { useT, useUserName } from "../i18n";
 import { groupTitle } from "../lib/chats";
 import { readAvatar } from "../lib/image";
 import { useActions, useApi, useDispatch, useStore } from "../store";
-import { Avatar, ChannelAvatar, HOST_ID, UserAvatar } from "../ui/Avatar";
+import { ChannelAvatar, HOST_ID, UserAvatar } from "../ui/Avatar";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { ModeSwitch } from "../ui/ModeSwitch";
+import { PeopleList, personEntry } from "./PeopleList";
 import { PersonPicker } from "./PersonPicker";
 import { PictureButtons } from "./Profile";
 
@@ -162,34 +163,30 @@ export function GroupInfo({ id }: { id: string }) {
 
       <section className="info-section">
         <h3>{t("group.members")}</h3>
-        <ul className="member-list">
-          {/* The user comes first and cannot be taken out. */}
-          <li>
-            <button type="button" className="member" onClick={() => dispatch({ type: "profile", mode: "view" })}>
-              <UserAvatar size="m" />
-              <span className="member-text">
-                <span>{me}</span>
-                <span className="muted small">{t("group.members.you")}</span>
-              </span>
-            </button>
-          </li>
-          {group.participants.map((p) => (
-            <li key={p.id}>
-              <button type="button" className="member" onClick={() => dispatch({ type: "drawer", drawer: p.id === HOST_ID ? { kind: "host" } : { kind: "person", id: p.id } })}>
-                <Avatar person={p} size="m" />
-                <span className="member-text">
-                  <span>{p.name}</span>
-                  {modeOf.get(p.id) && <span className="muted small">{t(`mode.${modeOf.get(p.id)!}`)}</span>}
-                </span>
-              </button>
-              {group.participants.length > 1 && (
-                <button type="button" className="round small" aria-label={t("group.members.remove", { name: p.name })} title={t("group.members.remove", { name: p.name })} onClick={() => void takeOut(p)}>
-                  <Icon name="close" size={16} />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        {/* The user comes first and cannot be taken out. */}
+        <PeopleList
+          bare
+          label={t("group.members")}
+          empty=""
+          entries={[
+            { key: "you", name: me, avatar: <UserAvatar size="m" />, secondary: t("group.members.you") },
+            ...group.participants.map((p) =>
+              personEntry(p, {
+                secondary: modeOf.get(p.id) ? t(`mode.${modeOf.get(p.id)!}`) : undefined,
+                trailing:
+                  group.participants.length > 1 ? (
+                    <button type="button" className="round small" aria-label={t("group.members.remove", { name: p.name })} title={t("group.members.remove", { name: p.name })} onClick={() => void takeOut(p)}>
+                      <Icon name="close" size={16} />
+                    </button>
+                  ) : undefined,
+              }),
+            ),
+          ]}
+          onPick={(e) => {
+            if (e.key === "you") dispatch({ type: "profile", mode: "view" });
+            else dispatch({ type: "drawer", drawer: e.key === HOST_ID ? { kind: "host" } : { kind: "person", id: e.key } });
+          }}
+        />
         <button type="button" className="ghost" onClick={() => setAdding(true)}>
           {t("group.members.add")}
         </button>

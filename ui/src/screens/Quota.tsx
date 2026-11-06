@@ -4,6 +4,7 @@ import { useT } from "../i18n";
 import { when } from "../lib/format";
 import { quotaExhaustedLine } from "../lib/quota";
 import { useActions, useApi, useStore } from "../store";
+import { Body, Choices, Note, Row, Section } from "../ui/SettingsKit";
 
 /** The choices for happenings a day: 0 up to what the intensity allows. */
 const eventCounts = (max: number) => Array.from({ length: max + 1 }, (_, n) => n);
@@ -23,60 +24,47 @@ export function QuotaPanel({ quota, onTier, children }: { quota: QuotaStatus; on
   const total = quota.spent.reduce((n, s) => n + (s.calls ?? 0), 0);
 
   return (
-    <section className="quota" aria-labelledby={`${id}-h`}>
-      <h3 id={`${id}-h`}>{t("quota.title")}</h3>
-      <fieldset className="mode mode-none tier">
-        <legend>{t("quota.tier")}</legend>
-        <div className="mode-options">
+    <>
+      <Section title={t("quota.title")}>
+        <Choices label={t("quota.tier")}>
           {TIERS.map((tier) => (
-            <label key={tier} className="mode-choice">
-              <input type="radio" name={id} value={tier} checked={tier === quota.tier} onChange={() => onTier(tier)} />
-              <span>{t(`quota.tier.${tier}`)}</span>
-            </label>
+            <Row key={tier} kind="choice" group={id} checked={tier === quota.tier} onChange={() => onTier(tier)} label={t(`quota.tier.${tier}`)} />
           ))}
-        </div>
-      </fieldset>
+        </Choices>
+        <Note>{t("quota.pacing", { visits: quota.visits_per_day, events: quota.events_max })}</Note>
+        {children}
+      </Section>
 
-      <p className="muted small">{t("quota.pacing", { visits: quota.visits_per_day, events: quota.events_max })}</p>
-      {children}
+      <Section title={t("quota.window")}>
+        {quota.tier === "ultra" ? (
+          <Note>{t("quota.ultra")}</Note>
+        ) : (
+          <>
+            {quota.window && (
+              <Body className="window">
+                <meter min={0} max={1} low={0.8} high={0.99} optimum={0} value={Math.min(quota.window.used ?? 0, 1)} aria-label={t("quota.window")} />
+                <span>{t("quota.used", { percent: Math.round((quota.window.used ?? 0) * 100) })}</span>
+              </Body>
+            )}
+            <Body>
+              <p className={`band band-${quota.band}`} data-band={quota.band}>
+                {t(`quota.band.${quota.band}`)}
+              </p>
+              {exhaustedLine && <p className="host-line">{exhaustedLine}</p>}
+              {quota.band !== "open" && quota.window?.release_at && <p className="muted">{t("quota.release", { when: when(quota.window.release_at, t) })}</p>}
+            </Body>
+          </>
+        )}
+      </Section>
 
-      {quota.tier === "ultra" ? (
-        <p className="band">{t("quota.ultra")}</p>
-      ) : (
-        <>
-          {quota.window && (
-            <dl className="windows">
-              <div className="window">
-                <dt>{t("quota.window")}</dt>
-                <dd>
-                  <meter min={0} max={1} low={0.8} high={0.99} optimum={0} value={Math.min(quota.window.used ?? 0, 1)} aria-label={t("quota.window")} />
-                  <span>{t("quota.used", { percent: Math.round((quota.window.used ?? 0) * 100) })}</span>
-                </dd>
-              </div>
-            </dl>
-          )}
-          <p className={`band band-${quota.band}`} data-band={quota.band}>
-            {t(`quota.band.${quota.band}`)}
-          </p>
-          {exhaustedLine && <p className="host-line">{exhaustedLine}</p>}
-          {quota.band !== "open" && quota.window?.release_at && <p className="muted">{t("quota.release", { when: when(quota.window.release_at, t) })}</p>}
-        </>
-      )}
-
-      <h4>{t("quota.spent")}</h4>
-      {total === 0 ? (
-        <p className="muted">{t("quota.spent.empty")}</p>
-      ) : (
-        <ul className="spend">
-          {quota.spent.map((s) => (
-            <li key={s.shape}>
-              <span>{t(`quota.shape.${s.shape}`)}</span>
-              <span className="muted">{Math.round(((s.calls ?? 0) / total) * 100)}%</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+      <Section title={t("quota.spent")}>
+        {total === 0 ? (
+          <Note>{t("quota.spent.empty")}</Note>
+        ) : (
+          quota.spent.map((s) => <Row key={s.shape} kind="info" label={t(`quota.shape.${s.shape}`)} value={<span className="muted">{Math.round(((s.calls ?? 0) / total) * 100)}%</span>} />)
+        )}
+      </Section>
+    </>
   );
 }
 
@@ -117,7 +105,6 @@ function TimeInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings) => void }) {
   const t = useT();
-  const id = useId();
   // The engine fills the default hours on first run; re-enabling restores the last ones.
   const [last, setLast] = useState<QuietHours>(settings.quiet_hours ?? { from: "", to: "" });
   const [on, setOn] = useState(settings.quiet_hours !== null);
@@ -127,47 +114,36 @@ function QuietPanel({ settings, save }: { settings: Settings; save: (s: Settings
     if (next.from && next.to) save({ ...settings, quiet_hours: next });
   };
   return (
-    <section className="quiet" aria-labelledby={`${id}-h`}>
-      <h3 id={`${id}-h`}>{t("quiet.title")}</h3>
-      <label className="switch">
-        <input
-          type="checkbox"
-          role="switch"
+    <>
+      <Section title={t("quiet.title")}>
+        <Row
+          kind="toggle"
+          icon="mute"
+          label={t("quiet.dnd")}
           checked={on}
-          onChange={(e) => {
-            setOn(e.target.checked);
-            if (!e.target.checked) save({ ...settings, quiet_hours: null });
+          onChange={(checked) => {
+            setOn(checked);
+            if (!checked) save({ ...settings, quiet_hours: null });
             else if (last.from && last.to) save({ ...settings, quiet_hours: last });
           }}
         />
-        <span>{t("quiet.dnd")}</span>
-      </label>
-      {on && (
-        <div className="field-row">
-          <label className="field">
-            <span>{t("quiet.from")}</span>
-            <TimeInput value={hours.from} onChange={(from) => update({ ...hours, from })} />
-          </label>
-          <label className="field">
-            <span>{t("quiet.to")}</span>
-            <TimeInput value={hours.to} onChange={(to) => update({ ...hours, to })} />
-          </label>
-        </div>
-      )}
-      <label className="switch">
-        <input
-          type="checkbox"
-          role="switch"
-          checked={settings.notifications}
-          aria-describedby={`${id}-n`}
-          onChange={(e) => save({ ...settings, notifications: e.target.checked })}
-        />
-        <span>{t("quiet.notifications")}</span>
-      </label>
-      <p id={`${id}-n`} className="muted small">
-        {t("quiet.notifications.hint")}
-      </p>
-    </section>
+        {on && (
+          <div className="sx-pair">
+            <label className="sx-field">
+              <span>{t("quiet.from")}</span>
+              <TimeInput value={hours.from} onChange={(from) => update({ ...hours, from })} />
+            </label>
+            <label className="sx-field">
+              <span>{t("quiet.to")}</span>
+              <TimeInput value={hours.to} onChange={(to) => update({ ...hours, to })} />
+            </label>
+          </div>
+        )}
+      </Section>
+      <Section>
+        <Row kind="toggle" icon="bell" label={t("quiet.notifications")} hint={t("quiet.notifications.hint")} checked={settings.notifications} onChange={(notifications) => save({ ...settings, notifications })} />
+      </Section>
+    </>
   );
 }
 

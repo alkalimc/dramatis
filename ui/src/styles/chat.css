@@ -844,55 +844,16 @@ button.pinned-first {
   border-radius: var(--r-md);
   box-shadow: var(--shadow-menu);
 }
-.mention-pop button {
-  display: flex;
-  align-items: center;
-  /* a plain button centres its content; the picker's rows start at the left edge */
-  justify-content: flex-start;
-  gap: var(--s-3);
-  width: 100%;
+.mention-pop .person-row {
   height: var(--ctl-lg);
   padding: 0 var(--s-3);
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: var(--ink);
-  font-weight: var(--fw);
-  text-align: left;
 }
-.mention-pop li.on button,
-.mention-pop button:hover {
+.mention-pop li.on .person-row {
   background: var(--hover);
 }
 .avatar-favorites {
   background: var(--accent-fill);
   color: var(--accent-ink);
-}
-.forward-card .forward-list {
-  display: flex;
-  flex-direction: column;
-  max-height: 22rem;
-  overflow-y: auto;
-  margin: var(--s-2) 0 0;
-  padding: 0;
-  list-style: none;
-}
-.forward-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--s-3);
-  width: 100%;
-  padding: var(--s-2) var(--s-1);
-  border: none;
-  background: none;
-  color: var(--ink);
-  font-weight: var(--fw);
-  text-align: left;
-}
-.forward-row:hover,
-.forward-row:focus-visible {
-  background: var(--hover);
 }
 .about-form {
   display: flex;

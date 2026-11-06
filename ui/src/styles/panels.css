@@ -38,35 +38,6 @@
   align-self: flex-start;
   font-size: var(--fs-sm);
 }
-.member-list {
-  display: flex;
-  flex-direction: column;
-}
-.member-list li {
-  display: flex;
-  align-items: center;
-  gap: var(--s-1);
-  min-width: 0;
-}
-.member-list li > .round {
-  flex: none;
-}
-button.member {
-  justify-content: flex-start;
-  flex: 1;
-  min-width: 0;
-  white-space: normal;
-  gap: var(--s-3);
-  background: none;
-  border: none;
-  border-radius: var(--r-sm);
-  color: var(--ink);
-  min-height: var(--row-s);
-  padding: var(--s-1) var(--s-2);
-}
-button.member:hover {
-  background: var(--hover);
-}
 .picture-buttons {
   margin-top: var(--s-2);
   justify-content: center;
@@ -261,11 +232,6 @@ button.member:hover {
   cursor: pointer;
   color: var(--accent);
 }
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-}
 
 /* ---- world ---- */
 .facts li {
@@ -335,22 +301,6 @@ button.member:hover {
 .birthday input {
   width: 5.5rem;
 }
-/* A section of settings: its rows sit a step apart. The pages made of full-width rows (privacy,
-   storage) carry no side padding of their own; every other page gets the card's gutter. */
-.settings-page > section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-  padding-inline: var(--s-4);
-}
-.settings-page > section.privacy,
-.settings-page > section.location,
-.settings-page > section.storage {
-  padding-inline: 0;
-}
-.settings-page > section.location {
-  padding-bottom: var(--s-4);
-}
 .endpoint-test {
   display: flex;
   flex-direction: column;
@@ -362,9 +312,6 @@ button.member:hover {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--s-1);
-}
-.settings-page > section > h3 {
-  margin: 0;
 }
 /* A label over its control, for the small inputs of the system forms. */
 .field {
@@ -511,53 +458,37 @@ details.more > .field + .field,
   gap: var(--s-3);
   width: min(var(--card-w), 100%);
 }
-.roles {
+.role {
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
+  gap: var(--s-1);
+  padding-bottom: var(--s-2);
 }
-.roles h4 {
-  margin: 0;
+.role + .role {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-2);
 }
-.roles-table {
+.role select {
   width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
 }
-.roles-table th,
-.roles-table td {
-  padding: var(--s-1) var(--s-2) var(--s-1) 0;
-  text-align: left;
-  vertical-align: middle;
-}
-.roles-table thead th {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw);
-  color: var(--muted);
-}
-.roles-table tbody th {
-  width: 22%;
-  font-weight: var(--fw-strong);
-}
-.roles-table td:last-child {
-  width: 30%;
-  padding-right: 0;
-}
-.roles-table select {
-  width: 100%;
-  min-width: 0;
-}
+/* A save: name and marks, then its versions as labelled chips, then what can be done with it. */
 .save-list {
-  margin: var(--s-2) 0 var(--s-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .save {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   gap: var(--s-2);
-  padding: var(--s-2) 0;
-  border-bottom: 1px solid var(--line);
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--line);
+}
+.save:first-child {
+  border-top: none;
+}
+.save.current {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .save .badge {
   font-size: var(--fs-xs);
@@ -565,10 +496,48 @@ details.more > .field + .field,
   color: var(--accent);
   padding: 0;
 }
-
 .save .warn-badge {
   color: var(--danger);
   font-weight: 600;
+}
+.save-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  margin: 0;
+}
+.save-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.save-fact dt {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.save-fact dd {
+  margin: 0;
+}
+.fact-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  border: 1px solid var(--edge);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+.fact-chip.dim {
+  color: var(--muted);
+  font-weight: var(--fw);
+  border-style: dashed;
+}
+.save-note {
+  margin: 0;
 }
 
 /* ---- first open, library, search results ---- */
@@ -798,14 +767,6 @@ button.info-row:hover {
 .info-panel .info-head {
   padding-top: var(--s-5);
 }
-.member-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 0;
-  text-align: left;
-  line-height: var(--lh-tight);
-}
 
 /* ---- unlock, password forms, bio ---- */
 .unlock {
@@ -850,10 +811,6 @@ button.wide {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
-  padding: var(--s-4);
-}
-.password-dialog {
-  padding: 0;
 }
 .about h4 {
   margin: var(--s-3) 0 0;
@@ -869,22 +826,7 @@ button.wide {
   flex-direction: column;
   gap: var(--s-2);
 }
-.privacy-hint,
-.privacy-note {
-  padding: var(--s-3) var(--s-4) 0;
-  margin: 0;
-}
-.section-title {
-  color: var(--accent);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-strong);
-  padding: var(--s-3) var(--s-4) var(--s-1);
-  margin: 0;
-}
 /* ---- advanced: data and storage ---- */
-.storage {
-  padding-bottom: var(--s-4);
-}
 .storage-donut {
   position: relative;
   width: 11rem;
@@ -982,27 +924,6 @@ button.wide {
 .storage-k-audio:is(.storage-swatch, .storage-check) { --k-saves: var(--k-audio); }
 .storage-k-uploads:is(.storage-swatch, .storage-check) { --k-saves: var(--k-uploads); }
 .storage-k-corpus:is(.storage-swatch, .storage-check) { --k-saves: var(--k-corpus); }
-.storage-clear {
-  display: block;
-  width: calc(100% - 2 * var(--s-4));
-  margin: var(--s-3) var(--s-4);
-  min-height: var(--ctl);
-  border: 0;
-  border-radius: var(--r-pill);
-  background: var(--accent-fill);
-  color: var(--accent-ink);
-  font-weight: var(--fw-strong);
-  cursor: pointer;
-}
-.storage-clear:disabled {
-  background: var(--raised);
-  color: var(--muted);
-  opacity: 1;
-  cursor: default;
-}
-.storage > p {
-  padding: 0 var(--s-4);
-}
 .check-row {
   display: flex;
   gap: var(--s-3);
@@ -1063,12 +984,6 @@ button.wide {
   border-bottom: 2px solid var(--accent);
   padding: var(--s-2) 0;
 }
-.picker .save {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-3);
-}
 .picker .stack {
   display: flex;
   flex-direction: column;
@@ -1088,13 +1003,3 @@ button.wide {
   font-size: var(--fs-sm);
 }
 
-/* ---- a roster-like list to browse inside a dialog or panel (group members to pick) ---- */
-.people-list {
-  max-height: min(18rem, 40vh);
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-}
-.people-list li + li {
-  border-top: 1px solid var(--line);
-}

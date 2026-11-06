@@ -49,8 +49,12 @@ export type Drawer =
 
 export type ProfileMode = "view" | "edit";
 
-/** The pages of the settings card; `root` is its list. */
-export type SystemPage = "root" | "language" | "quota" | "quiet" | "endpoints" | "network" | "plugins" | "chat" | "saves" | "privacy" | "storage" | "about";
+/**
+ * The pages of the settings card. The main page ("root") lists the top pages; "chats" and
+ * "advanced" list sub-pages of their own (night mode, typing and sending, quiet hours;
+ * data and storage, network). `screens/Settings.tsx` holds the tree.
+ */
+export type SystemPage = "root" | "chats" | "night" | "input" | "quiet" | "endpoints" | "quota" | "saves" | "privacy" | "plugins" | "advanced" | "storage" | "network" | "language" | "about";
 
 export type Theme = "system" | "light" | "dark";
 

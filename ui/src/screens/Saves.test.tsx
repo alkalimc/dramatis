@@ -45,8 +45,28 @@ test("a save last opened with other versions asks before loading, and going back
 
 test("each card shows the save's version, pack and format", async () => {
   await open(vi.fn(), "drift=1");
-  expect(within(row("default")).getByText(/App .* · Pack demo 1\.0\.0 · Format 9/)).toBeDefined();
-  expect(within(row("second try")).getByText("App 1.0.9 · Pack demo 0.9.0 · Format 9")).toBeDefined();
+  const facts = (name: string) => {
+    const list = row(name).querySelector("dl")!;
+    return [...list.querySelectorAll(".save-fact")].map((f) => [f.querySelector("dt")!.textContent, f.querySelector("dd")!.textContent]);
+  };
+  expect(facts("default")).toEqual([
+    ["App version", expect.stringMatching(/^\d/)],
+    ["Corpus pack", "demo 1.0.0"],
+    ["Data format", "9"],
+  ]);
+  expect(facts("second try")).toEqual([
+    ["App version", "1.0.9"],
+    ["Corpus pack", "demo 0.9.0"],
+    ["Data format", "9"],
+  ]);
+});
+
+test("a save with no record of its app shows the releases that wrote its format, and says the pack is not recorded", async () => {
+  await open(vi.fn(), "unrecorded=1");
+  const card = within(row("second try"));
+  expect(card.getByText("1.0.4–1.1.0 (from the format)")).toBeDefined();
+  expect(card.getByText("not recorded")).toBeDefined();
+  expect(card.getByText("7")).toBeDefined();
 });
 
 test("a locked save's card says so instead of showing versions", async () => {
@@ -57,7 +77,7 @@ test("a locked save's card says so instead of showing versions", async () => {
 test("a save from an earlier release is marked, and opening it shows the command instead of loading", async () => {
   const { user, onSwitched, api } = await open(vi.fn(), "migrate=1");
   expect(within(row("second try")).getByText("Needs converting")).toBeDefined();
-  expect(within(row("second try")).getByText(/Format 7/)).toBeDefined();
+  expect(within(row("second try")).getByText("Data format")).toBeDefined();
   const switched = vi.spyOn(api.commands, "switchSave");
   await user.click(within(row("second try")).getByRole("button", { name: "Open" }));
   const dialog = await screen.findByRole("dialog", { name: /second try needs converting/ });
