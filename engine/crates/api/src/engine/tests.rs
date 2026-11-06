@@ -102,6 +102,24 @@ fn fixture() -> TempFolio {
         persons: &["zed"],
         ..UnitSpec::default()
     });
+    // A second line each, so that the recommendation does not drop them as resting on one.
+    b.unit(UnitSpec {
+        id: "u-amy-ledger",
+        template: "talk",
+        page: "Story 4",
+        text: "Amy keeps the ledger of the base, the stores, the rotas and every spare lantern \
+               on the lower decks, and checks it twice a week",
+        persons: &["amy"],
+        ..UnitSpec::default()
+    });
+    b.unit(UnitSpec {
+        id: "u-kal-night",
+        template: "talk",
+        page: "Story 5",
+        text: "Kal tends the furnace every night",
+        persons: &["kal"],
+        ..UnitSpec::default()
+    });
     persona(&b, "amy", &ALL);
     persona(&b, "kal", &ALL);
     persona(&b, "zed", &["system"]);
