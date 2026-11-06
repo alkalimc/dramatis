@@ -450,7 +450,12 @@ const DEFAULTS: &[(&str, &str)] = &[
     // Places an event may happen in, `|` between them; a few are offered each time.
     ("events.places", "the deck"),
     // How an event is told, one per event, `|` between them; `{a}` and `{b}` are the two.
-    ("events.tellings", "briefly, by the host"),
+    (
+        "events.tellings",
+        "told by {a} in the first person, to {user}, about something with {b}|\
+         told by {b} in the first person, to {user}, about something with {a}|\
+         briefly, by {host}, as an onlooker",
+    ),
     ("events.who", "{name}, in their own words or file: {about}"),
     ("events.together", "A scene the two appear in:\n{scene}"),
     ("harness.digest", "Since {user} last looked:"),
