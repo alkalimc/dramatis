@@ -21,6 +21,7 @@ import type {
   AppInfo,
   Author,
   InterfaceLanguage,
+  PluginInfo,
   ChannelId,
   ChannelSummary,
   Citation,
@@ -161,6 +162,10 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
   let home: HomeLocation = { path: "/Users/demo/.dramatis", default_path: "/Users/demo/.dramatis", source: params.get("home") === "fixed" ? "fixed" : "default", unavailable: null, can_change: params.get("home") !== "fixed" };
   let network: NetworkSetting = { mode: "system", proxy: "", username: "", no_proxy: "" };
   let networkPassword = false;
+  const plugins: PluginInfo[] = [
+    { name: "dice", version: "0.1.0", description: "A dice tool.", hooks: ["prompt", "message"], tools: ["dice__roll"], enabled: false, problem: null, status: null },
+    { name: "broken", version: "", description: "", hooks: [], tools: [], enabled: false, problem: "name `x` must equal the folder name `broken`", status: null },
+  ];
   let update: UpdateStatus = params.get("update") === "1" ? found(true) : { current: version, latest: null, url: null, newer: false, checked_at: null, auto: false, asked: params.get("first") !== "1" && params.get("update") !== "ask" };
   let locked = params.get("locked") === "1";
   // `?changed=1` starts as if another window had replaced the open save's file.
@@ -618,6 +623,14 @@ export function createMock(params: URLSearchParams, opts: MockOptions = {}): { c
     },
     setAutoUpdateCheck: (auto) => {
       update = { ...update, auto, asked: true };
+      return ok(null);
+    },
+    plugins: () => ok(plugins.map((p) => ({ ...p }))),
+    setPluginEnabled: (name, enabled) => {
+      const found = plugins.find((p) => p.name === name);
+      if (!found) return fail({ code: "not_found" });
+      if (enabled && found.problem) return fail({ code: "invalid", field: "plugin" });
+      found.enabled = enabled;
       return ok(null);
     },
     // The preview opens links itself; the call exists so the app's path can be tested.

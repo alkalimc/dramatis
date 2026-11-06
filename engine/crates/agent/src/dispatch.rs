@@ -64,6 +64,10 @@ impl Agent {
         let seg = self.current_segment(turn.channel)?;
         let names = self.segment_names(seg)?;
         let kind = self.turn_kind(turn)?;
+        // Plugin hook `tool`: a tool a plugin added is run by the plugin.
+        if plugin::Host::is_tool_name(name) {
+            return self.plugin_dispatch(turn, name, arguments, &names).await;
+        }
         let out = match kind {
             LogKind::Person => match SharedCall::parse(name, arguments) {
                 Ok(c) => self.shared(turn, c, &names, seg)?,

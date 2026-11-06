@@ -9,6 +9,7 @@ import { ChatPage, comboText } from "./ChatSettings";
 import { LanguagePage } from "./Language";
 import { NetworkPage } from "./Network";
 import { QuietSection, QuotaSection } from "./Quota";
+import { PluginsPage } from "./Plugins";
 import { PrivacyPage } from "./Privacy";
 import { SavesPage } from "./Saves";
 import { StoragePage } from "./Storage";
@@ -25,6 +26,7 @@ const GROUPS: PageDef[][] = [
   [
     { page: "endpoints", icon: "server" },
     { page: "network", icon: "network" },
+    { page: "plugins", icon: "plugin" },
   ],
   [
     { page: "saves", icon: "bookmark" },
@@ -107,6 +109,7 @@ export function SettingsCard({ page }: { page: SystemPage }) {
           {page === "language" && <LanguagePage />}
           {page === "endpoints" && <EndpointsPage />}
           {page === "network" && <NetworkPage />}
+          {page === "plugins" && <PluginsPage />}
           {page === "chat" && <ChatPage />}
           {page === "saves" && <SavesPage />}
           {page === "privacy" && <PrivacyPage />}

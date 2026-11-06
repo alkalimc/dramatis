@@ -273,7 +273,15 @@ calls wait until it releases; a turn you start yourself is never refused before 
 The contract is `forge/src/dramatis_forge/pack.py`: a module `packs/<name>/__init__.py`
 that defines `PACK = Pack(...)` with seed sets, routes to page parsers, inline markup rules,
 identity rules, chunking policy, figures, text and stopwords. Missing text keys fall back to
-the English defaults in `forge/src/dramatis_forge/text.py`.
+the English defaults in `forge/src/dramatis_forge/text.py`. The full guide, with the toy pack as
+the running example, is [docs/corpus-packs.md](docs/corpus-packs.md).
+
+## Plugins
+
+Plugins are separate programs, in any language, that add lines to a turn, post-process a
+tool's result, offer tools of their own, or watch posted messages. They are off until turned
+on in Settings. The interface is described in [docs/plugins.md](docs/plugins.md); a small
+Python plugin to copy is in `examples/plugins/dice/`.
 
 ## Licence
 

@@ -69,6 +69,9 @@ pub struct Ports {
     pub choose_folder: Option<ChooseFile>,
     /// Opens a web address in the system browser. Absent where there is none.
     pub open_url: Option<OpenUrl>,
+    /// The plugin host the agent also holds, so that turning a plugin off ends its process.
+    /// Absent: the engine makes its own over the home's `plugins/` folder.
+    pub plugins: Option<Arc<plugin::Host>>,
 }
 
 /// See [`Ports::open_url`].
@@ -92,6 +95,7 @@ impl Default for Ports {
             choose_file: None,
             choose_folder: None,
             open_url: None,
+            plugins: None,
         }
     }
 }
@@ -129,6 +133,7 @@ pub struct Engine {
     online: AtomicBool,
     /// What other processes have written since the last poll; see `external.rs`.
     watch: Mutex<external::Watch>,
+    plugins: Arc<plugin::Host>,
 }
 
 fn io(e: impl std::fmt::Display) -> ApiError {
@@ -218,6 +223,13 @@ impl Engine {
 
         ports.agent.set_endpoints(&endpoints);
         let media = MediaCache::new(home.media(), params.media.cache_bytes());
+        let plugins = ports.plugins.clone().unwrap_or_else(|| {
+            Arc::new(plugin::Host::new(
+                home.plugins(),
+                Some(home.logs()),
+                crate::update::VERSION,
+            ))
+        });
         Ok(Self {
             home,
             params,
@@ -236,6 +248,7 @@ impl Engine {
             fetches: tokio::sync::Semaphore::new(AVATAR_FETCHES),
             online: AtomicBool::new(true),
             watch: Mutex::default(),
+            plugins,
         })
     }
 
@@ -634,6 +647,12 @@ impl Api for Engine {
     }
     async fn check_update(&self, force: bool) -> ApiResult<UpdateStatus> {
         self.check_update_impl(force).await
+    }
+    async fn plugins(&self) -> ApiResult<Vec<PluginInfo>> {
+        Ok(self.plugins_impl())
+    }
+    async fn set_plugin_enabled(&self, name: String, enabled: bool) -> ApiResult<()> {
+        self.set_plugin_enabled_impl(&name, enabled)
     }
     async fn set_auto_update_check(&self, auto: bool) -> ApiResult<()> {
         self.home.set_auto_update_check(auto).map_err(io)

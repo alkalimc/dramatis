@@ -18,6 +18,7 @@
 //! corpus_path      optional: the full path of the corpus the user chose in the app
 //! uploads/         pictures the user chose (theirs, a group's), named by content hash
 //! media/           avatars and read-aloud audio: a bounded cache, never archived
+//! plugins/         optional: one folder per plugin (`plugin.toml`), and `enabled.toml`, the ones turned on
 //! prompts/         optional local overrides, `<subject>.yaml` = { slot: body }
 //! <pack>.folio     the corpus, unless `DRAMATIS_FOLIO` points elsewhere
 //! ```
@@ -418,6 +419,11 @@ impl Home {
 
     pub fn tts(&self) -> PathBuf {
         self.media().join("tts")
+    }
+
+    /// Plugins, one folder each, off until the user turns them on.
+    pub fn plugins(&self) -> PathBuf {
+        self.root.join("plugins")
     }
 
     pub fn prompts(&self) -> PathBuf {

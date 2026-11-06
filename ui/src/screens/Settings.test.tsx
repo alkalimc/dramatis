@@ -104,3 +104,19 @@ test("network: system by default; a manual proxy needs a good address, keeps its
   await user.click(within(page).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(set).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "direct", proxy: "socks5://10.0.0.2:1080" }), null));
 });
+
+test("the plugins page lists plugins off by default and turns one on; an unusable one stays off", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  const card = await openSettings(user);
+  await user.click(within(card).getByRole("button", { name: "Plugins" }));
+  const page = within(card).getByRole("region", { name: "Plugins" });
+  const dice = await within(page).findByRole("switch", { name: "dice" });
+  expect((dice as HTMLInputElement).checked).toBe(false);
+  expect(within(page).getByText(/Tools: dice__roll/)).toBeDefined();
+  await user.click(dice);
+  await waitFor(() => expect((within(page).getByRole("switch", { name: "dice" }) as HTMLInputElement).checked).toBe(true));
+  const broken = within(page).getByRole("switch", { name: "broken" }) as HTMLInputElement;
+  expect(broken.disabled).toBe(true);
+  expect(within(page).getByText(/Cannot be used/)).toBeDefined();
+});

@@ -25,6 +25,16 @@ export const commands = {
 	checkUpdate: (force: boolean) => typedError<UpdateStatus, ApiError>(__TAURI_INVOKE("check_update", { force })),
 	/**  Turn automatic checks on or off for this home. */
 	setAutoUpdateCheck: (auto: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("set_auto_update_check", { auto })),
+	/**
+	 *  The folders of the home's `plugins/` folder: what each adds, whether it is on, and
+	 *  why it cannot be (or has stopped). Read from disk; starts nothing.
+	 */
+	plugins: () => typedError<PluginInfo[], ApiError>(__TAURI_INVOKE("plugins")),
+	/**
+	 *  Turn a plugin on or off. Plugins are off until turned on; off ends the process.
+	 *  A plugin with an invalid manifest cannot be turned on (`Invalid`, field `plugin`).
+	 */
+	setPluginEnabled: (name: string, enabled: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("set_plugin_enabled", { name, enabled })),
 	/**  The corpus's runtime phrasing. */
 	wording: () => typedError<Wording, ApiError>(__TAURI_INVOKE("wording")),
 	/**  The interface language this home uses; `wording` already follows it. */
@@ -1047,6 +1057,23 @@ export type PersonRef = {
 	name: string,
 	/**  `None` when the corpus does not say; screens then use the neutral pronoun. */
 	pronoun?: Pronoun | null,
+};
+
+/**  One plugin folder, as the settings list shows it. */
+export type PluginInfo = {
+	/**  The folder's name, which is the plugin's. */
+	name: string,
+	version: string,
+	description: string,
+	/**  The hooks it takes: `prompt`, `tool_result`, `message`. */
+	hooks: string[],
+	/**  The tools it adds, by the names the model sees. */
+	tools: string[],
+	enabled: boolean,
+	/**  Why the manifest cannot be used; such a plugin cannot be turned on. */
+	problem: string | null,
+	/**  The last failure of a running plugin, or that it was stopped after repeated ones. */
+	status: string | null,
 };
 
 export type Profile = {

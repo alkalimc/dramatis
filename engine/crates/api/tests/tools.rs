@@ -61,8 +61,8 @@ fn tool_schemas_match_snapshot() {
 #[test]
 fn every_parsed_name_is_offered() {
     let none = Descriptions::new();
-    let shared: Vec<_> = shared_tools(&none).iter().map(|t| t.name).collect();
-    let host: Vec<_> = host_tools(&none).iter().map(|t| t.name).collect();
+    let shared: Vec<_> = shared_tools(&none).into_iter().map(|t| t.name).collect();
+    let host: Vec<_> = host_tools(&none).into_iter().map(|t| t.name).collect();
     assert_eq!(
         shared,
         ["search", "get_chunk", "request_join", "wrapup", "ask_host"]

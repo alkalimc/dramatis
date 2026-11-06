@@ -4,9 +4,38 @@ use super::{Engine, io};
 use crate::convert;
 use crate::error::{ApiError, ApiResult};
 use crate::update::{self, Checked};
-use crate::views::{AppInfo, CorpusCredits, UpdateStatus};
+use crate::views::{AppInfo, CorpusCredits, PluginInfo, UpdateStatus};
 
 impl Engine {
+    pub(crate) fn plugins_impl(&self) -> Vec<PluginInfo> {
+        self.plugins
+            .list()
+            .into_iter()
+            .map(|l| PluginInfo {
+                name: l.name,
+                version: l.version,
+                description: l.description,
+                hooks: l.hooks,
+                tools: l.tools,
+                enabled: l.enabled,
+                problem: l.problem,
+                status: l.status,
+            })
+            .collect()
+    }
+
+    pub(crate) fn set_plugin_enabled_impl(&self, name: &str, enabled: bool) -> ApiResult<()> {
+        self.plugins
+            .set_enabled(name, enabled)
+            .map_err(|e| match e {
+                plugin::Error::Unknown(_) => ApiError::NotFound,
+                plugin::Error::Invalid(_) => ApiError::Invalid {
+                    field: "plugin".into(),
+                },
+                plugin::Error::Io(detail) => ApiError::Io { detail },
+            })
+    }
+
     pub(crate) fn app_info_impl(&self) -> AppInfo {
         let credits = self.corpus.as_ref().map(|c| &c.manifest.credits);
         let clean = |s: &Option<String>| s.clone().filter(|s| !s.trim().is_empty());

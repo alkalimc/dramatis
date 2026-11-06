@@ -55,6 +55,8 @@ pub struct BridgeParts {
     pub frontend: Frontend,
     /// The password of the save the process starts on, if it is encrypted.
     pub password: Option<String>,
+    /// The plugins, shared with the engine so that its settings and the turns see one state.
+    pub plugins: Option<Arc<plugin::Host>>,
 }
 
 /// The background work in flight.
@@ -159,9 +161,14 @@ impl AgentBridge {
             return Ok(a);
         }
         let parts = self.agent_parts()?;
+        let plugins = self.parts.plugins.clone();
         let agent = tokio::task::spawn_blocking(move || Agent::new(parts))
             .await
             .map_err(io)?
+            .map(|a| match plugins {
+                Some(host) => a.with_plugins(host),
+                None => a,
+            })
             .map(Arc::new)
             .map_err(ApiError::from)?;
         *self.agent.lock().unwrap_or_else(|e| e.into_inner()) = Some(agent.clone());

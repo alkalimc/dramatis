@@ -1,0 +1,29 @@
+name = "dice"
+version = "0.1.0"
+description = "Example plugin: a dice tool, a note about messages seen, and e-mail address masking in tool results."
+protocol = 1
+# Run from this folder. Use "python" on Windows.
+command = ["python3", "dice.py"]
+hooks = ["prompt", "tool_result", "message"]
+timeout_ms = 1000
+
+[[tools]]
+name = "roll"
+description = "Roll dice for the user. Give how many dice and how many sides each has."
+audience = "all"
+
+[tools.parameters]
+type = "object"
+required = ["sides"]
+
+[tools.parameters.properties.sides]
+type = "integer"
+description = "Sides on each die."
+minimum = 2
+maximum = 1000
+
+[tools.parameters.properties.count]
+type = "integer"
+description = "How many dice, one by default."
+minimum = 1
+maximum = 20

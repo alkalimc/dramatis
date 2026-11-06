@@ -31,6 +31,7 @@ dependencies = [
  "image",
  "index",
  "llm",
+ "plugin",
  "rusqlite",
  "serde",
  "serde_json",
@@ -144,6 +145,7 @@ dependencies = [
  "index",
  "libc",
  "md-5",
+ "plugin",
  "rusqlite",
  "schemars 1.2.2",
  "serde",
@@ -3196,6 +3198,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin"
+version = "1.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3636,6 +3647,7 @@ dependencies = [
  "async-trait",
  "index",
  "llm",
+ "plugin",
  "rusqlite",
  "tokio",
  "toml 1.1.6+spec-1.1.0",

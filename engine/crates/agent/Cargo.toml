@@ -11,6 +11,7 @@ homepage.workspace = true
 
 [dependencies]
 api = { path = "../api" }
+plugin = { path = "../plugin" }
 folio = { path = "../folio" }
 index = { path = "../index" }
 world = { path = "../world" }

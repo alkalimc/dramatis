@@ -401,12 +401,28 @@ impl Agent {
         Ok(())
     }
 
-    /// The user's entry: their words verbatim, then the harness's lines and material.
-    pub(crate) fn user_entry(
+    /// The user's entry: their words verbatim, then the harness's lines and material, then
+    /// what the enabled plugins add to this turn.
+    pub(crate) async fn user_entry(
         &self,
         seg: world::SegmentId,
         posted: &Posted,
         lines: &[String],
+    ) -> Result<()> {
+        // Plugin hook `prompt`: this turn's lines, after the cached prefix and before the
+        // context line.
+        let plugin_lines = self.plugin_lines(posted.channel, &posted.text).await;
+        self.user_entry_with(seg, posted, lines, &plugin_lines)
+    }
+
+    /// The same entry with the plugins' lines already gathered (none for a question asked
+    /// again on regenerate: it is the user's own turn once more, not a new one).
+    pub(crate) fn user_entry_with(
+        &self,
+        seg: world::SegmentId,
+        posted: &Posted,
+        lines: &[String],
+        plugin_lines: &[String],
     ) -> Result<()> {
         let before = message::history(&self.db(), posted.channel, Some(posted.message), 50)?;
         let since = before
@@ -423,6 +439,7 @@ impl Agent {
         };
         let mut parts: Vec<&str> = vec![&words, &tag];
         parts.extend(lines.iter().map(String::as_str));
+        parts.extend(plugin_lines.iter().map(String::as_str));
         parts.push(&context);
         let text = assemble::entry(&parts);
         self.append_user(seg, &text, posted.image.as_ref())
@@ -461,7 +478,7 @@ impl Agent {
         let seg = self
             .ensure_segment(posted.channel, Some(posted.message))
             .await?;
-        self.user_entry(seg, posted, &[])?;
+        self.user_entry(seg, posted, &[]).await?;
         self.run(&mut turn, self.config.agent.turn_loop.max_steps)
             .await
     }
@@ -500,7 +517,7 @@ impl Agent {
         let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
         lines.extend(self.attachment(seg, &mut turn, &query, &posted.text, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, std::slice::from_ref(person))?);
-        self.user_entry(seg, posted, &lines)?;
+        self.user_entry(seg, posted, &lines).await?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         self.replied(posted.channel, person)?;
@@ -966,7 +983,7 @@ impl Agent {
         let mut turn = Turn::new(ch, Actor::Host, Shape::Host);
         turn.authorized = posted.is_some();
         match posted {
-            Some(p) => self.user_entry(seg, p, &lines)?,
+            Some(p) => self.user_entry(seg, p, &lines).await?,
             None => {
                 lines.push(self.context_line(seg, None)?);
                 self.append_user(
@@ -1047,7 +1064,7 @@ impl Agent {
         let query = self.retrieval_query(posted.channel, &posted.text, Some(posted.message))?;
         lines.extend(self.attachment(seg, &mut turn, &query, &posted.text, Vec::new())?);
         lines.extend(self.event_lines(seg, &mut turn, &members)?);
-        self.user_entry(seg, posted, &lines)?;
+        self.user_entry(seg, posted, &lines).await?;
         self.drive(&mut turn, self.config.agent.turn_loop.max_steps)
             .await?;
         self.replied(posted.channel, &addressed)?;

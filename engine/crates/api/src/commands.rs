@@ -105,6 +105,12 @@ commands! {
     fn check_update(force: bool) -> UpdateStatus;
     /// Turn automatic checks on or off for this home.
     fn set_auto_update_check(auto: bool) -> ();
+    /// The folders of the home's `plugins/` folder: what each adds, whether it is on, and
+    /// why it cannot be (or has stopped). Read from disk; starts nothing.
+    fn plugins() -> Vec<PluginInfo> = Ok(Vec::new());
+    /// Turn a plugin on or off. Plugins are off until turned on; off ends the process.
+    /// A plugin with an invalid manifest cannot be turned on (`Invalid`, field `plugin`).
+    fn set_plugin_enabled(name: String, enabled: bool) -> ();
     /// The corpus's runtime phrasing.
     fn wording() -> Wording = Ok(Wording::default());
     /// The interface language this home uses; `wording` already follows it.

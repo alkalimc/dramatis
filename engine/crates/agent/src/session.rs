@@ -194,10 +194,12 @@ impl Agent {
         kind: LogKind,
         names: &Names,
     ) -> request::Shape {
-        let tools = match kind {
+        let mut tools = match kind {
             LogKind::Person => api::tools::shared_tools(&self.corpus.descriptions),
             LogKind::Host => api::tools::host_tools(&self.corpus.descriptions),
         };
+        // Plugin hook `tool`: enabled plugins' tools follow the built-in ones.
+        tools.extend(self.plugin_tools(kind));
         let reasoning = match kind {
             LogKind::Person => role
                 .reasoning
@@ -486,6 +488,17 @@ impl Agent {
             return Ok(Some(Roll::Unreadable));
         };
         if !stored.knows(&names) {
+            return Ok(Some(Roll::Rename));
+        }
+        // Plugin hook `tool`: a plugin was turned on or off, so the tool list that opened
+        // this segment is no longer the one on offer.
+        if self.plugins.is_some()
+            && stored.tools
+                != self
+                    .shape_for(&role, self.log_kind(&conn, ch)?, &names)
+                    .stored()
+                    .tools
+        {
             return Ok(Some(Roll::Rename));
         }
         let entries = log::entries(&conn, seg.id)?;
@@ -1289,7 +1302,15 @@ impl Agent {
                     },
                 );
                 match self.dispatch(turn, name, args).await {
-                    Ok(output) => results.push(request::tool_result_part(id, output)),
+                    Ok(output) => {
+                        // Plugin hook `tool_result`: plugins may reword the result.
+                        let output = if turn.wrapup {
+                            output
+                        } else {
+                            self.plugin_result(turn, name, args, output).await
+                        };
+                        results.push(request::tool_result_part(id, output));
+                    }
                     Err(e) => {
                         // The reply with these calls is already in the log; every call
                         // needs an output or the endpoint refuses the channel from now on.

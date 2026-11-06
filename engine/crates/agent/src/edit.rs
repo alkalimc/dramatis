@@ -303,7 +303,7 @@ impl Agent {
             authorized: false,
             reply_to: asked.reply_to,
         };
-        if let Err(e) = self.user_entry(seg, &posted, &[]) {
+        if let Err(e) = self.user_entry_with(seg, &posted, &[], &[]) {
             log::replace_prefix_c(&self.db(), seg, &block)?;
             return Err(e);
         }

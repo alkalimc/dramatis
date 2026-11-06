@@ -102,6 +102,24 @@ pub struct UpdateStatus {
     pub asked: bool,
 }
 
+/// One plugin folder, as the settings list shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct PluginInfo {
+    /// The folder's name, which is the plugin's.
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// The hooks it takes: `prompt`, `tool_result`, `message`.
+    pub hooks: Vec<String>,
+    /// The tools it adds, by the names the model sees.
+    pub tools: Vec<String>,
+    pub enabled: bool,
+    /// Why the manifest cannot be used; such a plugin cannot be turned on.
+    pub problem: Option<String>,
+    /// The last failure of a running plugin, or that it was stopped after repeated ones.
+    pub status: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum AppForm {

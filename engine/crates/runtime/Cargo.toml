@@ -13,6 +13,7 @@ homepage.workspace = true
 api = { path = "../api" }
 agent = { path = "../agent" }
 llm = { path = "../llm" }
+plugin = { path = "../plugin" }
 index = { path = "../index" }
 world = { path = "../world" }
 async-trait.workspace = true
